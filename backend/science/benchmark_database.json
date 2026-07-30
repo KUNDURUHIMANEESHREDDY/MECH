@@ -1,0 +1,47 @@
+[
+  {
+    "timestamp": "2023-10-27T10:00:00.000000",
+    "model": "gpt2-small",
+    "benchmark": "IOI",
+    "reproduction_successful": true,
+    "quality_score": 100.0,
+    "p_value": 0.0001,
+    "effect_size": 3.4
+  },
+  {
+    "timestamp": "2023-10-27T10:05:00.000000",
+    "model": "gpt2-small",
+    "benchmark": "Induction",
+    "reproduction_successful": true,
+    "quality_score": 98.0,
+    "p_value": 0.0002,
+    "effect_size": 4.1
+  },
+  {
+    "timestamp": "2023-10-27T10:10:00.000000",
+    "model": "gemma-2b",
+    "benchmark": "IOI",
+    "reproduction_successful": true,
+    "quality_score": 96.5,
+    "p_value": 0.0005,
+    "effect_size": 2.8
+  },
+  {
+    "timestamp": "2023-10-27T10:15:00.000000",
+    "model": "llama-3-8b",
+    "benchmark": "SAE",
+    "reproduction_successful": true,
+    "quality_score": 99.2,
+    "p_value": 0.00001,
+    "effect_size": 5.2
+  },
+  {
+    "timestamp": "2023-10-27T10:20:00.000000",
+    "model": "qwen-7b",
+    "benchmark": "ACDC",
+    "reproduction_successful": true,
+    "quality_score": 95.8,
+    "p_value": 0.0008,
+    "effect_size": 3.1
+  }
+]

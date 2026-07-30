@@ -1,0 +1,94 @@
+{
+  "integrity": {
+    "registry_version": "1.1.0",
+    "last_verified": "2026-07-28T17:42:00Z",
+    "validator_version": "1.2.0"
+  },
+  "benchmarks": [],
+  "leaderboard": [],
+  "scaling": [],
+  "sae_validation": null,
+  "backend_alignment": {
+    "backend_a": "gpt2-small",
+    "backend_b": "tl-gpt2-small",
+    "mean_cosine_similarity": 0.999862,
+    "mean_kl_divergence": 0.0001187,
+    "top_1_agreement_pct": 100.0,
+    "verdict": "PASS"
+  },
+  "internal_parity": {
+    "prompt": "When Alice and Bob went to the store, Alice gave a drink to",
+    "layer_by_layer": [
+      {
+        "layer": 0,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999865
+      },
+      {
+        "layer": 1,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999814
+      },
+      {
+        "layer": 2,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999897
+      },
+      {
+        "layer": 3,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999846
+      },
+      {
+        "layer": 4,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999858
+      },
+      {
+        "layer": 5,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999869
+      },
+      {
+        "layer": 6,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999832
+      },
+      {
+        "layer": 7,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999803
+      },
+      {
+        "layer": 8,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999844
+      },
+      {
+        "layer": 9,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999871
+      },
+      {
+        "layer": 10,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999882
+      },
+      {
+        "layer": 11,
+        "residual_norm_sim": 1.0,
+        "mlp_cosine_sim": 0.999807
+      }
+    ],
+    "overall_internal_similarity": 1.0,
+    "verdict": "PASS"
+  },
+  "hook_equivalence": {
+    "intervention": "Patch L9H9",
+    "delta_a": -0.37,
+    "delta_b": -0.37,
+    "delta_error": 0.0,
+    "verdict": "PASS"
+  },
+  "discovery_quality": []
+}

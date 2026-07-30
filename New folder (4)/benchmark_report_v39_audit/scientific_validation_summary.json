@@ -1,0 +1,49 @@
+{
+  "integrity": {
+    "registry_version": "1.1.0",
+    "last_verified": "2026-07-28T17:42:00Z",
+    "validator_version": "1.2.0"
+  },
+  "benchmarks": [
+    {
+      "id": "IOI Faithfulness",
+      "published": 0.88,
+      "stats": {
+        "observed_mean": 0.8796,
+        "observed_median": 0.8796,
+        "observed_std": 0.0056,
+        "observed_iqr": 0.0091,
+        "n": 100,
+        "bootstrap_ci": [
+          0.8785,
+          0.8807
+        ],
+        "difference_pct": 0.05,
+        "cohens_d": -0.073,
+        "verdict": "PASS",
+        "criteria_met": {
+          "published_in_ci": true,
+          "diff_within_tolerance": true,
+          "rigorous_sample": true,
+          "patch_success_met": true
+        }
+      }
+    }
+  ],
+  "algorithms": [
+    {
+      "name": "ACDC",
+      "metric": "Head Recovery (Recall)",
+      "target": "1.0",
+      "observed": "1.0",
+      "verdict": "PASS"
+    },
+    {
+      "name": "ACDC",
+      "metric": "Edge Recovery (F1)",
+      "target": "0.90",
+      "observed": "0.94",
+      "verdict": "PASS"
+    }
+  ]
+}

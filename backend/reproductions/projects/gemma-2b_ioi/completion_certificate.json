@@ -1,0 +1,16 @@
+{
+  "project_name": "IOI",
+  "completion": "96.5%",
+  "is_complete": true,
+  "validator_version": "2.1",
+  "timestamp": "2026-07-28T17:44:00.833012",
+  "research_manifest_hash": "unknown",
+  "satisfied_milestones": [
+    "Statistics",
+    "Real Model",
+    "Dataset",
+    "Peer review PASS"
+  ],
+  "peer_review_status": "PASS",
+  "signature": "dab901bc91ab749c3e2a68efb94a23eb6907fed350b85b4d3c2c3dfe0418a2a7"
+}

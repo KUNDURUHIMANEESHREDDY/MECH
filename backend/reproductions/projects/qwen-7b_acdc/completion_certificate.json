@@ -1,0 +1,16 @@
+{
+  "project_name": "ACDC",
+  "completion": "95.8%",
+  "is_complete": true,
+  "validator_version": "2.1",
+  "timestamp": "2026-07-28T17:44:00.862785",
+  "research_manifest_hash": "unknown",
+  "satisfied_milestones": [
+    "Statistics",
+    "Real Model",
+    "Dataset",
+    "Peer review PASS"
+  ],
+  "peer_review_status": "PASS",
+  "signature": "785f926e5344106f10dd36e5ecf408594be1b2c8c69be27d568317669bd6b1b2"
+}

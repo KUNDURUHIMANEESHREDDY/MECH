@@ -1,0 +1,53 @@
+{
+  "name": "desktop-app",
+  "version": "0.1.0",
+  "description": "Electron + React + Python desktop application",
+  "main": "electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev:renderer": "vite",
+    "dev:electron": "node scripts/dev.js",
+    "dev": "concurrently -k -n vite,electron -c blue,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "build:renderer": "vite build",
+    "build:electron": "node scripts/build.js",
+    "build": "npm run build:renderer && npm run build:electron",
+    "start": "electron .",
+    "seed": "node scripts/seed.js",
+    "test:js": "vitest run",
+    "test:js:watch": "vitest",
+    "test:py": "pytest tests/pytest -q",
+    "test:e2e": "playwright test",
+    "test": "npm run test:js && npm run test:py"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "reactflow": "^11.11.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0",
+    "@testing-library/jest-dom": "^6.4.8",
+    "@testing-library/react": "^16.0.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^8.2.2",
+    "electron": "^32.0.1",
+    "electron-builder": "^25.0.5",
+    "jsdom": "^25.0.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  },
+  "build": {
+    "appId": "com.example.desktopapp",
+    "productName": "DesktopApp",
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "python/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    }
+  }
+}

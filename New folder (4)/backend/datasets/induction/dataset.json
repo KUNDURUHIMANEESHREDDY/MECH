@@ -1,0 +1,27 @@
+{
+  "version": "2.0",
+  "citation": "Olsson et al. 2022: In-context Learning and Induction Heads",
+  "checksum": "generated_builtin",
+  "prompts": [
+    {
+      "id": "induction_0001",
+      "clean": "The cat sat on the mat. The cat sat on the",
+      "corrupted": "The cat sat on the mat. The cat sat on thing",
+      "target": " mat",
+      "metadata": {
+        "task": "Induction",
+        "split": "validation"
+      }
+    },
+    {
+      "id": "induction_0002",
+      "clean": "She went to the shop and bought some bread. She went to the shop and bought some",
+      "corrupted": "She went to the shop and bought some bread. She went to the shop and bought item",
+      "target": " bread",
+      "metadata": {
+        "task": "Induction",
+        "split": "validation"
+      }
+    }
+  ]
+}

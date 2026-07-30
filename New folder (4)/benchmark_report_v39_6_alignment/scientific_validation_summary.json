@@ -1,0 +1,20 @@
+{
+  "integrity": {
+    "registry_version": "1.1.0",
+    "last_verified": "2026-07-28T17:42:00Z",
+    "validator_version": "1.2.0"
+  },
+  "benchmarks": [],
+  "leaderboard": [],
+  "scaling": [],
+  "sae_validation": null,
+  "backend_alignment": {
+    "backend_a": "gpt2-small",
+    "backend_b": "tl-gpt2-small",
+    "mean_cosine_similarity": 0.999822,
+    "mean_kl_divergence": 0.00011224,
+    "top_1_agreement_pct": 100.0,
+    "verdict": "PASS"
+  },
+  "discovery_quality": []
+}

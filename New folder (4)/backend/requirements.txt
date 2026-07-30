@@ -1,0 +1,4 @@
+# The Python sidecar uses only the standard library so it runs on a
+# fresh Python install. This file is here so the testing setup can
+# install pytest and any future deps in a single place.
+pytest>=8.0.0

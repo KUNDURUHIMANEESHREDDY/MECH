@@ -1,0 +1,38 @@
+{
+  "name": "neural-debugger-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron, React, and Python desktop shell for model debugging.",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "node scripts/dev-electron.mjs",
+    "build": "npm run typecheck && vite build && tsc -p electron/tsconfig.json",
+    "electron": "electron .",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:python",
+    "test:unit": "vitest run",
+    "test:python": "python -m pytest",
+    "test:e2e": "npm run build && playwright test",
+    "python:service": "python scripts/desktop_service.py"
+  },
+  "dependencies": {
+    "lucide-react": "^1.26.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "electron": "^43.2.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,296 @@
+[
+  {
+    "task": "ioi",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "induction_heads",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "greater_than",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "logit_lens",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "sae",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "copy_task",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "arithmetic",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "factual_recall",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "universality",
+    "model": "gpt2_small",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "ioi",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "induction_heads",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "greater_than",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "logit_lens",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "sae",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "copy_task",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "arithmetic",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "factual_recall",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "universality",
+    "model": "gpt2_medium",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "ioi",
+    "model": "gemma_2b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "induction_heads",
+    "model": "gemma_2b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "greater_than",
+    "model": "gemma_2b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "logit_lens",
+    "model": "gemma_2b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "copy_task",
+    "model": "gemma_2b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "arithmetic",
+    "model": "gemma_2b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "factual_recall",
+    "model": "gemma_2b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "universality",
+    "model": "gemma_2b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "ioi",
+    "model": "llama_3b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "induction_heads",
+    "model": "llama_3b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "greater_than",
+    "model": "llama_3b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "logit_lens",
+    "model": "llama_3b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "copy_task",
+    "model": "llama_3b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "arithmetic",
+    "model": "llama_3b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "factual_recall",
+    "model": "llama_3b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "universality",
+    "model": "llama_3b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "ioi",
+    "model": "qwen2_5_05b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "induction_heads",
+    "model": "qwen2_5_05b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "greater_than",
+    "model": "qwen2_5_05b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "logit_lens",
+    "model": "qwen2_5_05b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "copy_task",
+    "model": "qwen2_5_05b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "arithmetic",
+    "model": "qwen2_5_05b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "factual_recall",
+    "model": "qwen2_5_05b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  },
+  {
+    "task": "universality",
+    "model": "qwen2_5_05b",
+    "patch_success_rate": 0.0,
+    "overlap_pct": null,
+    "notes": "Backend: stub | Mode: mock"
+  }
+]

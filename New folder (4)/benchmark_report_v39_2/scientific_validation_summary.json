@@ -1,0 +1,58 @@
+{
+  "integrity": {
+    "registry_version": "1.1.0",
+    "last_verified": "2026-07-28T17:42:00Z",
+    "validator_version": "1.2.0"
+  },
+  "benchmarks": [
+    {
+      "id": "IOI Faithfulness",
+      "published": 0.88,
+      "stats": {
+        "observed_mean": 0.8814,
+        "observed_median": 0.8817,
+        "observed_std": 0.006,
+        "observed_iqr": 0.0106,
+        "n": 100,
+        "bootstrap_ci": [
+          0.8802,
+          0.8824
+        ],
+        "difference_pct": 0.15,
+        "cohens_d": 0.226,
+        "verdict": "REVISION_REQUIRED",
+        "criteria_met": {
+          "published_in_ci": false,
+          "diff_within_tolerance": true,
+          "rigorous_sample": true,
+          "patch_success_met": true
+        }
+      }
+    }
+  ],
+  "algorithms": [],
+  "discovery_quality": [
+    {
+      "algorithm": "ACDC",
+      "stats": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "edge_jaccard": 1.0,
+        "functional_recovery": 0.711,
+        "discovery_score": 0.92,
+        "verdict": "PASS"
+      }
+    },
+    {
+      "algorithm": "Path Patching",
+      "stats": {
+        "f1": 0.89,
+        "edge_jaccard": 0.93,
+        "functional_recovery": 0.96,
+        "discovery_score": 0.92,
+        "verdict": "PASS"
+      }
+    }
+  ]
+}

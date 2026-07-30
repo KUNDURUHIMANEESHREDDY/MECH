@@ -1,0 +1,40 @@
+{
+  "manifest_version": "1.2.0",
+  "schema_version": "1.2.0",
+  "created_at": "2026-07-28T21:40:00Z",
+  "root_signature": "sha256:root_sig_placeholder",
+  "datasets": {
+    "IOI-Canonical-100": {
+      "dataset_id": "IOI-Canonical-100",
+      "version": "1.0.0",
+      "benchmark_version": "v1.0",
+      "status": "GOLDEN",
+      "locked": true,
+      "hashes": {
+        "prompt_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "token_hash": "sha256:f7a2d3c...placeholder",
+        "bundle_hash": "sha256:d41d8cd98f00b204e9800998ecf8427e",
+        "tokenizer_fingerprint": "sha256:vocab_hash_placeholder",
+        "environment_hash": "sha256:env_hash_placeholder"
+      },
+      "lineage": {
+        "parent_id": null,
+        "change_reason": "Initial release",
+        "author": "Kevin Wang",
+        "breaking_change": false
+      },
+      "provenance": {
+        "paper_doi": "arxiv:2211.00593",
+        "license": "MIT",
+        "source_url": "https://github.com/redwoodresearch/Easy-Transformer",
+        "generation_script_hash": "sha256:script_hash",
+        "random_seed": 42
+      },
+      "tokenizer": {
+        "name": "gpt2",
+        "revision": "main"
+      },
+      "signature": "sha256:dataset_sig_placeholder"
+    }
+  }
+}

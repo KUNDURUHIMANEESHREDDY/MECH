@@ -1,0 +1,12 @@
+{
+  "activations": {
+    "feature_1402": 4.5
+  },
+  "provenance": {
+    "sae_version": "v1.0",
+    "dataset_hash": "ds_ioi",
+    "prompt_hash": "cc9032e5521bcb5d3ad98cb4ba1cabf5b6f582ecc2f1ba9f18e031e167df9c03",
+    "model_sha": "model_gpt2",
+    "timestamp": "2026-07-28T13:06:36.835093Z"
+  }
+}

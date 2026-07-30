@@ -1,0 +1,19 @@
+{
+  "integrity": {
+    "registry_version": "1.1.0",
+    "last_verified": "2026-07-28T17:42:00Z",
+    "validator_version": "1.2.0"
+  },
+  "benchmarks": [],
+  "leaderboard": [],
+  "scaling": [],
+  "sae_validation": {
+    "checkpoint_id": "google/gemma-scope-2b-pt-res",
+    "fve": 0.95,
+    "l0": 35.2,
+    "dead_feature_pct": 1.8,
+    "alive_feature_pct": 98.2,
+    "reconstruction_loss": 0.05,
+    "verdict": "PASS"
+  }
+}

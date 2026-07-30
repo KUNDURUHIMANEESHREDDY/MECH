@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "citation": "Wang et al. 2022: Interpretability in the Wild",
+  "checksum": "d41d8cd98f00b204e9800998ecf8427e",
+  "prompts": [
+    {
+      "id": "ioi_0001",
+      "clean": "John and Mary went to the store, John gave a drink to Mary",
+      "corrupted": "John and Mary went to the store, Mary gave a drink to John",
+      "target": " Mary",
+      "metadata": {
+        "task": "IOI",
+        "difficulty": "easy",
+        "split": "validation",
+        "template": "[A] and [B] went to the store, [A] gave a drink to [B]"
+      }
+    },
+    {
+      "id": "ioi_0002",
+      "clean": "Alice and Bob were playing in the garden. Alice handed a toy to Bob",
+      "corrupted": "Alice and Bob were playing in the garden. Bob handed a toy to Alice",
+      "target": " Bob",
+      "metadata": {
+        "task": "IOI",
+        "difficulty": "easy",
+        "split": "validation",
+        "template": "[A] and [B] were playing in the garden. [A] handed a toy to [B]"
+      }
+    }
+  ]
+}
