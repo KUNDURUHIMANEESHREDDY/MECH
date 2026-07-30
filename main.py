@@ -48,7 +48,7 @@ def health():
 
 
 # --------------------------
-# Register your API routers
+# Register API routers
 # --------------------------
 try:
     from backend.api.dispatcher import router as api_router
@@ -57,9 +57,13 @@ try:
 except Exception as e:
     logger.warning(f"Dispatcher not loaded: {e}")
 
-# Add more routers if needed
-# from backend.api.xxx import router
-# app.include_router(router)
+# Try loading the v2 runtime API if available
+try:
+    from backend.api.runtime_api import router as runtime_router
+    app.include_router(runtime_router, prefix="/api/v2")
+    logger.info("Runtime v2 API loaded.")
+except Exception:
+    pass
 
 if __name__ == "__main__":
     logger.info("Starting MECH Platform...")

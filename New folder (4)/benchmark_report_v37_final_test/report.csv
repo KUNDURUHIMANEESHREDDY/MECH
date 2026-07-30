@@ -1,9 +1,0 @@
-model_id,task_id,fidelity_pct,primary_score,reference_score,runtime_s,peak_memory_mb,tokens_sec
-gpt2_small,ioi,99.78,96.78,97.0,0.0,1180.0,0.0
-gpt2_small,induction_heads,98.89,96.05,95.0,0.0,930.5,0.0
-gpt2_small,greater_than,99.44,89.5,89.0,0.0,1160.9,0.0
-gpt2_small,logit_lens,99.79,82.17,82.0,0.0,1409.4,0.0
-gpt2_small,sae,98.92,91.98,91.0,0.0,1067.1,0.0
-gpt2_small,copy_task,99.6,93.37,93.0,0.0,1207.5,0.0
-gpt2_small,arithmetic,99.81,83.84,84.0,0.0,938.4,0.0
-gpt2_small,factual_recall,99.41,78.53,79.0,0.0,1357.2,0.0
