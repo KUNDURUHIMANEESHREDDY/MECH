@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Clapperboard, Play, Pause } from 'lucide-react';
 import { visualizationEngine } from '../../services/visualizationEngine.js';
 
 export default function CircuitAnimationPanel() {
@@ -19,12 +20,20 @@ export default function CircuitAnimationPanel() {
   return (
     <div className="panel circuit-animation-panel" data-testid="circuit-animation-panel">
       <div className="panel-header">
-        <h3>🎬 Circuit Activation Propagation Scrubber</h3>
+        <h3><Clapperboard size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Circuit Activation Propagation Scrubber</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div className="controls" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
           <button className="btn" onClick={togglePlay}>
-            {isPlaying ? '⏸ Pause' : '▶ Play'}
+            {isPlaying ? (
+              <>
+                <Pause size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Pause
+              </>
+            ) : (
+              <>
+                <Play size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Play
+              </>
+            )}
           </button>
           <span style={{ fontSize: '12px', color: '#94a3b8' }}>
             Layer Depth: {step} / {totalLayers}

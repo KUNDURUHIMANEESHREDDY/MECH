@@ -6,9 +6,9 @@ import datetime as _dt
 import os
 from typing import Any, Dict, List, Optional
 
-from ...science.models.adapter_base import ModelAdapter
+from science.models.adapter_base import ModelAdapter
 from .algorithms import get_algorithm
-from ...datasets.dataset_manager import DatasetManager
+from datasets.dataset_manager import DatasetManager
 
 
 class CircuitDiscoveryEngine:

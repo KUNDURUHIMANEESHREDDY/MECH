@@ -1,0 +1,74 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic "MECH Platform" [ref=e6] [cursor=pointer]: M
+      - button "Explorer" [ref=e8] [cursor=pointer]
+      - button "Search" [ref=e14] [cursor=pointer]
+      - button "Debug" [ref=e18] [cursor=pointer]
+      - button "Code" [ref=e28] [cursor=pointer]
+    - button "Settings" [ref=e35] [cursor=pointer]
+  - generic [ref=e39]:
+    - generic [ref=e40]:
+      - heading "Explorer" [level=1] [ref=e41]
+      - button "Collapse all" [ref=e43] [cursor=pointer]
+    - generic [ref=e46]:
+      - textbox "Search views..." [ref=e51]
+      - generic [ref=e52]:
+        - generic [ref=e53]: Explore
+        - generic [ref=e54]:
+          - button "Model Explorer" [ref=e55] [cursor=pointer]
+          - button "Workspace" [ref=e63] [cursor=pointer]
+          - button "Neural Explorer" [ref=e68] [cursor=pointer]
+          - button "Knowledge Graph" [ref=e83] [cursor=pointer]
+          - button "Circuit Explorer" [ref=e92] [cursor=pointer]
+      - generic [ref=e102]:
+        - generic [ref=e103]: Develop
+        - generic [ref=e104]:
+          - button "Models" [ref=e105] [cursor=pointer]
+          - button "Prompts" [ref=e118] [cursor=pointer]
+          - button "Debugger" [ref=e123] [cursor=pointer]
+          - button "Build" [ref=e135] [cursor=pointer]
+          - button "Benchmark" [ref=e142] [cursor=pointer]
+          - button "Benchmark Suite" [ref=e148] [cursor=pointer]
+      - generic [ref=e154]:
+        - generic [ref=e155]: Research
+        - generic [ref=e156]:
+          - button "Experiments" [ref=e157] [cursor=pointer]
+          - button "Sessions" [ref=e162] [cursor=pointer]
+          - button "Reports" [ref=e169] [cursor=pointer]
+          - button "Reasoning" [ref=e175] [cursor=pointer]
+          - button "Evidence Fusion" [ref=e182] [cursor=pointer]
+          - button "Analytics" [ref=e189] [cursor=pointer]
+          - button "Health" [ref=e195] [cursor=pointer]
+      - generic [ref=e201]:
+        - generic [ref=e202]: General
+        - generic [ref=e203]:
+          - button "Campaigns" [ref=e204] [cursor=pointer]
+          - button "Plugins" [ref=e212] [cursor=pointer]
+          - button "Research Notebook" [ref=e217] [cursor=pointer]
+          - button "Lab Notebook" [ref=e222] [cursor=pointer]
+          - button "Paper Reproduction" [ref=e228] [cursor=pointer]
+          - button "Settings" [ref=e235] [cursor=pointer]
+          - button "Logging" [ref=e241] [cursor=pointer]
+          - button "Projects" [ref=e247] [cursor=pointer]
+          - button "Recent Files" [ref=e252] [cursor=pointer]
+  - generic [ref=e258]:
+    - banner [ref=e259]:
+      - generic [ref=e260]: Model Explorer
+      - generic [ref=e262]:
+        - button "Mem" [ref=e263] [cursor=pointer]
+        - button "Dock" [ref=e274] [cursor=pointer]
+        - button "Share" [ref=e277] [cursor=pointer]
+        - button "Market" [ref=e284] [cursor=pointer]
+        - button "Export" [ref=e290] [cursor=pointer]
+        - button "P" [ref=e295] [cursor=pointer]
+        - generic [ref=e298]: Connected
+    - generic [ref=e301]: Choose a model to load
+    - generic [ref=e305] [cursor=pointer]:
+      - generic [ref=e306]: Console
+      - generic [ref=e309]: 0 lines
+  - generic [ref=e312]:
+    - generic [ref=e313]: "Model: GPT2"
+    - generic [ref=e318]: "GPU: 0%"
+    - generic [ref=e323]: "Memory: 0%"
+    - generic [ref=e327]: "Tokens: 0"

@@ -1,10 +1,11 @@
 import React from 'react';
+import { Scale } from 'lucide-react';
 
 export default function DiscoveryComparisonPanel() {
   return (
     <div className="panel discovery-comparison-panel" data-testid="discovery-comparison-panel">
       <div className="panel-header">
-        <h3>⚖️ Discovery Comparison Dashboard</h3>
+        <h3><Scale size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Discovery Comparison Dashboard</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>

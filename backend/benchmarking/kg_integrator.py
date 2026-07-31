@@ -13,8 +13,8 @@ import time
 from typing import List
 
 from .benchmark_runner import BenchmarkReport, BenchmarkResult
-from ..knowledge_graph.graph_store import GraphStore, KGNode, KGEdge
-from ..knowledge_graph.ontology import NodeType, EdgeType
+from knowledge_graph.graph_store import GraphStore, KGNode, KGEdge
+from knowledge_graph.ontology import NodeType, EdgeType
 
 logger = logging.getLogger(__name__)
 

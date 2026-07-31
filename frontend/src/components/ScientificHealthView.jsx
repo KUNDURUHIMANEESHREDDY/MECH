@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Bell, Check, HeartPulse, Play, Settings2, Trophy, Zap } from 'lucide-react';
 
 /**
  * ScientificHealthView - Continuous Validation & Regression Monitoring Dashboard
@@ -54,7 +55,7 @@ export default function ScientificHealthView({ api, onNavigate }) {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff' }}>🏥 Scientific Health & Continuous Validation</h1>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff', display: 'flex', alignItems: 'center', gap: 8 }}><HeartPulse size={20} /> Scientific Health & Continuous Validation</h1>
           <p style={{ margin: 0, color: '#888', fontSize: 13 }}>
             Continuous regression monitoring across PyTorch, CUDA, Transformers, and Golden Benchmarks
           </p>
@@ -68,7 +69,7 @@ export default function ScientificHealthView({ api, onNavigate }) {
             cursor: runningSuite ? 'default' : 'pointer', fontSize: 13, fontWeight: 700
           }}
         >
-          {runningSuite ? '⚡ Running Validation...' : '▶ Run Validation Suite'}
+          {runningSuite ? <><Zap size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Running Validation...</> : <><Play size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Run Validation Suite</>}
         </button>
       </div>
 
@@ -97,7 +98,7 @@ export default function ScientificHealthView({ api, onNavigate }) {
         
         {/* Left Column: Golden Benchmarks Matrix Table */}
         <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-          <h3 style={{ fontSize: 15, color: '#d0c0ff', margin: '0 0 14px 0' }}>🏆 Golden Benchmarks Validation Matrix</h3>
+          <h3 style={{ fontSize: 15, color: '#d0c0ff', margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Trophy size={15} /> Golden Benchmarks Validation Matrix</h3>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
             <thead>
               <tr style={{ background: '#151528', color: '#888', borderBottom: '1px solid #2a2a4a' }}>
@@ -121,7 +122,7 @@ export default function ScientificHealthView({ api, onNavigate }) {
                   <td style={{ padding: 10, color: '#888' }}>{bm.runtime}</td>
                   <td style={{ padding: 10 }}>
                     <span style={{ background: '#1c3d27', color: '#2ea043', border: '1px solid #2ea043', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
-                      ✓ {bm.status}
+                      <Check size={11} style={{ verticalAlign: 'middle', marginRight: 2 }} /> {bm.status}
                     </span>
                   </td>
                 </tr>
@@ -135,7 +136,7 @@ export default function ScientificHealthView({ api, onNavigate }) {
           
           {/* Actionable Alerts Feed */}
           <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#2ea043', margin: '0 0 12px 0' }}>🔔 Actionable Scientific Alerts</h3>
+            <h3 style={{ fontSize: 15, color: '#2ea043', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Bell size={15} /> Actionable Scientific Alerts</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {MOCK_HEALTH.alerts.map(a => (
                 <div key={a.id} style={{ background: '#151528', border: '1px solid #2a2a4a', borderRadius: 8, padding: 12, borderLeft: '3px solid #2ea043' }}>
@@ -149,7 +150,7 @@ export default function ScientificHealthView({ api, onNavigate }) {
 
           {/* Environment Version Snapshot */}
           <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#d0c0ff', margin: '0 0 12px 0' }}>⚙️ Runtime Environment Profile</h3>
+            <h3 style={{ fontSize: 15, color: '#d0c0ff', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Settings2 size={15} /> Runtime Environment Profile</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', background: '#151528', padding: 8, borderRadius: 6 }}>
                 <span style={{ color: '#888' }}>PyTorch Version</span>
@@ -176,3 +177,4 @@ export default function ScientificHealthView({ api, onNavigate }) {
     </div>
   );
 }
+

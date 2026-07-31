@@ -1,0 +1,4 @@
+npm notice run mech-platform@2.0.0 dev
+npm notice run concurrently -k -n vite,electron -c blue,magenta "npm:dev:renderer" "npm:dev:electron"
+(node:35804) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Globe } from "lucide-react";
 
 export default function EmbeddingViewerPanel() {
   const [method, setMethod] = useState("PCA");
@@ -11,22 +12,29 @@ export default function EmbeddingViewerPanel() {
   ];
 
   return (
-    <div className="p-4 bg-slate-900 text-slate-100 h-full overflow-y-auto">
-      <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+    <div style={{ padding: 16, height: "100%", overflowY: "auto", color: "var(--text)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
         <div>
-          <h2 className="text-lg font-bold text-cyan-400">🌐 3D Embedding Manifold Viewer</h2>
-          <p className="text-xs text-slate-400">Dimensionality Reduction (PCA / UMAP)</p>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", margin: 0 }}>
+            <Globe size={14} style={{ verticalAlign: "middle", marginRight: 6 }} /> 3D Embedding Manifold Viewer
+          </h2>
+          <p className="hint" style={{ margin: "2px 0 0 0" }}>Dimensionality Reduction (PCA / UMAP)</p>
         </div>
-        <div className="flex space-x-1">
+        <div style={{ display: "flex", gap: 4 }}>
           {["PCA", "UMAP", "t-SNE"].map((m) => (
             <button
               key={m}
               onClick={() => setMethod(m)}
-              className={`px-2.5 py-1 text-xs rounded font-semibold transition ${
-                method === m
-                  ? "bg-cyan-600 text-white"
-                  : "bg-slate-800 text-slate-400 hover:text-slate-200"
-              }`}
+              className="btn"
+              style={{
+                padding: "4px 10px",
+                fontSize: 12,
+                borderRadius: 6,
+                fontWeight: 600,
+                transition: "all 0.2s",
+                background: method === m ? "var(--accent-strong)" : "var(--bg-elev-2)",
+                color: method === m ? "var(--text)" : "var(--text-dim)",
+              }}
             >
               {m}
             </button>
@@ -34,19 +42,18 @@ export default function EmbeddingViewerPanel() {
         </div>
       </div>
 
-      <div className="relative h-64 bg-slate-950 rounded border border-slate-800 p-4 mb-4 flex items-center justify-center">
+      <div style={{ position: "relative", height: 256, background: "var(--bg)", borderRadius: 8, border: "1px solid var(--border)", padding: 16, marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
         {samplePoints.map((pt, idx) => (
           <div
             key={idx}
-            style={{ left: `${pt.x}%`, top: `${pt.y}%`, backgroundColor: pt.color }}
-            className="absolute w-4 h-4 rounded-full shadow-lg shadow-cyan-500/20 cursor-pointer transform -translate-x-1/2 -translate-y-1/2 group"
+            style={{ left: `${pt.x}%`, top: `${pt.y}%`, backgroundColor: pt.color, position: "absolute", width: 16, height: 16, borderRadius: "50%", boxShadow: "0 2px 8px var(--accent-soft)", cursor: "pointer", transform: "translate(-50%, -50%)" }}
           >
-            <span className="absolute left-5 top-0 text-[10px] whitespace-nowrap bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 text-slate-200 hidden group-hover:block z-10">
+            <span style={{ position: "absolute", left: 20, top: 0, fontSize: 10, whiteSpace: "nowrap", background: "var(--bg)", padding: "2px 6px", borderRadius: 4, border: "1px solid var(--border)", color: "var(--text)", zIndex: 10, display: "none" }}>
               {pt.label}
             </span>
           </div>
         ))}
-        <span className="text-xs text-slate-600 font-mono">
+        <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
           Projection: {method} (Component 1 vs Component 2)
         </span>
       </div>

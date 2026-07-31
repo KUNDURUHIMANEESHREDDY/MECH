@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { FlaskConical } from 'lucide-react';
 import { knowledgeExplorerEngine } from '../../services/knowledgeExplorerEngine.js';
 
 export default function MechanismSimulatorPanel() {
@@ -13,7 +14,7 @@ export default function MechanismSimulatorPanel() {
   return (
     <div className="panel mechanism-simulator-panel" data-testid="mechanism-simulator-panel">
       <div className="panel-header">
-        <h3>🧪 Interactive Mechanism Simulator</h3>
+        <h3><FlaskConical size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Interactive Mechanism Simulator</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>

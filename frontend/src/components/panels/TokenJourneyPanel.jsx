@@ -1,4 +1,5 @@
 import React from "react";
+import { Rocket } from "lucide-react";
 import { selectionManager } from "../../utils/selectionManager";
 
 export default function TokenJourneyPanel() {
@@ -9,27 +10,29 @@ export default function TokenJourneyPanel() {
   };
 
   return (
-    <div className="p-4 bg-slate-900 text-slate-100 h-full overflow-y-auto">
-      <div className="mb-4 pb-2 border-b border-slate-800">
-        <h2 className="text-lg font-bold text-teal-400">🚀 Token Representation Journey</h2>
-        <p className="text-xs text-slate-400">Layer-by-Layer Representation Trajectory & Cosine Distance</p>
+    <div style={{ padding: 16, height: "100%", overflowY: "auto", color: "var(--text)" }}>
+      <div style={{ marginBottom: 16, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", margin: 0 }}>
+          <Rocket size={14} style={{ verticalAlign: "middle", marginRight: 6 }} /> Token Representation Journey
+        </h2>
+        <p className="hint" style={{ margin: "2px 0 0 0" }}>Layer-by-Layer Representation Trajectory & Cosine Distance</p>
       </div>
 
-      <div className="space-y-3">
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {tokens.map((tok, idx) => (
-          <div key={idx} className="p-3 bg-slate-800/80 rounded border border-slate-700">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-bold text-teal-300">
+          <div key={idx} style={{ padding: 12, background: "var(--bg-elev-2)", borderRadius: 8, border: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--accent-hover)" }}>
                 Token [{idx}]: "{tok}"
               </span>
-              <span className="text-[10px] text-slate-400 font-mono">Embedding Dim: 768</span>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>Embedding Dim: 768</span>
             </div>
-            <div className="flex space-x-1">
+            <div style={{ display: "flex", gap: 4 }}>
               {Array.from({ length: 12 }).map((_, l) => (
                 <button
                   key={l}
                   onClick={() => handleSelectTokenLayer(tok, l)}
-                  className="flex-1 py-1 bg-slate-700 hover:bg-teal-600/50 text-[10px] rounded text-slate-300 font-mono transition"
+                  style={{ flex: 1, padding: "4px 0", background: "var(--bg-elev)", fontSize: 10, borderRadius: 4, color: "var(--text-dim)", fontFamily: "var(--font-mono)", transition: "background 0.2s" }}
                 >
                   L{l}
                 </button>

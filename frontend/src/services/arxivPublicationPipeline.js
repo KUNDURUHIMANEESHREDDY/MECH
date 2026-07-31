@@ -1,6 +1,6 @@
 /**
  * ArXiv Publication Pipeline Service.
- * Compiles Notebook ➔ Paper ➔ Figures ➔ Supplement ➔ ArXiv package.
+ * Compiles Notebook -> Paper -> Figures -> Supplement -> ArXiv package.
  */
 
 export class ArXivPublicationPipeline {

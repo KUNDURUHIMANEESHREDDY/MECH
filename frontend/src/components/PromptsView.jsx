@@ -53,3 +53,4 @@ export default function PromptsView({ api }) {
     </div>
   );
 }
+

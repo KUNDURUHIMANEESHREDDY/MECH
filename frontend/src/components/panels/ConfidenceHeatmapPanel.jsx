@@ -1,10 +1,11 @@
 import React from 'react';
+import { Flame } from 'lucide-react';
 
 export default function ConfidenceHeatmapPanel() {
   return (
     <div className="panel confidence-heatmap-panel" data-testid="confidence-heatmap-panel">
       <div className="panel-header">
-        <h3>🔥 Statistical Confidence Heatmap</h3>
+        <h3><Flame size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Statistical Confidence Heatmap</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px' }}>

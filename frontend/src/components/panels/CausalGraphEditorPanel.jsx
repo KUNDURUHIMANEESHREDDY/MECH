@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Zap } from 'lucide-react';
 import ProvenanceOverlay from '../common/ProvenanceOverlay';
 import { sharedWorkspaceState } from '../../utils/sharedWorkspaceState';
 
@@ -19,7 +20,7 @@ export default function CausalGraphEditorPanel() {
   return (
     <div className="panel causal-graph-editor-panel" data-testid="causal-graph-editor-panel">
       <div className="panel-header">
-        <h3>⚡ Interactive Causal Graph Editor</h3>
+        <h3><Zap size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Interactive Causal Graph Editor</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

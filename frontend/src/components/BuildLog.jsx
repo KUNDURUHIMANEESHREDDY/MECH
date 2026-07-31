@@ -76,7 +76,7 @@ export default function BuildLog({ api }) {
         </div>
         <div className="log-view" ref={viewRef} data-testid="build-log">
           {logs.length === 0 ? (
-            <div style={{ color: '#6b7280' }}>No output yet. Press “Start build”.</div>
+            <div style={{ color: 'var(--text-dim)' }}>No output yet. Press “Start build”.</div>
           ) : (
             logs.map((l, i) => (
               <div key={i} className={`log-line ${l.level}`}>
@@ -90,3 +90,4 @@ export default function BuildLog({ api }) {
     </div>
   );
 }
+

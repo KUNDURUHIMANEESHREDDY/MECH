@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BarChart3, ClipboardList } from 'lucide-react';
 import { notebookStore } from '../domain/notebook/notebookStore';
 import { ReportGenerator } from '../domain/reports/reportGenerator';
 
@@ -34,8 +35,8 @@ export default function ExperimentNotebook() {
           <div key={cell.id} className="notebook-cell" style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: '10px', borderRadius: '6px' }}>
             <span className="kbd-shortcut" style={{ marginBottom: '6px', display: 'inline-block' }}>{cell.type.toUpperCase()}</span>
             {cell.type === 'markdown' && <div style={{ whiteSpace: 'pre-wrap', fontSize: '13px' }}>{cell.content}</div>}
-            {cell.type === 'plot' && <div style={{ fontSize: '12px', color: 'var(--accent)' }}>📊 Plot: {cell.title}</div>}
-            {cell.type === 'table' && <div style={{ fontSize: '12px' }}>📋 Table: {cell.headers.join(' | ')}</div>}
+            {cell.type === 'plot' && <div style={{ fontSize: '12px', color: 'var(--accent)' }}><BarChart3 size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Plot: {cell.title}</div>}
+            {cell.type === 'table' && <div style={{ fontSize: '12px' }}><ClipboardList size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Table: {cell.headers.join(' | ')}</div>}
             {cell.type === 'json' && <pre style={{ fontSize: '11px', margin: 0 }}>{JSON.stringify(cell.data, null, 2)}</pre>}
           </div>
         ))}
@@ -54,3 +55,4 @@ export default function ExperimentNotebook() {
     </div>
   );
 }
+

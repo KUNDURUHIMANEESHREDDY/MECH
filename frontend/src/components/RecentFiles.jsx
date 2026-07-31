@@ -59,3 +59,4 @@ export default function RecentFiles({ api }) {
     </div>
   );
 }
+

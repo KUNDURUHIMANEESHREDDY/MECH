@@ -24,11 +24,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from ...science.models.adapter_base import ModelAdapter
+from science.models.adapter_base import ModelAdapter
 from .algorithms import get_algorithm
 from .algorithms.base_algorithm import DiscoveryReport
 from .discovery_planner import ResearchGoal, MechanismClaim
-from ...datasets.dataset_manager import DatasetManager
+from datasets.dataset_manager import DatasetManager
 
 
 @dataclass

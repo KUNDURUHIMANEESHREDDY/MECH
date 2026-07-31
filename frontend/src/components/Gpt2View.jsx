@@ -9,15 +9,20 @@ function StatusBadge({ value }) {
       display: 'inline-block', padding: '2px 8px', borderRadius: 4,
       fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
       background: ok ? '#d1fae5' : '#fee2e2',
-      color: ok ? '#065f46' : '#991b1b',
-    }}>
+      color: ok ? '#065f46' : '#991b1b'}}>
       {value || '—'}
     </span>
   );
 }
 
 function Spinner() {
-  return <span style={{ marginLeft: 6, opacity: 0.6 }}>⏳</span>;
+  return (
+    <span style={{ marginLeft: 6, opacity: 0.6, display: 'inline-flex', verticalAlign: 'middle' }}>
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 1h8M2 11h8M2 1l4 5 4-5M2 11l4-5 4 5" />
+      </svg>
+    </span>
+  );
 }
 
 function Section({ title, children, badge }) {
@@ -47,10 +52,19 @@ function AttentionHeatmap({ matrix, tokens }) {
   if (!matrix || !matrix.length) return <p className="hint">No data yet.</p>;
   const max = Math.max(...matrix.flat());
   const cell = (v) => {
-    const alpha = max > 0 ? (v / max) : 0;
-    const bg = `rgba(59,130,246,${(0.08 + alpha * 0.85).toFixed(3)})`;
-    const fg = alpha > 0.55 ? '#fff' : '#1e293b';
-    return { background: bg, color: fg };
+    // sqrt spreads low values so weak attention stays visible on dark theme
+    const t = max > 0 ? Math.sqrt(Math.max(0, v) / max) : 0;
+    const stops = [
+      [30, 41, 59],
+      [14, 165, 233],
+      [250, 204, 21],
+    ];
+    const scaled = t * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(scaled));
+    const f = scaled - i;
+    const [r, g, b] = stops[i].map((ch, k) => Math.round(ch + (stops[i + 1][k] - ch) * f));
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    return { background: `rgb(${r},${g},${b})`, color: lum > 140 ? '#0f172a' : '#f8fafc' };
   };
   const sz = 36;
   return (
@@ -76,7 +90,7 @@ function AttentionHeatmap({ matrix, tokens }) {
               {row.map((v, ki) => (
                 <td key={ki} style={{
                   width: sz, height: sz, textAlign: 'center', ...cell(v),
-                  border: '1px solid rgba(0,0,0,0.04)', borderRadius: 2
+                  border: '1px solid rgba(148,163,184,0.15)', borderRadius: 2
                 }}>
                   {v.toFixed(2)}
                 </td>
@@ -433,8 +447,7 @@ export default function Gpt2View({ api }) {
               marginTop: 10, padding: '8px 12px', borderRadius: 6, fontSize: 13,
               background: patchResult.direction === 'hurts' ? '#fef2f2' : '#f0fdf4',
               color:      patchResult.direction === 'hurts' ? '#991b1b' : '#166534',
-              fontWeight: 600,
-            }}>
+              fontWeight: 600}}>
               Zeroing L{patchResult.layer}H{patchResult.head}{' '}
               <strong>{patchResult.direction}</strong> the{' '}
               "{(patchPosToken||'').trim()}" prediction by{' '}
@@ -480,8 +493,7 @@ export default function Gpt2View({ api }) {
                 display: 'inline-block', padding: '3px 10px', borderRadius: 4, fontSize: 12,
                 marginTop: 4, fontWeight: 600,
                 background: ioiResult.ioi_pass ? '#d1fae5' : '#fee2e2',
-                color:      ioiResult.ioi_pass ? '#065f46' : '#991b1b',
-              }}>
+                color:      ioiResult.ioi_pass ? '#065f46' : '#991b1b'}}>
                 {ioiResult.ioi_pass ? `Model predicts ${ioiResult.io_name} (IO) — PASS` : 'FAIL'}
               </div>
             </div>
@@ -498,8 +510,7 @@ export default function Gpt2View({ api }) {
                 display: 'inline-block', padding: '3px 10px', borderRadius: 4, fontSize: 12,
                 marginTop: 4, fontWeight: 600,
                 background: ioiResult.corrupted_pass ? '#d1fae5' : '#fee2e2',
-                color:      ioiResult.corrupted_pass ? '#065f46' : '#991b1b',
-              }}>
+                color:      ioiResult.corrupted_pass ? '#065f46' : '#991b1b'}}>
                 {ioiResult.corrupted_pass
                   ? `Model flips to ${ioiResult.subj_name} (Subject) — PASS`
                   : 'FAIL'}

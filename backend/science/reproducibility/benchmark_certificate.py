@@ -17,7 +17,6 @@ class BenchmarkCertificate:
     certificate_id: str
     benchmark_id: str
     benchmark_version: str
-    schema_version: str = "1.1.0"
 
     # Provenance Fingerprints
     dataset_hash: str
@@ -38,6 +37,7 @@ class BenchmarkCertificate:
     # Metadata
     validator_version: str
     registry_version: str
+    schema_version: str = "1.1.0"
     timestamp: str = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
     signature: str = "" # Placeholder for digital signature
 

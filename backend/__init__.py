@@ -30,7 +30,7 @@ from . import agents
 from . import knowledge_graph
 
 # Platform & SDK
-from . import platform
+from . import mech_platform
 from . import sdk
 
 # Services
@@ -56,7 +56,7 @@ __all__ = [
     "api", "core", "interpretability", "discovery",
     "benchmarking", "reproductions", "science",
     "validation", "runtime", "agents", "knowledge_graph",
-    "platform", "sdk", "services", "research",
+    "mech_platform", "sdk", "services", "research",
     "research_platform", "datasets", "ui", "storage",
     "plugins", "analysis", "experiments"
 ]

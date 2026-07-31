@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ArrowRight, Building2, Check, FileText, FlaskConical, Search } from 'lucide-react';
 
 /**
  * EvidenceFusionView - Persistent Scientific Mechanism Claim Registry
@@ -92,7 +93,7 @@ export default function EvidenceFusionView({ api, onNavigate }) {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff' }}>🏛️ Mechanism Claim Registry</h1>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff', display: 'flex', alignItems: 'center', gap: 8 }}><Building2 size={20} /> Mechanism Claim Registry</h1>
           <p style={{ margin: 0, color: '#888', fontSize: 13 }}>
             Persistent scientific knowledge accumulation & cross-model evidence tracking
           </p>
@@ -190,7 +191,7 @@ export default function EvidenceFusionView({ api, onNavigate }) {
               <div key={idx} style={{ background: '#151528', border: '1px solid #2a2a4a', borderRadius: 8, padding: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: '#2ea043', fontWeight: 700 }}>✓</span>
+                    <span style={{ color: '#2ea043', fontWeight: 700, display: 'inline-flex' }}><Check size={12} /></span>
                     <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>{ev.algorithm}</span>
                   </div>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#5cd4c4' }}>{ev.score.toFixed(2)}</span>
@@ -211,7 +212,7 @@ export default function EvidenceFusionView({ api, onNavigate }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {claim.literature.map((lit, i) => (
                 <div key={i} style={{ fontSize: 12, color: '#d0c0ff', background: '#151528', padding: '8px 12px', borderRadius: 6, border: '1px solid #2a2a4a' }}>
-                  📄 {lit}
+                  <FileText size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />{lit}
                 </div>
               ))}
             </div>
@@ -236,13 +237,13 @@ export default function EvidenceFusionView({ api, onNavigate }) {
                   onClick={() => onNavigate('circuitexplorer')}
                   style={{ flex: 1, padding: 10, background: '#1a1a2e', border: '1px solid #3a3a5a', borderRadius: 6, color: '#5cd4c4', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
                 >
-                  🔍 Circuit Explorer →
+                  <Search size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Circuit Explorer <ArrowRight size={12} style={{ verticalAlign: 'middle', marginLeft: 4 }} />
                 </button>
                 <button
                   onClick={() => onNavigate('reasoning')}
                   style={{ flex: 1, padding: 10, background: '#1a1a2e', border: '1px solid #3a3a5a', borderRadius: 6, color: '#d0c0ff', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
                 >
-                  🔬 Reasoning Trace →
+                  <FlaskConical size={12} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Reasoning Trace <ArrowRight size={12} style={{ verticalAlign: 'middle', marginLeft: 4 }} />
                 </button>
               </div>
             )}
@@ -254,3 +255,4 @@ export default function EvidenceFusionView({ api, onNavigate }) {
     </div>
   );
 }
+

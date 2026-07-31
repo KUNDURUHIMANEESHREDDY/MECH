@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Glasses } from 'lucide-react';
 
 export default function VR3DNetworkViewerPanel() {
   const [viewMode, setViewMode] = useState('3D');
@@ -6,7 +7,7 @@ export default function VR3DNetworkViewerPanel() {
   return (
     <div className="panel vr-3d-panel" data-testid="vr-3d-panel">
       <div className="panel-header">
-        <h3>🕶️ VR / 3D Network Viewer</h3>
+        <h3><Glasses size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> VR / 3D Network Viewer</h3>
         <div style={{ display: 'flex', gap: '4px' }}>
           {['2D', '3D', 'VR Mode'].map((m) => (
             <button

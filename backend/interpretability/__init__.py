@@ -60,6 +60,12 @@ from .logit_inspector import LogitInspector
 from .heatmap import VisualizationGenerator, HeatmapGenerator
 from .api import app
 
+# Sub-packages
+from . import algorithms
+from . import sae
+from . import causal
+from . import semantics
+
 __version__ = "2.0.0"
 __all__ = [
     # Models

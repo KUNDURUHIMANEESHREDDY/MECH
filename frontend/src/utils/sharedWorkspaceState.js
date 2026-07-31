@@ -1,6 +1,6 @@
 /**
  * Shared Workspace Root State Manager.
- * Single root state: Workspace ➔ Session ➔ Experiment ➔ Visualization ➔ Collaboration ➔ Publication.
+ * Single root state: Workspace -> Session -> Experiment -> Visualization -> Collaboration -> Publication.
  */
 
 class SharedWorkspaceState {

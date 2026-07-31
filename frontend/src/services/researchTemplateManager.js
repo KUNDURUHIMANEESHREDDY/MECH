@@ -9,7 +9,7 @@ export class ResearchTemplateManager {
       {
         id: "template_circuit_discovery",
         name: "Automated Circuit Discovery",
-        description: "Extract computational circuit graph Neuron ➔ SAE Feature ➔ Head ➔ Output.",
+        description: "Extract computational circuit graph Neuron -> SAE Feature -> Head -> Output.",
         steps: ["Load Model", "Run Causal Tracing", "Extract Circuit", "Generate Report"],
       },
       {

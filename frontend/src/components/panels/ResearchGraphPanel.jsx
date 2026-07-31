@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Globe } from 'lucide-react';
 import { sharedWorkspaceState } from '../../utils/sharedWorkspaceState.js';
 import { visualizationEngine } from '../../services/visualizationEngine.js';
 
@@ -25,7 +26,7 @@ export default function ResearchGraphPanel() {
   return (
     <div className="panel research-graph-panel" data-testid="research-graph-panel">
       <div className="panel-header">
-        <h3>🌐 Interactive Research Graph</h3>
+        <h3><Globe size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Interactive Research Graph</h3>
         <div className="layout-controls" style={{ display: 'flex', gap: '6px' }}>
           {['Hierarchical', 'Force', 'Radial', 'Timeline'].map((m) => (
             <button

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ArrowRight } from 'lucide-react';
 import { selectionManager } from '../../utils/selectionManager';
 
 export default function CircuitGraphPanel() {
@@ -15,7 +16,7 @@ export default function CircuitGraphPanel() {
   return (
     <div className="panel-content circuit-graph-panel" data-testid="circuit-graph-panel">
       <h4>Interactive Circuit Graph</h4>
-      <p className="hint">Multi-node graph mapping: Token ➔ Neuron ➔ Feature ➔ Attention Head ➔ Output Prediction.</p>
+      <p className="hint">Multi-node graph mapping: Token -> Neuron -> Feature -> Attention Head -> Output Prediction.</p>
 
       <div className="graph-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', background: 'var(--bg)', borderRadius: '6px' }}>
         {GRAPH_NODES.map((node, idx) => (
@@ -31,7 +32,11 @@ export default function CircuitGraphPanel() {
               <div className="node-type-tag">{node.type}</div>
               <div className="node-label">{node.label}</div>
             </div>
-            {idx < GRAPH_NODES.length - 1 && <div className="graph-connector-arrow">➔</div>}
+            {idx < GRAPH_NODES.length - 1 && (
+              <div className="graph-connector-arrow" style={{ display: 'flex', alignItems: 'center' }}>
+                <ArrowRight size={14} />
+              </div>
+            )}
           </React.Fragment>
         ))}
       </div>

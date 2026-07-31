@@ -1,10 +1,11 @@
 import React from 'react';
+import { ChartBar } from 'lucide-react';
 
 export default function InteractiveFiguresPanel() {
   return (
     <div className="panel interactive-figures-panel" data-testid="interactive-figures-panel">
       <div className="panel-header">
-        <h3>📊 Interactive Publication Figures Studio</h3>
+        <h3><ChartBar size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Interactive Publication Figures Studio</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ padding: '12px', background: '#020617', borderRadius: '6px', border: '1px solid #1e293b' }}>
