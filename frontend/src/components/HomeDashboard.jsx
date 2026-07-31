@@ -17,7 +17,7 @@ export default function HomeDashboard() {
     <div className="p-8 max-w-6xl mx-auto space-y-12">
       <header className="mb-8">
         <h1 className="text-4xl font-light text-slate-800">Research Environment</h1>
-        <p className="text-slate-500 mt-2">Projects → Experiment → Analysis → Discovery → Publication</p>
+        <p className="text-slate-500 mt-2">Projects -&gt; Experiment -&gt; Analysis -&gt; Discovery -&gt; Publication</p>
       </header>
 
       <section className="grid grid-cols-2 gap-8">

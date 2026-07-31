@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { X } from "lucide-react";
 import { extensionMarketplaceService } from "../services/extensionMarketplaceService";
 
 export default function ExtensionMarketplaceModal({ isOpen, onClose }) {
@@ -13,38 +14,42 @@ export default function ExtensionMarketplaceModal({ isOpen, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-lg w-full p-5 text-slate-100 shadow-2xl">
-        <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
-          <h3 className="text-base font-bold text-amber-400">🧩 Extension Marketplace</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 text-sm">
-            ✕
-          </button>
+    <div className="modal-overlay">
+      <div className="modal-container">
+        <div className="modal-header">
+          <h2>Extension Marketplace</h2>
+          <button onClick={onClose} className="modal-close-btn"><X size={14} /></button>
         </div>
 
-        <div className="space-y-3 max-h-80 overflow-y-auto">
-          {plugins.map((plug) => {
-            const isInst = installed.some((p) => p.id === plug.id);
-            return (
-              <div key={plug.id} className="p-3 bg-slate-800/80 rounded border border-slate-700 flex justify-between items-center">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-200">{plug.name}</h4>
-                  <p className="text-[10px] text-slate-400">By {plug.author} • v{plug.version}</p>
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {plugins.length === 0 ? (
+            <p className="hint">No plugins available.</p>
+          ) : (
+            plugins.map(p => {
+              const isInstalled = installed.some(i => i.id === p.id);
+              return (
+                <div key={p.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <strong>{p.name}</strong>
+                    <p className="hint">{p.description}</p>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>v{p.version} by {p.author}</span>
+                  </div>
+                  <button
+                    className={'btn' + (isInstalled ? ' btn-secondary' : '')}
+                    onClick={() => handleInstall(p.id)}
+                    disabled={isInstalled}
+                  >
+                    {isInstalled ? 'Installed' : 'Install'}
+                  </button>
                 </div>
-                <button
-                  disabled={isInst}
-                  onClick={() => handleInstall(plug.id)}
-                  className={`px-3 py-1 text-xs font-semibold rounded transition ${
-                    isInst
-                      ? "bg-slate-700 text-slate-500 cursor-not-allowed"
-                      : "bg-amber-600 hover:bg-amber-500 text-white"
-                  }`}
-                >
-                  {isInst ? "Installed ✓" : "Install Plugin"}
-                </button>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <span>{plugins.length} plugins available</span>
+          <button onClick={onClose} className="btn">Close</button>
         </div>
       </div>
     </div>

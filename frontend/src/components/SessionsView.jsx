@@ -28,11 +28,11 @@ export default function SessionsView({ api }) {
   };
 
   return (
-    <div className="sessions-view" data-testid="sessions-view">
+    <div>
       <div className="section-header">
         <h2>Session Explorer</h2>
-        <p>Review past neural debugging sessions, state snapshots, and trace records.</p>
-        <button className="btn btn-primary btn-sm" style={{ marginTop: '10px' }} onClick={handleCreateSession}>
+        <p className="hint">Review past neural debugging sessions, state snapshots, and trace records.</p>
+        <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={handleCreateSession}>
           + New Research Session
         </button>
       </div>
@@ -46,11 +46,11 @@ export default function SessionsView({ api }) {
         ) : (
           <div className="sessions-list">
             {sessions.map((s) => (
-              <div key={s.id} className="session-item">
-                <div className="session-main">
-                  <h4>{s.name}</h4>
-                  <p className="session-meta">Model: <strong>{s.model}</strong> | Created: {new Date(s.createdAt).toLocaleString()}</p>
-                  <p className="session-prompt">"{s.prompt}"</p>
+              <div key={s.id} className="card" style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h4 style={{ margin: 0 }}>{s.name}</h4>
+                  <p className="hint" style={{ margin: '4px 0 0' }}>Model: <strong>{s.model}</strong> | Created: {new Date(s.createdAt).toLocaleString()}</p>
+                  <p className="hint" style={{ margin: '2px 0 0' }}>"{s.prompt}"</p>
                 </div>
                 <button className="btn btn-secondary btn-sm">Load Session</button>
               </div>

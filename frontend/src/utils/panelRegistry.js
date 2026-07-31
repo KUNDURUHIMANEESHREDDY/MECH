@@ -1,5 +1,6 @@
 'use strict';
 
+import { Pin } from 'lucide-react';
 import { eventBus } from './eventBus';
 
 /**
@@ -18,7 +19,7 @@ class PanelRegistry {
     this.panels.set(panel.id, {
       id: panel.id,
       name: panel.name,
-      icon: panel.icon || '📌',
+      icon: panel.icon || Pin,
       desc: panel.desc || '',
       component: panel.component || null,
       order: panel.order || 100

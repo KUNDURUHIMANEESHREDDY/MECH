@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { ScrollText, Zap } from "lucide-react";
 import { publicationPaperBuilder } from "../../services/publicationPaperBuilder";
 
 export default function PublicationBuilderPanel() {
@@ -9,21 +10,24 @@ export default function PublicationBuilderPanel() {
   };
 
   return (
-    <div className="p-4 bg-slate-900 text-slate-100 h-full overflow-y-auto">
-      <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+    <div style={{ padding: 16, height: "100%", overflowY: "auto", color: "var(--text)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
         <div>
-          <h2 className="text-lg font-bold text-fuchsia-400">📜 Publication Manuscript Builder</h2>
-          <p className="text-xs text-slate-400">Automated LaTeX / Markdown Paper Generator</p>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", margin: 0 }}>
+            <ScrollText size={14} style={{ verticalAlign: "middle", marginRight: 6 }} /> Publication Manuscript Builder
+          </h2>
+          <p className="hint" style={{ margin: "2px 0 0 0" }}>Automated LaTeX / Markdown Paper Generator</p>
         </div>
         <button
           onClick={handleRecompile}
-          className="px-3 py-1 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-semibold rounded"
+          className="btn btn-primary"
+          style={{ fontSize: 12 }}
         >
-          Recompile Paper ⚡
+          Recompile Paper <Zap size={12} style={{ verticalAlign: "middle", marginLeft: 4 }} />
         </button>
       </div>
 
-      <div className="p-4 bg-slate-950 rounded border border-slate-800 font-mono text-xs text-slate-300 whitespace-pre-wrap">
+      <div style={{ padding: 16, background: "var(--bg)", borderRadius: 8, border: "1px solid var(--border)", fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-dim)", whiteSpace: "pre-wrap" }}>
         {paper.manuscriptMarkdown}
       </div>
     </div>

@@ -23,10 +23,19 @@ export function AttentionHeatmap({ matrix, tokens, hoveredToken, onHoverToken }:
   const maxVal = useMemo(() => Math.max(...matrix.flat()), [matrix]);
 
   const getColor = (v: number) => {
-    const t = maxVal > 0 ? v / maxVal : 0;
-    const r = Math.round(30 + t * 70);
-    const g = Math.round(30 + (1 - t) * 60);
-    const b = Math.round(180 + t * 75);
+    // sqrt spreads low values so weak attention stays visible on dark theme
+    const t = maxVal > 0 ? Math.sqrt(Math.max(0, v) / maxVal) : 0;
+    const stops: [number, number, number][] = [
+      [30, 41, 59],
+      [14, 165, 233],
+      [250, 204, 21],
+    ];
+    const scaled = t * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(scaled));
+    const f = scaled - i;
+    const r = Math.round(stops[i][0] + (stops[i + 1][0] - stops[i][0]) * f);
+    const g = Math.round(stops[i][1] + (stops[i + 1][1] - stops[i][1]) * f);
+    const b = Math.round(stops[i][2] + (stops[i + 1][2] - stops[i][2]) * f);
     return `rgb(${r},${g},${b})`;
   };
 

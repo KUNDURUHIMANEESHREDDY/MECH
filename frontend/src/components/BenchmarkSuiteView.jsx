@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { ArrowDown, ArrowRight, BarChart3, Brain, Check, FlaskConical, Play, Ruler } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /* Reference data — mirrors backend TASK_CATALOGUE & MODEL_CATALOGUE   */
@@ -68,15 +69,13 @@ function FidelityCell({ value, taskId, modelId, onClick }) {
       title={`Fidelity: ${fidelity}%\nScore: ${value.score}%`}
       style={{
         textAlign: 'center', padding: '7px 6px', cursor: 'pointer',
-        borderRadius: 6, transition: 'background 0.2s',
-      }}
+        borderRadius: 6, transition: 'background 0.2s'}}
     >
       <div style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         width: 52, height: 26, borderRadius: 6,
         background: `${color}22`, border: `1px solid ${color}55`,
-        fontSize: 12, fontWeight: 700, color,
-      }}>
+        fontSize: 12, fontWeight: 700, color}}>
         {fidelity.toFixed(0)}%
       </div>
     </td>
@@ -88,8 +87,7 @@ function StatCard({ label, value, sub, color }) {
     <div style={{
       flex: '1 1 130px', padding: '14px 18px', borderRadius: 12,
       background: 'rgba(15,23,42,0.7)', border: `1px solid ${color}33`,
-      boxShadow: `0 0 14px ${color}18`,
-    }}>
+      boxShadow: `0 0 14px ${color}18`}}>
       <div style={{ fontSize: 24, fontWeight: 800, color }}>{value}</div>
       <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{label}</div>
       {sub && <div style={{ fontSize: 10, color: '#475569', marginTop: 1 }}>{sub}</div>}
@@ -107,15 +105,13 @@ function DrilldownModal({ taskId, modelId, onClose }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-    }} onClick={onClose}>
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000}} onClick={onClose}>
       <div
         onClick={e => e.stopPropagation()}
         style={{
           background: '#0f172a', border: '1px solid #334155', borderRadius: 16,
           padding: '28px 32px', width: 520, maxWidth: '95vw',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-        }}
+          boxShadow: '0 24px 64px rgba(0,0,0,0.6)'}}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
@@ -138,8 +134,7 @@ function DrilldownModal({ taskId, modelId, onClose }) {
           ].map(({ label, value, color }) => (
             <div key={label} style={{
               padding: '10px 14px', borderRadius: 8,
-              background: 'rgba(30,41,59,0.8)', border: '1px solid #1e293b',
-            }}>
+              background: 'rgba(30,41,59,0.8)', border: '1px solid #1e293b'}}>
               <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
               <div style={{ fontSize: 11, color: '#64748b' }}>{label}</div>
             </div>
@@ -193,9 +188,9 @@ export default function BenchmarkSuiteView() {
   const totalRuns = allScores.length;
 
   const TABS = [
-    { id: 'matrix',  label: '📊 Coverage Matrix' },
-    { id: 'model',   label: '🧠 Per-Model Detail' },
-    { id: 'task',    label: '🔬 Per-Task Analysis' },
+    { id: 'matrix',  label: 'Coverage Matrix', icon: BarChart3 },
+    { id: 'model',   label: 'Per-Model Detail', icon: Brain },
+    { id: 'task',    label: 'Per-Task Analysis', icon: FlaskConical },
   ];
 
   const activeModel = selectedModel ? MODELS.find(m => m.id === selectedModel) : null;
@@ -204,8 +199,8 @@ export default function BenchmarkSuiteView() {
     <div style={{ padding: '28px 32px', fontFamily: "'Inter', sans-serif", color: '#f1f5f9', height: '100%', overflowY: 'auto' }}>
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, background: 'linear-gradient(135deg,#6366f1,#ec4899,#f59e0b)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          📐 Real MI Benchmark Suite
+        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, background: 'linear-gradient(135deg,#6366f1,#ec4899,#f59e0b)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Ruler size={24} style={{ flexShrink: 0, color: '#6366f1' }} /> Real MI Benchmark Suite
         </h1>
         <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 14 }}>
           8 canonical tasks · 5 model families · comparison against TransformerLens, SAELens &amp; published papers
@@ -229,9 +224,8 @@ export default function BenchmarkSuiteView() {
           style={{
             padding: '10px 24px', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: running ? 'not-allowed' : 'pointer',
             background: running ? 'rgba(99,102,241,0.3)' : 'linear-gradient(135deg,#4f46e5,#7c3aed)',
-            border: 'none', color: '#fff', opacity: running ? 0.7 : 1, transition: 'all 0.2s',
-          }}
-        >{running ? `Running… ${progress}%` : '▶ Run Full Suite'}</button>
+            border: 'none', color: '#fff', opacity: running ? 0.7 : 1, transition: 'all 0.2s'}}
+        >{running ? `Running… ${progress}%` : <><Play size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Run Full Suite</>}</button>
         {running && (
           <div style={{ flex: 1, maxWidth: 320, height: 6, borderRadius: 3, background: '#1e293b' }}>
             <div style={{ width: `${progress}%`, height: '100%', borderRadius: 3, background: 'linear-gradient(90deg,#6366f1,#ec4899)', transition: 'width 0.1s' }} />
@@ -247,8 +241,7 @@ export default function BenchmarkSuiteView() {
             padding: '7px 18px', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all 0.2s',
             background: tab === t.id ? 'linear-gradient(135deg,#4f46e5,#7c3aed)' : 'rgba(30,41,59,0.7)',
             border: `1px solid ${tab === t.id ? '#6366f1' : '#1e293b'}`,
-            color: tab === t.id ? '#fff' : '#94a3b8',
-          }}>{t.label}</button>
+            color: tab === t.id ? '#fff' : '#94a3b8'}}>{typeof t.icon === 'function' ? <t.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{t.label}</button>
         ))}
       </div>
 
@@ -262,7 +255,7 @@ export default function BenchmarkSuiteView() {
             <thead>
               <tr>
                 <th style={{ textAlign: 'left', padding: '8px 12px', color: '#64748b', fontWeight: 600, borderBottom: '1px solid #1e293b', whiteSpace: 'nowrap' }}>
-                  Model ↓ / Task →
+                  Model <ArrowDown size={10} style={{ verticalAlign: 'middle' }} /> / Task <ArrowRight size={10} style={{ verticalAlign: 'middle' }} />
                 </th>
                 {TASKS.map(t => (
                   <th key={t.id} style={{ textAlign: 'center', padding: '8px 6px', color: '#94a3b8', fontWeight: 600, borderBottom: '1px solid #1e293b', whiteSpace: 'nowrap', fontSize: 11 }}>
@@ -329,8 +322,7 @@ export default function BenchmarkSuiteView() {
                   flex: '1 1 260px', padding: '18px 22px', borderRadius: 14, cursor: 'pointer',
                   background: 'rgba(15,23,42,0.8)', border: `1px solid ${selectedModel === model.id ? model.color : '#1e293b'}`,
                   boxShadow: selectedModel === model.id ? `0 0 20px ${model.color}33` : 'none',
-                  transition: 'all 0.25s',
-                }}
+                  transition: 'all 0.25s'}}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: model.color }} />
@@ -344,7 +336,7 @@ export default function BenchmarkSuiteView() {
                     const r = RESULTS[model.id][t.id];
                     if (!r) return <span key={t.id} style={{ fontSize: 10, color: '#334155', padding: '2px 6px', borderRadius: 4, background: '#1e293b' }}>{t.name} —</span>;
                     const col = r.fidelity >= 95 ? '#22c55e' : r.fidelity >= 88 ? '#f59e0b' : '#ef4444';
-                    return <span key={t.id} style={{ fontSize: 10, color: col, padding: '2px 6px', borderRadius: 4, background: `${col}15`, border: `1px solid ${col}33` }}>{t.name} ✓</span>;
+                    return <span key={t.id} style={{ fontSize: 10, color: col, padding: '2px 6px', borderRadius: 4, background: `${col}15`, border: `1px solid ${col}33` }}>{t.name} <Check size={10} style={{ verticalAlign: 'middle' }} /></span>;
                   })}
                 </div>
               </div>
@@ -358,8 +350,7 @@ export default function BenchmarkSuiteView() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {TASKS.map(task => (
             <div key={task.id} style={{
-              background: 'rgba(15,23,42,0.8)', border: '1px solid #1e293b', borderRadius: 14, padding: '18px 24px',
-            }}>
+              background: 'rgba(15,23,42,0.8)', border: '1px solid #1e293b', borderRadius: 14, padding: '18px 24px'}}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 15, color: '#f1f5f9' }}>{task.full}</div>
@@ -387,8 +378,7 @@ export default function BenchmarkSuiteView() {
                       style={{
                         padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
                         background: 'rgba(30,41,59,0.7)', border: `1px solid ${model.color}44`,
-                        minWidth: 120, transition: 'all 0.2s',
-                      }}
+                        minWidth: 120, transition: 'all 0.2s'}}
                     >
                       <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4 }}>{model.name}</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: col }}>{r.fidelity.toFixed(1)}%</div>
@@ -411,3 +401,4 @@ export default function BenchmarkSuiteView() {
     </div>
   );
 }
+

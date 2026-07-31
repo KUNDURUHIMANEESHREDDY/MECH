@@ -19,6 +19,7 @@ export interface WorkspaceState {
 export interface AppState {
   darkMode: boolean;
   commandPaletteOpen: boolean;
+  activePage: string;
   workspace: WorkspaceState;
   selection: SelectionState;
   visiblePanels: Record<string, boolean>;
@@ -28,6 +29,7 @@ export interface AppState {
 const DEFAULT_STATE: AppState = {
   darkMode: true,
   commandPaletteOpen: false,
+  activePage: 'explorer',
   workspace: {
     workspaceId: 'default_workspace',
     activeSessionId: null,
@@ -59,8 +61,9 @@ const listeners = new Set<() => void>();
 
 export const appStore = {
   getState: () => globalState,
-  setState: (fn: (prev: AppState) => Partial<AppState>) => {
-    globalState = { ...globalState, ...fn(globalState) };
+  setState: (fn: ((prev: AppState) => Partial<AppState>) | Partial<AppState>) => {
+    const patch = typeof fn === 'function' ? fn(globalState) : fn;
+    globalState = { ...globalState, ...patch };
     listeners.forEach(l => l());
   },
   subscribe: (listener: () => void) => {

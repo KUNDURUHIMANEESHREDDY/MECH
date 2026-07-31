@@ -1,4 +1,5 @@
 import React from 'react';
+import { FileText } from 'lucide-react';
 
 export default function PublicationDashboardPanel() {
   const artifacts = [
@@ -11,7 +12,7 @@ export default function PublicationDashboardPanel() {
   return (
     <div className="panel publication-dashboard-panel" data-testid="publication-dashboard-panel">
       <div className="panel-header">
-        <h3>📄 Publication Dashboard</h3>
+        <h3><FileText size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Publication Dashboard</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

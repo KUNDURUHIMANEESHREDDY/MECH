@@ -1,4 +1,5 @@
 import React from 'react';
+import { Cpu, Gauge, MemoryStick, Hash } from 'lucide-react';
 
 interface Props {
   modelName: string;
@@ -8,19 +9,21 @@ interface Props {
   darkMode: boolean;
 }
 
-export function StatusBar({ modelName, gpuUtil, memoryUtil, tokenCount, darkMode }: Props) {
-  const bg = darkMode ? '#111118' : '#e0e0e0';
-  const fg = darkMode ? '#ccc' : '#333';
-
+export function StatusBar({ modelName, gpuUtil, memoryUtil, tokenCount }: Props) {
   return (
-    <div style={{
-      display: 'flex', gap: 20, padding: '6px 14px', background: bg, color: fg,
-      fontSize: 11, fontFamily: 'monospace', alignItems: 'center', borderTop: darkMode ? '1px solid #2a2a3a' : '1px solid #ccc',
-    }}>
-      <span style={{ fontWeight: 600 }}>Model: {modelName}</span>
-      <span>GPU: {(gpuUtil * 100).toFixed(0)}%</span>
-      <span>Memory: {(memoryUtil * 100).toFixed(0)}%</span>
-      <span>Tokens: {tokenCount}</span>
+    <div className="status-bar">
+      <span className="status-item" style={{ fontWeight: 600 }}>
+        <span className="status-icon"><Cpu size={12} /></span> Model: {modelName}
+      </span>
+      <span className="status-item">
+        <span className="status-icon"><Gauge size={12} /></span> GPU: {(gpuUtil * 100).toFixed(0)}%
+      </span>
+      <span className="status-item">
+        <span className="status-icon"><MemoryStick size={12} /></span> Memory: {(memoryUtil * 100).toFixed(0)}%
+      </span>
+      <span className="status-item">
+        <span className="status-icon"><Hash size={12} /></span> Tokens: {tokenCount}
+      </span>
     </div>
   );
 }

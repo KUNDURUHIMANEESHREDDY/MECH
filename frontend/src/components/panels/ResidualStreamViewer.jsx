@@ -1,4 +1,5 @@
 import React from 'react';
+import { Zap } from 'lucide-react';
 import { selectionManager } from '../../utils/selectionManager';
 
 export default function ResidualStreamViewer() {
@@ -22,7 +23,7 @@ export default function ResidualStreamViewer() {
             onClick={() => selectionManager.setLayer(l.layer)}
             style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}
           >
-            {l.hasPatch && <span className="patch-marker" title="Patch applied">⚡</span>}
+            {l.hasPatch && <span className="patch-marker" title="Patch applied"><Zap size={10} /></span>}
             <div
               className="bar-fill"
               style={{

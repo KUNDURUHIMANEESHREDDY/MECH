@@ -1,10 +1,11 @@
 import React from 'react';
+import { Mic } from 'lucide-react';
 
 export default function ConferenceModePanel() {
   return (
     <div className="panel conference-mode-panel" data-testid="conference-mode-panel">
       <div className="panel-header">
-        <h3>🎤 Conference Mode Presentation Generator</h3>
+        <h3><Mic size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Conference Mode Presentation Generator</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ padding: '16px', background: '#020617', borderRadius: '8px', border: '1px solid #1e293b' }}>

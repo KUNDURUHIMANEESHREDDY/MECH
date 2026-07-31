@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Orbit } from 'lucide-react';
 import { knowledgeExplorerEngine } from '../../services/knowledgeExplorerEngine.js';
 
 export default function KnowledgeUniversePanel() {
@@ -8,7 +9,7 @@ export default function KnowledgeUniversePanel() {
   return (
     <div className="panel knowledge-universe-panel" data-testid="knowledge-universe-panel">
       <div className="panel-header">
-        <h3>🌌 Knowledge Universe</h3>
+        <h3><Orbit size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Knowledge Universe</h3>
         <div style={{ display: 'flex', gap: '4px' }}>
           <button className="btn" style={{ fontSize: '10px' }} onClick={() => setZoom((z) => Math.max(0.5, z - 0.2))}>Zoom -</button>
           <span style={{ fontSize: '11px', alignSelf: 'center', color: '#94a3b8' }}>{(zoom * 100).toFixed(0)}%</span>

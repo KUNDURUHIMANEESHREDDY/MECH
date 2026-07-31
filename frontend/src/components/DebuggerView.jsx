@@ -75,7 +75,10 @@ export default function DebuggerView({ api, onNavigate }) {
             style={{ marginTop: 8 }}
             onClick={() => onNavigate('gpt2')}
           >
-            Open GPT-2 Live View →
+            Open GPT-2 Live View
+            <svg width="12" height="12" viewBox="0 0 12 12" style={{ marginLeft: 4, verticalAlign: 'middle' }}>
+              <path d="M1 6 H9 M6 2 L10 6 L6 10" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         )}
       </div>
@@ -138,3 +141,4 @@ export default function DebuggerView({ api, onNavigate }) {
     </div>
   );
 }
+

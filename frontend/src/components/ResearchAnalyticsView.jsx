@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ArrowRight, BarChart3, Lightbulb, Star, TriangleAlert, Trophy, Zap } from 'lucide-react';
 
 /**
  * ResearchAnalyticsView - Multi-Campaign Meta-Learning & Analytics Dashboard
@@ -35,7 +36,7 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff' }}>📊 Multi-Campaign Meta-Learning Analytics</h1>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff', display: 'flex', alignItems: 'center', gap: 8 }}><BarChart3 size={20} /> Multi-Campaign Meta-Learning Analytics</h1>
           <p style={{ margin: 0, color: '#888', fontSize: 13 }}>
             Meta-policy learning extracted across 150 historical research campaigns
           </p>
@@ -74,7 +75,7 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
           
           {/* Algorithm Leaderboard */}
           <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#d0c0ff', margin: '0 0 14px 0' }}>🏆 Algorithm Performance Leaderboard</h3>
+            <h3 style={{ fontSize: 15, color: '#d0c0ff', margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Trophy size={15} /> Algorithm Performance Leaderboard</h3>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
               <thead>
                 <tr style={{ background: '#151528', color: '#888', borderBottom: '1px solid #2a2a4a' }}>
@@ -103,7 +104,7 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
 
           {/* Best Experiment Sequences */}
           <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#5cd4c4', margin: '0 0 14px 0' }}>⭐ Meta-Learned Optimal Experiment Sequences</h3>
+            <h3 style={{ fontSize: 15, color: '#5cd4c4', margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Star size={15} /> Meta-Learned Optimal Experiment Sequences</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {MOCK_ANALYTICS.sequences.map(seq => (
                 <div key={seq.rank} style={{ background: '#151528', border: '1px solid #2a2a4a', borderRadius: 8, padding: 14 }}>
@@ -117,7 +118,7 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
                         <span style={{ background: '#1a1a3a', border: '1px solid #5cd4c4', color: '#5cd4c4', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
                           {step}
                         </span>
-                        {sIdx < seq.seq.length - 1 && <span style={{ color: '#888' }}>➔</span>}
+                        {sIdx < seq.seq.length - 1 && <span style={{ color: '#888', display: 'inline-flex' }}><ArrowRight size={12} /></span>}
                       </React.Fragment>
                     ))}
                   </div>
@@ -133,7 +134,7 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
           
           {/* Failure Anti-Patterns Card */}
           <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#ff6b6b', margin: '0 0 12px 0' }}>⚠️ Learned Failure Anti-Patterns</h3>
+            <h3 style={{ fontSize: 15, color: '#ff6b6b', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} /> Learned Failure Anti-Patterns</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {MOCK_ANALYTICS.failures.map(f => (
                 <div key={f.id} style={{ background: '#151528', borderLeft: '3px solid #ff6b6b', borderRadius: '0 8px 8px 0', padding: 12 }}>
@@ -142,8 +143,8 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
                     <span style={{ fontSize: 11, color: '#ff6b6b', fontWeight: 700 }}>{f.count} Failures</span>
                   </div>
                   <div style={{ fontSize: 12, color: '#bbb', marginBottom: 6 }}>Root cause: {f.cause}</div>
-                  <div style={{ fontSize: 11, color: '#5cd4c4', background: '#1a1a3a', padding: 6, borderRadius: 4 }}>
-                    💡 Remedy: {f.remedy}
+                  <div style={{ fontSize: 11, color: '#5cd4c4', background: '#1a1a3a', padding: 6, borderRadius: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Lightbulb size={12} style={{ flexShrink: 0 }} /> Remedy: {f.remedy}
                   </div>
                 </div>
               ))}
@@ -152,7 +153,7 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
 
           {/* Compute Efficiency Dashboard */}
           <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#feca57', margin: '0 0 12px 0' }}>⚡ Compute Efficiency Meter</h3>
+            <h3 style={{ fontSize: 15, color: '#feca57', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Zap size={15} /> Compute Efficiency Meter</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ background: '#151528', padding: 12, borderRadius: 8, border: '1px solid #2a2a4a', display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 12, color: '#888' }}>Confidence Gained per $1 USD</span>
@@ -175,3 +176,4 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
     </div>
   );
 }
+

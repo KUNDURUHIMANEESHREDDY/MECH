@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Check } from 'lucide-react';
 
 export default function ModelsView({ api, onNavigate }) {
   const [selectedModel, setSelectedModel] = useState('gpt2');
@@ -26,7 +27,6 @@ export default function ModelsView({ api, onNavigate }) {
       const r = await api.gpt2Load();
       setModelInfo(r);
       if (r.status === 'loaded' && onNavigate) {
-        // brief delay then navigate to the GPT-2 live view
         setTimeout(() => onNavigate('gpt2'), 600);
       }
     } catch (e) {
@@ -85,7 +85,7 @@ export default function ModelsView({ api, onNavigate }) {
               {loading && selectedModel === m.id
                 ? 'Loading…'
                 : selectedModel === m.id && modelInfo?.status === 'loaded'
-                  ? 'Loaded ✓'
+                  ? <>Loaded <Check size={12} style={{ verticalAlign: 'middle' }} /></>
                   : 'Load Model'}
             </button>
           </div>
@@ -94,3 +94,4 @@ export default function ModelsView({ api, onNavigate }) {
     </div>
   );
 }
+

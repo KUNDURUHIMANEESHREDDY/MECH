@@ -1,18 +1,9 @@
 import React, { useState } from 'react';
-
-/**
- * KnowledgeGraphView - Scientific Knowledge Graph Exploration Environment
- *
- * Provides 4 exploratory perspectives across connected scientific entities:
- * 1. Mechanism View (Mechanism ➔ Evidence ➔ Experiments ➔ Replications)
- * 2. Paper View (Paper ➔ Claims ➔ Circuits ➔ Evidence)
- * 3. Feature View (Feature ➔ Neuron ➔ Circuit ➔ Claim)
- * 4. Campaign View (Campaign ➔ Experiments ➔ Evidence ➔ Publication)
- */
+import { ArrowRight } from 'lucide-react';
 
 const PERSPECTIVES = {
   mechanism: {
-    title: '🏛️ Mechanism View',
+    title: 'Mechanism View',
     subtitle: 'Trace mechanism claims to supporting evidence, experiment runs, and replication counts',
     flow: ['Mechanism Claim', 'Evidence Items', 'Experiment Runs', 'Replication Records'],
     nodes: [
@@ -24,7 +15,7 @@ const PERSPECTIVES = {
     ]
   },
   paper: {
-    title: '📄 Paper View',
+    title: 'Paper View',
     subtitle: 'Trace academic paper citations down to claims, minimal circuits, and evidence items',
     flow: ['Paper Citation', 'Derived Claims', 'Minimal Subgraphs', 'Supporting Evidence'],
     nodes: [
@@ -35,7 +26,7 @@ const PERSPECTIVES = {
     ]
   },
   feature: {
-    title: '🧩 Feature & Neuron View',
+    title: 'Feature & Neuron View',
     subtitle: 'Trace SAE sparse features down to individual attention heads, circuits, and high-level claims',
     flow: ['SAE Feature', 'Attention Head / Neuron', 'Circuit Subgraph', 'Mechanism Claim'],
     nodes: [
@@ -46,7 +37,7 @@ const PERSPECTIVES = {
     ]
   },
   campaign: {
-    title: '🧪 Campaign View',
+    title: 'Campaign View',
     subtitle: 'Trace research campaigns to executed experiment matrices, evidence streams, and publications',
     flow: ['Research Campaign', 'Experiment Matrix', 'Evidence Stream', 'Published Manuscript'],
     nodes: [
@@ -66,140 +57,98 @@ export default function KnowledgeGraphView({ api, onNavigate }) {
   const currentP = PERSPECTIVES[activePerspective] || PERSPECTIVES.mechanism;
 
   return (
-    <div style={{ padding: 28, background: '#0b0b1a', color: '#e0e0ff', height: '100%', overflowY: 'auto', fontFamily: "'Inter', sans-serif" }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+    <div className="explorer-page">
+      <div className="kg-header">
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff' }}>🕸️ Scientific Knowledge Graph</h1>
-          <p style={{ margin: 0, color: '#888', fontSize: 13 }}>
+          <h1>Scientific Knowledge Graph</h1>
+          <p className="hint">
             Unified provenance memory connecting Papers, Claims, Experiments, Circuits, Neurons, and Features
           </p>
         </div>
-        <div style={{ background: '#1a1a2e', padding: '6px 14px', borderRadius: 8, border: '1px solid #3a3a5a', fontSize: 12 }}>
-          <span style={{ color: '#888' }}>Graph Schema: </span>
+        <div className="kg-schema-badge">
+          <span style={{ color: 'var(--text-dim)' }}>Graph Schema: </span>
           <span style={{ color: '#5cd4c4', fontWeight: 600 }}>13 Node Types, 11 Edge Types</span>
         </div>
       </div>
 
-      {/* Perspective Switcher Tabs */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-        {[
-          { key: 'mechanism', label: '🏛️ Mechanism View' },
-          { key: 'paper', label: '📄 Paper View' },
-          { key: 'feature', label: '🧩 Feature & Neuron View' },
-          { key: 'campaign', label: '🧪 Campaign View' },
-        ].map(p => (
+      <div className="kg-perspective-tabs">
+        {Object.entries(PERSPECTIVES).map(([key, p]) => (
           <button
-            key={p.key}
-            onClick={() => setActivePerspective(p.key)}
-            style={{
-              padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-              background: activePerspective === p.key ? '#2a2a5a' : '#151528',
-              color: activePerspective === p.key ? '#5cd4c4' : '#888',
-              transition: 'all 0.2s'
-            }}
+            key={key}
+            onClick={() => setActivePerspective(key)}
+            className={'perspective-tab' + (activePerspective === key ? ' active' : '')}
           >
-            {p.label}
+            {p.title}
           </button>
         ))}
       </div>
 
-      {/* Perspective Info Header */}
-      <div style={{ background: '#12122a', border: '1px solid #2a2a4a', borderRadius: 12, padding: 20, marginBottom: 20 }}>
-        <h2 style={{ fontSize: 18, color: '#fff', margin: '0 0 4px 0' }}>{currentP.title}</h2>
-        <div style={{ fontSize: 13, color: '#bbb', marginBottom: 16 }}>{currentP.subtitle}</div>
+      <div className="kg-perspective-card">
+        <h2>{currentP.title}</h2>
+        <div className="hint">{currentP.subtitle}</div>
 
-        {/* Provenance Flow Diagram */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#151528', padding: 12, borderRadius: 8, border: '1px solid #2a2a4a', flexWrap: 'wrap' }}>
+        <div className="flow-diagram">
           {currentP.flow.map((step, idx) => (
             <React.Fragment key={idx}>
-              <span style={{ background: '#1a1a3a', border: '1px solid #5cd4c4', color: '#5cd4c4', padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>
-                {step}
-              </span>
-              {idx < currentP.flow.length - 1 && <span style={{ color: '#888', fontWeight: 800 }}>➔</span>}
+              <span className="flow-step">{step}</span>
+              {idx < currentP.flow.length - 1 && <span className="flow-arrow"><ArrowRight size={13} /></span>}
             </React.Fragment>
           ))}
         </div>
       </div>
 
-      {/* Graph Traversal Nodes Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 20 }}>
-        
-        {/* Left Column: Connected Graph Nodes */}
-        <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-          <h3 style={{ fontSize: 14, color: '#d0c0ff', margin: '0 0 14px 0' }}>🔗 Connected Lineage Nodes</h3>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {currentP.nodes.map((node, idx) => (
+      <div className="kg-grid">
+        <div className="kg-column">
+          <h3>Connected Lineage Nodes</h3>
+          <div className="kg-nodes-list">
+            {currentP.nodes.map((node) => (
               <div
                 key={node.id}
                 onClick={() => setSelectedNode(node)}
-                style={{
-                  background: '#151528',
-                  border: `1px solid ${selectedNode?.id === node.id ? '#5cd4c4' : '#2a2a4a'}`,
-                  borderRadius: 8,
-                  padding: 14,
-                  cursor: 'pointer',
-                  borderLeft: `4px solid ${node.color}`,
-                  transition: 'all 0.2s'
-                }}
+                className={'kg-node' + (selectedNode?.id === node.id ? ' selected' : '')}
+                style={{ borderLeftColor: node.color }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{node.label}</span>
-                  <span style={{ background: '#1a1a3a', color: node.color, padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
-                    {node.type}
-                  </span>
+                <div className="kg-node-header">
+                  <span className="kg-node-label">{node.label}</span>
+                  <span className="kg-node-type" style={{ color: node.color }}>{node.type}</span>
                 </div>
-                <div style={{ fontSize: 12, color: '#888' }}>{node.detail}</div>
+                <div className="kg-node-detail">{node.detail}</div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Right Column: Node Inspector & Query Console */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          
-          {/* Node Inspector */}
-          <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 14, color: '#5cd4c4', margin: '0 0 12px 0' }}>🔍 Node Lineage Inspector</h3>
+        <div className="kg-side-column">
+          <div className="kg-inspector-card">
+            <h3>Node Lineage Inspector</h3>
             {selectedNode ? (
-              <div style={{ background: '#151528', padding: 14, borderRadius: 8, border: '1px solid #2a2a4a' }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>{selectedNode.label}</div>
-                <div style={{ fontSize: 12, color: selectedNode.color, fontWeight: 700, marginBottom: 8 }}>{selectedNode.type}</div>
-                <div style={{ fontSize: 12, color: '#bbb' }}>{selectedNode.detail}</div>
+              <div className="kg-inspector-node">
+                <div className="kg-inspector-label">{selectedNode.label}</div>
+                <div className="kg-inspector-type" style={{ color: selectedNode.color }}>{selectedNode.type}</div>
+                <div className="kg-inspector-detail">{selectedNode.detail}</div>
               </div>
             ) : (
-              <div style={{ fontSize: 12, color: '#888', fontStyle: 'italic' }}>
+              <div className="hint" style={{ fontStyle: 'italic' }}>
                 Click any lineage node on the left to inspect its multi-hop connections and properties.
               </div>
             )}
           </div>
 
-          {/* Graph Query Console */}
-          <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 14, color: '#58a6ff', margin: '0 0 10px 0' }}>🔎 First-Class Graph Queries</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="kg-inspector-card">
+            <h3>First-Class Graph Queries</h3>
+            <div className="kg-queries">
               {[
                 'Show every experiment supporting IOI Name Mover',
                 'Which papers discuss GPT-2 L9H9?',
                 'Which SAE features appear in both GPT-2 and Gemma?'
-              ].map((q, qIdx) => (
-                <button
-                  key={qIdx}
-                  onClick={() => setSearchQuery(q)}
-                  style={{
-                    padding: '8px 12px', background: '#151528', border: '1px solid #2a2a4a', borderRadius: 6,
-                    color: '#d0c0ff', cursor: 'pointer', fontSize: 12, textAlign: 'left', fontWeight: 500
-                  }}
-                >
-                  ⚡ "{q}"
+              ].map((q, i) => (
+                <button key={i} onClick={() => setSearchQuery(q)} className="kg-query-btn">
+                  "{q}"
                 </button>
               ))}
             </div>
           </div>
-
         </div>
-
       </div>
     </div>
   );

@@ -49,8 +49,6 @@ class ResearchManifestEngine:
     SCHEMA_VERSION = "1.1.0"
 
     def _compute_hash(self, data: Any) -> str:
-
-    def _compute_hash(self, data: Any) -> str:
         s = json.dumps(data, sort_keys=True)
         return hashlib.sha256(s.encode("utf-8")).hexdigest()
 

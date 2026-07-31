@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from .feature_dictionary import FeatureDictionary
-from ...science.models.adapter_base import ModelAdapter
+from science.models.adapter_base import ModelAdapter
 from ..discovery.feature_auto_interpreter import FeatureAutoInterpreter
 
 

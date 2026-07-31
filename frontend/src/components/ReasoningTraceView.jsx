@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { ArrowDown, ArrowRight, BarChart3, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleX, Clock3, Dna, Eye, FileText, FlaskConical, GitBranch, Globe, Lightbulb, ListChecks, Loader2, Network, Ruler, Scale, Search, Target, Upload, X, Zap } from 'lucide-react';
 
 /**
  * ReasoningTraceView - Generic Reasoning Trace Viewer (v2)
  *
  * Features:
- *   1. Clickable nodes → navigate to Neural Explorer, Circuit Explorer, etc.
- *   2. Time travel: step through reasoning with ◀ Previous / Next ▶
- *   3. Live execution status indicators (✓ / Running / Waiting / Pending)
+ *   1. Clickable nodes -> navigate to Neural Explorer, Circuit Explorer, etc.
+ *   2. Time travel: step through reasoning with Prev / Next
+ *   3. Live execution status indicators (check / Running / Waiting / Pending)
  *   4. Collapsible multi-level reasoning tree
  *   5. Full-text trace search
  *   6. Export (Markdown / JSON / LaTeX)
@@ -23,6 +24,16 @@ function registerTraceRenderer(type, label, icon, renderer) {
 
 function getRegisteredTypes() {
   return Object.entries(_traceRendererRegistry).map(([id, r]) => ({ id, ...r }));
+}
+
+// lucide-react exports icons as forwardRef objects (not plain functions), so
+// `typeof icon === 'function'` is false for them. Render any component-like
+// value (function or forwardRef) as JSX; pass through strings/other children.
+function renderIcon(Icon, size = 13, style) {
+  if (typeof Icon === 'function' || (Icon && Icon.$$typeof)) {
+    return <Icon size={size} style={style} />;
+  }
+  return Icon;
 }
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -86,16 +97,16 @@ function ConfBar({ label, value, color = '#5cd4c4' }) {
 
 function StatusDot({ status }) {
   const map = {
-    done: { color: '#2ea043', icon: '✓', label: 'Done' },
-    running: { color: '#feca57', icon: '◉', label: 'Running...' },
-    waiting: { color: '#888', icon: '◌', label: 'Waiting...' },
-    pending: { color: '#555', icon: '○', label: 'Pending' },
-    failed: { color: '#f85149', icon: '✗', label: 'Failed' },
+    done: { color: '#2ea043', icon: Check, label: 'Done' },
+    running: { color: '#feca57', icon: Loader2, label: 'Running...' },
+    waiting: { color: '#888', icon: Clock3, label: 'Waiting...' },
+    pending: { color: '#555', icon: Circle, label: 'Pending' },
+    failed: { color: '#f85149', icon: X, label: 'Failed' },
   };
   const s = map[status] || map.pending;
   return (
     <span style={{ fontSize: 12, color: s.color, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-      <span style={{ fontSize: status === 'running' ? 14 : 12, animation: status === 'running' ? 'pulse 1.5s infinite' : 'none' }}>{s.icon}</span>
+      <span style={{ fontSize: status === 'running' ? 14 : 12, animation: status === 'running' ? 'pulse 1.5s infinite' : 'none' }}>{renderIcon(s.icon, status === 'running' ? 14 : 12)}</span>
       {s.label}
       <style>{`@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }`}</style>
     </span>
@@ -104,14 +115,14 @@ function StatusDot({ status }) {
 
 // ─── Clickable Node ─────────────────────────────────────────────────────────
 
-function ClickableNode({ label, target, icon, onNavigate }) {
+function ClickableNode({ label, target, icon: Icon, onNavigate }) {
   return (
     <span
       onClick={() => onNavigate && onNavigate(target)}
       style={{ ...S.clickable, color: '#5cd4c4', fontSize: 12 }}
       title={`Open ${label}`}
     >
-      {icon} {label} →
+      {renderIcon(Icon, 13)} {label} <ArrowRight size={12} style={{ verticalAlign: 'middle' }} />
     </span>
   );
 }
@@ -126,7 +137,7 @@ function Collapsible({ title, level = 0, defaultOpen = true, children }) {
         onClick={() => setOpen(p => !p)}
         style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}
       >
-        <span style={{ color: '#555', fontSize: 11, fontFamily: 'monospace' }}>{open ? '▾' : '▸'}</span>
+        <span style={{ color: '#555', display: 'inline-flex' }}>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
         <span style={{ fontSize: 12 + Math.max(0, 2 - level), color: level === 0 ? '#d0c0ff' : '#aaa', fontWeight: level === 0 ? 600 : 400 }}>{title}</span>
       </div>
       {open && <div style={{ paddingLeft: 8, borderLeft: '1px solid #2a2a4a' }}>{children}</div>}
@@ -138,12 +149,12 @@ function Collapsible({ title, level = 0, defaultOpen = true, children }) {
 
 function AgentFlow({ experiments, onNavigate, currentStep }) {
   const agents = [
-    { role: 'Observer', icon: '👁️', color: '#58a6ff', link: null },
-    { role: 'Hypothesis Agent', icon: '💡', color: '#d0c0ff', link: null },
-    { role: 'Skeptic', icon: '🔴', color: '#ff6b6b', link: null },
-    { role: 'Experiment Planner', icon: '🧪', color: '#feca57', link: null },
-    { role: 'Statistician', icon: '📊', color: '#2ea043', link: 'neuralexplorer' },
-    { role: 'Reviewer', icon: '⚖️', color: '#5cd4c4', link: null },
+    { role: 'Observer', icon: Eye, color: '#58a6ff', link: null },
+    { role: 'Hypothesis Agent', icon: Lightbulb, color: '#d0c0ff', link: null },
+    { role: 'Skeptic', icon: CircleX, color: '#ff6b6b', link: null },
+    { role: 'Experiment Planner', icon: FlaskConical, color: '#feca57', link: null },
+    { role: 'Statistician', icon: BarChart3, color: '#2ea043', link: 'neuralexplorer' },
+    { role: 'Reviewer', icon: Scale, color: '#5cd4c4', link: null },
   ];
 
   const agentData = agents.map((a, idx) => {
@@ -176,17 +187,17 @@ function AgentFlow({ experiments, onNavigate, currentStep }) {
         <div key={agent.role}>
           <div style={{ background: '#151528', borderLeft: `3px solid ${agent.color}`, borderRadius: '0 8px 8px 0', padding: 12, marginBottom: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: agent.color }}>{agent.icon} {agent.role}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: agent.color, display: 'inline-flex', alignItems: 'center', gap: 6 }}>{renderIcon(agent.icon, 13)} {agent.role}</span>
               <StatusDot status={agent.status} />
             </div>
             <div style={{ fontSize: 12, color: '#bbb', lineHeight: 1.5 }}>{agent.description}</div>
             {agent.link && onNavigate && (
               <div style={{ marginTop: 6 }}>
-                <ClickableNode label="Open in Neural Explorer" target={agent.link} icon="🌌" onNavigate={onNavigate} />
+                <ClickableNode label="Open in Neural Explorer" target={agent.link} icon={Globe} onNavigate={onNavigate} />
               </div>
             )}
           </div>
-          {i < agentData.length - 1 && <div style={{ textAlign: 'center', color: '#3a3a5a', fontSize: 12, marginBottom: 4 }}>↓</div>}
+          {i < agentData.length - 1 && <div style={{ textAlign: 'center', color: '#3a3a5a', fontSize: 12, marginBottom: 4, display: 'inline-flex', width: '100%', justifyContent: 'center' }}><ArrowDown size={12} /></div>}
         </div>
       ))}
     </div>
@@ -199,10 +210,10 @@ function EvidenceTree({ evidence, onNavigate }) {
   if (!evidence || evidence.length === 0) return <div style={{ color: '#666', fontSize: 13 }}>No evidence.</div>;
 
   const typeConfig = {
-    skeptic_critique: { icon: '🔴', color: '#ff6b6b' },
-    counterexample: { icon: '🟡', color: '#feca57' },
-    peer_review: { icon: '⚖️', color: '#5cd4c4' },
-    measurement: { icon: '📊', color: '#2ea043' },
+    skeptic_critique: { icon: CircleX, color: '#ff6b6b' },
+    counterexample: { icon: Target, color: '#feca57' },
+    peer_review: { icon: Scale, color: '#5cd4c4' },
+    measurement: { icon: BarChart3, color: '#2ea043' },
   };
 
   return (
@@ -210,7 +221,7 @@ function EvidenceTree({ evidence, onNavigate }) {
       {evidence.map((ev, i) => {
         const tc = typeConfig[ev.type] || { icon: '•', color: '#888' };
         return (
-          <Collapsible key={i} title={`${tc.icon} ${ev.type.replace(/_/g, ' ')}`} level={1} defaultOpen={false}>
+          <Collapsible key={i} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{renderIcon(tc.icon, 12)} {ev.type.replace(/_/g, ' ')}</span>} level={1} defaultOpen={false}>
             {ev.critique && <div style={{ fontSize: 12, color: '#ccc', marginBottom: 4 }}><strong style={{ color: '#aaa' }}>Critique:</strong> {ev.critique}</div>}
             {ev.alternative && <div style={{ fontSize: 12, color: '#ccc', marginBottom: 4 }}><strong style={{ color: '#aaa' }}>Alt:</strong> {ev.alternative}</div>}
             {ev.prompt && (
@@ -225,12 +236,12 @@ function EvidenceTree({ evidence, onNavigate }) {
             {ev.rationale && <div style={{ fontSize: 12, fontStyle: 'italic', color: '#999', marginTop: 4 }}>{ev.rationale}</div>}
             {ev.type === 'counterexample' && onNavigate && (
               <div style={{ marginTop: 6 }}>
-                <ClickableNode label="Open Patch Viewer" target="debugger" icon="⚡" onNavigate={onNavigate} />
+                <ClickableNode label="Open Patch Viewer" target="debugger" icon={Zap} onNavigate={onNavigate} />
               </div>
             )}
             {ev.type === 'peer_review' && onNavigate && (
               <div style={{ marginTop: 6 }}>
-                <ClickableNode label="Open Circuit Explorer" target="circuitexplorer" icon="🔍" onNavigate={onNavigate} />
+                <ClickableNode label="Open Circuit Explorer" target="circuitexplorer" icon={Search} onNavigate={onNavigate} />
               </div>
             )}
           </Collapsible>
@@ -260,17 +271,16 @@ function CounterexampleViewer({ experiments, onNavigate }) {
         <div style={{
           padding: '8px 12px', borderRadius: 6, fontSize: 12,
           background: failed ? '#2a1a1a' : passed ? '#1a2a1a' : '#2a2a1a',
-          border: `1px solid ${failed ? '#f8514944' : passed ? '#2ea04344' : '#d2992244'}`,
-        }}>
-          <span style={{ fontWeight: 700, color: failed ? '#f85149' : passed ? '#2ea043' : '#d29922' }}>
-            {failed ? '✗ FALSIFIED' : passed ? '✓ SURVIVED' : '? REVISION NEEDED'}
+          border: `1px solid ${failed ? '#f8514944' : passed ? '#2ea04344' : '#d2992244'}`}}>
+          <span style={{ fontWeight: 700, color: failed ? '#f85149' : passed ? '#2ea043' : '#d29922', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {failed ? <><X size={12} /> FALSIFIED</> : passed ? <><Check size={12} /> SURVIVED</> : '? REVISION NEEDED'}
           </span>
         </div>
       )}
       {onNavigate && (
         <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
-          <ClickableNode label="Neural Explorer" target="neuralexplorer" icon="🌌" onNavigate={onNavigate} />
-          <ClickableNode label="Patch Viewer" target="debugger" icon="⚡" onNavigate={onNavigate} />
+          <ClickableNode label="Neural Explorer" target="neuralexplorer" icon={Globe} onNavigate={onNavigate} />
+          <ClickableNode label="Patch Viewer" target="debugger" icon={Zap} onNavigate={onNavigate} />
         </div>
       )}
     </div>
@@ -337,7 +347,7 @@ const MOCK_TRACES = {
     id: 'trace_002', type: 'discovery', observation_id: 'ACDC Circuit #7',
     timestamp: '2026-07-28 14:01:33', llm_model: 'llama3',
     hypotheses: [
-      { id: 'D1', text: 'IOI Name Mover circuit via L9H9 → L10H0', semantic_confidence: 0.88, experimental_confidence: 0.92, replication_score: 0.95, status: 'accepted' },
+      { id: 'D1', text: 'IOI Name Mover circuit via L9H9 -> L10H0', semantic_confidence: 0.88, experimental_confidence: 0.92, replication_score: 0.95, status: 'accepted' },
     ],
     selected_hypothesis_id: 'D1',
     experiments: [
@@ -373,14 +383,14 @@ const MOCK_TRACES = {
 
 // ─── Register Default Renderers ─────────────────────────────────────────────
 
-registerTraceRenderer('debate', 'Debate', '⚖️');
-registerTraceRenderer('discovery', 'Discovery', '🔍');
-registerTraceRenderer('transcoders', 'Transcoders', '🧬');
-registerTraceRenderer('universality', 'Universality', '🌐');
-registerTraceRenderer('runtime', 'Runtime', '⚡');
-registerTraceRenderer('planner', 'Planner', '📋');
-registerTraceRenderer('validation', 'Validation', '✅');
-registerTraceRenderer('paper', 'Paper Repro', '📄');
+registerTraceRenderer('debate', 'Debate', Scale);
+registerTraceRenderer('discovery', 'Discovery', Search);
+registerTraceRenderer('transcoders', 'Transcoders', Dna);
+registerTraceRenderer('universality', 'Universality', Globe);
+registerTraceRenderer('runtime', 'Runtime', Zap);
+registerTraceRenderer('planner', 'Planner', ListChecks);
+registerTraceRenderer('validation', 'Validation', CheckCircle2);
+registerTraceRenderer('paper', 'Paper Repro', FileText);
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
@@ -426,18 +436,18 @@ export default function ReasoningTraceView({ api, onNavigate }) {
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px 0', color: '#d0c0ff' }}>🔬 Scientific Reasoning</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px 0', color: '#d0c0ff', display: 'flex', alignItems: 'center', gap: 8 }}><FlaskConical size={18} /> Scientific Reasoning</h1>
           <p style={{ margin: 0, color: '#888', fontSize: 13 }}>Auditable Reasoning Traces</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Export */}
           <div style={{ position: 'relative' }}>
-            <button style={S.btnPrimary} onClick={() => setShowExport(p => !p)}>📤 Export</button>
+            <button style={S.btnPrimary} onClick={() => setShowExport(p => !p)}><Upload size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Export</button>
             {showExport && (
               <div style={{ position: 'absolute', top: '110%', right: 0, background: '#1a1a2e', border: '1px solid #3a3a5a', borderRadius: 8, padding: 8, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {['json', 'markdown', 'latex'].map(fmt => (
                   <button key={fmt} style={{ ...S.btn(false), textAlign: 'left' }} onClick={() => { exportTrace(trace, fmt); setShowExport(false); }}>
-                    {fmt === 'json' ? '{ } JSON' : fmt === 'markdown' ? '📝 Markdown' : '📐 LaTeX'}
+                    {fmt === 'json' ? '{ } JSON' : fmt === 'markdown' ? <><FileText size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Markdown</> : <><Ruler size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> LaTeX</>}
                   </button>
                 ))}
               </div>
@@ -453,7 +463,7 @@ export default function ReasoningTraceView({ api, onNavigate }) {
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {traceTypes.map(tt => (
           <button key={tt.id} onClick={() => { setActiveType(tt.id); setSelectedHypId(null); setCurrentStep(5); }} style={S.btn(activeType === tt.id)}>
-            {tt.icon} {tt.label}
+            {renderIcon(tt.icon, 13, { verticalAlign: 'middle', marginRight: 4 })} {tt.label}
           </button>
         ))}
       </div>
@@ -462,7 +472,7 @@ export default function ReasoningTraceView({ api, onNavigate }) {
       <div style={{ marginBottom: 16 }}>
         <input
           style={S.searchInput}
-          placeholder="🔍 Search traces: hypotheses, experiments, neurons, circuits..."
+          placeholder="Search traces: hypotheses, experiments, neurons, circuits..."
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
         />
@@ -470,19 +480,18 @@ export default function ReasoningTraceView({ api, onNavigate }) {
 
       {/* ── Time Travel Controls ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, padding: '8px 14px', background: '#12122a', borderRadius: 10, border: '1px solid #2a2a4a' }}>
-        <button style={S.btn(false)} onClick={() => setCurrentStep(Math.max(0, currentStep - 1))} disabled={currentStep <= 0}>◀ Prev</button>
+        <button style={S.btn(false)} onClick={() => setCurrentStep(Math.max(0, currentStep - 1))} disabled={currentStep <= 0}><ChevronLeft size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Prev</button>
         <div style={{ flex: 1, display: 'flex', gap: 4, alignItems: 'center' }}>
           {['Observer', 'Hypothesis', 'Skeptic', 'Planner', 'Statistician', 'Reviewer'].map((step, i) => (
             <div key={step} onClick={() => setCurrentStep(i)} style={{
               flex: 1, height: 6, borderRadius: 3, cursor: 'pointer',
-              background: i <= currentStep ? '#5cd4c4' : '#2a2a4a', transition: 'background 0.3s',
-            }} title={step} />
+              background: i <= currentStep ? '#5cd4c4' : '#2a2a4a', transition: 'background 0.3s'}} title={step} />
           ))}
         </div>
         <span style={{ fontSize: 12, color: '#888', minWidth: 80, textAlign: 'center' }}>
           Step {currentStep + 1}/6
         </span>
-        <button style={S.btn(false)} onClick={() => setCurrentStep(Math.min(totalSteps, currentStep + 1))} disabled={currentStep >= totalSteps}>Next ▶</button>
+        <button style={S.btn(false)} onClick={() => setCurrentStep(Math.min(totalSteps, currentStep + 1))} disabled={currentStep >= totalSteps}>Next <ChevronRight size={14} style={{ verticalAlign: 'middle', marginLeft: 4 }} /></button>
       </div>
 
       {/* ── 4-Column Layout ── */}
@@ -490,21 +499,21 @@ export default function ReasoningTraceView({ api, onNavigate }) {
 
         {/* Col 1: Observation */}
         <div style={S.panel}>
-          <div style={S.label}><span>👁️</span> Observation</div>
+          <div style={S.label}><span><Eye size={13} /></span> Observation</div>
           <div style={{ fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 6 }}>{trace.observation_id}</div>
           <div style={{ fontSize: 12, color: '#888' }}>{trace.timestamp}</div>
           <div style={{ fontSize: 12, color: '#555', marginTop: 10 }}>Type: <span style={{ color: '#d0c0ff' }}>{trace.type}</span></div>
           {onNavigate && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <ClickableNode label="Neural Explorer" target="neuralexplorer" icon="🌌" onNavigate={onNavigate} />
-              <ClickableNode label="Knowledge Graph" target="knowledgegraph" icon="🕸️" onNavigate={onNavigate} />
+              <ClickableNode label="Neural Explorer" target="neuralexplorer" icon={Globe} onNavigate={onNavigate} />
+              <ClickableNode label="Knowledge Graph" target="knowledgegraph" icon={Network} onNavigate={onNavigate} />
             </div>
           )}
         </div>
 
         {/* Col 2: Hypotheses */}
         <div style={S.panel}>
-          <div style={S.label}><span>💡</span> Hypotheses</div>
+          <div style={S.label}><span><Lightbulb size={13} /></span> Hypotheses</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {filteredHypotheses.map(h => {
               const isSel = h.id === (selectedHypId || trace.selected_hypothesis_id);
@@ -529,7 +538,7 @@ export default function ReasoningTraceView({ api, onNavigate }) {
 
         {/* Col 3: Agent Flow */}
         <div style={S.panel}>
-          <div style={S.label}><span>🧪</span> Agents & Experiments</div>
+          <div style={S.label}><span><FlaskConical size={13} /></span> Agents & Experiments</div>
           {trace.type === 'debate' ? (
             <AgentFlow experiments={filteredExperiments} onNavigate={onNavigate} currentStep={currentStep} />
           ) : (
@@ -541,7 +550,7 @@ export default function ReasoningTraceView({ api, onNavigate }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* Verdict */}
           <div style={S.panel}>
-            <div style={S.label}><span>⚖️</span> Verdict</div>
+            <div style={S.label}><span><Scale size={13} /></span> Verdict</div>
             {trace.experiments.find(e => e.type === 'peer_review') ? (() => {
               const rv = trace.experiments.find(e => e.type === 'peer_review');
               const vc = rv.verdict === 'accepted' ? '#2ea043' : rv.verdict === 'rejected' ? '#f85149' : '#d29922';
@@ -550,7 +559,7 @@ export default function ReasoningTraceView({ api, onNavigate }) {
                   <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, color: vc }}>{rv.verdict.toUpperCase()}</div>
                   <div style={{ fontSize: 12, color: '#bbb', lineHeight: 1.5 }}>{rv.rationale}</div>
                   {onNavigate && (
-                    <div style={{ marginTop: 8 }}><ClickableNode label="Circuit Explorer" target="circuitexplorer" icon="🔍" onNavigate={onNavigate} /></div>
+                    <div style={{ marginTop: 8 }}><ClickableNode label="Circuit Explorer" target="circuitexplorer" icon={Search} onNavigate={onNavigate} /></div>
                   )}
                 </div>
               );
@@ -564,7 +573,7 @@ export default function ReasoningTraceView({ api, onNavigate }) {
 
           {/* Confidence Matrix */}
           <div style={S.panel}>
-            <div style={S.label}><span>📊</span> Confidence Matrix</div>
+            <div style={S.label}><span><BarChart3 size={13} /></span> Confidence Matrix</div>
             {selectedHyp && (
               <>
                 <ConfBar label="Semantic" value={selectedHyp.semantic_confidence} color="#d0c0ff" />
@@ -579,7 +588,7 @@ export default function ReasoningTraceView({ api, onNavigate }) {
 
           {/* Counterexample */}
           <div style={S.panel}>
-            <div style={S.label}><span>🎯</span> Counterexamples</div>
+            <div style={S.label}><span><Target size={13} /></span> Counterexamples</div>
             <CounterexampleViewer experiments={trace.experiments} onNavigate={onNavigate} />
           </div>
         </div>
@@ -587,12 +596,12 @@ export default function ReasoningTraceView({ api, onNavigate }) {
 
       {/* ── Full Evidence Tree (collapsible, full width) ── */}
       <div style={{ ...S.panel, marginTop: 14 }}>
-        <Collapsible title="🌲 Full Evidence Tree" level={0} defaultOpen={false}>
+        <Collapsible title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><GitBranch size={13} /> Full Evidence Tree</span>} level={0} defaultOpen={false}>
           <Collapsible title={`Observation: ${trace.observation_id}`} level={1} defaultOpen={true}>
             {trace.hypotheses.map(h => (
               <Collapsible key={h.id} title={`Hypothesis: "${h.text}" [${h.status}]`} level={2} defaultOpen={false}>
                 {trace.experiments.map((e, i) => (
-                  <Collapsible key={i} title={`${e.type.replace(/_/g, ' ')} ${e.verdict ? `→ ${e.verdict.toUpperCase()}` : ''}`} level={3} defaultOpen={false}>
+                  <Collapsible key={i} title={`${e.type.replace(/_/g, ' ')} ${e.verdict ? `-> ${e.verdict.toUpperCase()}` : ''}`} level={3} defaultOpen={false}>
                     {e.critique && <div style={{ fontSize: 12, color: '#ccc' }}>{e.critique}</div>}
                     {e.prompt && <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#fff', background: '#1a1a2e', padding: 4, borderRadius: 4, marginTop: 4 }}>{e.prompt}</div>}
                     {e.rationale && <div style={{ fontSize: 12, fontStyle: 'italic', color: '#999', marginTop: 4 }}>{e.rationale}</div>}
@@ -606,3 +615,4 @@ export default function ReasoningTraceView({ api, onNavigate }) {
     </div>
   );
 }
+

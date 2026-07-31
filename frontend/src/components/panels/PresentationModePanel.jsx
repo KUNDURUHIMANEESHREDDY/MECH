@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ChartBar } from 'lucide-react';
 
 export default function PresentationModePanel() {
   const [slide, setSlide] = useState(1);
@@ -11,7 +12,7 @@ export default function PresentationModePanel() {
   return (
     <div className="panel presentation-mode-panel" data-testid="presentation-mode-panel">
       <div className="panel-header">
-        <h3>📊 Presentation Mode</h3>
+        <h3><ChartBar size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Presentation Mode</h3>
         <div style={{ display: 'flex', gap: '6px' }}>
           <button className="btn" style={{ fontSize: '10px' }} onClick={() => setSlide((s) => Math.max(1, s - 1))}>Previous</button>
           <span style={{ fontSize: '11px', color: '#94a3b8', alignSelf: 'center' }}>Slide {slide} / {slides.length}</span>

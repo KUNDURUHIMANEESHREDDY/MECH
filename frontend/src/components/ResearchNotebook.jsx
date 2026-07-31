@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Menu, Play } from "lucide-react";
 
 /**
  * ResearchNotebook
@@ -30,7 +31,7 @@ export default function ResearchNotebook() {
         {blocks.map(block => (
           <div key={block.id} className="group relative">
             <div className="absolute -left-12 top-4 opacity-0 group-hover:opacity-100 transition">
-              <button className="text-slate-300 hover:text-slate-600">☰</button>
+              <button className="text-slate-300 hover:text-slate-600"><Menu size={16} /></button>
             </div>
             
             {block.type === "markdown" && (
@@ -43,7 +44,7 @@ export default function ResearchNotebook() {
               <div className="border border-slate-200 rounded overflow-hidden">
                 <div className="bg-slate-50 px-4 py-2 text-xs text-slate-500 font-mono flex justify-between">
                   <span>Python (Interpretability SDK)</span>
-                  <button className="text-indigo-600 hover:text-indigo-800">▶ Run</button>
+                  <button className="text-indigo-600 hover:text-indigo-800"><Play size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Run</button>
                 </div>
                 <div className="p-4 bg-slate-900 text-emerald-400 font-mono text-sm whitespace-pre-wrap">
                   {block.content}
@@ -71,3 +72,4 @@ export default function ResearchNotebook() {
     </div>
   );
 }
+

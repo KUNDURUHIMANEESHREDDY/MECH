@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional
 
 from .ontology import NodeType, EdgeType
 from .graph_store import GraphStore, KGNode, KGEdge
-from ..interpretability.discovery.mechanism_claim_registry import RegisteredMechanismClaim
-from ..interpretability.discovery.research_campaign_manager import ResearchCampaign
+from interpretability.discovery.mechanism_claim_registry import RegisteredMechanismClaim
+from interpretability.discovery.research_campaign_manager import ResearchCampaign
 
 
 class GraphBuilder:

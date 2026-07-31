@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Brain } from 'lucide-react';
 
 export default function KnowledgeGraphViewerPanel() {
   const [filter, setFilter] = useState('All');
@@ -14,7 +15,7 @@ export default function KnowledgeGraphViewerPanel() {
   return (
     <div className="panel knowledge-graph-panel" data-testid="knowledge-graph-panel">
       <div className="panel-header">
-        <h3>🧠 Knowledge Graph Viewer</h3>
+        <h3><Brain size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Knowledge Graph Viewer</h3>
         <div style={{ display: 'flex', gap: '4px' }}>
           {['All', 'Neuron', 'Feature', 'Circuit', 'Discovery'].map((f) => (
             <button

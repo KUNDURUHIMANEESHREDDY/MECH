@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { ArrowRight, Check, Play } from 'lucide-react';
 
 const MOCK_HISTORICAL_TRENDS = {
   'ioi': [95, 96, 96],
@@ -13,8 +14,7 @@ function TierBadge({ tier }) {
   return (
     <span style={{
       background: TIER_COLORS[tier] || '#555', color: tier === 'Gold' ? '#111' : '#fff',
-      borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700,
-    }}>{tier}</span>
+      borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700}}>{tier}</span>
   );
 }
 
@@ -28,7 +28,7 @@ function TrendSparkline({ values }) {
       {values.map((v, i) => (
         <React.Fragment key={i}>
           <span style={{ fontSize: 11, color: i === values.length - 1 ? color : '#666' }}>{v}%</span>
-          {i < values.length - 1 && <span style={{ fontSize: 10, color: '#444' }}>→</span>}
+          {i < values.length - 1 && <span style={{ fontSize: 10, color: '#444', display: 'inline-flex' }}><ArrowRight size={10} /></span>}
         </React.Fragment>
       ))}
     </div>
@@ -78,10 +78,9 @@ export default function BenchmarkDashboard({ api }) {
           style={{
             background: 'linear-gradient(135deg, #7c6af7, #5cd4c4)', color: '#fff',
             border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14,
-            fontWeight: 600, cursor: 'pointer',
-          }}
+            fontWeight: 600, cursor: 'pointer'}}
         >
-          ▶ Run Full Suite
+          <><Play size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Run Full Suite</>
         </button>
       </div>
 
@@ -122,7 +121,7 @@ export default function BenchmarkDashboard({ api }) {
                     {new Date(report.generated_at).toLocaleString()}
                   </td>
                   <td style={{ padding: '16px 24px', color: '#5cd4c4' }}>
-                    ✓ Passing
+                    <><Check size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Passing</>
                   </td>
                 </tr>
               ))}
@@ -140,3 +139,4 @@ export default function BenchmarkDashboard({ api }) {
     </div>
   );
 }
+

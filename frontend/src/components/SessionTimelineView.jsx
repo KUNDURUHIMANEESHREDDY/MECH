@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ArrowRight } from 'lucide-react';
 import { eventBus } from '../utils/eventBus';
 
 export default function SessionTimelineView() {
@@ -20,7 +21,7 @@ export default function SessionTimelineView() {
   return (
     <div className="card session-timeline-card" data-testid="session-timeline-view">
       <h3>Interactive Session Timeline</h3>
-      <p className="hint">Live trace of execution events: Run ➔ Breakpoint ➔ Patch ➔ Observe ➔ Export.</p>
+      <p className="hint">Live trace of execution events: Run <ArrowRight size={11} style={{ verticalAlign: 'middle' }} /> Breakpoint <ArrowRight size={11} style={{ verticalAlign: 'middle' }} /> Patch <ArrowRight size={11} style={{ verticalAlign: 'middle' }} /> Observe <ArrowRight size={11} style={{ verticalAlign: 'middle' }} /> Export.</p>
 
       <div className="timeline-events" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {events.map((ev) => (

@@ -1,0 +1,151 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic "MECH Platform" [ref=e6] [cursor=pointer]: M
+      - button "Explorer" [ref=e8] [cursor=pointer]
+      - button "Search" [ref=e14] [cursor=pointer]
+      - button "Debug" [ref=e18] [cursor=pointer]
+      - button "Code" [ref=e28] [cursor=pointer]
+    - button "Settings" [ref=e35] [cursor=pointer]
+  - generic [ref=e39]:
+    - generic [ref=e40]:
+      - heading "Explorer" [level=1] [ref=e41]
+      - button "Collapse all" [ref=e43] [cursor=pointer]
+    - generic [ref=e46]:
+      - textbox "Search views..." [ref=e51]
+      - generic [ref=e52]:
+        - generic [ref=e53]: Explore
+        - generic [ref=e54]:
+          - button "Model Explorer" [ref=e55] [cursor=pointer]
+          - button "GPT-2 Live" [ref=e63] [cursor=pointer]
+          - button "Workspace" [ref=e68] [cursor=pointer]
+          - button "Neural Explorer" [ref=e73] [cursor=pointer]
+          - button "Knowledge Graph" [ref=e88] [cursor=pointer]
+          - button "Circuit Explorer" [ref=e97] [cursor=pointer]
+      - generic [ref=e107]:
+        - generic [ref=e108]: Develop
+        - generic [ref=e109]:
+          - button "Models" [active] [ref=e110] [cursor=pointer]
+          - button "Prompts" [ref=e123] [cursor=pointer]
+          - button "Debugger" [ref=e128] [cursor=pointer]
+          - button "Build" [ref=e140] [cursor=pointer]
+          - button "Benchmark" [ref=e147] [cursor=pointer]
+          - button "Benchmark Suite" [ref=e153] [cursor=pointer]
+      - generic [ref=e159]:
+        - generic [ref=e160]: Research
+        - generic [ref=e161]:
+          - button "Experiments" [ref=e162] [cursor=pointer]
+          - button "Sessions" [ref=e167] [cursor=pointer]
+          - button "Reports" [ref=e174] [cursor=pointer]
+          - button "Reasoning" [ref=e180] [cursor=pointer]
+          - button "Evidence Fusion" [ref=e187] [cursor=pointer]
+          - button "Analytics" [ref=e194] [cursor=pointer]
+          - button "Health" [ref=e200] [cursor=pointer]
+      - generic [ref=e206]:
+        - generic [ref=e207]: General
+        - generic [ref=e208]:
+          - button "Campaigns" [ref=e209] [cursor=pointer]
+          - button "Plugins" [ref=e217] [cursor=pointer]
+          - button "Research Notebook" [ref=e222] [cursor=pointer]
+          - button "Lab Notebook" [ref=e227] [cursor=pointer]
+          - button "Paper Reproduction" [ref=e233] [cursor=pointer]
+          - button "Settings" [ref=e240] [cursor=pointer]
+          - button "Logging" [ref=e246] [cursor=pointer]
+          - button "Projects" [ref=e252] [cursor=pointer]
+          - button "Recent Files" [ref=e257] [cursor=pointer]
+  - generic [ref=e263]:
+    - banner [ref=e264]:
+      - generic [ref=e265]: Models
+      - generic [ref=e267]:
+        - button "Mem" [ref=e268] [cursor=pointer]
+        - button "Dock" [ref=e279] [cursor=pointer]
+        - button "Share" [ref=e282] [cursor=pointer]
+        - button "Market" [ref=e289] [cursor=pointer]
+        - button "Export" [ref=e295] [cursor=pointer]
+        - button "P" [ref=e300] [cursor=pointer]
+        - generic [ref=e303]: Connected
+    - generic [ref=e561]:
+      - generic [ref=e562]:
+        - heading "Model Explorer" [level=2] [ref=e563]
+        - paragraph [ref=e564]: Inspect neural network architectures, layer configurations, and weights.
+      - generic [ref=e565]:
+        - generic [ref=e566] [cursor=pointer]:
+          - generic [ref=e567]:
+            - heading "GPT-2 Small" [level=3] [ref=e568]
+            - generic [ref=e569]: Available
+          - generic [ref=e570]:
+            - generic [ref=e571]:
+              - text: "Layers:"
+              - strong [ref=e572]: "12"
+            - generic [ref=e573]:
+              - text: "Heads:"
+              - strong [ref=e574]: "12"
+            - generic [ref=e575]:
+              - text: "d_model:"
+              - strong [ref=e576]: "768"
+            - generic [ref=e577]:
+              - text: "Params:"
+              - strong [ref=e578]: 124M
+          - button "Load Model" [ref=e579]
+        - generic [ref=e580] [cursor=pointer]:
+          - generic [ref=e581]:
+            - heading "GPT-2 Medium" [level=3] [ref=e582]
+            - generic [ref=e583]: Available
+          - generic [ref=e584]:
+            - generic [ref=e585]:
+              - text: "Layers:"
+              - strong [ref=e586]: "24"
+            - generic [ref=e587]:
+              - text: "Heads:"
+              - strong [ref=e588]: "16"
+            - generic [ref=e589]:
+              - text: "d_model:"
+              - strong [ref=e590]: "1024"
+            - generic [ref=e591]:
+              - text: "Params:"
+              - strong [ref=e592]: 355M
+          - button "Load Model" [ref=e593]
+        - generic [ref=e594] [cursor=pointer]:
+          - generic [ref=e595]:
+            - heading "EleutherAI Pythia 160M" [level=3] [ref=e596]
+            - generic [ref=e597]: Available
+          - generic [ref=e598]:
+            - generic [ref=e599]:
+              - text: "Layers:"
+              - strong [ref=e600]: "12"
+            - generic [ref=e601]:
+              - text: "Heads:"
+              - strong [ref=e602]: "12"
+            - generic [ref=e603]:
+              - text: "d_model:"
+              - strong [ref=e604]: "768"
+            - generic [ref=e605]:
+              - text: "Params:"
+              - strong [ref=e606]: 160M
+          - button "Load Model" [ref=e607]
+        - generic [ref=e608] [cursor=pointer]:
+          - generic [ref=e609]:
+            - heading "Llama-3 8B (Quantized)" [level=3] [ref=e610]
+            - generic [ref=e611]: Downloadable
+          - generic [ref=e612]:
+            - generic [ref=e613]:
+              - text: "Layers:"
+              - strong [ref=e614]: "32"
+            - generic [ref=e615]:
+              - text: "Heads:"
+              - strong [ref=e616]: "32"
+            - generic [ref=e617]:
+              - text: "d_model:"
+              - strong [ref=e618]: "4096"
+            - generic [ref=e619]:
+              - text: "Params:"
+              - strong [ref=e620]: 8B
+          - button "Load Model" [ref=e621]
+    - generic [ref=e310] [cursor=pointer]:
+      - generic [ref=e311]: Console
+      - generic [ref=e314]: 0 lines
+  - generic [ref=e317]:
+    - generic [ref=e318]: "Model: GPT2"
+    - generic [ref=e323]: "GPU: 0%"
+    - generic [ref=e328]: "Memory: 0%"
+    - generic [ref=e332]: "Tokens: 0"

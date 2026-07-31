@@ -1,4 +1,5 @@
 import React from 'react';
+import { Hourglass } from 'lucide-react';
 
 export default function DiscoveryTimelinePanel() {
   const milestones = [
@@ -10,7 +11,7 @@ export default function DiscoveryTimelinePanel() {
   return (
     <div className="panel discovery-timeline-panel" data-testid="discovery-timeline-panel">
       <div className="panel-header">
-        <h3>⏳ Discovery Evolution Timeline</h3>
+        <h3><Hourglass size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Discovery Evolution Timeline</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

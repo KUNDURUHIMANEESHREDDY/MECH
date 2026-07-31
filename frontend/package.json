@@ -33,7 +33,7 @@
     "@testing-library/react": "^16.0.0",
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^8.2.2",
-    "electron": "^32.0.1",
+    "electron": "32.3.3",
     "electron-builder": "^25.0.5",
     "jsdom": "^25.0.0",
     "typescript": "^5.5.0",
@@ -43,6 +43,7 @@
   "build": {
     "appId": "com.mech.platform",
     "productName": "MECH Platform",
+    "electronVersion": "32.3.3",
     "files": [
       "electron/**/*",
       "dist/**/*",
@@ -50,6 +51,18 @@
     ],
     "directories": {
       "output": "release"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": ["**/*", "!__pycache__", "!**/*.pyc"]
+      }
+    ]
+  },
+  "allowScripts": {
+    "electron@32.3.3": true,
+    "esbuild@0.21.5": true,
+    "better-sqlite3@11.10.0": true
   }
 }

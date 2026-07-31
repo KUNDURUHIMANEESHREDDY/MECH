@@ -1,4 +1,5 @@
 import React from 'react';
+import { Brain, PanelsTopLeft, Share2, Store, FileUp, Command, CircleDot } from 'lucide-react';
 
 export default function Topbar({
   crumb,
@@ -11,60 +12,35 @@ export default function Topbar({
   onOpenDiscoveryMemory,
 }) {
   const statusLabel = pythonStatus === 'connected'
-    ? 'Python connected'
+    ? 'Connected'
     : pythonStatus === 'connecting'
-      ? 'Connecting…'
-      : 'Python offline';
+      ? '\u2026'
+      : 'Offline';
 
   return (
     <header className="topbar">
-      <div className="crumb" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <span>{crumb}</span>
-        <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>|</span>
-        <button
-          onClick={onOpenDiscoveryMemory}
-          className="btn btn-primary btn-sm"
-          style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem', background: '#2a2a5a', border: '1px solid #5cd4c4', color: '#5cd4c4' }}
-        >
-          🧠 Discovery Memory
-        </button>
-        <button
-          onClick={onToggleDock}
-          className="btn btn-secondary btn-sm"
-          style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-        >
-          ⚡ Dock Panels
-        </button>
-        <button
-          onClick={onOpenShare}
-          className="btn btn-secondary btn-sm"
-          style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-        >
-          🤝 Share
-        </button>
-        <button
-          onClick={onOpenMarketplace}
-          className="btn btn-secondary btn-sm"
-          style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-        >
-          🧩 Marketplace
-        </button>
-        <button
-          onClick={onOpenPublication}
-          className="btn btn-secondary btn-sm"
-          style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-        >
-          📄 Export
-        </button>
+      <div className="crumb-group">
+        <span className="crumb">{crumb}</span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <button
-          onClick={onToggleCmdPalette}
-          className="btn btn-secondary btn-sm"
-          style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', fontFamily: 'monospace' }}
-        >
-          Ctrl+Shift+P
+      <div className="topbar-actions">
+        <button onClick={onOpenDiscoveryMemory} className="btn btn-ghost btn-sm" title="Discovery Memory">
+          <Brain size={14} /> Mem
+        </button>
+        <button onClick={onToggleDock} className="btn btn-ghost btn-sm" title="Dock Panels">
+          <PanelsTopLeft size={14} /> Dock
+        </button>
+        <button onClick={onOpenShare} className="btn btn-ghost btn-sm" title="Share">
+          <Share2 size={14} /> Share
+        </button>
+        <button onClick={onOpenMarketplace} className="btn btn-ghost btn-sm" title="Marketplace">
+          <Store size={14} /> Market
+        </button>
+        <button onClick={onOpenPublication} className="btn btn-ghost btn-sm" title="Export">
+          <FileUp size={14} /> Export
+        </button>
+        <button onClick={onToggleCmdPalette} className="btn btn-ghost btn-sm" title="Command Palette">
+          <Command size={13} /> P
         </button>
         <div className="status" data-testid="python-status" data-status={pythonStatus}>
           <span className={'dot ' + (pythonStatus === 'connected' ? 'connected' : pythonStatus === 'connecting' ? 'connecting' : '')} />

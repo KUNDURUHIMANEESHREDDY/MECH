@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Waves, Play, Pause } from "lucide-react";
 
 export default function CausalTraceViewerPanel() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -15,23 +16,34 @@ export default function CausalTraceViewerPanel() {
   }, [isPlaying]);
 
   return (
-    <div className="p-4 bg-slate-900 text-slate-100 h-full overflow-y-auto">
-      <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+    <div style={{ padding: 16, height: "100%", overflowY: "auto", color: "var(--text)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
         <div>
-          <h2 className="text-lg font-bold text-indigo-400">🌊 Causal Trace Flow Viewer</h2>
-          <p className="text-xs text-slate-400">Layer-by-Layer Activation Recovery Curve</p>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", margin: 0 }}>
+            <Waves size={14} style={{ verticalAlign: "middle", marginRight: 6 }} /> Causal Trace Flow Viewer
+          </h2>
+          <p className="hint" style={{ margin: "2px 0 0 0" }}>Layer-by-Layer Activation Recovery Curve</p>
         </div>
-        <div className="flex items-center space-x-2">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             onClick={() => setIsPlaying(!isPlaying)}
-            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded"
+            className="btn btn-primary"
+            style={{ fontSize: 12 }}
           >
-            {isPlaying ? "Pause ⏸" : "Play Flow ▶"}
+            {isPlaying ? (
+              <>
+                <Pause size={12} style={{ verticalAlign: "middle", marginRight: 4 }} /> Pause
+              </>
+            ) : (
+              <>
+                <Play size={12} style={{ verticalAlign: "middle", marginRight: 4 }} /> Play Flow
+              </>
+            )}
           </button>
         </div>
       </div>
 
-      <div className="flex space-x-1 items-end h-40 bg-slate-950 p-4 rounded border border-slate-800 mb-4">
+      <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 160, background: "var(--bg)", padding: 16, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 16 }}>
         {Array.from({ length: 12 }).map((_, l) => {
           const isCurrent = l === currentLayer;
           const heightPct = 20 + ((l * 7 + (l === 8 ? 60 : 0)) % 80);
@@ -39,30 +51,32 @@ export default function CausalTraceViewerPanel() {
             <div
               key={l}
               onClick={() => setCurrentLayer(l)}
-              className="flex-1 flex flex-col items-center cursor-pointer group"
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer" }}
             >
               <div
-                style={{ height: `${heightPct}%` }}
-                className={`w-full rounded-t transition-all ${
-                  isCurrent
-                    ? "bg-indigo-400 shadow-lg shadow-indigo-500/50"
-                    : "bg-slate-700 group-hover:bg-slate-500"
-                }`}
+                style={{
+                  height: `${heightPct}%`,
+                  width: "100%",
+                  borderRadius: "4px 4px 0 0",
+                  transition: "all 0.2s",
+                  background: isCurrent ? "var(--accent-strong)" : "var(--bg-elev-2)",
+                  boxShadow: isCurrent ? "0 0 12px var(--accent-soft)" : "none",
+                }}
               />
-              <span className="text-[10px] mt-2 text-slate-400 font-mono">L{l}</span>
+              <span style={{ fontSize: 10, marginTop: 8, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>L{l}</span>
             </div>
           );
         })}
       </div>
 
-      <div className="p-3 bg-slate-800/80 rounded border border-slate-700 flex justify-between items-center">
+      <div style={{ padding: 12, background: "var(--bg-elev-2)", borderRadius: 8, border: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <span className="text-xs text-slate-400 block">Active Inspection Layer</span>
-          <span className="text-sm font-bold text-indigo-300">Layer {currentLayer}</span>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", display: "block" }}>Active Inspection Layer</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--accent)" }}>Layer {currentLayer}</span>
         </div>
-        <div className="text-right">
-          <span className="text-xs text-slate-400 block">Indirect Causal Score</span>
-          <span className="text-sm font-bold text-emerald-400">
+        <div style={{ textAlign: "right" }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", display: "block" }}>Indirect Causal Score</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--success)" }}>
             {currentLayer === 8 ? "0.90 (Max Peak)" : `${(0.12 + currentLayer * 0.04).toFixed(2)}`}
           </span>
         </div>

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { GitBranch } from "lucide-react";
 import { experimentVersionControl } from "../../services/experimentVersionControl";
 
 export default function VersionControlPanel() {
@@ -13,42 +14,46 @@ export default function VersionControlPanel() {
   };
 
   return (
-    <div className="p-4 bg-slate-900 text-slate-100 h-full overflow-y-auto">
-      <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+    <div style={{ padding: 16, height: "100%", overflowY: "auto", color: "var(--text)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
         <div>
-          <h2 className="text-lg font-bold text-violet-400">🌿 Experiment Version Control</h2>
-          <p className="text-xs text-slate-400">Git-like State Snapshot Commit & Rollback History</p>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", margin: 0 }}>
+            <GitBranch size={14} style={{ verticalAlign: "middle", marginRight: 6 }} /> Experiment Version Control
+          </h2>
+          <p className="hint" style={{ margin: "2px 0 0 0" }}>Git-like State Snapshot Commit & Rollback History</p>
         </div>
       </div>
 
-      <div className="flex space-x-2 mb-4">
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <input
           type="text"
           placeholder="Commit message (e.g. Patched L8_N402)..."
           value={msg}
           onChange={(e) => setMsg(e.target.value)}
-          className="flex-1 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+          style={{ flex: 1, padding: "6px 12px", background: "var(--bg-elev-2)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, color: "var(--text)", outline: "none" }}
         />
         <button
           onClick={handleCommit}
-          className="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs rounded transition"
+          className="btn btn-primary"
+          style={{ fontWeight: 600, fontSize: 12 }}
         >
           Commit Snapshot
         </button>
       </div>
 
-      <div className="space-y-2">
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {commits.map((c) => (
-          <div key={c.id} className="p-3 bg-slate-800/80 rounded border border-slate-700 flex justify-between items-center">
+          <div key={c.id} style={{ padding: 12, background: "var(--bg-elev-2)", borderRadius: 8, border: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <span className="text-xs font-bold text-violet-300 block">{c.message}</span>
-              <span className="text-[10px] text-slate-400 font-mono">
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent-hover)", display: "block" }}>{c.message}</span>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
                 {c.id} • {new Date(c.timestamp).toLocaleTimeString()}
               </span>
             </div>
             <button
               onClick={() => experimentVersionControl.rollback(c.id)}
-              className="px-2.5 py-1 bg-slate-700 hover:bg-violet-900 text-[10px] text-slate-300 font-semibold rounded"
+              className="btn btn-secondary"
+              style={{ fontSize: 10, padding: "4px 10px", fontWeight: 600 }}
             >
               Rollback
             </button>

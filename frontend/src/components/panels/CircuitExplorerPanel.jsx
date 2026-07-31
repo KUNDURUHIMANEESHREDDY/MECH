@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Zap } from "lucide-react";
 import { selectionManager } from "../../utils/selectionManager";
 
 export default function CircuitExplorerPanel() {
@@ -42,45 +43,51 @@ export default function CircuitExplorerPanel() {
   };
 
   return (
-    <div className="p-4 bg-slate-900 text-slate-100 h-full overflow-y-auto">
-      <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+    <div style={{ padding: 16, height: "100%", overflowY: "auto", color: "var(--text)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
         <div>
-          <h2 className="text-lg font-bold text-sky-400">⚡ Interactive Circuit Explorer</h2>
-          <p className="text-xs text-slate-400">
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)", margin: 0 }}>
+            <Zap size={14} style={{ verticalAlign: "middle", marginRight: 6 }} /> Interactive Circuit Explorer
+          </h2>
+          <p className="hint" style={{ margin: "2px 0 0 0" }}>
             Automated Causal Graph: {circuit ? circuit.prompt : "Loading..."}
           </p>
         </div>
-        <span className="px-2 py-1 bg-emerald-500/20 text-emerald-300 text-xs font-semibold rounded border border-emerald-500/30">
+        <span style={{ padding: "4px 8px", background: "rgba(166, 227, 161, 0.15)", color: "var(--success)", fontSize: 12, fontWeight: 600, borderRadius: 6, border: "1px solid rgba(166, 227, 161, 0.3)" }}>
           Score: {circuit ? circuit.circuit_score : "0.94"}
         </span>
       </div>
 
-      <div className="grid grid-cols-5 gap-3 mb-6">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 24 }}>
         {circuit &&
           circuit.nodes.map((node) => (
             <div
               key={node.id}
               onClick={() => handleSelectNode(node)}
-              className={`p-3 rounded-lg border cursor-pointer transition ${
-                selectedNode?.id === node.id
-                  ? "bg-sky-950 border-sky-400 shadow-lg shadow-sky-500/20"
-                  : "bg-slate-800 border-slate-700 hover:border-slate-500"
-              }`}
+              style={{
+                padding: 12,
+                borderRadius: 10,
+                border: `1px solid ${selectedNode?.id === node.id ? "var(--accent)" : "var(--border)"}`,
+                cursor: "pointer",
+                transition: "all 0.2s",
+                background: selectedNode?.id === node.id ? "var(--bg-active)" : "var(--bg-elev-2)",
+                boxShadow: selectedNode?.id === node.id ? "0 0 16px var(--accent-soft)" : "none",
+              }}
             >
-              <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wide block mb-1">
+              <span style={{ fontSize: 10, textTransform: "uppercase", fontWeight: 700, color: "var(--accent)", letterSpacing: "0.05em", display: "block", marginBottom: 4 }}>
                 {node.type}
               </span>
-              <p className="text-sm font-semibold text-slate-200">{node.label}</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", margin: 0 }}>{node.label}</p>
             </div>
           ))}
       </div>
 
       {selectedNode && (
-        <div className="p-3 bg-slate-800/80 rounded border border-slate-700">
-          <h3 className="text-xs font-bold text-slate-300 mb-1">Evidence & Provenance Overlay</h3>
-          <p className="text-xs text-slate-400">Node ID: {selectedNode.id}</p>
-          <p className="text-xs text-slate-400">Type: {selectedNode.type}</p>
-          <p className="text-xs text-emerald-400 mt-1">Causal Impact Confidence: 96.4%</p>
+        <div style={{ padding: 12, background: "var(--bg-elev-2)", borderRadius: 8, border: "1px solid var(--border)" }}>
+          <h3 style={{ fontSize: 12, fontWeight: 700, color: "var(--text-dim)", marginBottom: 4 }}>Evidence & Provenance Overlay</h3>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>Node ID: {selectedNode.id}</p>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>Type: {selectedNode.type}</p>
+          <p style={{ fontSize: 12, color: "var(--success)", marginTop: 4 }}>Causal Impact Confidence: 96.4%</p>
         </div>
       )}
     </div>

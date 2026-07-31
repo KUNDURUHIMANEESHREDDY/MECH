@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Rewind } from 'lucide-react';
 
 export default function ResearchReplayPanel() {
   const [timelineStep, setTimelineStep] = useState(2);
@@ -12,7 +13,7 @@ export default function ResearchReplayPanel() {
   return (
     <div className="panel research-replay-panel" data-testid="research-replay-panel">
       <div className="panel-header">
-        <h3>⏪ Campaign Time-Travel Research Replay</h3>
+        <h3><Rewind size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Campaign Time-Travel Research Replay</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <input

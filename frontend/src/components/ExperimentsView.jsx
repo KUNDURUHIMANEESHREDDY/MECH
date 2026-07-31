@@ -32,32 +32,18 @@ export default function ExperimentsView({ api }) {
   };
 
   return (
-    <div className="experiments-view" data-testid="experiments-view">
+    <div>
       <div className="section-header">
         <h2>Experiments Matrix</h2>
-        <p>Manage circuit ablation, activation patching, and SAE feature steering runs.</p>
+        <p className="hint">Manage circuit ablation, activation patching, and SAE feature steering runs.</p>
       </div>
 
-      <div className="card" style={{ marginBottom: '20px' }}>
+      <div className="card" style={{ marginBottom: 20 }}>
         <h3>New Experiment Run</h3>
-        <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-          <input
-            type="text"
-            className="input-text"
-            placeholder="Experiment Title (e.g. IOI Head 9.9 Ablation)"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            style={{ flex: 2 }}
-          />
-          <input
-            type="text"
-            className="input-text"
-            placeholder="Target Circuit"
-            value={circuit}
-            onChange={(e) => setCircuit(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <button className="btn btn-primary" onClick={handleCreate}>Create Run</button>
+        <div className="exp-form-row">
+          <input type="text" className="input-text" placeholder="Experiment Title" value={title} onChange={e => setTitle(e.target.value)} />
+          <input type="text" className="input-text" placeholder="Target Circuit" value={circuit} onChange={e => setCircuit(e.target.value)} />
+          <button className="btn" onClick={handleCreate}>Create Run</button>
         </div>
       </div>
 
@@ -68,10 +54,10 @@ export default function ExperimentsView({ api }) {
         ) : (
           <div className="experiment-grid">
             {experiments.map((exp) => (
-              <div key={exp.id} className="experiment-card">
+              <div key={exp.id} className="card" style={{ marginBottom: 0 }}>
                 <div className="exp-header">
                   <h4>{exp.title}</h4>
-                  <span className={`status-badge ${exp.status}`}>{exp.status}</span>
+                  <span className={'status-badge ' + exp.status}>{exp.status}</span>
                 </div>
                 <div className="exp-details">
                   <div>Target Circuit: <strong>{exp.targetCircuit}</strong></div>

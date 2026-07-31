@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Rewind } from 'lucide-react';
 
 export default function TimeTravelDebuggerPanel() {
   const [layer, setLayer] = useState(8);
@@ -6,7 +7,7 @@ export default function TimeTravelDebuggerPanel() {
   return (
     <div className="panel time-travel-debugger-panel" data-testid="time-travel-debugger-panel">
       <div className="panel-header">
-        <h3>⏪ Time-Travel Activation Debugger</h3>
+        <h3><Rewind size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Time-Travel Activation Debugger</h3>
         <div style={{ display: 'flex', gap: '4px' }}>
           <button className="btn" style={{ fontSize: '10px' }} onClick={() => setLayer((l) => Math.max(0, l - 1))}>Step Back</button>
           <span style={{ fontSize: '11px', alignSelf: 'center', color: '#38bdf8' }}>Layer {layer}</span>

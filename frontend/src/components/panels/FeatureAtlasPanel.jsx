@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Map } from "lucide-react";
 
 export default function FeatureAtlasPanel() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -18,37 +19,39 @@ export default function FeatureAtlasPanel() {
   );
 
   return (
-    <div className="p-4 bg-slate-900 text-slate-100 h-full overflow-y-auto">
-      <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+    <div style={{ padding: 16, height: "100%", overflowY: "auto", color: "var(--text)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
         <div>
-          <h2 className="text-lg font-bold text-amber-400">🗺 SAE Feature Atlas</h2>
-          <p className="text-xs text-slate-400">Searchable Catalog of 16,384 Sparse Autoencoder Features</p>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--warning)", margin: 0 }}>
+            <Map size={14} style={{ verticalAlign: "middle", marginRight: 6 }} /> SAE Feature Atlas
+          </h2>
+          <p className="hint" style={{ margin: "2px 0 0 0" }}>Searchable Catalog of 16,384 Sparse Autoencoder Features</p>
         </div>
         <input
           type="text"
           placeholder="Filter features..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="px-3 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-slate-200 focus:outline-none focus:border-amber-500 w-48"
+          style={{ padding: "4px 12px", background: "var(--bg-elev-2)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, color: "var(--text)", width: 192, outline: "none" }}
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
         {filtered.map((feature) => (
           <div
             key={feature.id}
-            className="p-3 bg-slate-800/80 rounded border border-slate-700 hover:border-amber-500/50 transition"
+            style={{ padding: 12, background: "var(--bg-elev-2)", borderRadius: 8, border: "1px solid var(--border)", transition: "border-color 0.2s" }}
           >
-            <div className="flex justify-between items-start mb-1">
-              <span className="text-xs font-bold text-amber-400">Feature #{feature.id}</span>
-              <span className="px-2 py-0.5 bg-amber-500/10 text-amber-300 text-[10px] rounded font-mono">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--warning)" }}>Feature #{feature.id}</span>
+              <span style={{ padding: "2px 8px", background: "rgba(249, 226, 175, 0.12)", color: "var(--warning)", fontSize: 10, borderRadius: 4, fontFamily: "var(--font-mono)" }}>
                 {feature.cluster}
               </span>
             </div>
-            <h3 className="text-sm font-semibold text-slate-200 mb-2">{feature.label}</h3>
-            <div className="flex justify-between text-xs text-slate-400 pt-2 border-t border-slate-700/50">
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>{feature.label}</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", paddingTop: 8, borderTop: "1px solid var(--border)" }}>
               <span>Firing Freq: {feature.freq}</span>
-              <span className="text-emerald-400 font-medium">Interpretability: {feature.score}</span>
+              <span style={{ color: "var(--success)", fontWeight: 500 }}>Interpretability: {feature.score}</span>
             </div>
           </div>
         ))}

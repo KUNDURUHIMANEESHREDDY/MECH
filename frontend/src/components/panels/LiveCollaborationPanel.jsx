@@ -1,4 +1,5 @@
 import React from 'react';
+import { Users } from 'lucide-react';
 import { sharedWorkspaceState } from '../../utils/sharedWorkspaceState.js';
 
 export default function LiveCollaborationPanel() {
@@ -7,7 +8,7 @@ export default function LiveCollaborationPanel() {
   return (
     <div className="panel live-collaboration-panel" data-testid="live-collaboration-panel">
       <div className="panel-header">
-        <h3>👥 Live Collaboration View</h3>
+        <h3><Users size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Live Collaboration View</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
