@@ -1,26 +1,48 @@
-# Examples 1:
-(empty)
-
-# Example 2 (Project with artifacts):
-# Compiled and build artifacts
-*.pyc
+# Python
 __pycache__/
-*.o
-*.obj
-dist/
-build/
-# Dependencies
+*.py[cod]
+*.pyo
+.pytest_cache/
 .venv/
 venv/
-node_modules/
-# Logs and temp files
-*.log
-*.tmp
+*.egg-info/
+dist/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDE
+.idea/
+.vscode/
 *.swp
+*.swo
+
+# AI / Continue
+.continue/
+
+# Generated Assets
+attn_L10_H7.png
+
+# Logs
+*.log
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+package-lock.json
+
+# Build / Output
+release/
+coverage/
+playwright-report/
+test-results/
+.vite/
+
 # Environment
 .env
-.env.local
 .env.*
-# Editors
-.vscode/
-.idea/
