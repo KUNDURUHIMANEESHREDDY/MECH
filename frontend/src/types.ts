@@ -11,6 +11,7 @@ export interface NeuronActivation {
   layer: number;
   index: number;
   activation: number;
+  token_activations?: number[];
 }
 
 export interface TokenInfo {
@@ -52,6 +53,7 @@ export interface HeadData {
 export interface NeuronData {
   index: number;
   activation: number;
+  tokenActivations?: number[];
 }
 
 export interface PanelState {

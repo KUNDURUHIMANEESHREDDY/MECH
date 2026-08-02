@@ -6,9 +6,10 @@ interface Props {
   neurons: NeuronData[];
   selectedNeuron: number | null;
   onSelectNeuron: (i: number) => void;
+  tokens?: string[];
 }
 
-export function NeuronPanel({ neurons, selectedNeuron, onSelectNeuron }: Props) {
+export function NeuronPanel({ neurons, selectedNeuron, onSelectNeuron, tokens }: Props) {
   const sel = selectedNeuron !== null ? neurons[selectedNeuron] : null;
 
   return (
@@ -21,6 +22,8 @@ export function NeuronPanel({ neurons, selectedNeuron, onSelectNeuron }: Props) 
           activations={neurons.map(n => n.activation)}
           neuronIndex={selectedNeuron}
           onSelectNeuron={onSelectNeuron}
+          tokens={tokens}
+          neuronTokenActivations={neurons.map(n => n.tokenActivations ?? null)}
         />
       </div>
 

@@ -15,7 +15,7 @@ export function activationsToNeurons(
 
   for (const act of activations) {
     if (act.layer < numLayers) {
-      result[act.layer].push({ index: act.index, activation: act.activation });
+      result[act.layer].push({ index: act.index, activation: act.activation, tokenActivations: act.token_activations });
     }
   }
 

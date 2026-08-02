@@ -244,9 +244,8 @@ export default function Gpt2View({ api }) {
   const loaded = modelInfo?.status === 'loaded';
   const hasCache = promptResult?.status === 'ok';
 
-  // capitals for step 4 bar chart
-  const caps = promptResult?.capitals || {};
-  const maxCapLogit = Math.max(...Object.values(caps), 0.01);
+  const top16 = promptResult?.top16 || [];
+  const maxLogit = top16.length ? Math.max(...top16.map(t => Math.abs(t.logit)), 0.01) : 0.01;
 
   return (
     <div style={{ padding: '20px 24px', maxWidth: 900 }}>
@@ -302,19 +301,18 @@ export default function Gpt2View({ api }) {
 
         {promptResult?.status === 'ok' && (
           <>
-            <KV k="Tokens" v={promptResult.str_tokens?.join(' | ')} mono />
-            <KV k="Top-1 token" v={`"${promptResult.top5?.[0]?.token}"`} />
-            <KV k="Paris rank"  v={`#${promptResult.paris_rank}`} />
-            <KV k="Paris logit" v={promptResult.paris_logit?.toFixed(3)} mono />
-            <div style={{ marginTop: 12 }}>
-              <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--muted, #666)' }}>
-                Capital city logits
-              </p>
-              {Object.entries(caps).map(([name, val]) => (
-                <LogitBar key={name} label={name} value={val} max={maxCapLogit}
-                  color={name === 'Paris' ? '#10b981' : '#94a3b8'} />
-              ))}
-            </div>
+             <KV k="Tokens" v={promptResult.str_tokens?.join(' | ')} mono />
+             <KV k="Top-1 token" v={`"${promptResult.top5?.[0]?.token}"`} />
+             <KV k="Next token"  v={`"${promptResult.next_token}"`} />
+             <div style={{ marginTop: 12 }}>
+               <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--muted, #666)' }}>
+                 Top-16 predictions
+               </p>
+               {top16.map((t, i) => (
+                 <LogitBar key={t.token} label={t.token} value={t.logit} max={maxLogit}
+                   color={i === 0 ? '#10b981' : '#94a3b8'} />
+               ))}
+             </div>
             <div style={{ marginTop: 12 }}>
               <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: 'var(--muted, #666)' }}>
                 Top-5 predictions

@@ -3,6 +3,8 @@ import { useModel } from './hooks/useModel';
 import { AttentionHeatmap } from './components/visualizations/panels/AttentionHeatmap';
 import { ActivationHeatmap } from './components/visualizations/panels/ActivationHeatmap';
 import { TokenViewer } from './components/visualizations/panels/TokenViewer';
+import { NeuronUMAP } from './components/visualizations/neuron-umap/NeuronUMAP';
+import { buildNeuronPoints, idForHeadNeuron, parseNeuronId } from './components/visualizations/neuron-umap/data';
 import { LayerSidebar } from './components/LayerSidebar';
 import { NeuronPanel } from './components/NeuronPanel';
 import { StatusBar } from './components/StatusBar';
@@ -33,6 +35,9 @@ import SessionsView from './components/SessionsView';
 import ReportsView from './components/ReportsView';
 import ModelsView from './components/ModelsView';
 import Gpt2View from './components/Gpt2View';
+import Gpt2NeuronExplorer from './components/Gpt2NeuronExplorer';
+import TransformerVisualizer from './components/TransformerVisualizer';
+import { TransformerExplorer } from './components/visualizations/TransformerExplorer';
 import DebuggerView from './components/DebuggerView';
 import PromptsView from './components/PromptsView';
 import NeuralExplorerView from './components/NeuralExplorerView';
@@ -54,6 +59,9 @@ import CampaignWorkspaceView from './components/CampaignWorkspaceView';
 const PAGES: Record<string, { label: string }> = {
   explorer: { label: 'Model Explorer' },
   gpt2: { label: 'GPT-2 Live' },
+  gpt2explorer: { label: 'GPT-2 Neuron Explorer' },
+  transformer: { label: 'Transformer Visualizer' },
+  transformerExplorer: { label: 'Transformer Explorer' },
   workspace: { label: 'Workspace' },
   models: { label: 'Models' },
   prompts: { label: 'Prompts' },
@@ -83,7 +91,7 @@ const PAGES: Record<string, { label: string }> = {
 };
 
 export default function App() {
-  const { state: model, listModels, load, infer } = useModel();
+  const { state: model, listModels, load, infer, clearError } = useModel();
   const [appState, setAppState] = useAppStore();
 
   const [panel, setPanel] = useState<PanelState>({
@@ -114,6 +122,10 @@ export default function App() {
   const data = model.result;
   const layer = data?.layers[panel.selectedLayer];
   const head = layer?.heads[panel.selectedHead];
+  const umapPoints = React.useMemo(
+    () => (data ? buildNeuronPoints(data.layers, data.tokens.map(t => t.text)) : []),
+    [data],
+  );
 
   const [prompt, setPrompt] = useState('Hello world');
 
@@ -135,6 +147,12 @@ export default function App() {
         return renderExplorer();
       case 'gpt2':
         return <Gpt2View {...pageProps} />;
+      case 'gpt2explorer':
+        return <Gpt2NeuronExplorer {...pageProps} />;
+      case 'transformer':
+        return <TransformerVisualizer {...pageProps} />;
+      case 'transformerExplorer':
+        return <TransformerExplorer {...pageProps} />;
       case 'workspace':
         return <CampaignWorkspaceView {...pageProps} />;
       case 'models':
@@ -280,6 +298,8 @@ export default function App() {
                           activations={head.neurons.map(n => n.activation)}
                           neuronIndex={panel.selectedNeuron}
                           onSelectNeuron={n => setPanel(s => ({ ...s, selectedNeuron: n }))}
+                          tokens={data.tokens.map(t => t.text)}
+                          neuronTokenActivations={head.neurons.map(n => n.tokenActivations ?? null)}
                         />
                       ) : <div className="hint">Select a layer and head</div>,
                       neuron_panel: (
@@ -287,6 +307,21 @@ export default function App() {
                           neurons={head?.neurons ?? []}
                           selectedNeuron={panel.selectedNeuron}
                           onSelectNeuron={n => setPanel(s => ({ ...s, selectedNeuron: n }))}
+                          tokens={data?.tokens.map(t => t.text) ?? []}
+                        />
+                      ),
+                      neuron_umap: (
+                        <NeuronUMAP
+                          points={umapPoints}
+                          tokens={data.tokens.map(t => t.text)}
+                          selectedId={panel.selectedNeuron !== null ? idForHeadNeuron(panel.selectedLayer, panel.selectedHead, panel.selectedNeuron) : null}
+                          onSelectNeuron={id => {
+                            const parsed = parseNeuronId(id);
+                            setPanel(s => parsed
+                              ? { ...s, selectedLayer: parsed.layer, selectedHead: parsed.head ?? s.selectedHead, selectedNeuron: parsed.neuron }
+                              : { ...s, selectedNeuron: null });
+                          }}
+                          darkMode={appState.darkMode}
                         />
                       ),
                       token_inspector: (
@@ -350,7 +385,7 @@ export default function App() {
         <ExtensionMarketplaceModal isOpen={showMarketplace} onClose={() => setShowMarketplace(false)} />
         <PublicationExportModal isOpen={showExport} onClose={() => setShowExport(false)} />
 
-        <ErrorUI message={panel.error || model.error} onDismiss={() => { setError(null); }} />
+        <ErrorUI message={panel.error || model.error} onDismiss={() => { setError(null); clearError(); }} />
       </div>
       <StatusBar
         modelName={model.modelInfo?.model_name ?? 'GPT2'}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Network,
+  Workflow,
   PanelsTopLeft,
   BrainCircuit,
   Share2,
@@ -35,7 +36,7 @@ import {
 const SECTIONS = [
   {
     title: 'Explore',
-    items: ['explorer', 'gpt2', 'workspace', 'neuralexplorer', 'knowledgegraph', 'circuitexplorer'],
+    items: ['explorer', 'gpt2', 'transformer', 'workspace', 'neuralexplorer', 'knowledgegraph', 'circuitexplorer'],
   },
   {
     title: 'Develop',
@@ -54,6 +55,7 @@ const SECTIONS = [
 const PAGE_LABELS = {
   explorer: 'Model Explorer',
   gpt2: 'GPT-2 Live',
+  transformer: 'Transformer Visualizer',
   workspace: 'Workspace',
   neuralexplorer: 'Neural Explorer',
   knowledgegraph: 'Knowledge Graph',
@@ -85,6 +87,7 @@ const PAGE_LABELS = {
 const ICONS = {
   explorer: Network,
   gpt2: Activity,
+  transformer: Workflow,
   workspace: PanelsTopLeft,
   neuralexplorer: BrainCircuit,
   knowledgegraph: Share2,

@@ -3,7 +3,12 @@ import React from 'react';
 const OPTIONS = [
   { value: 'system', label: 'Follow system' },
   { value: 'dark', label: 'Dark' },
-  { value: 'light', label: 'Light' }
+  { value: 'light', label: 'Light' },
+  { value: 'midnight', label: 'Midnight' },
+  { value: 'nord', label: 'Nord' },
+  { value: 'dracula', label: 'Dracula' },
+  { value: 'solarized-dark', label: 'Solarized Dark' },
+  { value: 'solarized-light', label: 'Solarized Light' },
 ];
 
 export default function ThemeSettings({ settings, onChange }) {

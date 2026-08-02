@@ -138,12 +138,24 @@ def run_inference(
         if act_tensor is None:
             continue
 
-        avg = act_tensor.abs().mean(dim=0)
-        inter_dim = avg.size(0)
+        # Per-token neuron activations: for each token position,
+        # compute the activation of each sampled neuron
+        act_squeezed = act_tensor.squeeze(0)  # [seq_len, inter_dim]
+        seq_len = act_squeezed.size(0)
+        actual_inter_dim = act_squeezed.size(1)
+
         for ni in range(n_neurons_per_layer):
-            idx = int((ni / n_neurons_per_layer) * inter_dim)
-            val = float(torch.tanh(avg[idx] * 3.0))
-            neuron_dtos.append(NeuronActivation(layer=li, index=ni, activation=val))
+            neuron_idx = int((ni / n_neurons_per_layer) * actual_inter_dim)
+            # Activation of this neuron at each token position
+            token_acts = torch.tanh(act_squeezed[:, neuron_idx] * 3.0)
+            token_activations = [float(a) for a in token_acts.tolist()]
+            # Averaged activation (backward-compatible scalar)
+            avg_activation = float(torch.tanh(act_tensor.abs().mean(dim=0).squeeze(0)[neuron_idx] * 3.0)) \
+                if act_tensor.size(0) == 1 else float(token_acts.mean())
+            neuron_dtos.append(NeuronActivation(
+                layer=li, index=ni, activation=avg_activation,
+                token_activations=token_activations,
+            ))
 
         # Cache & Repository
         if session:
