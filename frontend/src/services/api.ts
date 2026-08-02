@@ -41,6 +41,14 @@ export const api = {
     post<Record<string, unknown>>('/api/v1/gpt2/patch_head', { layer, head, pos_token: posToken, neg_token: negToken }),
   gpt2RunIoi: (ioName: string, subjName: string) =>
     post<Record<string, unknown>>('/api/v1/gpt2/ioi', { io_name: ioName, subj_name: subjName }),
+  gpt2Architecture: () =>
+    post<Record<string, unknown>>('/api/v1/gpt2/architecture', {}),
+  gpt2Layer: (layer: number) =>
+    post<Record<string, unknown>>('/api/v1/gpt2/layer', { layer }),
+  gpt2Neuron: (layer: number, neuronIndex: number, component?: string, topKWeights?: number) =>
+    post<Record<string, unknown>>('/api/v1/gpt2/neuron', { layer, neuron_index: neuronIndex, component, top_k_weights: topKWeights }),
+  gpt2Neurons: (layer: number, component?: string, page?: number, pageSize?: number, sortBy?: string, order?: string) =>
+    post<Record<string, unknown>>('/api/v1/gpt2/neurons', { layer, component, page, page_size: pageSize, sort_by: sortBy, order }),
 
   listExperiments: () => get<{ experiments: unknown[] }>('/api/v1/experiments'),
   createExperiment: (data: Record<string, unknown>) => post<unknown>('/api/v1/experiments', data),
