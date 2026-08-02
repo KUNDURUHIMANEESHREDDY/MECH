@@ -2,14 +2,19 @@
 
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
+const http = require('node:http');
 const { registerIpcHandlers } = require('./ipc');
 const { getLogger } = require('./logger');
 const { getStorage } = require('./storage');
 
 const isDev = !app.isPackaged;
 const RENDERER_DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+const BACKEND_PORT = 8000;
+const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 
 let mainWindow = null;
+let pythonBackend = null;
 
 function createMainWindow() {
   const logger = getLogger();
@@ -66,19 +71,89 @@ function createMainWindow() {
   return win;
 }
 
+async function startBackend(logger) {
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const req = http.get(`${BACKEND_URL}/health`, (res) => { res.resume(); resolve(res); });
+      req.on('error', reject);
+      req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+    if (res.statusCode && res.statusCode < 500) {
+      logger.info('backend_reuse', { url: BACKEND_URL });
+      return null;
+    }
+  } catch {
+  }
+
+  let pythonPath, scriptPath, cwd, pythonPathEnv;
+
+  if (isDev) {
+    pythonPath = 'python';
+    scriptPath = path.join(__dirname, '..', '..', 'backend', 'main.py');
+    cwd = path.join(__dirname, '..', '..');
+    pythonPathEnv = `${cwd};${path.join(cwd, 'backend')}`;
+  } else {
+    const resourcesPath = process.resourcesPath || path.join(__dirname, '..');
+    pythonPath = 'python';
+    scriptPath = path.join(resourcesPath, 'backend', 'main.py');
+    cwd = resourcesPath;
+    pythonPathEnv = `${resourcesPath};${path.join(resourcesPath, 'backend')}`;
+  }
+
+  logger.info('backend_spawning', { pythonPath, scriptPath, cwd, pythonPathEnv });
+
+  const child = spawn(pythonPath, [scriptPath], {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, PYTHONPATH: pythonPathEnv, PYTHONUNBUFFERED: '1' },
+    windowsHide: true,
+  });
+
+  child.stdout?.on('data', (d) => logger.info('backend_stdout', { line: d.toString().trim() }));
+  child.stderr?.on('data', (d) => logger.warn('backend_stderr', { line: d.toString().trim() }));
+  child.on('exit', (code) => logger.info('backend_exited', { code }));
+  child.on('error', (err) => logger.error('backend_spawn_error', { error: err.message }));
+
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await new Promise((resolve, reject) => {
+        const req = http.get(`${BACKEND_URL}/health`, (res) => { res.resume(); resolve(res); });
+        req.on('error', reject);
+        req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
+      });
+      if (res.statusCode && res.statusCode < 500) {
+        logger.info('backend_ready', { url: BACKEND_URL });
+        return child;
+      }
+    } catch { }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  logger.warn('backend_not_ready', { timeout: '30s' });
+  return child;
+}
+
+async function stopBackend(child, logger) {
+  if (!child || child.killed) return;
+  try {
+    child.kill();
+  } catch (e) {
+    logger.error('backend_kill_error', { error: e.message });
+  }
+}
+
 async function bootstrap() {
   const logger = getLogger();
   logger.info('app_boot', { version: app.getVersion(), isDev });
 
-  // Initialize storage (creates DB on first run)
   const storage = getStorage();
   await storage.init();
   logger.info('storage_ready', { db: storage.dbPath });
 
-  // Runtime IPC handlers proxy gpt2:* / runtime:* calls to the HTTP backend on :8000
+  pythonBackend = await startBackend(logger);
   registerIpcHandlers({ ipcMain, storage, logger });
 
-  // Create window
   mainWindow = createMainWindow();
 }
 
@@ -88,13 +163,17 @@ process.on('uncaughtException', (err) => {
 });
 
 app.whenReady().then(bootstrap).catch((err) => {
-  // eslint-disable-next-line no-console
   console.error('Fatal during bootstrap:', err);
   app.exit(1);
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', async () => {
+  const logger = getLogger();
+  await stopBackend(pythonBackend, logger);
 });
 
 app.on('activate', () => {

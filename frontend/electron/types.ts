@@ -1,4 +1,4 @@
-export type Theme = "system" | "light" | "dark";
+export type Theme = "system" | "dark" | "light" | "midnight" | "nord" | "dracula" | "solarized-dark" | "solarized-light";
 
 export type Settings = {
   theme: Theme;
