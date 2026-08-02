@@ -98,7 +98,11 @@ export function useModel() {
     }
   }, [state.modelInfo]);
 
+  const clearError = useCallback(() => {
+    setState(s => ({ ...s, error: null }));
+  }, []);
+
   const dispose = useCallback(() => { disposedRef.current = true; }, []);
 
-  return { state, listModels, load, infer, dispose };
+  return { state, listModels, load, infer, dispose, clearError };
 }
