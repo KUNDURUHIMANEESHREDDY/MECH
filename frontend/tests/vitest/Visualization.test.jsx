@@ -28,12 +28,20 @@ describe('EventBus & PanelRegistry', () => {
 });
 
 describe('NeuronSearch & TimelinePanel', () => {
-  it('renders NeuronSearch and filters by input', () => {
-    render(<NeuronSearch />);
-    expect(screen.getByTestId('neuron-search')).toBeInTheDocument();
+  it('renders NeuronSearch and filters by input', async () => {
+    const neurons = [
+      { label: 'Induction Head Key', neuron_index: 1, activation: 0.95, in_weight_l2: 0.1, out_weight_l2: 0.2 },
+      { label: 'Name Mover Head', neuron_index: 2, activation: 0.8, in_weight_l2: 0.3, out_weight_l2: 0.4 }
+    ];
+    const api = {
+      gpt2Neurons: async () => ({ status: 'ok', neurons, total_neurons: neurons.length })
+    };
+    render(<NeuronSearch api={api} />);
+    await screen.findByText('Induction Head Key');
     const input = screen.getByPlaceholderText(/Search neuron ID/i);
     fireEvent.change(input, { target: { value: 'Induction' } });
     expect(screen.getByText('Induction Head Key')).toBeInTheDocument();
+    expect(screen.queryByText('Name Mover Head')).not.toBeInTheDocument();
   });
 
   it('renders TimelinePanel and receives timeline events', () => {

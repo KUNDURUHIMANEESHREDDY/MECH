@@ -37,7 +37,7 @@ describe('App shell', () => {
     render(<App />);
     fireEvent.click(screen.getByTestId('nav-settings'));
     await waitFor(() => {
-      expect(screen.getByTestId('settings-tab-theme')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     });
   });
 });
