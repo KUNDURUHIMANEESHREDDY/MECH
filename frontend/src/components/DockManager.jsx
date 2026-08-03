@@ -100,7 +100,7 @@ export default function DockManager({ isVisible, onClose }) {
               className={`dock-tab ${activePanelId === p.id ? 'active' : ''}`}
               onClick={() => setActivePanelId(p.id)}
             >
-              <span className="dock-icon">{typeof p.icon === 'function' ? <p.icon size={16} /> : p.icon}</span> {p.name}
+              <span className="dock-icon">{typeof p.icon === 'string' ? p.icon : p.icon ? <p.icon size={16} /> : null}</span> {p.name}
             </button>
           ))}
         </div>

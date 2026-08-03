@@ -31,8 +31,8 @@ function run(cmd, args, opts) {
 }
 
 function ensureRendererBuilt() {
-  const distIndex = path.join(ROOT, 'dist', 'index.html');
-  if (fs.existsSync(distIndex)) return;
+  // Always rebuild: a stale dist/ silently ships an old UI (electron-builder
+  // packages whatever is on disk, so skipping the Vite build hides changes).
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   run(npmCmd, ['run', 'build:renderer']);
 }

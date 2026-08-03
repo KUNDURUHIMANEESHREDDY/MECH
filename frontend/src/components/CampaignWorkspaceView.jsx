@@ -133,7 +133,7 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
               borderBottom: activeTab === tab.key ? '2px solid #5cd4c4' : '2px solid transparent'
             }}
           >
-            {typeof tab.icon === 'function' ? <tab.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{tab.label}
+            {tab.icon ? <tab.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{tab.label}
           </button>
         ))}
       </div>

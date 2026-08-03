@@ -241,7 +241,7 @@ export default function BenchmarkSuiteView() {
             padding: '7px 18px', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all 0.2s',
             background: tab === t.id ? 'linear-gradient(135deg,#4f46e5,#7c3aed)' : 'rgba(30,41,59,0.7)',
             border: `1px solid ${tab === t.id ? '#6366f1' : '#1e293b'}`,
-            color: tab === t.id ? '#fff' : '#94a3b8'}}>{typeof t.icon === 'function' ? <t.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{t.label}</button>
+            color: tab === t.id ? '#fff' : '#94a3b8'}}>{t.icon ? <t.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{t.label}</button>
         ))}
       </div>
 

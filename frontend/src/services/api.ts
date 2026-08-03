@@ -16,6 +16,12 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json();
 }
 
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
+  return res.json();
+}
+
 const noopResolve = (val?: any) => Promise.resolve(val ?? []);
 
 export const api = {
@@ -50,15 +56,26 @@ export const api = {
   gpt2Neurons: (layer: number, component?: string, page?: number, pageSize?: number, sortBy?: string, order?: string) =>
     post<Record<string, unknown>>('/api/v1/gpt2/neurons', { layer, component, page, page_size: pageSize, sort_by: sortBy, order }),
 
-  listExperiments: () => get<{ experiments: unknown[] }>('/api/v1/experiments'),
+  listExperiments: async (): Promise<unknown[]> => {
+    const res = await get<{ experiments?: unknown[] }>('/api/v1/experiments');
+    return Array.isArray(res) ? res : Array.isArray(res?.experiments) ? res.experiments : [];
+  },
   createExperiment: (data: Record<string, unknown>) => post<unknown>('/api/v1/experiments', data),
   saveExperiment: (data: unknown) => post<unknown>('/api/v1/experiments', data as Record<string, unknown>),
+  deleteExperiment: (id: string) => del<{ status: string }>(`/api/v1/experiments/${id}`),
 
-  listSessions: () => get<{ sessions: unknown[] }>('/api/v1/sessions'),
+  listSessions: async (): Promise<unknown[]> => {
+    const res = await get<{ sessions?: unknown[] }>('/api/v1/sessions');
+    return Array.isArray(res) ? res : Array.isArray(res?.sessions) ? res.sessions : [];
+  },
   createSession: (data: Record<string, unknown>) => post<unknown>('/api/v1/sessions', data),
   saveSession: (data: unknown) => post<unknown>('/api/v1/sessions', data as Record<string, unknown>),
+  deleteSession: (id: string) => del<{ status: string }>(`/api/v1/sessions/${id}`),
 
-  listBenchmarks: () => get<{ benchmarks: string[] }>('/api/v1/benchmarks'),
+  listBenchmarks: async (): Promise<string[]> => {
+    const res = await get<{ benchmarks?: string[] }>('/api/v1/benchmarks');
+    return Array.isArray(res) ? res : Array.isArray(res?.benchmarks) ? res.benchmarks : [];
+  },
   runBenchmark: (name: string) => post<unknown>('/api/v1/benchmarks/run', { benchmark_name: name }),
 
   getAppLogs: () => noopResolve(),

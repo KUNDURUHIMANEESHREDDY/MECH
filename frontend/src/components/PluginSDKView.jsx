@@ -63,7 +63,7 @@ function HookBadge({ hookId, active }) {
       border: `1px solid ${active ? '#6366f1' : '#334155'}`,
       color: active ? '#a5b4fc' : '#64748b',
       cursor: 'help', transition: 'all 0.2s'}}>
-      {typeof hook.icon === 'function' ? <hook.icon size={13} /> : hook.icon} {hook.label}
+      {typeof hook.icon === 'string' ? hook.icon : hook.icon ? <hook.icon size={13} /> : null} {hook.label}
     </span>
   );
 }
@@ -198,7 +198,7 @@ function HookMatrixPanel() {
               return (
                 <tr key={h.id} style={{ background: i % 2 === 0 ? 'rgba(30,41,59,0.3)' : 'transparent' }}>
                   <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#818cf8' }}>{h.id}</td>
-                  <td style={{ padding: '8px 12px', color: '#94a3b8' }}>{typeof h.icon === 'function' ? <h.icon size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} /> : h.icon} {h.label}</td>
+                  <td style={{ padding: '8px 12px', color: '#94a3b8' }}>{typeof h.icon === 'string' ? h.icon : h.icon ? <h.icon size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} /> : null} {h.label}</td>
                   <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                     <span style={{
                       padding: '1px 8px', borderRadius: 8, fontWeight: 600, fontSize: 10,
@@ -366,7 +366,7 @@ export default function PluginSDKView() {
               background: tab === t.id ? 'linear-gradient(135deg,#4f46e5,#7c3aed)' : 'rgba(30,41,59,0.7)',
               border: `1px solid ${tab === t.id ? '#6366f1' : '#1e293b'}`,
               color: tab === t.id ? '#fff' : '#94a3b8'}}
-          >{typeof t.icon === 'function' ? <t.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{t.label}</button>
+          >{t.icon ? <t.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{t.label}</button>
         ))}
       </div>
 
