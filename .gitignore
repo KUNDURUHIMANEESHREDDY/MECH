@@ -1,7 +1,3 @@
-# Examples 1:
-(empty)
-
-# Example 2 (Project with artifacts):
 # Compiled and build artifacts
 *.pyc
 __pycache__/
@@ -9,18 +5,33 @@ __pycache__/
 *.obj
 dist/
 build/
+release*/
+.pytest_cache/
+
 # Dependencies
 .venv/
 venv/
 node_modules/
+
 # Logs and temp files
 *.log
 *.tmp
 *.swp
+
 # Environment
 .env
 .env.local
 .env.*
+
 # Editors
 .vscode/
 .idea/
+
+# Agent tooling and session state
+.continue/
+.omo/run-continuation/
+frontend/audit_*
+
+# Misc untracked junk
+New folder*/
+attn_L10_H7.png
