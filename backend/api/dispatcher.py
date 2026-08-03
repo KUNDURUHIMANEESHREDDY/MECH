@@ -1,13 +1,25 @@
 from fastapi import APIRouter
 from typing import Dict, Any, List
 import hashlib
+import os
 import random
+from pathlib import Path
 
 # Real GPT-2 inference engine (torch + transformers). Falls back to the
 # seeded stand-ins below only when the engine's ML stack is unavailable.
 from backend.services import gpt2_engine as engine
+from backend.core.unified_registry import UnifiedRegistry
+from backend.storage import DesktopStorage
 
 router = APIRouter()
+
+_STORAGE_PATH = os.environ.get(
+    "MECH_STORAGE_DB",
+    str(Path(__file__).parent.parent / "storage" / "mech.db"),
+)
+_store = DesktopStorage(_STORAGE_PATH)
+_store.initialize()
+_unified_registry = UnifiedRegistry()
 
 
 @router.get("/status")
@@ -97,6 +109,11 @@ def list_benchmarks() -> Dict[str, Any]:
     }
 
 
+@router.get("/research_catalog")
+def research_catalog(item_type: str = "all") -> Dict[str, Any]:
+    return {"catalog": _unified_registry.list_catalog(item_type=item_type)}
+
+
 @router.post("/benchmarks/run")
 def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
     name = payload.get("benchmark_name", "IOI")
@@ -110,22 +127,40 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/experiments")
 def list_experiments() -> Dict[str, Any]:
-    return {"experiments": []}
+    return {"experiments": _store.list_experiments()}
 
 
 @router.post("/experiments")
 def create_experiment(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {"status": "created", "id": f"exp_{hash(str(payload)) % 10000}"}
+    item = dict(payload)
+    item.setdefault("id", f"exp_{hash(str(payload)) % 10000}")
+    _store.add_experiment(item)
+    return {"status": "created", "id": item["id"]}
+
+
+@router.delete("/experiments/{item_id}")
+def delete_experiment(item_id: str) -> Dict[str, Any]:
+    deleted = _store.delete_experiment(item_id)
+    return {"status": "deleted" if deleted else "not_found", "id": item_id}
 
 
 @router.get("/sessions")
 def list_sessions() -> Dict[str, Any]:
-    return {"sessions": []}
+    return {"sessions": _store.list_sessions()}
 
 
 @router.post("/sessions")
 def create_session(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {"status": "created", "id": f"sess_{hash(str(payload)) % 10000}"}
+    item = dict(payload)
+    item.setdefault("id", f"sess_{hash(str(payload)) % 10000}")
+    _store.add_session(item)
+    return {"status": "created", "id": item["id"]}
+
+
+@router.delete("/sessions/{item_id}")
+def delete_session(item_id: str) -> Dict[str, Any]:
+    deleted = _store.delete_session(item_id)
+    return {"status": "deleted" if deleted else "not_found", "id": item_id}
 
 
 @router.get("/discoveries")
