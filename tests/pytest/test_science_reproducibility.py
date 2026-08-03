@@ -92,8 +92,8 @@ def test_report_engine_needs_investigation():
 def test_ioi_pipeline_runs():
     pipeline = IOIReproductionPipeline(mock_mode=True)
     result = pipeline.run(n_prompts=20, seed=42)
-    assert result["pipeline"] == "IOIReproductionPipeline"
-    assert result["n_prompts"] == 20
+    assert result["pipeline"] == "IOIReproductionPipeline-HighFidelity"
+    assert result["observed_metrics"]["n_samples"] == 20
     assert "circuit_faithfulness" in result["observed_metrics"]
     assert result["reproducibility_report"]["overall_tier"] in ("Gold", "Silver", "Bronze", "Needs Investigation")
 

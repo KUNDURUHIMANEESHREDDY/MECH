@@ -113,7 +113,7 @@ class AIScientistEngine:
 
         # 8. Roadmap & Consensus Synthesis
         roadmap = self.roadmap_generator.generate_roadmap(research_theme=question)
-        consensus = self.consensus_engine.Synthesize_consensus(experimental_outcomes=[val_res])
+        consensus = self.consensus_engine.synthesize_consensus(experimental_outcomes=[val_res])
 
         return {
             "question": question,
