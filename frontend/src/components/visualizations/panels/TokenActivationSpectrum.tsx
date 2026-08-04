@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { colors } from '../../../design/tokens/colors';
 
 interface Props {
   tokens: string[];
@@ -28,7 +29,7 @@ export function TokenActivationSpectrum({ tokens, activations, maxTokens = 50 }:
 
   return (
     <div style={{ fontSize: 11 }}>
-      <div style={{ fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+      <div style={{ fontWeight: 600, color: colors.inkMuted48, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
         Token Activation Spectrum
       </div>
       <svg width={W} height={H} style={{ display: 'block', borderRadius: 4 }}>
@@ -41,19 +42,19 @@ export function TokenActivationSpectrum({ tokens, activations, maxTokens = 50 }:
           const b = 200;
           return (
             <g key={p.idx}>
-              <text x={LABEL_W - 4} y={y + ROW_H / 2} fill="#a0a0a0" fontSize="9" textAnchor="end" dominantBaseline="middle">
+              <text x={LABEL_W - 4} y={y + ROW_H / 2} fill={colors.inkMuted48} fontSize="9" textAnchor="end" dominantBaseline="middle">
                 {p.token.length > 10 ? p.token.slice(0, 10) + '…' : p.token}
               </text>
-              <rect x={LABEL_W} y={y} width={BAR_MAX_W} height={ROW_H} fill="#1e1e2e" rx={2} />
+              <rect x={LABEL_W} y={y} width={BAR_MAX_W} height={ROW_H} fill={colors.dividerSoft} rx={2} />
               <rect x={LABEL_W} y={y} width={barW} height={ROW_H} fill={`rgb(${r},${g},${b})`} rx={2} />
-              <text x={LABEL_W + barW + 4} y={y + ROW_H / 2} fill="#ccc" fontSize="9" dominantBaseline="middle">
+              <text x={LABEL_W + barW + 4} y={y + ROW_H / 2} fill={colors.bodyMuted} fontSize="9" dominantBaseline="middle">
                 {p.activation.toFixed(3)}
               </text>
             </g>
           );
         })}
       </svg>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10, color: '#888' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10, color: colors.inkMuted48 }}>
         <span>Showing {limited.length} of {tokens.length} tokens</span>
         <span>Sorted by |activation|</span>
       </div>

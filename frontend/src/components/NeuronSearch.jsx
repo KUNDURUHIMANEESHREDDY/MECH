@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { colors } from '../design/tokens/colors';
 
 export default function NeuronSearch({ api, onSelectNeuron, selectedLayer }) {
   const [query, setQuery] = useState('');
@@ -80,7 +81,7 @@ export default function NeuronSearch({ api, onSelectNeuron, selectedLayer }) {
       </div>
 
       {error && (
-        <p style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{error}</p>
+        <p style={{ color: colors.danger, fontSize: 12, marginTop: 8 }}>{error}</p>
       )}
 
       {loading ? (
@@ -103,7 +104,7 @@ export default function NeuronSearch({ api, onSelectNeuron, selectedLayer }) {
                 onClick={() => onSelectNeuron && onSelectNeuron(n)}
                 style={{
                   cursor: 'pointer',
-                  borderLeft: n.activation > 0.5 ? '3px solid #3b82f6' : '3px solid transparent',
+                  borderLeft: n.activation > 0.5 ? `3px solid ${colors.primary}` : '3px solid transparent',
                 }}
               >
                 <div className="neuron-id-tag">{n.label}</div>
@@ -127,7 +128,7 @@ export default function NeuronSearch({ api, onSelectNeuron, selectedLayer }) {
               >
                 Prev
               </button>
-              <span style={{ fontSize: 11, color: '#888', lineHeight: '24px' }}>
+              <span style={{ fontSize: 11, color: colors.inkMuted48, lineHeight: '24px' }}>
                 Page {page + 1} · {total} total neurons
               </span>
               <button

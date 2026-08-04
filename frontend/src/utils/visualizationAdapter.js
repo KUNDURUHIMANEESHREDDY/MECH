@@ -9,7 +9,7 @@ export class VisualizationAdapter {
       id: backendNode.id,
       label: backendNode.label || backendNode.title || backendNode.id,
       type: backendNode.type || 'Node',
-      color: backendNode.type === 'Circuit' ? '#3b82f6' : backendNode.type === 'Feature' ? '#10b981' : '#a855f7',
+      color: backendNode.type === 'Circuit' ? 'var(--accent)' : backendNode.type === 'Feature' ? 'var(--success)' : 'var(--purple)',
     };
   }
 

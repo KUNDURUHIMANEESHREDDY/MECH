@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useEffect, useState } from 'react';
+import { colors } from '../../../design/tokens/colors';
 import { TokenActivationSpectrum } from './TokenActivationSpectrum';
 
 interface Props {
@@ -21,9 +22,9 @@ const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 6;
 
 const btnStyle: React.CSSProperties = {
-  background: '#1e1e2e',
-  color: '#ccc',
-  border: '1px solid #3a5a8a',
+  background: colors.surfacePearl,
+  color: colors.inkMuted80,
+  border: `1px solid ${colors.hairline}`,
   borderRadius: 4,
   width: 20,
   height: 20,
@@ -65,7 +66,7 @@ export function ActivationHeatmap({ activations, neuronIndex, onSelectNeuron, to
       const barTop = rowTop + TOP_PAD + (barH - barHeight);
       const selected = neuronIndex === i;
 
-      ctx.fillStyle = selected ? '#3a5a8a' : '#1e1e2e';
+      ctx.fillStyle = selected ? colors.primary : colors.surfacePearl;
       ctx.fillRect(x, barTop, barW, barHeight);
 
       const t = v / maxVal;
@@ -76,18 +77,18 @@ export function ActivationHeatmap({ activations, neuronIndex, onSelectNeuron, to
       ctx.fillRect(x, barTop, barW, barHeight);
 
       if (selected) {
-        ctx.strokeStyle = '#ffd700';
+        ctx.strokeStyle = colors.warning;
         ctx.lineWidth = 2;
         ctx.strokeRect(x, barTop, barW, barHeight);
       }
 
-      ctx.fillStyle = '#a0a0a0';
+      ctx.fillStyle = colors.inkMuted48;
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(`n${i}`, x + barW / 2, rowTop + TOP_PAD + barH + LABEL_H);
 
-      ctx.fillStyle = '#ccc';
+      ctx.fillStyle = colors.bodyMuted;
       ctx.fillText(v.toFixed(2), x + barW / 2, rowTop + TOP_PAD - 4);
     }
   }, [activations, maxVal, neuronIndex, zoom, W, H, barW, barH, rowH, barsPerRow]);
@@ -119,11 +120,11 @@ export function ActivationHeatmap({ activations, neuronIndex, onSelectNeuron, to
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: 10, color: '#94a3b8' }}>Zoom</span>
+        <span style={{ fontSize: 10, color: colors.inkMuted48 }}>Zoom</span>
         <button type="button" onClick={() => setZoom(z => Math.max(ZOOM_MIN, z - 0.1))} style={btnStyle}>-</button>
-        <span style={{ fontSize: 10, fontFamily: 'monospace', minWidth: 36, textAlign: 'center', color: '#ccc' }}>{Math.round(zoom * 100)}%</span>
+        <span style={{ fontSize: 10, fontFamily: 'monospace', minWidth: 36, textAlign: 'center', color: colors.bodyMuted }}>{Math.round(zoom * 100)}%</span>
         <button type="button" onClick={() => setZoom(z => Math.min(ZOOM_MAX, z + 0.1))} style={btnStyle}>+</button>
-        <span style={{ fontSize: 10, color: '#64748b' }}>scroll to zoom</span>
+        <span style={{ fontSize: 10, color: colors.inkMuted48 }}>scroll to zoom</span>
       </div>
       <canvas
         ref={ref}

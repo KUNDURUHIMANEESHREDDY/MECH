@@ -102,7 +102,7 @@ export default function DiscoveryMemoryModal({ isOpen, onClose, onNavigate }) {
           {(activeCategory === 'all' || activeCategory === 'features') && db.features.map(item => (
             <div key={item.id} className="result-item feature">
               <div className="result-type">
-                <span style={{ color: '#d0c0ff' }}>SAE FEATURE</span>
+                <span style={{ color: 'var(--warning)' }}>SAE FEATURE</span>
                 <span style={{ color: 'var(--text-dim)' }}>Match: {Math.round(item.score * 100)}%</span>
               </div>
               <div className="result-title">{item.title} ({item.id})</div>
@@ -113,7 +113,7 @@ export default function DiscoveryMemoryModal({ isOpen, onClose, onNavigate }) {
           {(activeCategory === 'all' || activeCategory === 'neurons') && db.neurons.map(item => (
             <div key={item.id} className="result-item neuron">
               <div className="result-type">
-                <span style={{ color: '#5cd4c4' }}>ATTENTION HEAD / NEURON</span>
+                <span style={{ color: 'var(--accent-hover)' }}>ATTENTION HEAD / NEURON</span>
                 <span style={{ color: 'var(--text-dim)' }}>Match: {Math.round(item.score * 100)}%</span>
               </div>
               <div className="result-title">{item.title}</div>
@@ -124,7 +124,7 @@ export default function DiscoveryMemoryModal({ isOpen, onClose, onNavigate }) {
           {(activeCategory === 'all' || activeCategory === 'circuits') && db.circuits.map(item => (
             <div key={item.id} className="result-item circuit">
               <div className="result-type">
-                <span style={{ color: '#feca57' }}>COMPUTATIONAL CIRCUIT</span>
+                <span style={{ color: 'var(--success)' }}>COMPUTATIONAL CIRCUIT</span>
                 <span style={{ color: 'var(--text-dim)' }}>Score: {Math.round(item.score * 100)}%</span>
               </div>
               <div className="result-title">{item.title}</div>

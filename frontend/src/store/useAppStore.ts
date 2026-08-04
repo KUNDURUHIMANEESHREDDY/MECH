@@ -17,7 +17,6 @@ export interface WorkspaceState {
 }
 
 export interface AppState {
-  darkMode: boolean;
   commandPaletteOpen: boolean;
   activePage: string;
   workspace: WorkspaceState;
@@ -27,7 +26,6 @@ export interface AppState {
 }
 
 const DEFAULT_STATE: AppState = {
-  darkMode: true,
   commandPaletteOpen: false,
   activePage: 'explorer',
   workspace: {

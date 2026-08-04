@@ -35,7 +35,7 @@ export default function CircuitAnimationPanel() {
               </>
             )}
           </button>
-          <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             Layer Depth: {step} / {totalLayers}
           </span>
         </div>
@@ -49,9 +49,9 @@ export default function CircuitAnimationPanel() {
           style={{ width: '100%', marginBottom: '12px' }}
         />
 
-        <div className="frame-preview" style={{ padding: '12px', background: '#0f172a', borderRadius: '6px', border: '1px solid #1e293b' }}>
-          <h4 style={{ margin: '0 0 6px 0', fontSize: '13px', color: '#38bdf8' }}>Cached Runtime Frame @ Layer {step}</h4>
-          <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>
+        <div className="frame-preview" style={{ padding: '12px', background: 'var(--bg-elev-2)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+          <h4 style={{ margin: '0 0 6px 0', fontSize: '13px', color: 'var(--accent)' }}>Cached Runtime Frame @ Layer {step}</h4>
+          <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)' }}>
             Activation Magnitude: <strong>{(step * 0.85).toFixed(2)}</strong> | Active Attn Heads: <strong>[H{step % 12}.{step % 4}]</strong>
           </p>
         </div>

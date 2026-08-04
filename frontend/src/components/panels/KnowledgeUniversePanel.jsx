@@ -12,18 +12,18 @@ export default function KnowledgeUniversePanel() {
         <h3><Orbit size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Knowledge Universe</h3>
         <div style={{ display: 'flex', gap: '4px' }}>
           <button className="btn" style={{ fontSize: '10px' }} onClick={() => setZoom((z) => Math.max(0.5, z - 0.2))}>Zoom -</button>
-          <span style={{ fontSize: '11px', alignSelf: 'center', color: '#94a3b8' }}>{(zoom * 100).toFixed(0)}%</span>
+          <span style={{ fontSize: '11px', alignSelf: 'center', color: 'var(--text-muted)' }}>{(zoom * 100).toFixed(0)}%</span>
           <button className="btn" style={{ fontSize: '10px' }} onClick={() => setZoom((z) => Math.min(2.0, z + 0.2))}>Zoom +</button>
         </div>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {nodes.map((n) => (
-            <div key={n.id} style={{ padding: '12px', background: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
-              <span className="badge" style={{ fontSize: '10px', background: '#38bdf8', color: '#0f172a', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
+            <div key={n.id} style={{ padding: '12px', background: 'var(--bg-elev-2)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <span className="badge" style={{ fontSize: '10px', background: 'var(--accent)', color: 'var(--bg)', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
                 {n.category}
               </span>
-              <h4 style={{ margin: '4px 0', color: '#f8fafc', fontSize: '13px' }}>{n.label}</h4>
+              <h4 style={{ margin: '4px 0', color: 'var(--text)', fontSize: '13px' }}>{n.label}</h4>
             </div>
           ))}
         </div>

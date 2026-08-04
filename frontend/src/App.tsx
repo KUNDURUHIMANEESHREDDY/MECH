@@ -171,7 +171,7 @@ export default function App() {
       case 'transformerExplorer':
         // Needs model data (tokens/layers) — the old {...pageProps} spread
         // passed api/onNavigate instead and crashed buildNeuronPoints.
-        return data ? (
+        return data?.tokens && data?.layers?.length ? (
           <TransformerExplorer
             tokens={data.tokens.map(t => t.text)}
             layers={data.layers}

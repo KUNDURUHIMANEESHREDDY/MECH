@@ -50,15 +50,15 @@ export default function ResearchGraphPanel() {
               style={{
                 padding: '8px 12px',
                 borderRadius: '6px',
-                background: '#1e293b',
-                border: '1px solid #334155',
+                background: 'var(--bg-elev-2)',
+                border: '1px solid var(--border)',
                 cursor: 'pointer'
               }}
             >
-              <span className="badge" style={{ fontSize: '10px', background: '#3b82f6', color: '#fff', padding: '2px 6px', borderRadius: '4px', marginRight: '8px' }}>
+              <span className="badge" style={{ fontSize: '10px', background: 'var(--accent)', color: 'var(--bg)', padding: '2px 6px', borderRadius: '4px', marginRight: '8px' }}>
                 {n.type}
               </span>
-              <span style={{ fontSize: '12px', color: '#e2e8f0' }}>{n.label}</span>
+              <span style={{ fontSize: '12px', color: 'var(--text)' }}>{n.label}</span>
             </div>
           ))}
         </div>

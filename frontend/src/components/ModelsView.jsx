@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Check } from 'lucide-react';
+import { colors } from '../design/tokens/colors';
 
 export default function ModelsView({ api, onNavigate }) {
   const [selectedModel, setSelectedModel] = useState('gpt2');
@@ -44,18 +45,18 @@ export default function ModelsView({ api, onNavigate }) {
       </div>
 
       {modelInfo?.status === 'loaded' && (
-        <div className="card" style={{ marginBottom: 16, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-          <p style={{ margin: 0, fontWeight: 600, color: '#166534', fontSize: 13 }}>
+<div className="card" style={{ marginBottom: 16, background: colors.successSoft, border: `1px solid ${colors.successBorder}` }}>
+          <p style={{ margin: 0, fontWeight: 600, color: colors.successText, fontSize: 13 }}>
             {modelInfo.model_name} loaded — {modelInfo.n_layers} layers · {modelInfo.n_heads} heads · d_model {modelInfo.d_model}
           </p>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#166534' }}>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: colors.successText }}>
             Navigating to GPT-2 Live view…
           </p>
         </div>
       )}
       {error && (
-        <div className="card" style={{ marginBottom: 16, background: '#fef2f2', border: '1px solid #fecaca' }}>
-          <p style={{ margin: 0, color: '#991b1b', fontSize: 13 }}>{error}</p>
+        <div className="card" style={{ marginBottom: 16, background: colors.dangerSoft, border: `1px solid ${colors.dangerBorder}` }}>
+          <p style={{ margin: 0, color: colors.dangerText, fontSize: 13 }}>{error}</p>
         </div>
       )}
 

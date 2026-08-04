@@ -15,14 +15,14 @@ export default function PresentationModePanel() {
         <h3><ChartBar size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Presentation Mode</h3>
         <div style={{ display: 'flex', gap: '6px' }}>
           <button className="btn" style={{ fontSize: '10px' }} onClick={() => setSlide((s) => Math.max(1, s - 1))}>Previous</button>
-          <span style={{ fontSize: '11px', color: '#94a3b8', alignSelf: 'center' }}>Slide {slide} / {slides.length}</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', alignSelf: 'center' }}>Slide {slide} / {slides.length}</span>
           <button className="btn" style={{ fontSize: '10px' }} onClick={() => setSlide((s) => Math.min(slides.length, s + 1))}>Next</button>
         </div>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
-        <div style={{ padding: '16px', background: '#020617', borderRadius: '8px', border: '1px solid #1e293b' }}>
-          <h4 style={{ margin: '0 0 6px 0', fontSize: '14px', color: '#38bdf8' }}>{slides[slide - 1].title}</h4>
-          <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1' }}>{slides[slide - 1].content}</p>
+        <div style={{ padding: '16px', background: 'var(--bg-elev-2)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+          <h4 style={{ margin: '0 0 6px 0', fontSize: '14px', color: 'var(--accent)' }}>{slides[slide - 1].title}</h4>
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>{slides[slide - 1].content}</p>
         </div>
       </div>
     </div>

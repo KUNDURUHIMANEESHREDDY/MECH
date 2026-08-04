@@ -19,8 +19,8 @@ export function TokenViewer({ tokens, tokenIds, selectedToken, onHoverToken }: P
             style={{
               padding: '2px 6px',
               borderRadius: 4,
-              background: selectedToken === i ? '#3b82f6' : '#2a2a3a',
-              color: selectedToken === i ? '#fff' : '#d0d0d0',
+              background: selectedToken === i ? 'var(--accent)' : 'var(--bg-elev-2)',
+              color: selectedToken === i ? 'var(--bg)' : 'var(--text)',
               cursor: 'pointer',
               transition: 'background 0.15s',
             }}
@@ -29,14 +29,14 @@ export function TokenViewer({ tokens, tokenIds, selectedToken, onHoverToken }: P
           </span>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', color: '#888' }}>
+      <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', color: 'var(--text-muted)' }}>
         {tokenIds.map((id, i) => (
           <span
             key={i}
             style={{
               padding: '2px 6px',
               borderRadius: 4,
-              background: selectedToken === i ? '#1e3a5f' : 'transparent',
+              background: selectedToken === i ? 'var(--accent-soft)' : 'transparent',
             }}
           >
             {id}

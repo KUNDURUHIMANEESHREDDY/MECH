@@ -29,9 +29,11 @@ import {
   FolderKanban,
   Clock,
   Search,
-  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Activity,
 } from 'lucide-react';
+import { colors, radii, spacing, typography } from '../design/tokens';
 
 const SECTIONS = [
   {
@@ -116,55 +118,156 @@ const ICONS = {
   recent: Clock,
 };
 
-export default function Sidebar({ pages, active, onSelect }) {
+export default function Sidebar({ pages, active, onSelect, collapsed, onToggle }) {
   const [query, setQuery] = useState('');
   const getLabel = (key) => pages[key]?.label || PAGE_LABELS[key] || key;
   const matches = (key) => getLabel(key).toLowerCase().includes(query.trim().toLowerCase());
 
   return (
-    <div className="sidebar">
-      <div className="sidebar-header">
-        <h1>Explorer</h1>
-        <div className="sidebar-actions">
-          <button className="btn btn-ghost btn-sm" title="Collapse all"><ChevronUp size={14} /></button>
-        </div>
+    <div
+      className={`sidebar${collapsed ? ' collapsed' : ''}`}
+      style={{
+        backgroundColor: colors.bgSidebar,
+        width: collapsed ? '0px' : '264px',
+        borderRight: `1px solid ${colors.border}`,
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'width 0.2s ease',
+        overflow: 'hidden',
+        gridArea: 'sidebar',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: `${spacing.md} ${spacing.md} ${spacing.sm}`,
+          borderBottom: `1px solid ${colors.border}`,
+        }}
+      >
+        <h1
+          style={{
+            fontFamily: typography.displayLg.fontFamily,
+            fontSize: typography.displayLg.fontSize,
+            fontWeight: typography.displayLg.fontWeight,
+            letterSpacing: typography.displayLg.letterSpacing,
+            color: colors.ink,
+            margin: 0,
+          }}
+        >
+          Explorer
+        </h1>
+        <button
+          onClick={onToggle}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: radii.full,
+            border: 'none',
+            background: 'transparent',
+            color: colors.inkMuted80,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
       </div>
-      <div className="sidebar-body">
-        <div className="sidebar-search">
-          <Search size={13} />
-          <input
-            type="text"
-            className="input-text"
-            placeholder="Search views..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        {SECTIONS.map(section => (
-          <div key={section.title}>
-            <div className="nav-section-title">{section.title}</div>
-            <div className="nav-group">
-              {section.items.filter(matches).map(key => {
-                const Icon = ICONS[key];
-                return (
-                  <div
-                    key={key}
-                    role="button"
-                    tabIndex={0}
-                    className={'nav-item' + (active === key ? ' active' : '')}
-                    onClick={() => onSelect(key)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(key); }}
-                    data-testid={`nav-${key}`}
-                  >
-                    {Icon && <span className="nav-item-icon"><Icon size={15} strokeWidth={1.75} /></span>}
-                    <span className="nav-item-label">{getLabel(key)}</span>
-                  </div>
-                );
-              })}
-            </div>
+      {!collapsed && (
+        <div style={{ padding: `${spacing.sm} ${spacing.md}`, flex: 1, overflowY: 'auto' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: spacing.xs,
+              background: colors.canvas,
+              borderRadius: radii.pill,
+              padding: `${spacing.xs} ${spacing.md}`,
+              marginBottom: spacing.md,
+              border: `1px solid ${colors.border}`,
+            }}
+          >
+            <Search size={13} color={colors.inkMuted48} />
+            <input
+              type="text"
+              placeholder="Search views..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{
+                border: 'none',
+                outline: 'none',
+                background: 'transparent',
+                fontFamily: typography.body.fontFamily,
+                fontSize: typography.body.fontSize,
+                color: colors.ink,
+                width: '100%',
+                padding: '4px 0',
+              }}
+            />
           </div>
-        ))}
-      </div>
+          {SECTIONS.map((section) => (
+            <div key={section.title} style={{ marginBottom: spacing.md }}>
+              <div
+                style={{
+                  fontFamily: typography.caption.fontFamily,
+                  fontSize: typography.caption.fontSize,
+                  fontWeight: typography.caption.fontWeight,
+                  letterSpacing: typography.caption.letterSpacing,
+                  color: colors.inkMuted48,
+                  padding: `${spacing.xs} 0`,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {section.title}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                {section.items.filter(matches).map((key) => {
+                  const Icon = ICONS[key];
+                  const isActive = active === key;
+                  return (
+                    <div
+                      key={key}
+                      role="button"
+                      tabIndex={0}
+                      className={'nav-item' + (isActive ? ' active' : '')}
+                      data-testid={`nav-${key}`}
+                      onClick={() => onSelect(key)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') onSelect(key);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: spacing.sm,
+                        padding: `${spacing.xs} ${spacing.sm}`,
+                        borderRadius: radii.sm,
+                        cursor: 'pointer',
+                        backgroundColor: isActive ? colors.accentSoft : 'transparent',
+                        color: isActive ? colors.primary : colors.ink,
+                        fontFamily: typography.body.fontFamily,
+                        fontSize: typography.body.fontSize,
+                        fontWeight: isActive ? typography.bodyStrong.fontWeight : typography.body.fontWeight,
+                        transition: 'background-color 0.15s ease',
+                      }}
+                    >
+                      {Icon && (
+                        <span style={{ display: 'flex', alignItems: 'center' }}>
+                          <Icon size={15} strokeWidth={1.75} />
+                        </span>
+                      )}
+                      <span>{getLabel(key)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

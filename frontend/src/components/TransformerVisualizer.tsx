@@ -1,5 +1,15 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '../services/api';
+import { colors } from '../design/tokens';
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgba(hex: string, a: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -37,7 +47,6 @@ interface GraphData {
 
 interface Props {
   onNavigate?: (page: string) => void;
-  darkMode?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -45,21 +54,21 @@ interface Props {
 /* ------------------------------------------------------------------ */
 
 const COLORS = {
-  bg: '#0f0f1a',
-  nodeEmbedding: '#60a5fa',
-  nodeLayernorm: '#a78bfa',
-  nodeAttention: '#facc15',
-  nodeMlp: '#34d399',
-  nodeOutput: '#f472b6',
-  nodeBlockInput: '#60a5fa',
-  nodeBlockOutput: '#60a5fa',
-  edgeFeedforward: '#3a3a5a',
-  edgeResidual: '#f97316',
-  edgeAttention: '#818cf8',
-  edgeHighlight: '#d0c0ff',
-  text: '#e2e8f0',
-  textDim: '#64748b',
-  accent: '#d0c0ff',
+  bg: colors.canvasParchment,
+  nodeEmbedding: colors.primary,
+  nodeLayernorm: colors.purple,
+  nodeAttention: colors.warning,
+  nodeMlp: colors.success,
+  nodeOutput: colors.pink,
+  nodeBlockInput: colors.primary,
+  nodeBlockOutput: colors.primary,
+  edgeFeedforward: colors.hairline,
+  edgeResidual: colors.warning,
+  edgeAttention: colors.purple,
+  edgeHighlight: colors.purpleBorder,
+  text: colors.ink,
+  textDim: colors.inkMuted48,
+  accent: colors.purpleBorder,
   viridis: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
 };
 
@@ -117,21 +126,21 @@ function Spinner() {
 function KV({ k, v, mono }: { k: string; v: string | number; mono?: boolean }) {
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginBottom: 3, fontSize: 12 }}>
-      <span style={{ color: '#888', minWidth: 140, flexShrink: 0 }}>{k}</span>
+      <span style={{ color: colors.inkMuted48, minWidth: 140, flexShrink: 0 }}>{k}</span>
       <span style={mono ? { fontFamily: 'monospace' } : {}}>{v ?? '—'}</span>
     </div>
   );
 }
 
-function MiniBar({ label, value, max, color = '#d0c0ff' }: { label: string; value: number; max: number; color?: string }) {
+function MiniBar({ label, value, max, color = colors.purpleBorder }: { label: string; value: number; max: number; color?: string }) {
   const pct = max > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, marginBottom: 2 }}>
-      <span style={{ width: 34, color: '#888', flexShrink: 0 }}>{label}</span>
-      <div style={{ flex: 1, background: '#1e1e2e', borderRadius: 2, height: 6, overflow: 'hidden' }}>
+      <span style={{ width: 34, color: colors.inkMuted48, flexShrink: 0 }}>{label}</span>
+      <div style={{ flex: 1, background: colors.canvas, borderRadius: 2, height: 6, overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2 }} />
       </div>
-      <span style={{ width: 44, textAlign: 'right', fontFamily: 'monospace', color: '#aaa', flexShrink: 0 }}>
+      <span style={{ width: 44, textAlign: 'right', fontFamily: 'monospace', color: colors.bodyMuted, flexShrink: 0 }}>
         {value.toFixed(3)}
       </span>
     </div>
@@ -142,7 +151,7 @@ function MiniBar({ label, value, max, color = '#d0c0ff' }: { label: string; valu
 /*  Main Component                                                     */
 /* ------------------------------------------------------------------ */
 
-export default function TransformerVisualizer({ onNavigate, darkMode }: Props) {
+export default function TransformerVisualizer({ onNavigate }: Props) {
   const [arch, setArch] = useState<any>(null);
   const [archLoading, setArchLoading] = useState(true);
   const [loadingModel, setLoadingModel] = useState(false);
@@ -411,9 +420,9 @@ export default function TransformerVisualizer({ onNavigate, darkMode }: Props) {
     <div data-testid="transformer-visualizer" style={{ padding: 16, height: '100%', display: 'flex', flexDirection: 'column', background: COLORS.bg }}>
       {/* Header + prompt bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-        <h2 style={{ margin: 0, fontSize: 16, color: '#eee' }}>GPT-2 Computational Graph</h2>
+        <h2 style={{ margin: 0, fontSize: 16, color: colors.ink }}>GPT-2 Computational Graph</h2>
         {loaded && graph && (
-          <span style={{ fontSize: 11, color: '#888' }}>
+          <span style={{ fontSize: 11, color: colors.inkMuted48 }}>
             {arch.model_name} · {graph.nodes.length} nodes · {graph.edges.length} edges
           </span>
         )}
@@ -433,8 +442,8 @@ export default function TransformerVisualizer({ onNavigate, darkMode }: Props) {
       </div>
 
       {error && (
-        <div className="card" style={{ marginBottom: 14, background: '#fef2f2', border: '1px solid #fecaca' }}>
-          <p style={{ margin: 0, color: '#991b1b', fontSize: 13 }}>{error}</p>
+        <div className="card" style={{ marginBottom: 14, background: colors.dangerSoft, border: `1px solid ${colors.dangerBorder}` }}>
+          <p style={{ margin: 0, color: colors.dangerText, fontSize: 13 }}>{error}</p>
         </div>
       )}
 
@@ -442,7 +451,7 @@ export default function TransformerVisualizer({ onNavigate, darkMode }: Props) {
         <div className="card"><p className="hint">Loading architecture from live model…<Spinner /></p></div>
       ) : !loaded ? (
         <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-          <p style={{ color: '#bbb', fontSize: 13 }}>{arch?.error || 'Model not loaded.'}</p>
+          <p style={{ color: colors.inkMuted48, fontSize: 13 }}>{arch?.error || 'Model not loaded.'}</p>
           <button className="btn btn-primary" onClick={() => void loadModel()} disabled={loadingModel}>
             {loadingModel ? <>Loading GPT-2<Spinner /></> : 'Load GPT-2'}
           </button>
@@ -514,7 +523,7 @@ export default function TransformerVisualizer({ onNavigate, darkMode }: Props) {
                         r={r}
                         fill={color}
                         opacity={isSelected ? 1 : isHovered ? 0.9 : 0.7}
-                        stroke={isSelected ? '#fff' : 'none'}
+                        stroke={isSelected ? colors.onDark : 'none'}
                         strokeWidth={isSelected ? 2 : 0}
                       />
                       {node.type === 'attention-head' && (
@@ -545,9 +554,9 @@ export default function TransformerVisualizer({ onNavigate, darkMode }: Props) {
           </div>
 
           {/* Detail panel */}
-          <div style={{ width: 380, flexShrink: 0, borderLeft: '1px solid #2a2a4a', padding: 14, overflowY: 'auto', maxHeight: 'calc(100vh - 180px)' }}>
+          <div style={{ width: 380, flexShrink: 0, borderLeft: `1px solid ${colors.hairline}`, padding: 14, overflowY: 'auto', maxHeight: 'calc(100vh - 180px)' }}>
             {selectedNode === null ? (
-              <div className="card" style={{ border: '1px dashed #2a2a4a', textAlign: 'center', padding: 28 }}>
+              <div className="card" style={{ border: `1px dashed ${colors.hairline}`, textAlign: 'center', padding: 28 }}>
                 <p className="hint" style={{ margin: 0 }}>
                   Click a neuron or component node to inspect its weights, connections, and activations.
                 </p>
@@ -578,8 +587,8 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
     return (
       <div className="card" style={{ padding: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 14, color: '#d0c0ff' }}>
-            {details.path} <span style={{ color: '#888', fontSize: 11 }}>· {fmt(details.n_params)} params</span>
+          <h3 style={{ margin: 0, fontSize: 14, color: colors.purpleBorder }}>
+            {details.path} <span style={{ color: colors.inkMuted48, fontSize: 11 }}>· {fmt(details.n_params)} params</span>
           </h3>
           <button className="btn btn-ghost btn-sm" onClick={() => {}}>✕</button>
         </div>
@@ -594,9 +603,9 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
         {/* Heads */}
         {details.attention_heads?.length > 0 && (
           <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', marginBottom: 6 }}>ATTENTION HEADS</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: colors.bodyMuted, marginBottom: 6 }}>ATTENTION HEADS</div>
             {details.attention_heads.map((h: any) => (
-              <div key={h.head_index} style={{ fontSize: 10, padding: '2px 0', color: '#d0c0ff' }}>
+              <div key={h.head_index} style={{ fontSize: 10, padding: '2px 0', color: colors.purpleBorder }}>
                 H{h.head_index}: Q {h.q_weight_l2?.toFixed(3)} K {h.k_weight_l2?.toFixed(3)} V {h.v_weight_l2?.toFixed(3)} O {h.o_weight_l2?.toFixed(3)}
               </div>
             ))}
@@ -605,14 +614,14 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
 
         {/* MLP */}
         {details.mlp && (
-          <div style={{ marginTop: 10, borderTop: '1px solid #2a2a4a', paddingTop: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>MLP WEIGHTS</div>
+          <div style={{ marginTop: 10, borderTop: `1px solid ${colors.hairline}`, paddingTop: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: colors.bodyMuted, marginBottom: 4 }}>MLP WEIGHTS</div>
             <KV k="c_fc" v={details.mlp.c_fc_shape ? `[${details.mlp.c_fc_shape.join(' × ')}]` : ''} mono />
             <KV k="c_proj" v={details.mlp.c_proj_shape ? `[${details.mlp.c_proj_shape.join(' × ')}]` : ''} mono />
             {details.mlp.in_weight_l2_stats && (
               <>
                 <MiniBar label="w_in µ" value={details.mlp.in_weight_l2_stats.mean} max={details.mlp.in_weight_l2_stats.max || 1} />
-                <MiniBar label="w_in σ" value={details.mlp.in_weight_l2_stats.std} max={details.mlp.in_weight_l2_stats.max || 1} color="#60a5fa" />
+                <MiniBar label="w_in σ" value={details.mlp.in_weight_l2_stats.std} max={details.mlp.in_weight_l2_stats.max || 1} color={colors.primary} />
               </>
             )}
           </div>
@@ -620,12 +629,12 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
 
         {/* Top active neurons */}
         {details.top_active_neurons?.length > 0 && (
-          <div style={{ marginTop: 10, borderTop: '1px solid #2a2a4a', paddingTop: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#aaa', marginBottom: 4 }}>TOP ACTIVE NEURONS</div>
+          <div style={{ marginTop: 10, borderTop: `1px solid ${colors.hairline}`, paddingTop: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.bodyMuted, marginBottom: 4 }}>TOP ACTIVE NEURONS</div>
             {details.top_active_neurons.slice(0, 8).map((n: any) => (
               <div key={n.neuron_index} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, padding: '1px 0' }}>
-                <span style={{ color: '#d0c0ff' }}>N{n.neuron_index}</span>
-                <span style={{ fontFamily: 'monospace', color: '#aaa' }}>{n.activation?.toFixed(4)}</span>
+                <span style={{ color: colors.purpleBorder }}>N{n.neuron_index}</span>
+                <span style={{ fontFamily: 'monospace', color: colors.bodyMuted }}>{n.activation?.toFixed(4)}</span>
               </div>
             ))}
           </div>
@@ -639,7 +648,7 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
     return (
       <div className="card" style={{ padding: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 14, color: '#d0c0ff' }}>{details.id}</h3>
+          <h3 style={{ margin: 0, fontSize: 14, color: colors.purpleBorder }}>{details.id}</h3>
           <button className="btn btn-ghost btn-sm" onClick={() => {}}>✕</button>
         </div>
         <KV k="path" v={details.path} mono />
@@ -650,10 +659,10 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
 
         {details.top_input_weights_positive?.length > 0 && (
           <div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 10, color: '#999', marginBottom: 3 }}>top input weights (+)</div>
+            <div style={{ fontSize: 10, color: colors.inkMuted48, marginBottom: 3 }}>top input weights (+)</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
               {details.top_input_weights_positive.slice(0, 10).map((w: any, i: number) => (
-                <span key={i} style={{ fontSize: 9, fontFamily: 'monospace', color: '#7dd3fc', background: '#1e1e2e', padding: '1px 4px', borderRadius: 3 }}>
+                <span key={i} style={{ fontSize: 9, fontFamily: 'monospace', color: colors.primary, background: colors.canvas, padding: '1px 4px', borderRadius: 3 }}>
                   d{w.dim}: +{w.weight.toFixed(2)}
                 </span>
               ))}
@@ -663,10 +672,10 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
 
         {details.top_output_weights_positive?.length > 0 && (
           <div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 10, color: '#999', marginBottom: 3 }}>top output weights (+)</div>
+            <div style={{ fontSize: 10, color: colors.inkMuted48, marginBottom: 3 }}>top output weights (+)</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
               {details.top_output_weights_positive.slice(0, 10).map((w: any, i: number) => (
-                <span key={i} style={{ fontSize: 9, fontFamily: 'monospace', color: '#7dd3fc', background: '#1e1e2e', padding: '1px 4px', borderRadius: 3 }}>
+                <span key={i} style={{ fontSize: 9, fontFamily: 'monospace', color: colors.primary, background: colors.canvas, padding: '1px 4px', borderRadius: 3 }}>
                   d{w.dim}: +{w.weight.toFixed(2)}
                 </span>
               ))}
@@ -676,13 +685,13 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
 
         {details.per_token_activations?.length > 0 && (
           <div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 10, color: '#999', marginBottom: 3 }}>per-token activations</div>
+            <div style={{ fontSize: 10, color: colors.inkMuted48, marginBottom: 3 }}>per-token activations</div>
             <div style={{ display: 'flex', gap: 1, alignItems: 'flex-end', height: 30, overflowX: 'auto' }}>
               {details.per_token_activations.slice(0, 40).map((t: any, i: number) => {
                 const max = Math.max(...details.per_token_activations.map((x: any) => Math.abs(x.activation)), 0.01);
                 const pct = Math.max(4, (Math.abs(t.activation) / max) * 100);
                 return (
-                  <div key={i} style={{ width: 4, height: `${pct}%`, background: t.activation >= 0 ? '#3b82f6' : '#ef4444', borderRadius: 1 }} title={`${t.token}: ${t.activation.toFixed(4)}`} />
+                  <div key={i} style={{ width: 4, height: `${pct}%`, background: t.activation >= 0 ? colors.primary : colors.danger, borderRadius: 1 }} title={`${t.token}: ${t.activation.toFixed(4)}`} />
                 );
               })}
             </div>
@@ -700,21 +709,21 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
   if (details.status === 'ok' && details.matrix !== undefined) {
     return (
       <div className="card" style={{ padding: 14 }}>
-        <h3 style={{ margin: 0, fontSize: 14, color: '#d0c0ff', marginBottom: 8 }}>Attention Pattern</h3>
+        <h3 style={{ margin: 0, fontSize: 14, color: colors.purpleBorder, marginBottom: 8 }}>Attention Pattern</h3>
         {details.matrix?.length > 0 && details.str_tokens?.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', fontSize: 8 }}>
               <thead>
                 <tr><th style={{ width: 24 }} />{details.str_tokens.map((t: string, i: number) => (
-                  <th key={i} style={{ width: 24, textAlign: 'center', fontWeight: 500, padding: '1px 0', maxWidth: 24, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#999' }}>{t.slice(0, 3)}</th>
+                  <th key={i} style={{ width: 24, textAlign: 'center', fontWeight: 500, padding: '1px 0', maxWidth: 24, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: colors.inkMuted48 }}>{t.slice(0, 3)}</th>
                 ))}</tr>
               </thead>
               <tbody>
                 {details.matrix.map((row: number[], qi: number) => (
                   <tr key={qi}>
-                    <td style={{ color: '#999', paddingRight: 2, maxWidth: 36, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(details.str_tokens[qi] || '').slice(0, 4)}</td>
+                    <td style={{ color: colors.inkMuted48, paddingRight: 2, maxWidth: 36, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(details.str_tokens[qi] || '').slice(0, 4)}</td>
                     {row.map((v: number, ki: number) => (
-                      <td key={ki} style={{ width: 24, height: 24, background: ramp(Math.max(0, v), [[30, 41, 59], [14, 165, 233], [250, 204, 21]]), border: '1px solid rgba(148,163,184,0.08)', borderRadius: 1, textAlign: 'center', color: '#0f172a', fontSize: 7 }}>
+                      <td key={ki} style={{ width: 24, height: 24, background: ramp(Math.max(0, v), [hexToRgb(colors.surfaceBlack), hexToRgb(colors.primaryOnDark), hexToRgb(colors.warning)]), border: `1px solid ${rgba(colors.bodyMuted, 0.08)}`, borderRadius: 1, textAlign: 'center', color: colors.ink, fontSize: 7 }}>
                         {v.toFixed(2)}
                       </td>
                     ))}
@@ -732,8 +741,8 @@ function NodeInspector({ details, selectedNodeId }: { details: any; selectedNode
 
   return (
     <div className="card" style={{ padding: 14 }}>
-      <h3 style={{ margin: 0, fontSize: 14, color: '#d0c0ff', marginBottom: 8 }}>Node Detail</h3>
-      <pre style={{ fontSize: 10, color: '#aaa', whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto' }}>
+      <h3 style={{ margin: 0, fontSize: 14, color: colors.purpleBorder, marginBottom: 8 }}>Node Detail</h3>
+      <pre style={{ fontSize: 10, color: colors.bodyMuted, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto' }}>
         {JSON.stringify(details, null, 2).slice(0, 3000)}
       </pre>
     </div>

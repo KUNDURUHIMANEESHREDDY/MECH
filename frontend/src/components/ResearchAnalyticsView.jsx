@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowRight, BarChart3, Lightbulb, Star, TriangleAlert, Trophy, Zap } from 'lucide-react';
+import { colors, radii, spacing, typography } from '../design/tokens';
 
 /**
  * ResearchAnalyticsView - Multi-Campaign Meta-Learning & Analytics Dashboard
@@ -32,38 +33,38 @@ const MOCK_ANALYTICS = {
 
 export default function ResearchAnalyticsView({ api, onNavigate }) {
   return (
-    <div style={{ padding: 28, background: '#0b0b1a', color: '#e0e0ff', height: '100%', overflowY: 'auto', fontFamily: "'Inter', sans-serif" }}>
+    <div style={{ padding: 28, background: colors.canvasParchment, color: colors.ink, height: '100%', overflowY: 'auto', fontFamily: typography.body.fontFamily }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff', display: 'flex', alignItems: 'center', gap: 8 }}><BarChart3 size={20} /> Multi-Campaign Meta-Learning Analytics</h1>
-          <p style={{ margin: 0, color: '#888', fontSize: 13 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: colors.purpleBorder, display: 'flex', alignItems: 'center', gap: 8 }}><BarChart3 size={20} /> Multi-Campaign Meta-Learning Analytics</h1>
+          <p style={{ margin: 0, color: colors.inkMuted48, fontSize: 13 }}>
             Meta-policy learning extracted across 150 historical research campaigns
           </p>
         </div>
-        <div style={{ background: '#1a1a2e', padding: '6px 14px', borderRadius: 8, border: '1px solid #3a3a5a', fontSize: 12 }}>
-          <span style={{ color: '#888' }}>Meta-Learning Policy: </span>
-          <span style={{ color: '#2ea043', fontWeight: 600 }}>Active (v3.2)</span>
+        <div style={{ background: colors.surfacePearl, padding: '6px 14px', borderRadius: 8, border: `1px solid ${colors.hairline}`, fontSize: 12 }}>
+          <span style={{ color: colors.inkMuted48 }}>Meta-Learning Policy: </span>
+          <span style={{ color: colors.success, fontWeight: 600 }}>Active (v3.2)</span>
         </div>
       </div>
 
       {/* Executive Overview Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-        <div style={{ background: '#12122a', border: '1px solid #2a2a4a', padding: 20, borderRadius: 12, textAlign: 'center' }}>
-          <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase' }}>Campaigns Analyzed</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: '#fff', marginTop: 4 }}>{MOCK_ANALYTICS.total_campaigns}</div>
+        <div style={{ background: colors.canvas, border: `1px solid ${colors.hairline}`, padding: 20, borderRadius: 12, textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, textTransform: 'uppercase' }}>Campaigns Analyzed</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: colors.ink, marginTop: 4 }}>{MOCK_ANALYTICS.total_campaigns}</div>
         </div>
-        <div style={{ background: '#12122a', border: '1px solid #2a2a4a', padding: 20, borderRadius: 12, textAlign: 'center' }}>
-          <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase' }}>Overall Success Rate</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: '#2ea043', marginTop: 4 }}>{(MOCK_ANALYTICS.overall_success_rate * 100).toFixed(1)}%</div>
+        <div style={{ background: colors.canvas, border: `1px solid ${colors.hairline}`, padding: 20, borderRadius: 12, textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, textTransform: 'uppercase' }}>Overall Success Rate</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: colors.success, marginTop: 4 }}>{(MOCK_ANALYTICS.overall_success_rate * 100).toFixed(1)}%</div>
         </div>
-        <div style={{ background: '#12122a', border: '1px solid #2a2a4a', padding: 20, borderRadius: 12, textAlign: 'center' }}>
-          <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase' }}>Total Compute Consumed</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: '#5cd4c4', marginTop: 4 }}>{MOCK_ANALYTICS.total_flops}</div>
+        <div style={{ background: colors.canvas, border: `1px solid ${colors.hairline}`, padding: 20, borderRadius: 12, textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, textTransform: 'uppercase' }}>Total Compute Consumed</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: colors.primary, marginTop: 4 }}>{MOCK_ANALYTICS.total_flops}</div>
         </div>
-        <div style={{ background: '#12122a', border: '1px solid #2a2a4a', padding: 20, borderRadius: 12, textAlign: 'center' }}>
-          <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase' }}>Total Research Spend</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: '#feca57', marginTop: 4 }}>${MOCK_ANALYTICS.total_usd.toFixed(2)}</div>
+        <div style={{ background: colors.canvas, border: `1px solid ${colors.hairline}`, padding: 20, borderRadius: 12, textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, textTransform: 'uppercase' }}>Total Research Spend</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: colors.warning, marginTop: 4 }}>${MOCK_ANALYTICS.total_usd.toFixed(2)}</div>
         </div>
       </div>
 
@@ -74,11 +75,11 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           
           {/* Algorithm Leaderboard */}
-          <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#d0c0ff', margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Trophy size={15} /> Algorithm Performance Leaderboard</h3>
+          <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20 }}>
+            <h3 style={{ fontSize: 15, color: colors.purpleBorder, margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Trophy size={15} /> Algorithm Performance Leaderboard</h3>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
               <thead>
-                <tr style={{ background: '#151528', color: '#888', borderBottom: '1px solid #2a2a4a' }}>
+                <tr style={{ background: colors.surfacePearl, color: colors.inkMuted48, borderBottom: `1px solid ${colors.hairline}` }}>
                   <th style={{ padding: 10 }}>Algorithm</th>
                   <th style={{ padding: 10 }}>Success</th>
                   <th style={{ padding: 10 }}>Avg ΔBelief</th>
@@ -89,13 +90,13 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
               </thead>
               <tbody>
                 {MOCK_ANALYTICS.leaderboard.map((item, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid #1a1a3a', background: idx % 2 === 0 ? '#12122a' : '#151528' }}>
-                    <td style={{ padding: 10, fontWeight: 700, color: '#fff' }}>{item.name}</td>
-                    <td style={{ padding: 10, color: '#2ea043', fontWeight: 600 }}>{item.success}</td>
-                    <td style={{ padding: 10, color: '#5cd4c4', fontWeight: 600 }}>{item.avg_gain}</td>
-                    <td style={{ padding: 10, color: '#888' }}>{item.runtime}</td>
-                    <td style={{ padding: 10, color: '#d0c0ff' }}>{item.gain_tflop}</td>
-                    <td style={{ padding: 10, color: '#feca57', fontWeight: 700 }}>{item.gain_usd}</td>
+                  <tr key={idx} style={{ borderBottom: `1px solid ${colors.hairline}`, background: idx % 2 === 0 ? colors.canvas : colors.surfacePearl }}>
+                    <td style={{ padding: 10, fontWeight: 700, color: colors.ink }}>{item.name}</td>
+                    <td style={{ padding: 10, color: colors.success, fontWeight: 600 }}>{item.success}</td>
+                    <td style={{ padding: 10, color: colors.primary, fontWeight: 600 }}>{item.avg_gain}</td>
+                    <td style={{ padding: 10, color: colors.inkMuted48 }}>{item.runtime}</td>
+                    <td style={{ padding: 10, color: colors.purpleBorder }}>{item.gain_tflop}</td>
+                    <td style={{ padding: 10, color: colors.warning, fontWeight: 700 }}>{item.gain_usd}</td>
                   </tr>
                 ))}
               </tbody>
@@ -103,22 +104,22 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
           </div>
 
           {/* Best Experiment Sequences */}
-          <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#5cd4c4', margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Star size={15} /> Meta-Learned Optimal Experiment Sequences</h3>
+          <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20 }}>
+            <h3 style={{ fontSize: 15, color: colors.primary, margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Star size={15} /> Meta-Learned Optimal Experiment Sequences</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {MOCK_ANALYTICS.sequences.map(seq => (
-                <div key={seq.rank} style={{ background: '#151528', border: '1px solid #2a2a4a', borderRadius: 8, padding: 14 }}>
+                <div key={seq.rank} style={{ background: colors.surfacePearl, border: `1px solid ${colors.hairline}`, borderRadius: 8, padding: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Rank #{seq.rank}: {seq.name}</span>
-                    <span style={{ fontSize: 12, color: '#2ea043', fontWeight: 700 }}>Avg Posterior: {seq.posterior}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Rank #{seq.rank}: {seq.name}</span>
+                    <span style={{ fontSize: 12, color: colors.success, fontWeight: 700 }}>Avg Posterior: {seq.posterior}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                     {seq.seq.map((step, sIdx) => (
                       <React.Fragment key={sIdx}>
-                        <span style={{ background: '#1a1a3a', border: '1px solid #5cd4c4', color: '#5cd4c4', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                        <span style={{ background: colors.surfacePearl, border: `1px solid ${colors.primary}`, color: colors.primary, padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
                           {step}
                         </span>
-                        {sIdx < seq.seq.length - 1 && <span style={{ color: '#888', display: 'inline-flex' }}><ArrowRight size={12} /></span>}
+                        {sIdx < seq.seq.length - 1 && <span style={{ color: colors.inkMuted48, display: 'inline-flex' }}><ArrowRight size={12} /></span>}
                       </React.Fragment>
                     ))}
                   </div>
@@ -133,17 +134,17 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           
           {/* Failure Anti-Patterns Card */}
-          <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#ff6b6b', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} /> Learned Failure Anti-Patterns</h3>
+          <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20 }}>
+            <h3 style={{ fontSize: 15, color: colors.danger, margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} /> Learned Failure Anti-Patterns</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {MOCK_ANALYTICS.failures.map(f => (
-                <div key={f.id} style={{ background: '#151528', borderLeft: '3px solid #ff6b6b', borderRadius: '0 8px 8px 0', padding: 12 }}>
+                <div key={f.id} style={{ background: colors.surfacePearl, borderLeft: `3px solid ${colors.danger}`, borderRadius: '0 8px 8px 0', padding: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{f.title}</span>
-                    <span style={{ fontSize: 11, color: '#ff6b6b', fontWeight: 700 }}>{f.count} Failures</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>{f.title}</span>
+                    <span style={{ fontSize: 11, color: colors.danger, fontWeight: 700 }}>{f.count} Failures</span>
                   </div>
-                  <div style={{ fontSize: 12, color: '#bbb', marginBottom: 6 }}>Root cause: {f.cause}</div>
-                  <div style={{ fontSize: 11, color: '#5cd4c4', background: '#1a1a3a', padding: 6, borderRadius: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ fontSize: 12, color: colors.ink, marginBottom: 6 }}>Root cause: {f.cause}</div>
+                  <div style={{ fontSize: 11, color: colors.primary, background: colors.canvas, padding: 6, borderRadius: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Lightbulb size={12} style={{ flexShrink: 0 }} /> Remedy: {f.remedy}
                   </div>
                 </div>
@@ -152,20 +153,20 @@ export default function ResearchAnalyticsView({ api, onNavigate }) {
           </div>
 
           {/* Compute Efficiency Dashboard */}
-          <div style={{ background: '#12122a', borderRadius: 12, border: '1px solid #2a2a4a', padding: 20 }}>
-            <h3 style={{ fontSize: 15, color: '#feca57', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Zap size={15} /> Compute Efficiency Meter</h3>
+          <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20 }}>
+            <h3 style={{ fontSize: 15, color: colors.warning, margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Zap size={15} /> Compute Efficiency Meter</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ background: '#151528', padding: 12, borderRadius: 8, border: '1px solid #2a2a4a', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, color: '#888' }}>Confidence Gained per $1 USD</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#2ea043' }}>+4.25% / $1</span>
+              <div style={{ background: colors.surfacePearl, padding: 12, borderRadius: 8, border: `1px solid ${colors.hairline}`, display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, color: colors.inkMuted48 }}>Confidence Gained per $1 USD</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: colors.success }}>+4.25% / $1</span>
               </div>
-              <div style={{ background: '#151528', padding: 12, borderRadius: 8, border: '1px solid #2a2a4a', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, color: '#888' }}>Confidence Gained per TFLOP</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#5cd4c4' }}>+0.21% / TFLOP</span>
+              <div style={{ background: colors.surfacePearl, padding: 12, borderRadius: 8, border: `1px solid ${colors.hairline}`, display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, color: colors.inkMuted48 }}>Confidence Gained per TFLOP</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: colors.primary }}>+0.21% / TFLOP</span>
               </div>
-              <div style={{ background: '#151528', padding: 12, borderRadius: 8, border: '1px solid #2a2a4a', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, color: '#888' }}>Confidence Gained per GPU-sec</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#d0c0ff' }}>+1.85% / sec</span>
+              <div style={{ background: colors.surfacePearl, padding: 12, borderRadius: 8, border: `1px solid ${colors.hairline}`, display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, color: colors.inkMuted48 }}>Confidence Gained per GPU-sec</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: colors.purpleBorder }}>+1.85% / sec</span>
               </div>
             </div>
           </div>

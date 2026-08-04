@@ -62,5 +62,4 @@ export interface PanelState {
   selectedNeuron: number | null;
   hoveredToken: number | null;
   error: string | null;
-  darkMode: boolean;
 }

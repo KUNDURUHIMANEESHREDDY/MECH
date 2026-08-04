@@ -22,9 +22,9 @@ export default function VR3DNetworkViewerPanel() {
         </div>
       </div>
       <div className="panel-body" style={{ padding: '12px', textAlign: 'center' }}>
-        <div style={{ padding: '24px', background: '#020617', borderRadius: '8px', border: '1px dashed #334155' }}>
-          <h4 style={{ margin: '0 0 8px 0', color: '#38bdf8' }}>Interactive Network Render [{viewMode}]</h4>
-          <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
+        <div style={{ padding: '24px', background: 'var(--bg-elev-2)', borderRadius: '8px', border: '1px dashed var(--border)' }}>
+          <h4 style={{ margin: '0 0 8px 0', color: 'var(--accent)' }}>Interactive Network Render [{viewMode}]</h4>
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
             {viewMode === 'VR Mode'
               ? 'VR Headset Connected. Walk inside GPT-2 Small activation manifold.'
               : 'Rotate, pan, and zoom 3D node-link network geometry.'}

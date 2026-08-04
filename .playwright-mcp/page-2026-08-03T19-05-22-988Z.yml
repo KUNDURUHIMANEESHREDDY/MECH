@@ -1,0 +1,80 @@
+- generic [ref=f1e3]:
+  - generic [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - generic [ref=f1e6]: M
+      - button "Explorer" [ref=f1e7] [cursor=pointer]
+      - button "Search" [ref=f1e13] [cursor=pointer]
+      - button "Debug" [ref=f1e17] [cursor=pointer]
+      - button "Code" [ref=f1e27] [cursor=pointer]
+    - button "Collapse sidebar" [ref=f1e33] [cursor=pointer]
+  - generic [ref=f1e36]:
+    - generic [ref=f1e37]:
+      - heading "Explorer" [level=1] [ref=f1e38]
+      - button "Collapse sidebar" [ref=f1e39] [cursor=pointer]
+    - generic [ref=f1e42]:
+      - textbox "Search views..." [ref=f1e47]
+      - generic [ref=f1e48]:
+        - generic [ref=f1e49]: Explore
+        - generic [ref=f1e50]:
+          - button "Model Explorer" [ref=f1e51] [cursor=pointer]
+          - button "GPT-2 Live" [ref=f1e59] [cursor=pointer]
+          - button "Transformer Visualizer" [ref=f1e64] [cursor=pointer]
+          - button "Workspace" [ref=f1e71] [cursor=pointer]
+          - button "Neural Explorer" [ref=f1e76] [cursor=pointer]
+          - button "Knowledge Graph" [ref=f1e91] [cursor=pointer]
+          - button "Circuit Explorer" [ref=f1e100] [cursor=pointer]
+      - generic [ref=f1e110]:
+        - generic [ref=f1e111]: Develop
+        - generic [ref=f1e112]:
+          - button "Models" [ref=f1e113] [cursor=pointer]
+          - button "Prompts" [ref=f1e126] [cursor=pointer]
+          - button "Debugger" [ref=f1e131] [cursor=pointer]
+          - button "Build" [ref=f1e143] [cursor=pointer]
+          - button "Benchmark" [ref=f1e150] [cursor=pointer]
+          - button "Benchmark Suite" [ref=f1e156] [cursor=pointer]
+      - generic [ref=f1e162]:
+        - generic [ref=f1e163]: Research
+        - generic [ref=f1e164]:
+          - button "Experiments" [ref=f1e165] [cursor=pointer]
+          - button "Sessions" [ref=f1e170] [cursor=pointer]
+          - button "Reports" [ref=f1e177] [cursor=pointer]
+          - button "Reasoning" [ref=f1e183] [cursor=pointer]
+          - button "Evidence Fusion" [ref=f1e190] [cursor=pointer]
+          - button "Analytics" [ref=f1e197] [cursor=pointer]
+          - button "Health" [ref=f1e203] [cursor=pointer]
+      - generic [ref=f1e209]:
+        - generic [ref=f1e210]: General
+        - generic [ref=f1e211]:
+          - button "Campaigns" [ref=f1e212] [cursor=pointer]
+          - button "Plugins" [ref=f1e220] [cursor=pointer]
+          - button "Research Notebook" [ref=f1e225] [cursor=pointer]
+          - button "Lab Notebook" [ref=f1e230] [cursor=pointer]
+          - button "Paper Reproduction" [ref=f1e236] [cursor=pointer]
+          - button "Settings" [ref=f1e243] [cursor=pointer]
+          - button "Logging" [ref=f1e249] [cursor=pointer]
+          - button "Projects" [ref=f1e255] [cursor=pointer]
+          - button "Recent Files" [ref=f1e260] [cursor=pointer]
+  - generic [ref=f1e266]:
+    - banner [ref=f1e267]:
+      - generic [ref=f1e268]:
+        - button "Collapse activity bar" [ref=f1e269] [cursor=pointer]
+        - button "Collapse sidebar" [ref=f1e272] [cursor=pointer]
+        - generic [ref=f1e275]: Model Explorer
+      - generic [ref=f1e276]:
+        - button "Mem" [ref=f1e277] [cursor=pointer]
+        - button "Dock" [ref=f1e288] [cursor=pointer]
+        - button "Share" [ref=f1e291] [cursor=pointer]
+        - button "Market" [ref=f1e298] [cursor=pointer]
+        - button "Export" [ref=f1e304] [cursor=pointer]
+        - button "P" [ref=f1e309] [cursor=pointer]
+        - generic [ref=f1e312]: Connected
+    - generic [ref=f1e315]: Choose a model to load
+    - generic [ref=f1e319] [cursor=pointer]:
+      - generic [ref=f1e320]: Console
+      - generic [ref=f1e323]: 0 lines
+  - contentinfo [ref=f1e326]:
+    - generic [ref=f1e327]: GPT2
+    - generic [ref=f1e328]:
+      - generic [ref=f1e329]: "GPU: 0%"
+      - generic [ref=f1e330]: "Memory: 0%"
+      - generic [ref=f1e331]: "Tokens: 0"

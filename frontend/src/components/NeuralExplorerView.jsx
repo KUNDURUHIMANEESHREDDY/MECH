@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { NeuronUMAP } from './visualizations/neuron-umap/NeuronUMAP';
 import { buildLayerNeuronPoints, idForLayerNeuron, parseNeuronId } from './visualizations/neuron-umap/data';
 import { AttentionHeatmap } from './visualizations/panels/AttentionHeatmap';
+import { colors, radii, spacing, typography } from '../design/tokens';
 
 function fmtToken(tok) {
   if (!tok) return '';
@@ -11,12 +12,12 @@ function fmtToken(tok) {
 function TierBadge({ tier }) {
   return (
     <span style={{
-      background: '#555', color: '#fff',
+      background: colors.surfacePearl, color: colors.ink,
       borderRadius: 4, padding: '1px 8px', fontSize: 11, fontWeight: 700, marginLeft: 6}}>{tier}</span>
   );
 }
 
-function ScoreBar({ value, max = 1.0, color = '#7c6af7' }) {
+function ScoreBar({ value, max = 1.0, color = colors.purple }) {
   const pct = Math.min(100, (value / max) * 100);
   return (
     <div style={{ background: 'var(--bg)', borderRadius: 4, height: 6, width: '100%', margin: '3px 0' }}>
@@ -25,7 +26,7 @@ function ScoreBar({ value, max = 1.0, color = '#7c6af7' }) {
   );
 }
 
-function Chip({ label, color = '#7c6af7' }) {
+function Chip({ label, color = colors.purple }) {
   return (
     <span style={{
       background: color + '22', color, border: `1px solid ${color}55`,
@@ -45,14 +46,14 @@ function ModelTree({ selectedModel, onSelectModel, selectedLayer, onSelectLayer,
   };
 
   return (
-    <div style={{ width: 220, minWidth: 180, background: '#0d0d1a', borderRight: '1px solid #2a2a4a', overflowY: 'auto', padding: '12px 0', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '0 12px 12px', borderBottom: '1px solid #2a2a4a' }}>
-        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Model</div>
+    <div style={{ width: 220, minWidth: 180, background: colors.surfacePearl, borderRight: `1px solid ${colors.hairline}`, overflowY: 'auto', padding: '12px 0', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '0 12px 12px', borderBottom: `1px solid ${colors.hairline}` }}>
+        <div style={{ fontSize: 10, color: colors.inkMuted48, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Model</div>
         <select
           id="neural-explorer-model-select"
           value={selectedModel?.id || ''}
           onChange={e => onSelectModel(models.find(m => m.id === e.target.value))}
-          style={{ width: '100%', background: 'var(--bg)', border: '1px solid #3a3a6a', color: 'inherit', borderRadius: 6, padding: '6px 8px', fontSize: 12 }}
+          style={{ width: '100%', background: 'var(--bg)', border: `1px solid ${colors.hairline}`, color: 'inherit', borderRadius: 6, padding: '6px 8px', fontSize: 12 }}
         >
           {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
         </select>
@@ -66,12 +67,12 @@ function ModelTree({ selectedModel, onSelectModel, selectedLayer, onSelectLayer,
               onClick={() => { onSelectLayer(layer); toggleLayer(layer.layer_index); }}
               style={{
                 width: '100%', textAlign: 'left', padding: '7px 14px',
-                background: selectedLayer?.layer_index === layer.layer_index ? '#1e1e38' : 'transparent',
-                border: 'none', color: '#c8c8ff', fontSize: 12, cursor: 'pointer',
-                borderLeft: selectedLayer?.layer_index === layer.layer_index ? '3px solid #7c6af7' : '3px solid transparent',
+                background: selectedLayer?.layer_index === layer.layer_index ? colors.surfacePearl : 'transparent',
+                border: 'none', color: colors.purpleBorder, fontSize: 12, cursor: 'pointer',
+                borderLeft: selectedLayer?.layer_index === layer.layer_index ? `3px solid ${colors.purple}` : '3px solid transparent',
                 display: 'flex', alignItems: 'center', gap: 6}}
             >
-              <span style={{ display: 'inline-flex', color: 'var(--text-dim)' }}>
+              <span style={{ display: 'inline-flex', color: colors.inkMuted48 }}>
                 <svg width="8" height="8" viewBox="0 0 8 8" style={{ transform: expandedLayers.has(layer.layer_index) ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>
                   <polygon points="2,0 8,4 2,8" fill="currentColor" />
                 </svg>
@@ -90,14 +91,14 @@ function ModelTree({ selectedModel, onSelectModel, selectedLayer, onSelectLayer,
                     style={{
                       display: 'block', width: '100%', textAlign: 'left',
                       padding: '3px 8px', background: 'transparent', border: 'none',
-                      color: selectedHead?.layer === layer.layer_index && selectedHead?.head_index === h.head_index ? '#b0a0ff' : '#6060a0',
+                      color: selectedHead?.layer === layer.layer_index && selectedHead?.head_index === h.head_index ? colors.purple : colors.inkMuted48,
                       fontSize: 11, cursor: 'pointer'}}
                   >
                     H{h.head_index}
-                    {h.top_token ? <span style={{ color: '#7c6af7', fontSize: 10, marginLeft: 4 }}>· {fmtToken(h.top_token)}</span> : null}
+                    {h.top_token ? <span style={{ color: colors.purple, fontSize: 10, marginLeft: 4 }}>· {fmtToken(h.top_token)}</span> : null}
                   </button>
                 ))}
-                <div style={{ fontSize: 10, color: 'var(--text-dim)', paddingLeft: 8, marginTop: 4 }}>
+                <div style={{ fontSize: 10, color: colors.inkMuted48, paddingLeft: 8, marginTop: 4 }}>
                   {layer.num_mlp_neurons} MLP neurons
                 </div>
                 {layer.mlp_neurons_preview?.length ? (
@@ -109,15 +110,15 @@ function ModelTree({ selectedModel, onSelectModel, selectedLayer, onSelectLayer,
                       style={{
                         display: 'block', width: '100%', textAlign: 'left',
                         padding: '3px 8px', background: 'transparent', border: 'none',
-                        color: selectedNeuron?.layer === layer.layer_index && selectedNeuron?.neuron_index === n.neuron_index ? '#b0a0ff' : '#6060a0',
+                        color: selectedNeuron?.layer === layer.layer_index && selectedNeuron?.neuron_index === n.neuron_index ? colors.purple : colors.inkMuted48,
                         fontSize: 11, cursor: 'pointer'}}
                     >
                       N{n.neuron_index}
-                      {n.top_token ? <span style={{ color: '#7c6af7', fontSize: 10, marginLeft: 4 }}>· {fmtToken(n.top_token)}</span> : null}
+                      {n.top_token ? <span style={{ color: colors.purple, fontSize: 10, marginLeft: 4 }}>· {fmtToken(n.top_token)}</span> : null}
                     </button>
                   ))
                 ) : (
-                  <div style={{ fontSize: 10, color: '#4a4a7a', paddingLeft: 8 }}>Run a prompt to see active neurons</div>
+                  <div style={{ fontSize: 10, color: colors.inkMuted48, paddingLeft: 8 }}>Run a prompt to see active neurons</div>
                 )}
               </div>
             )}
@@ -131,19 +132,19 @@ function ModelTree({ selectedModel, onSelectModel, selectedLayer, onSelectLayer,
 function LayerDetail({ layer, selectedHead, onSelectHead }) {
   if (!layer) {
     return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: 14 }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.inkMuted48, fontSize: 14 }}>
         Select a layer to explore
       </div>
     );
   }
   return (
-    <div style={{ width: 260, background: '#0f0f20', borderRight: '1px solid #2a2a4a', overflowY: 'auto', padding: 16 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: '#b0a0ff', marginBottom: 12 }}>
+    <div style={{ width: 260, background: colors.surfacePearl, borderRight: `1px solid ${colors.hairline}`, overflowY: 'auto', padding: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: colors.purple, marginBottom: 12 }}>
         Layer {layer.layer_index}
-        <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 400, marginLeft: 8 }}>d={layer.residual_stream_dim}</span>
+        <span style={{ fontSize: 10, color: colors.inkMuted48, fontWeight: 400, marginLeft: 8 }}>d={layer.residual_stream_dim}</span>
       </div>
 
-      <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+      <div style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
         Attention Heads ({layer.num_attention_heads}) · click to inspect
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, marginBottom: 16 }}>
@@ -155,18 +156,18 @@ function LayerDetail({ layer, selectedHead, onSelectHead }) {
             onClick={() => onSelectHead(layer.layer_index, h.head_index)}
             style={{
               padding: '4px 2px', borderRadius: 4, textAlign: 'center', fontSize: 10,
-              background: selectedHead?.layer === layer.layer_index && selectedHead?.head_index === h.head_index ? '#2a3a5a' : '#1a1a2e',
-              border: selectedHead?.layer === layer.layer_index && selectedHead?.head_index === h.head_index ? '1px solid #3b82f6' : '1px solid #2a2a4a',
-              color: '#8080c0',
+              background: selectedHead?.layer === layer.layer_index && selectedHead?.head_index === h.head_index ? colors.canvas : colors.canvas,
+              border: selectedHead?.layer === layer.layer_index && selectedHead?.head_index === h.head_index ? `1px solid ${colors.primaryFocus}` : `1px solid ${colors.hairline}`,
+              color: colors.inkMuted48,
               cursor: 'pointer'}}
           >
             H{h.head_index}
-            {h.top_token ? <div style={{ fontSize: 9, color: '#7c6af7', marginTop: 2 }}>{fmtToken(h.top_token)}</div> : null}
+            {h.top_token ? <div style={{ fontSize: 9, color: colors.purple, marginTop: 2 }}>{fmtToken(h.top_token)}</div> : null}
           </button>
         ))}
       </div>
 
-      <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+      <div style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
         Top Active Neurons
       </div>
       {layer.mlp_neurons_preview?.length ? (
@@ -177,18 +178,18 @@ function LayerDetail({ layer, selectedHead, onSelectHead }) {
               title={n.label}
               style={{
                 padding: '4px 2px', borderRadius: 4, textAlign: 'center', fontSize: 10,
-                background: '#1a1a2e',
-                border: '1px solid #252540',
-                color: '#8080c0',
+                background: colors.canvas,
+                border: `1px solid ${colors.hairline}`,
+                color: colors.inkMuted48,
                 cursor: 'default'}}
             >
               {n.neuron_index}
-              {n.top_token ? <div style={{ fontSize: 9, color: '#7c6af7', marginTop: 2 }}>{fmtToken(n.top_token)}</div> : null}
+              {n.top_token ? <div style={{ fontSize: 9, color: colors.purple, marginTop: 2 }}>{fmtToken(n.top_token)}</div> : null}
             </div>
           ))}
         </div>
       ) : (
-        <div style={{ fontSize: 11, color: '#666' }}>Run a prompt to populate top active neurons.</div>
+        <div style={{ fontSize: 11, color: colors.inkMuted48 }}>Run a prompt to populate top active neurons.</div>
       )}
     </div>
   );
@@ -204,7 +205,7 @@ function MiniHistogram({ histogram }) {
           key={i}
           title={`[${histogram.bins[i]}, ${histogram.bins[i+1]}): ${count}`}
           style={{
-            flex: 1, background: i === 4 || i === 5 ? '#4a3a8a' : '#2a2a50',
+            flex: 1, background: i === 4 || i === 5 ? `${colors.purple}66` : `${colors.canvas}`,
             height: `${Math.max(3, (count / max) * 100)}%`,
             borderRadius: '2px 2px 0 0', transition: 'height 0.3s'}}
         />
@@ -215,11 +216,11 @@ function MiniHistogram({ histogram }) {
 
 function WeightBar({ dim, weight, maxAbs }) {
   const pct = Math.min(100, (Math.abs(weight) / maxAbs) * 100);
-  const color = weight >= 0 ? '#7c6af7' : '#e55';
+  const color = weight >= 0 ? colors.purple : colors.danger;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, marginBottom: 2 }}>
-      <span style={{ color: '#888', minWidth: 40, fontSize: 9 }}>D{dim}</span>
-      <div style={{ flex: 1, height: 6, background: '#2a2a4a', borderRadius: 2, overflow: 'hidden' }}>
+      <span style={{ color: colors.inkMuted48, minWidth: 40, fontSize: 9 }}>D{dim}</span>
+      <div style={{ flex: 1, height: 6, background: colors.hairline, borderRadius: 2, overflow: 'hidden' }}>
         <div style={{
           width: `${pct}%`,
           height: '100%',
@@ -238,7 +239,7 @@ function NeuronDetailPanel({ detail, model, onPatch, patchResult }) {
 
   if (!detail) {
     return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: 14 }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.inkMuted48, fontSize: 14 }}>
         Select a neuron to inspect
       </div>
     );
@@ -253,19 +254,19 @@ function NeuronDetailPanel({ detail, model, onPatch, patchResult }) {
     <div style={{ flex: 1, overflowY: 'auto', padding: 20, background: 'var(--bg)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#d0c0ff' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: colors.purpleBorder }}>
             {model?.label || 'GPT-2'} · {detail.id || `L${detail.layer}N${detail.neuron_index}`}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, marginTop: 2 }}>
             {detail.description}
           </div>
           {activatesOn && (
             <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1 }}>
+              <span style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase', letterSpacing: 1 }}>
                 Activates on
               </span>
               <code style={{
-                background: '#7c6af722', border: '1px solid #7c6af755', color: '#c0b0ff',
+                background: `${colors.purple}22`, border: `1px solid ${colors.purple}55`, color: colors.purpleBorder,
                 borderRadius: 6, padding: '2px 10px', fontSize: 14, fontWeight: 600}}>
                 {fmtToken(activatesOn.token)}
               </code>
@@ -273,45 +274,45 @@ function NeuronDetailPanel({ detail, model, onPatch, patchResult }) {
           )}
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Chip label={detail.component} color="#7c6af7" />
+          <Chip label={detail.component} color={colors.purple} />
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
         <div style={{ background: 'var(--bg-elev)', borderRadius: 10, padding: 16, border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Weight Summary</div>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Weight Summary</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11 }}>
-            <span style={{ color: '#888' }}>Bias</span>
-            <span style={{ color: '#ddd' }}>{detail.bias !== null ? detail.bias.toFixed(4) : 'N/A'}</span>
-            <span style={{ color: '#888' }}>In Weight L2</span>
-            <span style={{ color: '#ddd' }}>{detail.in_weight_l2 !== null ? detail.in_weight_l2.toFixed(4) : 'N/A'}</span>
-            <span style={{ color: '#888' }}>Out Weight L2</span>
-            <span style={{ color: '#ddd' }}>{detail.out_weight_l2 !== null ? detail.out_weight_l2.toFixed(4) : 'N/A'}</span>
-            <span style={{ color: '#888' }}>In Mean</span>
-            <span style={{ color: '#ddd' }}>{detail.in_weight_stats?.mean !== undefined ? detail.in_weight_stats.mean.toFixed(4) : 'N/A'}</span>
-            <span style={{ color: '#888' }}>Out Mean</span>
-            <span style={{ color: '#ddd' }}>{detail.out_weight_stats?.mean !== undefined ? detail.out_weight_stats.mean.toFixed(4) : 'N/A'}</span>
+            <span style={{ color: colors.inkMuted48 }}>Bias</span>
+            <span style={{ color: colors.bodyMuted }}>{detail.bias !== null ? detail.bias.toFixed(4) : 'N/A'}</span>
+            <span style={{ color: colors.inkMuted48 }}>In Weight L2</span>
+            <span style={{ color: colors.bodyMuted }}>{detail.in_weight_l2 !== null ? detail.in_weight_l2.toFixed(4) : 'N/A'}</span>
+            <span style={{ color: colors.inkMuted48 }}>Out Weight L2</span>
+            <span style={{ color: colors.bodyMuted }}>{detail.out_weight_l2 !== null ? detail.out_weight_l2.toFixed(4) : 'N/A'}</span>
+            <span style={{ color: colors.inkMuted48 }}>In Mean</span>
+            <span style={{ color: colors.bodyMuted }}>{detail.in_weight_stats?.mean !== undefined ? detail.in_weight_stats.mean.toFixed(4) : 'N/A'}</span>
+            <span style={{ color: colors.inkMuted48 }}>Out Mean</span>
+            <span style={{ color: colors.bodyMuted }}>{detail.out_weight_stats?.mean !== undefined ? detail.out_weight_stats.mean.toFixed(4) : 'N/A'}</span>
           </div>
         </div>
 
         <div style={{ background: 'var(--bg-elev)', borderRadius: 10, padding: 16, border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Activation Stats</div>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Activation Stats</div>
           {detail.activation_stats ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11 }}>
-              <span style={{ color: '#888' }}>Mean</span><span style={{ color: '#ddd' }}>{detail.activation_stats.mean.toFixed(4)}</span>
-              <span style={{ color: '#888' }}>Std</span><span style={{ color: '#ddd' }}>{detail.activation_stats.std.toFixed(4)}</span>
-              <span style={{ color: '#888' }}>Min</span><span style={{ color: '#ddd' }}>{detail.activation_stats.min.toFixed(4)}</span>
-              <span style={{ color: '#888' }}>Max</span><span style={{ color: '#ddd' }}>{detail.activation_stats.max.toFixed(4)}</span>
+              <span style={{ color: colors.inkMuted48 }}>Mean</span><span style={{ color: colors.bodyMuted }}>{detail.activation_stats.mean.toFixed(4)}</span>
+              <span style={{ color: colors.inkMuted48 }}>Std</span><span style={{ color: colors.bodyMuted }}>{detail.activation_stats.std.toFixed(4)}</span>
+              <span style={{ color: colors.inkMuted48 }}>Min</span><span style={{ color: colors.bodyMuted }}>{detail.activation_stats.min.toFixed(4)}</span>
+              <span style={{ color: colors.inkMuted48 }}>Max</span><span style={{ color: colors.bodyMuted }}>{detail.activation_stats.max.toFixed(4)}</span>
             </div>
           ) : (
-            <span style={{ color: '#888', fontSize: 11 }}>No activations — run a prompt first</span>
+            <span style={{ color: colors.inkMuted48, fontSize: 11 }}>No activations — run a prompt first</span>
           )}
           <MiniHistogram histogram={detail.activation_histogram} />
         </div>
 
         <div style={{ background: 'var(--bg-elev)', borderRadius: 10, padding: 16, border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Top Input Weights</div>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Top Input Weights</div>
           {detail.top_input_weights_positive?.slice(0, 8).map((w) => (
             <WeightBar key={w.dim} dim={w.dim} weight={w.weight} maxAbs={Math.max(...detail.top_input_weights_positive.map(x => Math.abs(x.weight)), ...detail.top_input_weights_negative.map(x => Math.abs(x.weight)))} />
           ))}
@@ -321,73 +322,73 @@ function NeuronDetailPanel({ detail, model, onPatch, patchResult }) {
         </div>
 
         <div style={{ background: 'var(--bg-elev)', borderRadius: 10, padding: 16, border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Per-Token Activations</div>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Per-Token Activations</div>
           {detail.per_token_activations && detail.per_token_activations.length > 0 ? (
             detail.per_token_activations.slice(0, 12).map((ta) => (
               <div key={ta.token_index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <code style={{ background: '#1e1e3a', borderRadius: 3, padding: '1px 6px', fontSize: 11, color: '#c0b0ff', minWidth: 80 }}>
+                <code style={{ background: colors.surfacePearl, borderRadius: 3, padding: '1px 6px', fontSize: 11, color: colors.purpleBorder, minWidth: 80 }}>
                   {ta.token}
                 </code>
-                <div style={{ flex: 1, height: 4, background: '#2a2a4a', borderRadius: 2, position: 'relative', overflow: 'visible' }}>
+                <div style={{ flex: 1, height: 4, background: colors.hairline, borderRadius: 2, position: 'relative', overflow: 'visible' }}>
                   <div style={{
                     position: 'absolute',
                     left: ta.activation >= 0 ? '50%' : '50%',
                     width: `${Math.min(50, Math.abs(ta.activation) / 5 * 100)}%`,
                     height: '100%',
-                    background: ta.activation >= 0 ? '#5cd4c4' : '#e55',
+                    background: ta.activation >= 0 ? colors.primary : colors.danger,
                     borderRadius: 2,
                     transform: ta.activation >= 0 ? 'translateX(0)' : 'translateX(-100%)',
                   }} />
                 </div>
-                <span style={{ fontSize: 10, color: '#aaa', minWidth: 60, textAlign: 'right' }}>
+                <span style={{ fontSize: 10, color: colors.inkMuted48, minWidth: 60, textAlign: 'right' }}>
                   {ta.activation.toFixed(4)}
                 </span>
                 {ta.pre_activation !== null && (
-                  <span style={{ fontSize: 9, color: '#666' }}>pre: {ta.pre_activation.toFixed(3)}</span>
+                  <span style={{ fontSize: 9, color: colors.inkMuted48 }}>pre: {ta.pre_activation.toFixed(3)}</span>
                 )}
               </div>
             ))
           ) : (
-            <span style={{ color: '#888', fontSize: 11 }}>No cached activations.</span>
+            <span style={{ color: colors.inkMuted48, fontSize: 11 }}>No cached activations.</span>
           )}
         </div>
 
         <div style={{ background: 'var(--bg-elev)', borderRadius: 10, padding: 16, border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Nearest Neurons (by weights)</div>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Nearest Neurons (by weights)</div>
           {detail.nearest_neurons && detail.nearest_neurons.length > 0 ? (
             detail.nearest_neurons.map((n) => (
               <div key={n.neuron_index} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                <span style={{ color: '#a0a0d0' }}>L{n.layer}N{n.neuron_index}</span>
-                <span style={{ color: '#5cd4c4' }}>{(n.similarity * 100).toFixed(1)}%</span>
+                <span style={{ color: colors.inkMuted48 }}>L{n.layer}N{n.neuron_index}</span>
+                <span style={{ color: colors.primary }}>{(n.similarity * 100).toFixed(1)}%</span>
               </div>
             ))
           ) : (
-            <span style={{ color: '#888', fontSize: 11 }}>No nearest neighbors.</span>
+            <span style={{ color: colors.inkMuted48, fontSize: 11 }}>No nearest neighbors.</span>
           )}
         </div>
 
         <div style={{ background: 'var(--bg-elev)', borderRadius: 10, padding: 16, border: '1px solid var(--border)', gridColumn: '1 / -1' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
+          <div style={{ fontSize: 11, color: colors.inkMuted48, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
             Activation Patch Experiment
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div>
-              <label style={{ fontSize: 11, color: '#aaa', display: 'block', marginBottom: 4 }}>Patch Value</label>
+              <label style={{ fontSize: 11, color: colors.inkMuted48, display: 'block', marginBottom: 4 }}>Patch Value</label>
               <input
                 id="patch-value-input"
                 type="number" step="0.1"
                 value={patchVal}
                 onChange={e => setPatchVal(parseFloat(e.target.value) || 0)}
-                style={{ width: 90, background: 'var(--bg)', border: '1px solid #3a3a6a', color: 'inherit', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+                style={{ width: 90, background: 'var(--bg)', border: `1px solid ${colors.hairline}`, color: 'inherit', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
               />
             </div>
             <button
               id="patch-run-btn"
               onClick={() => onPatch(patchVal)}
               style={{
-                background: 'linear-gradient(135deg, #7c6af7, #5cd4c4)',
+background: `linear-gradient(135deg, ${colors.purple}, ${colors.primary})`,
                 border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13,
-                fontWeight: 600, cursor: 'pointer', marginTop: 20}}
+                fontWeight: 600, color: colors.onPrimary, cursor: 'pointer', marginTop: 20}}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" style={{ marginRight: 6, verticalAlign: 'middle' }}>
                 <polygon points="2,0 12,6 2,12" fill="currentColor" />
@@ -397,19 +398,19 @@ function NeuronDetailPanel({ detail, model, onPatch, patchResult }) {
             {patchResult && (
               <div style={{ display: 'flex', gap: 16, marginTop: 16, flexWrap: 'wrap' }}>
                 <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Before</div>
-                  <code style={{ color: '#c0b0ff', fontSize: 13 }}>{patchResult.top_token_before}</code>
+                  <div style={{ fontSize: 10, color: colors.inkMuted48 }}>Before</div>
+                  <code style={{ color: colors.purpleBorder, fontSize: 13 }}>{patchResult.top_token_before}</code>
                 </div>
-                <svg width="20" height="14" viewBox="0 0 20 14" style={{ color: '#7c6af7', alignSelf: 'center' }}>
+                <svg width="20" height="14" viewBox="0 0 20 14" style={{ color: colors.purple, alignSelf: 'center' }}>
                   <path d="M0 7 H16 M11 2 L16 7 L11 12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>After</div>
-                  <code style={{ color: '#5cd4c4', fontSize: 13 }}>{patchResult.top_token_after}</code>
+                  <div style={{ fontSize: 10, color: colors.inkMuted48 }}>After</div>
+                  <code style={{ color: colors.primary, fontSize: 13 }}>{patchResult.top_token_after}</code>
                 </div>
                 <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Δ logit</div>
-                  <span style={{ color: patchResult.delta > 0 ? '#5cd4c4' : '#ff6060', fontSize: 13, fontWeight: 700 }}>
+                  <div style={{ fontSize: 10, color: colors.inkMuted48 }}>Δ logit</div>
+                  <span style={{ color: patchResult.delta > 0 ? colors.primary : colors.danger, fontSize: 13, fontWeight: 700 }}>
                     {patchResult.delta > 0 ? '+' : ''}{patchResult.delta?.toFixed(4)}
                   </span>
                 </div>
@@ -426,16 +427,16 @@ function HeadDetailPanel({ head, detail, loading, error }) {
   const [hovered, setHovered] = useState(null);
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: 20, background: 'var(--bg)' }}>
-      <div style={{ fontSize: 18, fontWeight: 700, color: '#d0c0ff', marginBottom: 4 }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color: colors.purpleBorder, marginBottom: 4 }}>
         GPT-2 · L{head.layer}H{head.head_index}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 16 }}>
+      <div style={{ fontSize: 11, color: colors.inkMuted48, marginBottom: 16 }}>
         Attention pattern — rows = query tokens, cols = key tokens
       </div>
-      {loading && <div style={{ color: '#888', fontSize: 13 }}>Loading attention pattern…</div>}
+      {loading && <div style={{ color: colors.inkMuted48, fontSize: 13 }}>Loading attention pattern…</div>}
       {error && (
         <div style={{
-          background: '#2a1414', border: '1px solid #5a2a2a', color: '#ff9090',
+          background: `${colors.danger}18`, border: `1px solid ${colors.danger}55`, color: colors.danger,
           borderRadius: 8, padding: '12px 16px', fontSize: 12, marginBottom: 16, display: 'inline-block'}}
         >
           {error}
@@ -636,26 +637,33 @@ export default function NeuralExplorerView({ api }) {
   return (
     <div
       id="neural-explorer-root"
-      style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'inherit', fontFamily: 'Inter, system-ui, sans-serif', overflow: 'hidden' }}
+      style={{
+        display: 'flex', flexDirection: 'column', height: '100%',
+        background: 'var(--bg)', color: 'inherit',
+        fontFamily: "'Inter', system-ui, sans-serif", overflow: 'hidden',
+        '--bg': colors.canvasParchment,
+        '--bg-elev': colors.canvas,
+        '--border': colors.hairline,
+      }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: '#0d0d1a', borderBottom: '1px solid #2a2a4a', flexShrink: 0 }}>
-        <span style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1 }}>Prompt</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: colors.surfacePearl, borderBottom: `1px solid ${colors.hairline}`, flexShrink: 0 }}>
+        <span style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase', letterSpacing: 1 }}>Prompt</span>
         <input
           id="ne-prompt-input"
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleRunPrompt(); }}
           placeholder="Run a prompt to populate activations…"
-          style={{ flex: 1, minWidth: 0, background: 'var(--bg)', border: '1px solid #3a3a6a', color: 'inherit', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}
+          style={{ flex: 1, minWidth: 0, background: 'var(--bg)', border: `1px solid ${colors.hairline}`, color: 'inherit', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}
         />
         <button
           id="ne-run-prompt-btn"
           onClick={handleRunPrompt}
           disabled={promptRunning || !selectedModel}
           style={{
-            background: 'linear-gradient(135deg, #7c6af7, #5cd4c4)',
+            background: `linear-gradient(135deg, ${colors.purple}, ${colors.primary})`,
             border: 'none', borderRadius: 8, padding: '7px 18px', fontSize: 12,
-            fontWeight: 600, color: '#fff', cursor: promptRunning ? 'default' : 'pointer',
+            fontWeight: 600, color: colors.onPrimary, cursor: promptRunning ? 'default' : 'pointer',
             opacity: promptRunning ? 0.65 : 1}}
         >
           {promptRunning ? 'Running…' : 'Run Prompt'}
@@ -665,8 +673,8 @@ export default function NeuralExplorerView({ api }) {
           onClick={() => loadTree()}
           title="Reload layer data"
           style={{
-            background: 'transparent', border: '1px solid #3a3a6a', borderRadius: 8,
-            padding: '7px 14px', fontSize: 12, color: '#c8c8ff', cursor: 'pointer'}}
+            background: 'transparent', border: `1px solid ${colors.hairline}`, borderRadius: 8,
+            padding: '7px 14px', fontSize: 12, color: colors.purpleBorder, cursor: 'pointer'}}
         >
           Refresh
         </button>
@@ -675,9 +683,9 @@ export default function NeuralExplorerView({ api }) {
       {promptMsg && (
         <div style={{
           padding: '6px 16px', fontSize: 11, flexShrink: 0,
-          color: promptMsg.ok ? '#5cd4c4' : '#ff6060',
-          background: promptMsg.ok ? '#0f241d' : '#2a1414',
-          borderBottom: '1px solid #2a2a4a'}}
+          color: promptMsg.ok ? colors.primary : colors.danger,
+          background: promptMsg.ok ? `${colors.success}18` : `${colors.danger}18`,
+          borderBottom: `1px solid ${colors.hairline}`}}
         >
           {promptMsg.text}
         </div>
@@ -688,7 +696,7 @@ export default function NeuralExplorerView({ api }) {
           data-testid="ne-token-strip"
           style={{
           display: 'flex', flexWrap: 'wrap', gap: 4, padding: '6px 16px', flexShrink: 0,
-          background: '#0a0a16', borderBottom: '1px solid #2a2a4a'}}
+          background: colors.surfacePearl, borderBottom: `1px solid ${colors.hairline}`}}
         >
           {strTokens.map((t, i) => (
             <span
@@ -696,9 +704,9 @@ export default function NeuralExplorerView({ api }) {
               data-testid={`ne-token-chip-${i}`}
               style={{
               fontSize: 10, padding: '2px 6px', borderRadius: 4,
-              background: i === selTokIdx ? '#7c6af733' : '#16162e',
-              border: i === selTokIdx ? '1px solid #7c6af7' : '1px solid #2a2a4a',
-              color: i === selTokIdx ? '#c0b0ff' : '#8080a0',
+              background: i === selTokIdx ? `${colors.purple}33` : colors.canvas,
+              border: i === selTokIdx ? `1px solid ${colors.purple}` : `1px solid ${colors.hairline}`,
+              color: i === selTokIdx ? colors.purpleBorder : colors.inkMuted48,
               fontWeight: i === selTokIdx ? 600 : 400}}>
               {fmtToken(t)}
             </span>
@@ -727,12 +735,12 @@ export default function NeuralExplorerView({ api }) {
       />
 
       {selectedLayer && selectedLayer.mlp_neurons_preview && (
-        <div style={{ width: 430, background: '#0f0f20', borderRight: '1px solid #2a2a4a', overflowY: 'auto', padding: 16, flexShrink: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#b0a0ff', marginBottom: 12 }}>
+        <div style={{ width: 430, background: colors.surfacePearl, borderRight: `1px solid ${colors.hairline}`, overflowY: 'auto', padding: 16, flexShrink: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: colors.purple, marginBottom: 12 }}>
             Neuron Map — Layer {selectedLayer.layer_index}
           </div>
           {!hasActivations && (
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: colors.inkMuted48, marginBottom: 10 }}>
               No activations yet — run a prompt above to populate the map.
             </div>
           )}
@@ -745,14 +753,13 @@ export default function NeuralExplorerView({ api }) {
               const parsed = parseNeuronId(id);
               handleSelectNeuron(parsed ? { layer: parsed.layer, neuron_index: parsed.neuron } : null);
             }}
-            darkMode
             height={460}
           />
         </div>
       )}
 
       {loading ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 14 }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.inkMuted48, fontSize: 14 }}>
           Loading model tree…
         </div>
       ) : selectedHead ? (

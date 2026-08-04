@@ -13,7 +13,7 @@ export default function LayerEvolutionPanel() {
         </button>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
-        <p style={{ fontSize: '12px', color: '#94a3b8' }}>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           {animating ? 'Animating residual stream trajectory through Layers 0 -> 11...' : 'Trajectory paused.'}
         </p>
       </div>

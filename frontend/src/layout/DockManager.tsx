@@ -5,7 +5,6 @@ import { panelRegistry } from '../services/panelRegistry';
 
 interface DockManagerProps {
   children: Record<string, React.ReactNode>;
-  darkMode: boolean;
 }
 
 export const DockManager: React.FC<DockManagerProps> = ({ children }) => {

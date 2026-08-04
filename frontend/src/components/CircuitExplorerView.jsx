@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { colors } from '../design/tokens/colors';
 
 export default function CircuitExplorerView({ api }) {
   const [selectedCircuit, setSelectedCircuit] = useState('ioi_circuit');
@@ -25,18 +26,18 @@ export default function CircuitExplorerView({ api }) {
             <option value="greater_than_circuit">Greater-Than Circuit</option>
           </select>
 
-          <div className="evidence-block" style={{ borderLeftColor: '#5cd4c4' }}>
+          <div className="evidence-block" style={{ borderLeftColor: colors.primary }}>
             <div className="evidence-label">Evidence</div>
             <p className="evidence-text">
               Path patching shows Name Mover Heads (L9H9, L10H0) directly write to the IO token logits.
             </p>
           </div>
 
-          <div className="evidence-block" style={{ borderLeftColor: '#f5c518' }}>
+          <div className="evidence-block" style={{ borderLeftColor: colors.warning }}>
             <div className="evidence-label">Confidence</div>
             <div className="confidence-bar">
               <div className="confidence-track">
-                <div className="confidence-fill" style={{ width: '95%', background: '#f5c518' }} />
+                <div className="confidence-fill" style={{ width: '95%', background: colors.warning }} />
               </div>
               <span className="confidence-value">95%</span>
             </div>
@@ -49,7 +50,7 @@ export default function CircuitExplorerView({ api }) {
           <div className="component-list">
             <div className="component-card">
               <div className="component-header">
-                <h3 style={{ color: '#c9ada7' }}>Attention Heads</h3>
+                <h3 style={{ color: colors.bodyMuted }}>Attention Heads</h3>
                 <span className="component-tag">Name Movers</span>
               </div>
               <div className="component-tags">
@@ -59,16 +60,16 @@ export default function CircuitExplorerView({ api }) {
             </div>
 
             <div className="component-card">
-              <h3 style={{ color: '#f2e9e4', margin: '0 0 12px 0' }}>Key MLP Neurons</h3>
+              <h3 style={{ color: colors.ink, margin: '0 0 12px 0' }}>Key MLP Neurons</h3>
               <div className="component-tags">
                 <span className="chip">L8N1204</span>
               </div>
             </div>
 
             <div className="component-card">
-              <h3 style={{ color: '#2a9d8f', margin: '0 0 12px 0' }}>SAE Features</h3>
+              <h3 style={{ color: colors.primary, margin: '0 0 12px 0' }}>SAE Features</h3>
               <div className="component-tags">
-                <span className="chip" style={{ borderLeft: '2px solid #2a9d8f' }}>Feature 451 (Syntax)</span>
+                <span className="chip" style={{ borderLeft: `2px solid ${colors.primary}` }}>Feature 451 (Syntax)</span>
               </div>
             </div>
 
