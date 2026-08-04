@@ -25,6 +25,8 @@ import DiscoveryMemoryModal from './components/DiscoveryMemoryModal';
 import WorkspaceSharingModal from './components/WorkspaceSharingModal';
 import ExtensionMarketplaceModal from './components/ExtensionMarketplaceModal';
 import PublicationExportModal from './components/PublicationExportModal';
+import { colors } from './design/tokens';
+import './design/styles/global.css';
 
 import CircuitExplorerView from './components/CircuitExplorerView';
 import KnowledgeGraphView from './components/KnowledgeGraphView';
@@ -96,23 +98,38 @@ export default function App() {
 
   const [panel, setPanel] = useState<PanelState>({
     selectedLayer: 0, selectedHead: 0, selectedNeuron: null,
-    hoveredToken: null, error: null, darkMode: appState.darkMode,
+    hoveredToken: null, error: null,
   });
+
+  const [activityCollapsed, setActivityCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => { listModels(); }, []);
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', appState.darkMode ? 'dark' : 'light');
-  }, [appState.darkMode]);
-
   const setError = (e: string | null) => setPanel(s => ({ ...s, error: e }));
-  const toggleDarkMode = () => {
-    const nextDark = !appState.darkMode;
-    setAppState({ darkMode: nextDark });
-    setPanel(s => ({ ...s, darkMode: nextDark }));
+
+  const setActivePage = (page: string) => {
+    setAppState({ activePage: page });
+    if (typeof window !== 'undefined' && window.location.hash.slice(1) !== page) {
+      window.location.hash = page;
+    }
   };
 
-  const setActivePage = (page: string) => setAppState({ activePage: page });
+  // Hash-router: activePage stays the source of truth; the URL hash mirrors it
+  // so every page is addressable by route and back/forward works.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const current = window.location.hash.slice(1);
+    if (current && PAGES[current]) {
+      setAppState({ activePage: current });
+    }
+    const onHashChange = () => {
+      const next = window.location.hash.slice(1);
+      if (next && PAGES[next]) setAppState({ activePage: next });
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   const [showDiscoveryMemory, setShowDiscoveryMemory] = useState(false);
   const [showShare, setShowShare] = useState(false);
@@ -139,7 +156,7 @@ export default function App() {
     setPanel(s => ({ ...s, selectedLayer: 0, selectedHead: 0, selectedNeuron: null }));
   };
 
-  const pageProps = { api, onNavigate: setActivePage, darkMode: appState.darkMode };
+  const pageProps = { api, onNavigate: setActivePage };
 
   const renderPage = () => {
     switch (appState.activePage) {
@@ -152,7 +169,20 @@ export default function App() {
       case 'transformer':
         return <TransformerVisualizer {...pageProps} />;
       case 'transformerExplorer':
-        return <TransformerExplorer {...pageProps} />;
+        // Needs model data (tokens/layers) — the old {...pageProps} spread
+        // passed api/onNavigate instead and crashed buildNeuronPoints.
+        return data ? (
+          <TransformerExplorer
+            tokens={data.tokens.map(t => t.text)}
+            layers={data.layers}
+            numLayers={data.layers.length}
+            numHeads={data.layers[0]?.heads.length ?? 12}
+          />
+        ) : (
+          <div className="welcome-screen">
+            <div className="welcome-hint">Load a model and run a prompt to populate transformer data.</div>
+          </div>
+        );
       case 'workspace':
         return <CampaignWorkspaceView {...pageProps} />;
       case 'models':
@@ -275,7 +305,7 @@ export default function App() {
                   />
                 </div>
                 <div className="dock-wrapper">
-                  <DockManager darkMode={appState.darkMode}>
+                  <DockManager>
                     {{
                       token_viewer: (
                         <TokenViewer
@@ -321,7 +351,6 @@ export default function App() {
                               ? { ...s, selectedLayer: parsed.layer, selectedHead: parsed.head ?? s.selectedHead, selectedNeuron: parsed.neuron }
                               : { ...s, selectedNeuron: null });
                           }}
-                          darkMode={appState.darkMode}
                         />
                       ),
                       token_inspector: (
@@ -329,20 +358,17 @@ export default function App() {
                           tokens={data.tokens.map(t => t.text)}
                           selectedTokenIdx={appState.selection.selectedTokenIdx}
                           onSelectToken={idx => setAppState(prev => ({ selection: { ...prev.selection, selectedTokenIdx: idx } }))}
-                          darkMode={appState.darkMode}
                         />
                       ),
                       layer_inspector: (
                         <LayerPanel
                           layerIdx={panel.selectedLayer}
                           numHeads={data.layers[panel.selectedLayer]?.heads.length ?? 12}
-                          darkMode={appState.darkMode}
                         />
                       ),
                       prediction_inspector: (
                         <PredictionPanel
                           tokens={data.tokens.map(t => t.text)}
-                          darkMode={appState.darkMode}
                         />
                       ),
                     }}
@@ -357,9 +383,20 @@ export default function App() {
   };
 
   return (
-    <div className="app">
-      <ActivityBar active={appState.activePage} onSelect={setActivePage} />
-      <Sidebar pages={PAGES} active={appState.activePage} onSelect={setActivePage} />
+    <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}${activityCollapsed ? ' activity-collapsed' : ''}`}>
+      <ActivityBar
+        active={appState.activePage}
+        onSelect={setActivePage}
+        collapsed={activityCollapsed}
+        onToggle={() => setActivityCollapsed(!activityCollapsed)}
+      />
+      <Sidebar
+        pages={PAGES}
+        active={appState.activePage}
+        onSelect={setActivePage}
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+      />
       <div className="main-area">
         <Topbar
           crumb={PAGES[appState.activePage]?.label ?? 'MECH'}
@@ -370,12 +407,15 @@ export default function App() {
           onOpenMarketplace={() => setShowMarketplace(true)}
           onOpenPublication={() => setShowExport(true)}
           onOpenDiscoveryMemory={() => setShowDiscoveryMemory(true)}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+          activityCollapsed={activityCollapsed}
+          onToggleActivity={() => setActivityCollapsed(!activityCollapsed)}
         />
         <div className="content">
           <CommandPalette
             onLoadModel={handleLoadModel}
             onRunPrompt={handleRun}
-            darkMode={appState.darkMode}
           />
           {renderPage()}
         </div>
@@ -392,7 +432,6 @@ export default function App() {
         gpuUtil={data?.gpuUtil ?? 0}
         memoryUtil={data?.memoryUtil ?? 0}
         tokenCount={data?.tokens.length ?? 0}
-        darkMode={appState.darkMode}
       />
     </div>
   );

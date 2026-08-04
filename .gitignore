@@ -18,6 +18,10 @@ node_modules/
 *.tmp
 *.swp
 
+# Playwright artifacts
+frontend/test-results/
+frontend/playwright-report/
+
 # Environment
 .env
 .env.local
