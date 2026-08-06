@@ -1,6 +1,6 @@
 import { ModelInfo } from '../types';
 
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = 'http://localhost:8000/api';
 
 export async function fetchAvailableModels(): Promise<string[]> {
   const res = await fetch(`${API_BASE}/models`);

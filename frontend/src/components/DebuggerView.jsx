@@ -197,7 +197,7 @@ export default function DebuggerView({ api, onNavigate }) {
           </button>
         </div>
         {error && (
-          <p style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{error}</p>
+          <p style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{error}</p>
         )}
       </div>
 
@@ -205,7 +205,7 @@ export default function DebuggerView({ api, onNavigate }) {
       <div className="card" style={{ marginBottom: 20 }}>
         <h3>Token Activation Heatmap
           {tokens.length > 0 && !tokens[0]?.is_real && (
-            <span style={{ fontSize: 11, color: '#d97706', marginLeft: 8, fontWeight: 400 }}>(demo data — connect Python for live values)</span>
+            <span style={{ fontSize: 11, color: 'var(--warning)', marginLeft: 8, fontWeight: 400 }}>(demo data — connect Python for live values)</span>
           )}
         </h3>
         {loading ? (
@@ -233,7 +233,7 @@ export default function DebuggerView({ api, onNavigate }) {
       {architecture && (
         <div className="card" style={{ marginBottom: 20 }}>
           <h3>LLM Neuron Inspector
-            <span style={{ fontSize: 11, color: '#888', marginLeft: 8, fontWeight: 400 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400 }}>
               {nLayers} layers · {layerDetail?.num_mlp_neurons} MLP neurons per layer · d_model={layerDetail?.residual_stream_dim}
             </span>
           </h3>
@@ -255,12 +255,12 @@ export default function DebuggerView({ api, onNavigate }) {
           {/* Layer Detail Summary */}
           {layerDetail && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12, marginBottom: 12 }}>
-              <span style={{ color: '#888' }}>Params</span>
-              <span style={{ color: '#ddd' }}>{layerDetail.n_params?.toLocaleString()}</span>
-              <span style={{ color: '#888' }}>Heads</span>
-              <span style={{ color: '#ddd' }}>{layerDetail.num_attention_heads}</span>
-              <span style={{ color: '#888' }}>Top Active Neurons (last token)</span>
-              <span style={{ color: '#ddd' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Params</span>
+              <span style={{ color: 'var(--text)' }}>{layerDetail.n_params?.toLocaleString()}</span>
+              <span style={{ color: 'var(--text-muted)' }}>Heads</span>
+              <span style={{ color: 'var(--text)' }}>{layerDetail.num_attention_heads}</span>
+              <span style={{ color: 'var(--text-muted)' }}>Top Active Neurons (last token)</span>
+              <span style={{ color: 'var(--text)' }}>
                 {layerDetail.top_active_neurons?.slice(0, 3).map(n => n.label).join(', ') || '—'}
               </span>
             </div>
@@ -283,9 +283,9 @@ export default function DebuggerView({ api, onNavigate }) {
                     height: 20,
                     borderRadius: 3,
                     border: selectedNeuron?.neuron_index === n.index && selectedNeuron?.layer === selectedLayer
-                      ? '2px solid #fbbf24'
+                      ? '2px solid var(--accent)'
                       : 'none',
-                    backgroundColor: n.has_activation ? neuronCellColor(n.activation) : '#1a1a2a',
+                    backgroundColor: n.has_activation ? neuronCellColor(n.activation) : 'var(--bg-elev-2)',
                     cursor: 'pointer',
                     padding: 0,
                     fontSize: 0,
@@ -297,27 +297,27 @@ export default function DebuggerView({ api, onNavigate }) {
 
           {/* Selected Neuron Detail */}
           {selectedNeuron && neuronDetail && (
-            <div style={{ background: '#1a1a2a', borderRadius: 8, padding: 12, border: '1px solid #333' }}>
+            <div style={{ background: 'var(--bg-elev-2)', borderRadius: 8, padding: 12, border: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <h4 style={{ margin: 0, fontSize: 13 }}>{neuronDetail.id}</h4>
-                <span style={{ fontSize: 11, color: '#888' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                   click another neuron to update
                 </span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11 }}>
-                <span style={{ color: '#888' }}>in_weight_l2</span>
-                <span style={{ color: '#ddd' }}>{neuronDetail.in_weight_l2 !== null ? neuronDetail.in_weight_l2.toFixed(4) : '—'}</span>
-                <span style={{ color: '#888' }}>out_weight_l2</span>
-                <span style={{ color: '#ddd' }}>{neuronDetail.out_weight_l2 !== null ? neuronDetail.out_weight_l2.toFixed(4) : '—'}</span>
-                <span style={{ color: '#888' }}>bias</span>
-                <span style={{ color: '#ddd' }}>{neuronDetail.bias !== null ? neuronDetail.bias.toFixed(4) : '—'}</span>
-                <span style={{ color: '#888' }}>per-token activations</span>
-                <span style={{ color: '#ddd' }}>{neuronDetail.per_token_activations?.length ? `${neuronDetail.per_token_activations.length} tokens` : 'none'}</span>
+                <span style={{ color: 'var(--text-muted)' }}>in_weight_l2</span>
+                <span style={{ color: 'var(--text)' }}>{neuronDetail.in_weight_l2 !== null ? neuronDetail.in_weight_l2.toFixed(4) : '—'}</span>
+                <span style={{ color: 'var(--text-muted)' }}>out_weight_l2</span>
+                <span style={{ color: 'var(--text)' }}>{neuronDetail.out_weight_l2 !== null ? neuronDetail.out_weight_l2.toFixed(4) : '—'}</span>
+                <span style={{ color: 'var(--text-muted)' }}>bias</span>
+                <span style={{ color: 'var(--text)' }}>{neuronDetail.bias !== null ? neuronDetail.bias.toFixed(4) : '—'}</span>
+                <span style={{ color: 'var(--text-muted)' }}>per-token activations</span>
+                <span style={{ color: 'var(--text)' }}>{neuronDetail.per_token_activations?.length ? `${neuronDetail.per_token_activations.length} tokens` : 'none'}</span>
               </div>
               {neuronDetail.per_token_activations && neuronDetail.per_token_activations.length > 0 && (
                 <div style={{ marginTop: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {neuronDetail.per_token_activations.slice(0, 10).map((ta) => (
-                    <span key={ta.token_index} style={{ fontSize: 10, color: '#aaa' }}>
+                    <span key={ta.token_index} style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                       "{ta.token}": {ta.activation.toFixed(3)}
                     </span>
                   ))}
@@ -325,10 +325,10 @@ export default function DebuggerView({ api, onNavigate }) {
               )}
               {neuronDetail.top_input_weights_positive && neuronDetail.top_input_weights_positive.length > 0 && (
                 <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>Top input weights (residual dims):</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>Top input weights (residual dims):</div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {neuronDetail.top_input_weights_positive.slice(0, 8).map((w) => (
-                      <span key={w.dim} style={{ fontSize: 10, color: '#ddd' }}>
+                      <span key={w.dim} style={{ fontSize: 10, color: 'var(--text)' }}>
                         D{w.dim}: {w.weight.toFixed(3)}
                       </span>
                     ))}

@@ -12,6 +12,7 @@ Upgraded to include:
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import os
@@ -49,6 +50,54 @@ class DatasetManager:
         self.manifest_path = os.path.join(data_dir, "golden_manifest.json")
         self._datasets: Dict[str, Dict[str, Any]] = {}
         self._manifest = self._load_manifest()
+
+    def _load_manifest(self) -> Dict[str, Dict[str, Any]]:
+        """Loads the golden manifest, aliasing dataset folder names (e.g. ``ioi``)
+        to their manifest entries so folder-based dataset ids resolve correctly.
+        Returns an empty mapping when the manifest is missing or malformed.
+        """
+        manifest: Dict[str, Dict[str, Any]] = {}
+        if os.path.exists(self.manifest_path):
+            try:
+                with open(self.manifest_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                datasets = data.get("datasets", data)
+                if isinstance(datasets, dict):
+                    for ds_id, meta in datasets.items():
+                        if isinstance(meta, dict):
+                            manifest[ds_id] = meta
+                            if meta.get("dataset_id") and meta["dataset_id"] not in manifest:
+                                manifest[meta["dataset_id"]] = meta
+            except (OSError, ValueError):
+                pass
+        # Alias on-disk dataset folders to the matching manifest entry so that
+        # load("ioi") -> datasets/ioi/dataset.json works even when the manifest
+        # registers the dataset under a canonical id like "IOI-Canonical-100".
+        if os.path.isdir(self.data_dir):
+            for name in os.listdir(self.data_dir):
+                folder = os.path.join(self.data_dir, name)
+                if not os.path.isdir(folder) or not os.path.exists(os.path.join(folder, "dataset.json")):
+                    continue
+                if name in manifest:
+                    continue
+                match = next(
+                    (e for e in manifest.values() if name.lower() in str(e.get("dataset_id", "")).lower()),
+                    None,
+                )
+                if match is not None:
+                    manifest[name] = match
+        return manifest
+
+    def validate_schema(self, data: Dict[str, Any]) -> None:
+        """Validates that a loaded dataset dict has the required ``prompts`` field."""
+        if not isinstance(data, dict) or "prompts" not in data:
+            raise ValueError("Dataset schema invalid: missing 'prompts' field")
+
+    def validate(self, data: Dict[str, Any]) -> None:
+        self.validate_schema(data)
+
+    def _compute_sha256(self, content: str) -> str:
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def log_audit_event(self, dataset_id: str, action: str, researcher: str, details: str) -> None:
         """Records a lifecycle event in the immutable dataset audit log."""

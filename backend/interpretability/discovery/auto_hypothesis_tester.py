@@ -56,6 +56,28 @@ class ReasoningTrace:
     final_confidence: float = 0.0
 
 
+class _OfflineLLMEngine:
+    """Deterministic engine for offline verdicts (no network, fixed responses)."""
+
+    model = "deterministic-offline"
+
+    def generate_hypotheses(self, feature_report: Dict[str, Any], max_candidates: int = 3) -> List[Dict[str, Any]]:
+        fid = feature_report.get("feature_index", "Unknown")
+        return [
+            {"description": f"Feature {fid} fires on French locations.", "initial_confidence": 0.65},
+            {"description": f"Feature {fid} fires on Python syntax.", "initial_confidence": 0.45},
+        ][:max_candidates]
+
+    def generate_critique(self, hypothesis: str) -> Dict[str, Any]:
+        return {"critique": "Might be a spurious correlation.", "alternative_explanation": "Fires on something else."}
+
+    def generate_counterexample(self, hypothesis: str, critique: str = "") -> Dict[str, Any]:
+        return {"prompt": "Paris Hilton went to the store.", "expected_firing": False}
+
+    def review_evidence(self, hypothesis: str, critique: str, experiment_spec: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+        return {"verdict": "needs_revision", "rationale": "Deterministic reviewer needs more data."}
+
+
 class AutoHypothesisTester:
     """Autonomous agent that generates and falsifies mechanistic hypotheses."""
 
@@ -223,6 +245,26 @@ class AutoHypothesisTester:
         self.traces.append(trace)
         
         return best_hypothesis
+
+    def test_hypothesis(self, hypothesis_statement: str, max_iterations: int = 2) -> Dict[str, Any]:
+        """Runs the full falsification loop for a single statement and returns a verdict dict."""
+        target_report = {
+            "feature_index": 1402,
+            "description": hypothesis_statement,
+            "hypothesis_statement": hypothesis_statement,
+        }
+        tester = AutoHypothesisTester(engine=_OfflineLLMEngine())
+        hypothesis = tester.run_loop(target_report, max_iterations=max_iterations)
+        outcome = "Confirmed" if hypothesis.overall_confidence >= 0.5 else "Inconclusive"
+        return {
+            "passed": outcome == "Confirmed",
+            "outcome_state": outcome,
+            "hypothesis_id": hypothesis.id,
+            "target": hypothesis.target,
+            "description": hypothesis.description,
+            "confidence": round(hypothesis.overall_confidence, 4),
+            "evidence_count": len(hypothesis.evidence_registry),
+        }
 
 
 AutomaticHypothesisTesterEngine = AutoHypothesisTester

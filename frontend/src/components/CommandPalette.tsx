@@ -5,7 +5,6 @@ import { useAppStore } from '../store/useAppStore';
 interface CommandPaletteProps {
   onLoadModel: (name: string) => void;
   onRunPrompt: () => void;
-  darkMode: boolean;
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ onLoadModel, onRunPrompt }) => {
@@ -31,7 +30,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ onLoadModel, onR
   const commands = [
     { label: 'Load GPT-2 Model', action: () => onLoadModel('gpt2') },
     { label: 'Run Current Prompt', action: () => onRunPrompt() },
-    { label: 'Toggle Dark Mode', action: () => setState(s => ({ darkMode: !s.darkMode })) },
     { label: 'Toggle Token Viewer', action: () => setState(s => ({ visiblePanels: { ...s.visiblePanels, token_viewer: !s.visiblePanels.token_viewer } })) },
     { label: 'Toggle Attention Heatmap', action: () => setState(s => ({ visiblePanels: { ...s.visiblePanels, attention_heatmap: !s.visiblePanels.attention_heatmap } })) },
     { label: 'Toggle Prediction Inspector', action: () => setState(s => ({ visiblePanels: { ...s.visiblePanels, prediction_inspector: !s.visiblePanels.prediction_inspector } })) },

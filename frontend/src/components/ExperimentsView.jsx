@@ -31,6 +31,14 @@ export default function ExperimentsView({ api }) {
     setTitle('');
   };
 
+  const handleDelete = async (id) => {
+    if (api && api.deleteExperiment) {
+      await api.deleteExperiment(id);
+      const updated = await api.listExperiments();
+      setExperiments(updated || []);
+    }
+  };
+
   return (
     <div>
       <div className="section-header">
@@ -62,6 +70,9 @@ export default function ExperimentsView({ api }) {
                 <div className="exp-details">
                   <div>Target Circuit: <strong>{exp.targetCircuit}</strong></div>
                   <div>Created: <strong>{new Date(exp.createdAt).toLocaleDateString()}</strong></div>
+                </div>
+                <div className="exp-details" style={{ marginTop: 8 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(exp.id)}>Delete</button>
                 </div>
               </div>
             ))}

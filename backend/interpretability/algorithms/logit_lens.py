@@ -6,7 +6,7 @@ Applies direct unembedding matrix projection to intermediate layer residual stre
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from runtime.logits import IntermediateLogitsEngine
+from backend.runtime.logits import IntermediateLogitsEngine
 
 
 class ProjectionModel:

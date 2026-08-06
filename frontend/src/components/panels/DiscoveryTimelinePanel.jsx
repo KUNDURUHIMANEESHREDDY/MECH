@@ -16,9 +16,9 @@ export default function DiscoveryTimelinePanel() {
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {milestones.map((m, i) => (
-            <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: '6px', borderLeft: '4px solid #a855f7' }}>
-              <span style={{ fontSize: '10px', color: '#a855f7', fontWeight: 'bold' }}>{m.date}</span>
-              <h5 style={{ margin: '4px 0 0 0', color: '#f8fafc' }}>{m.title}</h5>
+            <div key={i} style={{ padding: '10px', background: 'var(--bg-elev-2)', borderRadius: '6px', borderLeft: '4px solid var(--purple)' }}>
+              <span style={{ fontSize: '10px', color: 'var(--purple)', fontWeight: 'bold' }}>{m.date}</span>
+              <h5 style={{ margin: '4px 0 0 0', color: 'var(--text)' }}>{m.title}</h5>
             </div>
           ))}
         </div>

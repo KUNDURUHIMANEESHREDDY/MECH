@@ -1,6 +1,6 @@
 import { InferenceResponse } from '../types';
 
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = 'http://localhost:8000/api';
 
 export async function runInference(prompt: string, maxNewTokens = 10): Promise<InferenceResponse> {
   const res = await fetch(`${API_BASE}/infer`, {

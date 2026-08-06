@@ -74,5 +74,10 @@ class UnifiedRegistry:
                 *self.papers.list_items(),
                 *self.mechanisms.list_items(),
                 *self.circuits.list_items(),
+                *self.experiments.list_items(),
+                *self.discoveries.list_items(),
+                *self.datasets.list_items(),
+                *self.reports.list_items(),
+                *self.skills.list_items(),
             ]
         return []

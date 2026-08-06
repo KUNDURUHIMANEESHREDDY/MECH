@@ -111,7 +111,7 @@ export function useNeuronUMAP({ points, selectedId, onSelectNeuron, focusSearchR
   const key = useMemo(() => cacheKey(points), [points]);
 
   const animRef = useRef<ProjectedPoint[]>(coords);
-  const [viewport, setViewport] = useState<Viewport>(() => VIEWPORT_CACHE.get(key) ?? { x: 0, y: 0, k: 1 });
+  const [viewport, setViewport] = useState<Viewport>(() => VIEWPORT_CACHE.get(key) ?? { x: 0, y: 0, k: 2.5 });
   const viewportRef = useRef(viewport);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const hoveredRef = useRef<number | null>(null);

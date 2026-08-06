@@ -8,7 +8,7 @@ export default function ImmersiveCollabPanel() {
         <h3><Globe size={13} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} /> Immersive Synchronized Collaboration</h3>
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
-        <p style={{ fontSize: '12px', color: '#94a3b8' }}>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           Synchronized view: 2 researchers exploring the same activation manifold in real time.
         </p>
       </div>

@@ -1,39 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { BoxSelect, Download, Hand, Loader2, Maximize, Search, ZoomIn, ZoomOut } from 'lucide-react';
+import { colors } from '../../../design/tokens/colors';
 import { NeuronUMapProps, NeuronUMapTheme } from './types';
 import { useNeuronUMAP } from './useNeuronUMAP';
 import { drawMinimap, drawScene } from './renderer';
 import { ConnectedNeuron, NeuronDetailPanel } from './NeuronDetailPanel';
 
-const LIGHT_THEME: NeuronUMapTheme = {
-  bg: '#f6f7f9',
-  grid: '#e4e6ea',
-  text: '#1f2328',
-  muted: '#6e7781',
-  cardBg: '#ffffff',
-  border: '#d8dce0',
-  green: '#16a34a',
-  red: '#dc2626',
-  gray: '#a1a6ad',
-  accent: '#2563eb',
-  hover: '#111827',
-  tooltipBg: '#1f2328f2',
-};
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
 
-const DARK_THEME: NeuronUMapTheme = {
-  bg: '#111418',
-  grid: '#1e2329',
-  text: '#e6e8ea',
-  muted: '#8b949e',
-  cardBg: '#161b22',
-  border: '#30363d',
-  green: '#2ea043',
-  red: '#f85149',
-  gray: '#6e7681',
-  accent: '#58a6ff',
-  hover: '#f0f6fc',
-  tooltipBg: '#21262df2',
+function rgba(hex: string, a: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+const LIGHT_THEME: NeuronUMapTheme = {
+  bg: colors.canvasParchment,
+  grid: colors.hairline,
+  text: colors.ink,
+  muted: colors.inkMuted48,
+  cardBg: colors.canvas,
+  border: colors.border,
+  green: colors.success,
+  red: colors.danger,
+  gray: colors.inkMuted48,
+  accent: colors.primary,
+  hover: colors.ink,
+  tooltipBg: rgba(colors.ink, 0.95),
 };
 
 const MINIMAP_W = 140;
@@ -43,12 +39,11 @@ export function NeuronUMAP({
   points,
   selectedId = null,
   onSelectNeuron,
-  darkMode,
   height = 480,
   loading = false,
   title = 'Neuron Map',
-}: NeuronUMAPProps) {
-  const theme = darkMode ? DARK_THEME : LIGHT_THEME;
+}: NeuronUMapProps) {
+  const theme = LIGHT_THEME;
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -564,3 +559,5 @@ export function NeuronUMAP({
     </div>
   );
 }
+
+export default NeuronUMAP;

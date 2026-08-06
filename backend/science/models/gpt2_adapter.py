@@ -7,6 +7,7 @@ activation patching via the unified ModelAdapter interface.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import random
 from typing import Any, Dict, List, Optional
@@ -27,7 +28,7 @@ def _gpt2_spec(variant: str = "small", mock_mode: bool = False) -> ModelSpec:
 
 def _mock_activation(layer: int, neuron_index: int, prompt: str) -> float:
     """Deterministic mock activation for reproducible tests."""
-    seed = hash(f"{layer}_{neuron_index}_{prompt[:20]}") & 0x7FFFFFFF
+    seed = int(hashlib.sha256(f"{layer}_{neuron_index}_{prompt[:20]}".encode("utf-8")).hexdigest()[:8], 16)
     return round((seed % 1000) / 200.0 - 2.5, 4)
 
 
@@ -185,7 +186,7 @@ class GPT2Adapter(ModelAdapter):
         # Mock Path
         original = _mock_activation(layer, neuron_index, prompt)
         return PatchResult(
-            original_logit=original, patched_logit=patch_value, delta=patch_value - original,
+            original_logit=original, patched_logit=patch_value, delta=round(patch_value - original, 4),
             top_token_before=" Paris", top_token_after=" France" if abs(patch_value - original) > 1.0 else " Paris",
             layer=layer, neuron_index=neuron_index, patch_value=patch_value,
         )

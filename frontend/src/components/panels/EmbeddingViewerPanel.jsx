@@ -5,10 +5,10 @@ export default function EmbeddingViewerPanel() {
   const [method, setMethod] = useState("PCA");
 
   const samplePoints = [
-    { x: 12, y: 45, label: "IOI Features", color: "#38bdf8" },
-    { x: 78, y: 22, label: "Geography Probes", color: "#f59e0b" },
-    { x: 45, y: 88, label: "Syntax Patterns", color: "#10b981" },
-    { x: 82, y: 75, label: "Code Decoders", color: "#ec4899" },
+    { x: 12, y: 45, label: "IOI Features", color: "var(--accent)" },
+    { x: 78, y: 22, label: "Geography Probes", color: "var(--warning)" },
+    { x: 45, y: 88, label: "Syntax Patterns", color: "var(--success)" },
+    { x: 82, y: 75, label: "Code Decoders", color: "var(--pink)" },
   ];
 
   return (

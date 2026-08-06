@@ -24,9 +24,9 @@ export default function ResearchReplayPanel() {
           onChange={(e) => setTimelineStep(Number(e.target.value))}
           style={{ width: '100%', marginBottom: '12px' }}
         />
-        <div style={{ padding: '12px', background: '#1e293b', borderRadius: '6px' }}>
-          <h4 style={{ margin: '0 0 4px 0', color: '#38bdf8' }}>{events[timelineStep - 1].title}</h4>
-          <span style={{ fontSize: '11px', color: '#94a3b8' }}>Timestamp: {events[timelineStep - 1].time}</span>
+        <div style={{ padding: '12px', background: 'var(--bg-elev-2)', borderRadius: '6px' }}>
+          <h4 style={{ margin: '0 0 4px 0', color: 'var(--accent)' }}>{events[timelineStep - 1].title}</h4>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Timestamp: {events[timelineStep - 1].time}</span>
         </div>
       </div>
     </div>

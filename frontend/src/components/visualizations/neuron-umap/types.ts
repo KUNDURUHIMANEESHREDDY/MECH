@@ -59,7 +59,6 @@ export interface NeuronUMapProps {
   tokens?: string[];
   selectedId?: string | null;
   onSelectNeuron?: (id: string | null) => void;
-  darkMode: boolean;
   height?: number;
   loading?: boolean;
   title?: string;

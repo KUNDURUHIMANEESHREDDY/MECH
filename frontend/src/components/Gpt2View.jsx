@@ -1,6 +1,17 @@
 import React, { useState, useCallback, useRef } from 'react';
+import { colors } from '../design/tokens/colors';
 
 // ─── tiny helpers ──────────────────────────────────────────────────────────────
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgba(hex, a) {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 function StatusBadge({ value }) {
   const ok = value === 'ok' || value === 'loaded';
@@ -8,8 +19,8 @@ function StatusBadge({ value }) {
     <span style={{
       display: 'inline-block', padding: '2px 8px', borderRadius: 4,
       fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
-      background: ok ? '#d1fae5' : '#fee2e2',
-      color: ok ? '#065f46' : '#991b1b'}}>
+      background: ok ? colors.successSoft : colors.dangerSoft,
+      color: ok ? colors.successText : colors.dangerText}}>
       {value || '—'}
     </span>
   );
@@ -40,7 +51,7 @@ function Section({ title, children, badge }) {
 function KV({ k, v, mono }) {
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginBottom: 3, fontSize: 13 }}>
-      <span style={{ color: 'var(--muted, #666)', minWidth: 180, flexShrink: 0 }}>{k}</span>
+      <span style={{ color: colors.inkMuted48, minWidth: 180, flexShrink: 0 }}>{k}</span>
       <span style={mono ? { fontFamily: 'monospace' } : {}}>{v ?? '—'}</span>
     </div>
   );
@@ -64,7 +75,7 @@ function AttentionHeatmap({ matrix, tokens }) {
     const f = scaled - i;
     const [r, g, b] = stops[i].map((ch, k) => Math.round(ch + (stops[i + 1][k] - ch) * f));
     const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    return { background: `rgb(${r},${g},${b})`, color: lum > 140 ? '#0f172a' : '#f8fafc' };
+    return { background: `rgb(${r},${g},${b})`, color: lum > 140 ? colors.ink : colors.onDark };
   };
   const sz = 36;
   return (
@@ -110,8 +121,8 @@ function LogitBar({ label, value, max, color }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5, fontSize: 13 }}>
       <span style={{ minWidth: 70, textAlign: 'right' }}>{label}</span>
-      <div style={{ flex: 1, background: '#e2e8f0', borderRadius: 3, height: 14, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color || '#3b82f6', borderRadius: 3 }} />
+      <div style={{ flex: 1, background: colors.dividerSoft, borderRadius: 3, height: 14, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color || colors.primary, borderRadius: 3 }} />
       </div>
       <span style={{ minWidth: 50, fontFamily: 'monospace', fontSize: 12 }}>{value.toFixed(3)}</span>
     </div>
@@ -251,7 +262,7 @@ export default function Gpt2View({ api }) {
     <div style={{ padding: '20px 24px', maxWidth: 900 }}>
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>GPT-2 Small — Live Interpretability</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted, #666)' }}>
+        <p style={{ margin: '4px 0 0', fontSize: 13, color: colors.inkMuted48 }}>
           8-step mechanistic interpretability pipeline running on the real model via Python sidecar
         </p>
       </div>
@@ -276,7 +287,7 @@ export default function Gpt2View({ api }) {
           </div>
         )}
         {modelInfo?.status === 'error' && (
-          <p style={{ color: '#dc2626', marginTop: 8, fontSize: 12 }}>{modelInfo.error}</p>
+          <p style={{ color: colors.danger, marginTop: 8, fontSize: 12 }}>{modelInfo.error}</p>
         )}
       </Section>
 
@@ -305,23 +316,23 @@ export default function Gpt2View({ api }) {
              <KV k="Top-1 token" v={`"${promptResult.top5?.[0]?.token}"`} />
              <KV k="Next token"  v={`"${promptResult.next_token}"`} />
              <div style={{ marginTop: 12 }}>
-               <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--muted, #666)' }}>
+               <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: colors.inkMuted48 }}>
                  Top-16 predictions
                </p>
                {top16.map((t, i) => (
                  <LogitBar key={t.token} label={t.token} value={t.logit} max={maxLogit}
-                   color={i === 0 ? '#10b981' : '#94a3b8'} />
+                   color={i === 0 ? colors.success : colors.inkMuted48} />
                ))}
              </div>
             <div style={{ marginTop: 12 }}>
-              <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: 'var(--muted, #666)' }}>
+              <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: colors.inkMuted48 }}>
                 Top-5 predictions
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {promptResult.top5?.map((t, i) => (
                   <span key={i} style={{
                     padding: '3px 8px', borderRadius: 4, fontSize: 12,
-                    background: i === 0 ? '#dbeafe' : '#f1f5f9',
+                    background: i === 0 ? colors.infoSoft : colors.dividerSoft,
                     fontFamily: 'monospace', fontWeight: i === 0 ? 700 : 400
                   }}>
                     "{t.token}" {t.logit.toFixed(2)}
@@ -332,7 +343,7 @@ export default function Gpt2View({ api }) {
           </>
         )}
         {promptResult?.status === 'error' && (
-          <p style={{ color: '#dc2626', fontSize: 12 }}>{promptResult.error}</p>
+          <p style={{ color: colors.danger, fontSize: 12 }}>{promptResult.error}</p>
         )}
       </Section>
 
@@ -360,7 +371,7 @@ export default function Gpt2View({ api }) {
           </>
         )}
         {activResult?.status === 'error' && (
-          <p style={{ color: '#dc2626', fontSize: 12 }}>{activResult.error}</p>
+          <p style={{ color: colors.danger, fontSize: 12 }}>{activResult.error}</p>
         )}
       </Section>
 
@@ -386,14 +397,14 @@ export default function Gpt2View({ api }) {
         {!hasCache && <p className="hint">Run a prompt first.</p>}
         {attnResult?.status === 'ok' && (
           <>
-            <p style={{ fontSize: 12, color: 'var(--muted, #666)', marginBottom: 8 }}>
+            <p style={{ fontSize: 12, color: colors.inkMuted48, marginBottom: 8 }}>
               Layer {attnResult.layer} · Head {attnResult.head} — rows = query, cols = key
             </p>
             <AttentionHeatmap matrix={attnResult.matrix} tokens={attnResult.str_tokens || []} />
           </>
         )}
         {attnResult?.status === 'error' && (
-          <p style={{ color: '#dc2626', fontSize: 12 }}>{attnResult.error}</p>
+          <p style={{ color: colors.danger, fontSize: 12 }}>{attnResult.error}</p>
         )}
       </Section>
 
@@ -432,7 +443,7 @@ export default function Gpt2View({ api }) {
           disabled={runningPatch || !hasCache}>
           {runningPatch ? <>Patching…<Spinner /></> : 'Zero-ablate head'}
         </button>
-        {!hasCache && <span style={{ fontSize: 12, color: 'var(--muted,#666)', marginLeft: 10 }}>
+        {!hasCache && <span style={{ fontSize: 12, color: colors.inkMuted48, marginLeft: 10 }}>
           Run a prompt first.
         </span>}
 
@@ -443,8 +454,8 @@ export default function Gpt2View({ api }) {
             <KV k="Delta"              v={patchResult.delta?.toFixed(4)} mono />
             <div style={{
               marginTop: 10, padding: '8px 12px', borderRadius: 6, fontSize: 13,
-              background: patchResult.direction === 'hurts' ? '#fef2f2' : '#f0fdf4',
-              color:      patchResult.direction === 'hurts' ? '#991b1b' : '#166534',
+background: patchResult.direction === 'hurts' ? colors.dangerSoft : colors.successSoft,
+      color:      patchResult.direction === 'hurts' ? colors.dangerText : colors.successText,
               fontWeight: 600}}>
               Zeroing L{patchResult.layer}H{patchResult.head}{' '}
               <strong>{patchResult.direction}</strong> the{' '}
@@ -454,7 +465,7 @@ export default function Gpt2View({ api }) {
           </div>
         )}
         {patchResult?.status === 'error' && (
-          <p style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{patchResult.error}</p>
+          <p style={{ color: colors.danger, fontSize: 12, marginTop: 8 }}>{patchResult.error}</p>
         )}
       </Section>
 
@@ -479,8 +490,8 @@ export default function Gpt2View({ api }) {
         {ioiResult?.status === 'ok' && (
           <div>
             <div style={{ marginBottom: 12 }}>
-              <p style={{ fontSize: 12, color: 'var(--muted,#666)', marginBottom: 4 }}>
-                Clean: <code style={{ background: '#f1f5f9', padding: '1px 4px', borderRadius: 3 }}>
+              <p style={{ fontSize: 12, color: colors.inkMuted48, marginBottom: 4 }}>
+                Clean: <code style={{ background: colors.dividerSoft, padding: '1px 4px', borderRadius: 3 }}>
                   {ioiResult.clean_prompt}
                 </code>
               </p>
@@ -490,14 +501,14 @@ export default function Gpt2View({ api }) {
               <div style={{
                 display: 'inline-block', padding: '3px 10px', borderRadius: 4, fontSize: 12,
                 marginTop: 4, fontWeight: 600,
-                background: ioiResult.ioi_pass ? '#d1fae5' : '#fee2e2',
-                color:      ioiResult.ioi_pass ? '#065f46' : '#991b1b'}}>
+                background: ioiResult.ioi_pass ? colors.successSoft : colors.dangerSoft,
+                color:      ioiResult.ioi_pass ? colors.successText : colors.dangerText}}>
                 {ioiResult.ioi_pass ? `Model predicts ${ioiResult.io_name} (IO) — PASS` : 'FAIL'}
               </div>
             </div>
             <div>
-              <p style={{ fontSize: 12, color: 'var(--muted,#666)', marginBottom: 4 }}>
-                Corrupted: <code style={{ background: '#f1f5f9', padding: '1px 4px', borderRadius: 3 }}>
+              <p style={{ fontSize: 12, color: colors.inkMuted48, marginBottom: 4 }}>
+                Corrupted: <code style={{ background: colors.dividerSoft, padding: '1px 4px', borderRadius: 3 }}>
                   {ioiResult.corrupted_prompt}
                 </code>
               </p>
@@ -507,8 +518,8 @@ export default function Gpt2View({ api }) {
               <div style={{
                 display: 'inline-block', padding: '3px 10px', borderRadius: 4, fontSize: 12,
                 marginTop: 4, fontWeight: 600,
-                background: ioiResult.corrupted_pass ? '#d1fae5' : '#fee2e2',
-                color:      ioiResult.corrupted_pass ? '#065f46' : '#991b1b'}}>
+                background: ioiResult.corrupted_pass ? colors.successSoft : colors.dangerSoft,
+                color:      ioiResult.corrupted_pass ? colors.successText : colors.dangerText}}>
                 {ioiResult.corrupted_pass
                   ? `Model flips to ${ioiResult.subj_name} (Subject) — PASS`
                   : 'FAIL'}
@@ -517,7 +528,7 @@ export default function Gpt2View({ api }) {
           </div>
         )}
         {ioiResult?.status === 'error' && (
-          <p style={{ color: '#dc2626', fontSize: 12 }}>{ioiResult.error}</p>
+          <p style={{ color: colors.danger, fontSize: 12 }}>{ioiResult.error}</p>
         )}
       </Section>
     </div>

@@ -11,10 +11,10 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any, Dict, List
 
-from core.capability_registry import CapabilityRegistry
-from core.evidence_graph import TraceableEvidenceGraph
-from core.workflow_dsl import DeclarativeWorkflowEngine
-from validation.validation_engine import ScientificValidationEngine
+from backend.core.capability_registry import CapabilityRegistry
+from backend.core.evidence_graph import TraceableEvidenceGraph
+from backend.core.workflow_dsl import DeclarativeWorkflowEngine
+from backend.validation.validation_engine import ScientificValidationEngine
 from .debate_engine import ScientificDebateEngine
 from .discovery_prioritizer import DiscoveryPrioritizerEngine
 from .experiment_recommender import ExperimentRecommendationEngine
@@ -113,7 +113,7 @@ class AIScientistEngine:
 
         # 8. Roadmap & Consensus Synthesis
         roadmap = self.roadmap_generator.generate_roadmap(research_theme=question)
-        consensus = self.consensus_engine.Synthesize_consensus(experimental_outcomes=[val_res])
+        consensus = self.consensus_engine.synthesize_consensus(experimental_outcomes=[val_res])
 
         return {
             "question": question,

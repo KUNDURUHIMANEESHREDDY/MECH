@@ -1,13 +1,43 @@
 from fastapi import APIRouter
 from typing import Dict, Any, List
 import hashlib
+import os
 import random
+from pathlib import Path
 
-# Real GPT-2 inference engine (torch + transformers). Falls back to the
-# seeded stand-ins below only when the engine's ML stack is unavailable.
-from backend.services import gpt2_engine as engine
+# Real GPT-2 inference engine (torch + transformers) is imported lazily so the
+# desktop app can open immediately. Falls back to seeded stand-ins when absent.
+from backend.storage import DesktopStorage
 
 router = APIRouter()
+
+_STORAGE_PATH = os.environ.get(
+    "MECH_STORAGE_DB",
+    str(Path(__file__).parent.parent / "storage" / "mech.db"),
+)
+_store = DesktopStorage(_STORAGE_PATH)
+_store.initialize()
+_unified_registry = None
+_engine = None
+
+
+def get_registry():
+    global _unified_registry
+    if _unified_registry is None:
+        from backend.core.unified_registry import UnifiedRegistry
+        _unified_registry = UnifiedRegistry()
+    return _unified_registry
+
+
+def get_engine():
+    global _engine
+    if _engine is None:
+        try:
+            from backend.services import gpt2_engine
+            _engine = gpt2_engine
+        except Exception:
+            _engine = False
+    return _engine if _engine is not False else None
 
 
 @router.get("/status")
@@ -41,7 +71,8 @@ def list_models() -> Dict[str, Any]:
 @router.post("/models/load")
 def load_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     name = payload.get("model_name", "gpt2-small")
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.load()
     return {"status": "loaded", "model_name": name}
 
@@ -59,9 +90,10 @@ def get_model_info(name: str) -> Dict[str, Any]:
 
 @router.post("/infer")
 def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
-    prompt = payload.get("prompt", "The capital of France is")
+    prompt = payload.get("prompt") or _random_prompt()
     model_name = payload.get("model_name", "gpt2-small")
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.infer(prompt, model_name)
     prompt_tokens = [t.strip() for t in prompt.split() if t.strip()]
     if not prompt_tokens:
@@ -97,6 +129,11 @@ def list_benchmarks() -> Dict[str, Any]:
     }
 
 
+@router.get("/research_catalog")
+def research_catalog(item_type: str = "all") -> Dict[str, Any]:
+    return {"catalog": get_registry().list_catalog(item_type=item_type)}
+
+
 @router.post("/benchmarks/run")
 def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
     name = payload.get("benchmark_name", "IOI")
@@ -110,22 +147,40 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/experiments")
 def list_experiments() -> Dict[str, Any]:
-    return {"experiments": []}
+    return {"experiments": _store.list_experiments()}
 
 
 @router.post("/experiments")
 def create_experiment(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {"status": "created", "id": f"exp_{hash(str(payload)) % 10000}"}
+    item = dict(payload)
+    item.setdefault("id", f"exp_{hash(str(payload)) % 10000}")
+    _store.add_experiment(item)
+    return {"status": "created", "id": item["id"]}
+
+
+@router.delete("/experiments/{item_id}")
+def delete_experiment(item_id: str) -> Dict[str, Any]:
+    deleted = _store.delete_experiment(item_id)
+    return {"status": "deleted" if deleted else "not_found", "id": item_id}
 
 
 @router.get("/sessions")
 def list_sessions() -> Dict[str, Any]:
-    return {"sessions": []}
+    return {"sessions": _store.list_sessions()}
 
 
 @router.post("/sessions")
 def create_session(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {"status": "created", "id": f"sess_{hash(str(payload)) % 10000}"}
+    item = dict(payload)
+    item.setdefault("id", f"sess_{hash(str(payload)) % 10000}")
+    _store.add_session(item)
+    return {"status": "created", "id": item["id"]}
+
+
+@router.delete("/sessions/{item_id}")
+def delete_session(item_id: str) -> Dict[str, Any]:
+    deleted = _store.delete_session(item_id)
+    return {"status": "deleted" if deleted else "not_found", "id": item_id}
 
 
 @router.get("/discoveries")
@@ -220,7 +275,8 @@ def _seed(text: str) -> int:
 
 @router.post("/gpt2/load")
 def gpt2_load(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.load()
     return {
         "status": "loaded",
@@ -235,11 +291,50 @@ def gpt2_load(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 NAMES = ["John", "Alice", "Bob", "Emma", "David", "Sophia", "Michael", "Olivia", "James", "Emily"]
 
+PROMPT_POOL = [
+    "The capital of France is",
+    "The quick brown fox jumps over",
+    "In a world where artificial intelligence",
+    "The meaning of life is",
+    "Once upon a time there was a",
+    "The largest planet in our solar system is",
+    "Machine learning models can",
+    "The future of technology looks like",
+    "Scientists recently discovered that",
+    "The best way to learn programming is",
+    "In the year 2050, humans will",
+    "The most important invention in history",
+    "When you mix red and blue paint",
+    "The theory of relativity states that",
+    "A well-trained neural network can",
+]
+
+
+def _random_prompt() -> str:
+    return random.choice(PROMPT_POOL)
+
+
+TOKEN_POOLS = [
+    ["When", "Mary", "and", "John", "went", "to", "the", "store", ",", "John", "gave", "a", "bottle", "to"],
+    ["The", "cat", "sat", "on", "the", "mat", "and", "looked", "at", "the", "dog"],
+    ["Scientists", "at", "MIT", "discovered", "that", "the", "quantum", "computer", "performed"],
+    ["In", "a", "surprising", "turn", "of", "events", ",", "the", "researchers", "found"],
+    ["The", "president", "announced", "that", "the", "new", "policy", "would", "take", "effect"],
+    ["Deep", "learning", "models", "have", "shown", "remarkable", "progress", "in"],
+    ["The", "guitarist", "played", "a", "beautiful", "melody", "that", "moved", "the", "audience"],
+    ["According", "to", "the", "latest", "study", ",", "climate", "change", "is"],
+]
+
+
+def _random_token_sequence() -> list:
+    return list(random.choice(TOKEN_POOLS))
+
 
 @router.post("/gpt2/run_prompt")
 def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
-    prompt = payload.get("prompt", "The capital of France is")
-    if engine.is_available():
+    prompt = payload.get("prompt") or _random_prompt()
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.run_prompt(prompt)
     str_tokens = [t for t in prompt.replace(",", " ,").replace(".", " .").split() if t]
     seed = _seed(prompt)
@@ -261,7 +356,8 @@ def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/gpt2/activations")
 def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.activations(int(payload.get("layer", 0)))
     layer = max(0, min(11, int(payload.get("layer", 0))))
     seq = int(payload.get("seq_len", 12))
@@ -276,14 +372,12 @@ def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/gpt2/attention_head")
 def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.attention_head(int(payload.get("layer", 0)), int(payload.get("head", 0)))
     layer = int(payload.get("layer", 0)) % 12
     head = int(payload.get("head", 0)) % 12
-    tokens = payload.get("tokens") or [
-        "When", "Mary", "and", "John", "went", "to",
-        "the", "store", ",", "John", "gave", "a", "bottle", "to"
-    ]
+    tokens = payload.get("tokens") or _random_token_sequence()
     n = len(tokens)
     rng = random.Random(_seed(f"{layer}:{head}:{' '.join(tokens)}"))
     matrix = [[0.0] * n for _ in range(n)]
@@ -297,8 +391,10 @@ def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @router.post("/gpt2/patch_head")
+@router.post("/gpt2/patchhead")
 def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.patch_head(
             int(payload.get("layer", 9)),
             int(payload.get("head", 9)),
@@ -326,9 +422,10 @@ def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/gpt2/ioi")
 def gpt2_ioi(payload: Dict[str, Any]) -> Dict[str, Any]:
-    io_name = payload.get("io_name", "Mary")
-    subj_name = payload.get("subj_name", "John")
-    if engine.is_available():
+    io_name = payload.get("io_name") or random.choice(NAMES)
+    subj_name = payload.get("subj_name") or random.choice([n for n in NAMES if n != io_name])
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.ioi(io_name, subj_name)
     rng = random.Random(_seed(f"{io_name}:{subj_name}"))
     clean_prompt = f"When {subj_name} and {io_name} went to the store, {subj_name} gave a bottle to"
@@ -354,7 +451,8 @@ def gpt2_ioi(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/gpt2/architecture")
 def gpt2_architecture(payload: Dict[str, Any] = None) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.architecture()
     return {
         "status": "error",
@@ -365,14 +463,16 @@ def gpt2_architecture(payload: Dict[str, Any] = None) -> Dict[str, Any]:
 @router.post("/gpt2/layer")
 def gpt2_layer(payload: Dict[str, Any]) -> Dict[str, Any]:
     layer = int(payload.get("layer", 0))
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.layer_detail(layer)
     return {"status": "error", "error": "torch/transformers not available"}
 
 
 @router.post("/gpt2/neurons")
 def gpt2_neurons(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.list_neurons(
             layer=int(payload.get("layer", 0)),
             component=str(payload.get("component", "mlp")),
@@ -387,7 +487,8 @@ def gpt2_neurons(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/gpt2/neuron")
 def gpt2_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.neuron_detail(
             layer=int(payload.get("layer", 0)),
             neuron_index=int(payload.get("neuron_index", 0)),
@@ -399,7 +500,8 @@ def gpt2_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/gpt2/head")
 def gpt2_head(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.head_detail(
             layer=int(payload.get("layer", 0)),
             head=int(payload.get("head", 0)),
@@ -409,7 +511,8 @@ def gpt2_head(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/gpt2/patch_neuron")
 def gpt2_patch_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if engine.is_available():
+    engine = get_engine()
+    if engine and engine.is_available():
         return engine.patch_neuron(
             layer=int(payload.get("layer", 0)),
             neuron_index=int(payload.get("neuron_index", 0)),

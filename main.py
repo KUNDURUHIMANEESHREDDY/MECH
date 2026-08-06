@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 from pathlib import Path
+import asyncio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +28,21 @@ app.add_middleware(
 )
 
 PROJECT_ROOT = Path(__file__).parent
+
+@app.on_event("startup")
+async def _preload_gpt2_engine():
+    """Pre-load GPT-2 model at startup to avoid first-request timeout."""
+    try:
+        from backend.services import gpt2_engine
+        if gpt2_engine.is_available():
+            logger.info("Pre-loading GPT-2 engine (torch/transformers)...")
+            result = await asyncio.to_thread(gpt2_engine.load)
+            status = result.get("status", "unknown")
+            logger.info(f"GPT-2 engine pre-loaded: status={status}")
+        else:
+            logger.info("GPT-2 engine not available — using seeded fallbacks.")
+    except Exception as e:
+        logger.warning(f"GPT-2 pre-loading failed: {e}")
 
 @app.get("/")
 def home():
@@ -68,5 +84,6 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True
+        reload=False,
+        timeout_keep_alive=600,
     )

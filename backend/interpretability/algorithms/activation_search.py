@@ -6,7 +6,7 @@ Executes activation queries using ActivationQuery specification objects.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from repository.activation_repository import get_activation_repository
+from backend.repository.activation_repository import get_activation_repository
 
 
 class ActivationQuery:

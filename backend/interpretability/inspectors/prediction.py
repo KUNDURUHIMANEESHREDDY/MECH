@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import torch
 from typing import Any
-from repository.activation_repository import activation_repo
-from interpretability.statistics.stats_engine import stats_engine
+from backend.repository.activation_repository import activation_repo
+from backend.interpretability.statistics.stats_engine import stats_engine
 
 
 class PredictionInspector:

@@ -11,7 +11,7 @@ import collections
 import math
 from typing import Any, Dict, List, Optional
 
-from science.models.adapter_base import ModelAdapter
+from backend.science.models.adapter_base import ModelAdapter
 
 
 class FeatureAutoInterpreter:

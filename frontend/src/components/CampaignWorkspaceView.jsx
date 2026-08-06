@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { BarChart3, Building2, Check, FlaskConical, ScrollText, TrendingUp, X } from 'lucide-react';
+import { colors, radii, spacing, typography } from '../design/tokens';
 
 /**
  * CampaignWorkspaceView - Scientist's Research Campaign Workspace
@@ -81,18 +82,18 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
   const campaign = MOCK_CAMPAIGNS.find(c => c.id === selectedCampaignId) || MOCK_CAMPAIGNS[0];
 
   return (
-    <div style={{ padding: 28, background: 'var(--bg)', color: 'inherit', height: '100%', overflowY: 'auto', fontFamily: "'Inter', sans-serif" }}>
+    <div style={{ padding: 28, background: colors.canvasParchment, color: colors.ink, height: '100%', overflowY: 'auto', fontFamily: typography.body.fontFamily }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: '#d0c0ff', display: 'flex', alignItems: 'center', gap: 8 }}><FlaskConical size={20} /> Scientist's Campaign Workspace</h1>
-          <p style={{ margin: 0, color: 'var(--text-dim)', fontSize: 13 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 6px 0', color: colors.purpleBorder, display: 'flex', alignItems: 'center', gap: 8 }}><FlaskConical size={20} /> Scientist's Campaign Workspace</h1>
+          <p style={{ margin: 0, color: colors.inkMuted48, fontSize: 13 }}>
             Manage ongoing & completed research campaigns, Bayesian belief evolution, compute FLOPs, and USD budget
           </p>
         </div>
-        <div style={{ background: 'var(--bg)', padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Active Workspace: </span>
-          <span style={{ color: '#5cd4c4', fontWeight: 600 }}>{MOCK_CAMPAIGNS.length} Campaigns</span>
+        <div style={{ background: colors.surfacePearl, padding: '6px 14px', borderRadius: 8, border: `1px solid ${colors.hairline}`, fontSize: 12 }}>
+          <span style={{ color: colors.inkMuted48 }}>Active Workspace: </span>
+          <span style={{ color: colors.primary, fontWeight: 600 }}>{MOCK_CAMPAIGNS.length} Campaigns</span>
         </div>
       </div>
 
@@ -104,8 +105,8 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
             onClick={() => setSelectedCampaignId(c.id)}
             style={{
               padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-              background: selectedCampaignId === c.id ? '#2a2a5a' : '#151528',
-              color: selectedCampaignId === c.id ? '#d0c0ff' : '#888',
+              background: selectedCampaignId === c.id ? colors.surfacePearl : colors.canvas,
+              color: selectedCampaignId === c.id ? colors.purpleBorder : colors.inkMuted48,
               transition: 'all 0.2s'
             }}
           >
@@ -115,7 +116,7 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
       </div>
 
       {/* Workspace Panel Selector Tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, borderBottom: '1px solid #2a2a4a', paddingBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, borderBottom: `1px solid ${colors.hairline}`, paddingBottom: 10 }}>
         {[
           { key: 'overview', label: 'Executive Overview', icon: BarChart3 },
           { key: 'experiments', label: 'Executed Matrix', icon: FlaskConical },
@@ -128,29 +129,29 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
             onClick={() => setActiveTab(tab.key)}
             style={{
               padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-              background: activeTab === tab.key ? '#1f1f42' : 'transparent',
-              color: activeTab === tab.key ? '#5cd4c4' : '#888',
-              borderBottom: activeTab === tab.key ? '2px solid #5cd4c4' : '2px solid transparent'
+              background: activeTab === tab.key ? colors.surfacePearl : 'transparent',
+              color: activeTab === tab.key ? colors.primary : colors.inkMuted48,
+              borderBottom: activeTab === tab.key ? `2px solid ${colors.primary}` : '2px solid transparent'
             }}
           >
-            {typeof tab.icon === 'function' ? <tab.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{tab.label}
+            {tab.icon ? <tab.icon size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> : null}{tab.label}
           </button>
         ))}
       </div>
 
       {/* Campaign Executive Header Card */}
-      <div style={{ background: 'var(--bg-elev)', borderRadius: 12, border: '1px solid var(--border)', padding: 20, marginBottom: 20 }}>
+      <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20, marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
           <div>
-            <span style={{ fontSize: 11, color: '#5cd4c4', textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 700 }}>Active Campaign</span>
+            <span style={{ fontSize: 11, color: colors.primary, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 700 }}>Active Campaign</span>
             <h2 style={{ fontSize: 18, margin: '4px 0 6px 0' }}>{campaign.title}</h2>
-            <div style={{ fontSize: 13, color: '#bbb' }}>{campaign.goal}</div>
+            <div style={{ fontSize: 13, color: colors.ink }}>{campaign.goal}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
             <span style={{
-              background: campaign.status === 'Completed' ? '#1c3d27' : '#3d321c',
-              color: campaign.status === 'Completed' ? '#2ea043' : '#feca57',
-              border: `1px solid ${campaign.status === 'Completed' ? '#2ea043' : '#feca57'}`,
+              background: campaign.status === 'Completed' ? `${colors.success}26` : `${colors.warning}26`,
+              color: campaign.status === 'Completed' ? colors.success : colors.warning,
+              border: `1px solid ${campaign.status === 'Completed' ? colors.success : colors.warning}`,
               padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700
             }}>
               {campaign.status}
@@ -159,26 +160,26 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
         </div>
 
         {/* Executive Metrics Bar */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, background: 'var(--bg)', padding: 12, borderRadius: 8, border: '1px solid var(--border)', textAlign: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, background: colors.surfacePearl, padding: 12, borderRadius: 8, border: `1px solid ${colors.hairline}`, textAlign: 'center' }}>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Posterior Belief</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: '#2ea043', marginTop: 2 }}>{((1.0 - campaign.remaining_uncertainty) * 100).toFixed(1)}%</div>
+            <div style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase' }}>Posterior Belief</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: colors.success, marginTop: 2 }}>{((1.0 - campaign.remaining_uncertainty) * 100).toFixed(1)}%</div>
           </div>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Uncertainty Bounds</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: '#5cd4c4', marginTop: 2 }}>{(campaign.remaining_uncertainty * 100).toFixed(1)}%</div>
+            <div style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase' }}>Uncertainty Bounds</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: colors.primary, marginTop: 2 }}>{(campaign.remaining_uncertainty * 100).toFixed(1)}%</div>
           </div>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Budget Remaining</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: '#feca57', marginTop: 2 }}>${campaign.budget_remaining.toFixed(2)}</div>
+            <div style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase' }}>Budget Remaining</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: colors.warning, marginTop: 2 }}>${campaign.budget_remaining.toFixed(2)}</div>
           </div>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Compute FLOPs</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: '#d0c0ff', marginTop: 2 }}>{campaign.compute_flops}</div>
+            <div style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase' }}>Compute FLOPs</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: colors.purpleBorder, marginTop: 2 }}>{campaign.compute_flops}</div>
           </div>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Papers Reproduced</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#58a6ff', marginTop: 4 }}>{campaign.papers_reproduced.length} Papers</div>
+            <div style={{ fontSize: 10, color: colors.inkMuted48, textTransform: 'uppercase' }}>Papers Reproduced</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: colors.info, marginTop: 4 }}>{campaign.papers_reproduced.length} Papers</div>
           </div>
         </div>
       </div>
@@ -187,15 +188,15 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
 
       {/* PANEL 4: BAYESIAN BELIEF EVOLUTION (Target Phase 30 Panel) */}
       {activeTab === 'belief' && (
-        <div style={{ background: 'var(--bg-elev)', borderRadius: 12, border: '1px solid var(--border)', padding: 24 }}>
+        <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div>
-              <h3 style={{ fontSize: 16, color: '#d0c0ff', margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: 6 }}><TrendingUp size={15} /> Mathematically Traceable Bayesian Belief Evolution</h3>
-              <p style={{ fontSize: 12, color: 'var(--text-dim)', margin: 0 }}>
+              <h3 style={{ fontSize: 16, color: colors.purpleBorder, margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: 6 }}><TrendingUp size={15} /> Mathematically Traceable Bayesian Belief Evolution</h3>
+              <p style={{ fontSize: 12, color: colors.inkMuted48, margin: 0 }}>
                 P(Mechanism | Evidence) = [P(Evidence | Mechanism) × Prior] / P(Evidence)
               </p>
             </div>
-            <div style={{ background: 'var(--bg)', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, color: '#2ea043', fontWeight: 700 }}>
+            <div style={{ background: colors.surfacePearl, padding: '6px 12px', borderRadius: 6, border: `1px solid ${colors.hairline}`, fontSize: 12, color: colors.success, fontWeight: 700 }}>
               Final Posterior Belief: {((1.0 - campaign.remaining_uncertainty) * 100).toFixed(1)}%
             </div>
           </div>
@@ -203,7 +204,7 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
           {/* Belief Evolution Iteration Table */}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
             <thead>
-              <tr style={{ background: 'var(--bg)', borderBottom: '1px solid #2a2a4a', color: 'var(--text-dim)' }}>
+              <tr style={{ background: colors.surfacePearl, borderBottom: `1px solid ${colors.hairline}`, color: colors.inkMuted48 }}>
                 <th style={{ padding: 10 }}>Iter</th>
                 <th style={{ padding: 10 }}>Algorithm</th>
                 <th style={{ padding: 10 }}>Prior P(M)</th>
@@ -216,20 +217,20 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
             </thead>
             <tbody>
               {campaign.belief_history.map(row => (
-                <tr key={row.iter} style={{ borderBottom: '1px solid #1a1a3a', background: row.iter % 2 === 0 ? '#12122a' : '#151528' }}>
-                  <td style={{ padding: 10, fontWeight: 700, color: '#d0c0ff' }}>{row.iter}</td>
+                <tr key={row.iter} style={{ borderBottom: `1px solid ${colors.hairline}`, background: row.iter % 2 === 0 ? colors.canvas : colors.surfacePearl }}>
+                  <td style={{ padding: 10, fontWeight: 700, color: colors.purpleBorder }}>{row.iter}</td>
                   <td style={{ padding: 10, fontWeight: 600}}>{row.alg}</td>
-                  <td style={{ padding: 10, color: '#aaa' }}>{(row.prior * 100).toFixed(1)}%</td>
-                  <td style={{ padding: 10, color: '#5cd4c4' }}>{(row.likelihood * 100).toFixed(1)}%</td>
-                  <td style={{ padding: 10, fontWeight: 800, color: '#2ea043' }}>{(row.posterior * 100).toFixed(1)}%</td>
-                  <td style={{ padding: 10, fontWeight: 700, color: row.delta >= 0 ? '#2ea043' : '#ff6b6b' }}>
+                  <td style={{ padding: 10, color: colors.inkMuted48 }}>{(row.prior * 100).toFixed(1)}%</td>
+                  <td style={{ padding: 10, color: colors.primary }}>{(row.likelihood * 100).toFixed(1)}%</td>
+                  <td style={{ padding: 10, fontWeight: 800, color: colors.success }}>{(row.posterior * 100).toFixed(1)}%</td>
+                  <td style={{ padding: 10, fontWeight: 700, color: row.delta >= 0 ? colors.success : colors.danger }}>
                     {row.delta >= 0 ? `+${(row.delta * 100).toFixed(1)}%` : `${(row.delta * 100).toFixed(1)}%`}
                   </td>
-                  <td style={{ padding: 10, fontFamily: 'monospace', color: '#d0c0ff' }}>{row.ci}</td>
+                  <td style={{ padding: 10, fontFamily: 'monospace', color: colors.purpleBorder }}>{row.ci}</td>
                   <td style={{ padding: 10 }}>
                     <span style={{
-                      background: row.verdict === 'SUPPORTED' ? '#1c3d27' : '#1a1a3a',
-                      color: row.verdict === 'SUPPORTED' ? '#2ea043' : '#888',
+                      background: row.verdict === 'SUPPORTED' ? `${colors.success}26` : colors.surfacePearl,
+                      color: row.verdict === 'SUPPORTED' ? colors.success : colors.inkMuted48,
                       padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700
                     }}>
                       {row.verdict}
@@ -244,25 +245,25 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
 
       {/* PANEL 2: EXECUTED EXPERIMENTS MATRIX */}
       {activeTab === 'experiments' && (
-        <div style={{ background: 'var(--bg-elev)', borderRadius: 12, border: '1px solid var(--border)', padding: 20 }}>
-          <h3 style={{ fontSize: 14, color: '#d0c0ff', margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><FlaskConical size={14} /> Executed Experiments Matrix</h3>
+        <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20 }}>
+          <h3 style={{ fontSize: 14, color: colors.purpleBorder, margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: 6 }}><FlaskConical size={14} /> Executed Experiments Matrix</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {campaign.completed_experiments.map(exp => (
-              <div key={exp.id} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, borderLeft: '3px solid #2ea043' }}>
+              <div key={exp.id} style={{ background: colors.canvas, border: `1px solid ${colors.hairline}`, borderRadius: 8, padding: 12, borderLeft: `3px solid ${colors.success}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ fontSize: 13, fontWeight: 700}}>{exp.name} ({exp.model})</span>
-                  <span style={{ fontSize: 11, color: '#2ea043', fontWeight: 600 }}><Check size={11} style={{ verticalAlign: 'middle' }} /> {exp.status} ({exp.runtime})</span>
+                  <span style={{ fontSize: 11, color: colors.success, fontWeight: 600 }}><Check size={11} style={{ verticalAlign: 'middle' }} /> {exp.status} ({exp.runtime})</span>
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>{exp.detail}</div>
+                <div style={{ fontSize: 12, color: colors.inkMuted48 }}>{exp.detail}</div>
               </div>
             ))}
             {campaign.failed_experiments && campaign.failed_experiments.map(exp => (
-              <div key={exp.id} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, borderLeft: '3px solid #ff6b6b' }}>
+              <div key={exp.id} style={{ background: colors.canvas, border: `1px solid ${colors.hairline}`, borderRadius: 8, padding: 12, borderLeft: `3px solid ${colors.danger}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ fontSize: 13, fontWeight: 700}}>{exp.name} ({exp.model})</span>
-                  <span style={{ fontSize: 11, color: '#ff6b6b', fontWeight: 600 }}><X size={11} style={{ verticalAlign: 'middle' }} /> {exp.status} ({exp.runtime})</span>
+                  <span style={{ fontSize: 11, color: colors.danger, fontWeight: 600 }}><X size={11} style={{ verticalAlign: 'middle' }} /> {exp.status} ({exp.runtime})</span>
                 </div>
-                <div style={{ fontSize: 12, color: '#ff6b6b', fontFamily: 'monospace' }}>{exp.error}</div>
+                <div style={{ fontSize: 12, color: colors.danger, fontFamily: 'monospace' }}>{exp.error}</div>
               </div>
             ))}
           </div>
@@ -271,12 +272,12 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
 
       {/* PANEL 3: EVIDENCE STREAM */}
       {activeTab === 'evidence' && (
-        <div style={{ background: 'var(--bg-elev)', borderRadius: 12, border: '1px solid var(--border)', padding: 20 }}>
-          <h3 style={{ fontSize: 14, color: '#5cd4c4', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><ScrollText size={14} /> Accumulated Evidence Stream</h3>
+        <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20 }}>
+          <h3 style={{ fontSize: 14, color: colors.primary, margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><ScrollText size={14} /> Accumulated Evidence Stream</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {campaign.evidence.map(ev => (
-              <div key={ev.id} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', fontSize: 12 }}>
-                <span style={{ color: '#2ea043', fontWeight: 700, marginRight: 6 }}><Check size={11} style={{ verticalAlign: 'middle' }} /> [{ev.type}]</span>
+              <div key={ev.id} style={{ background: colors.canvas, border: `1px solid ${colors.hairline}`, borderRadius: 6, padding: '10px 12px', fontSize: 12 }}>
+                <span style={{ color: colors.success, fontWeight: 700, marginRight: 6 }}><Check size={11} style={{ verticalAlign: 'middle' }} /> [{ev.type}]</span>
                 <span style={{  }}>{ev.text}</span>
               </div>
             ))}
@@ -286,9 +287,9 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
 
       {/* PANEL 1: EXECUTIVE OVERVIEW */}
       {activeTab === 'overview' && (
-        <div style={{ background: 'var(--bg-elev)', borderRadius: 12, border: '1px solid var(--border)', padding: 20 }}>
-          <h3 style={{ fontSize: 14, color: '#d0c0ff', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><BarChart3 size={14} /> Campaign Executive Overview</h3>
-          <div style={{ fontSize: 13, color: '#bbb', lineHeight: 1.6 }}>
+        <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20 }}>
+          <h3 style={{ fontSize: 14, color: colors.purpleBorder, margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><BarChart3 size={14} /> Campaign Executive Overview</h3>
+          <div style={{ fontSize: 13, color: colors.ink, lineHeight: 1.6 }}>
             This research campaign evaluated target model <strong>{campaign.model}</strong> across {campaign.completed_experiments.length} executed experiment runs.
             The Bayesian belief engine updated posterior belief from <strong>50.0%</strong> to <strong>{((1.0 - campaign.remaining_uncertainty) * 100).toFixed(1)}%</strong>.
           </div>
@@ -297,10 +298,10 @@ export default function CampaignWorkspaceView({ api, onNavigate }) {
 
       {/* PANEL 5: EMITTED CLAIMS */}
       {activeTab === 'claims' && (
-        <div style={{ background: 'var(--bg-elev)', borderRadius: 12, border: '1px solid var(--border)', padding: 20 }}>
-          <h3 style={{ fontSize: 14, color: '#58a6ff', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Building2 size={14} /> Emitted Mechanism Claims</h3>
+        <div style={{ background: colors.canvas, borderRadius: 12, border: `1px solid ${colors.hairline}`, padding: 20 }}>
+          <h3 style={{ fontSize: 14, color: colors.info, margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}><Building2 size={14} /> Emitted Mechanism Claims</h3>
           {campaign.claims.map((c, i) => (
-            <div key={i} style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: 12, borderRadius: 8, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div key={i} style={{ background: colors.canvas, border: `1px solid ${colors.hairline}`, padding: 12, borderRadius: 8, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Building2 size={13} style={{ flexShrink: 0 }} /> {c}
             </div>
           ))}

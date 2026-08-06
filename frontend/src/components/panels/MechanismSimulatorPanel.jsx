@@ -18,7 +18,7 @@ export default function MechanismSimulatorPanel() {
       </div>
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-          <select value={patchType} onChange={(e) => setPatchType(e.target.value)} style={{ padding: '4px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #334155' }}>
+          <select value={patchType} onChange={(e) => setPatchType(e.target.value)} style={{ padding: '4px', borderRadius: '4px', background: 'var(--bg-elev-2)', color: 'var(--text)', border: '1px solid var(--border)' }}>
             <option value="zero_ablation">Zero Ablation</option>
             <option value="mean_ablation">Mean Ablation</option>
             <option value="rescale_patch">Rescale 2.0x</option>
@@ -27,9 +27,9 @@ export default function MechanismSimulatorPanel() {
         </div>
 
         {result && (
-          <div style={{ padding: '12px', background: '#020617', borderRadius: '6px', border: '1px solid #1e293b' }}>
-            <h5 style={{ margin: '0 0 4px 0', color: '#10b981' }}>Simulation Output</h5>
-            <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>
+          <div style={{ padding: '12px', background: 'var(--bg-elev-2)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+            <h5 style={{ margin: '0 0 4px 0', color: 'var(--success)' }}>Simulation Output</h5>
+            <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)' }}>
               Simulated Logit Delta: <strong>{result.simulatedDelta}</strong> | Confidence: <strong>{(result.confidence * 100).toFixed(0)}%</strong>
             </p>
           </div>

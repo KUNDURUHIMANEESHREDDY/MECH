@@ -10,7 +10,7 @@ class NeuralNetworkVisualizer:
         """
         Generates a Mermaid diagram for the high-level architecture.
         """
-        mermaid = ["graph TD", f"  Input[Input Tokens] --> Embed[Embedding Layer]"]
+        mermaid = ["graph LR", f"  Input[Input Tokens] --> Embed[Embedding Layer]"]
         
         last_node = "Embed"
         for i in range(layers):
@@ -59,4 +59,4 @@ graph LR
     NM96 --> Output
     NM99 --> Output
 """
-        return "graph TD\n  Start --> End"
+        return "graph LR\n  Start --> End"

@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
+import { colors } from '../../../design/tokens/colors';
 
 interface Props {
   matrix: number[][];
@@ -47,7 +48,7 @@ export function AttentionHeatmap({ matrix, tokens, hoveredToken, onHoverToken }:
     ctx.clearRect(0, 0, W, H);
 
     // labels
-    ctx.fillStyle = '#a0a0a0';
+    ctx.fillStyle = colors.inkMuted48;
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
@@ -68,7 +69,7 @@ export function AttentionHeatmap({ matrix, tokens, hoveredToken, onHoverToken }:
         ctx.fillStyle = getColor(matrix[i][j]);
         ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
         if (hoveredToken === i || hoveredToken === j) {
-          ctx.strokeStyle = '#fff';
+          ctx.strokeStyle = colors.onDark;
           ctx.lineWidth = 2;
           ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
         }
@@ -119,7 +120,7 @@ export function AttentionHeatmap({ matrix, tokens, hoveredToken, onHoverToken }:
           left: tooltip.x,
           top: tooltip.y,
           background: 'rgba(0,0,0,0.85)',
-          color: '#fff',
+          color: colors.onDark,
           padding: '4px 8px',
           borderRadius: 4,
           fontSize: 11,

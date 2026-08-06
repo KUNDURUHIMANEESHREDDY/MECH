@@ -32,12 +32,12 @@ export default function KnowledgeGraphViewerPanel() {
       <div className="panel-body" style={{ padding: '12px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
           {filtered.map((item) => (
-            <div key={item.id} style={{ padding: '8px', background: '#1e293b', borderRadius: '6px', border: '1px solid #334155' }}>
-              <span className="badge" style={{ fontSize: '10px', background: '#a855f7', color: '#fff', padding: '2px 4px', borderRadius: '3px' }}>
+            <div key={item.id} style={{ padding: '8px', background: 'var(--bg-elev-2)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+              <span className="badge" style={{ fontSize: '10px', background: 'var(--purple)', color: 'var(--bg)', padding: '2px 4px', borderRadius: '3px' }}>
                 {item.type}
               </span>
-              <h5 style={{ margin: '4px 0', fontSize: '12px', color: '#f8fafc' }}>{item.label}</h5>
-              <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>{item.value}</p>
+              <h5 style={{ margin: '4px 0', fontSize: '12px', color: 'var(--text)' }}>{item.label}</h5>
+              <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)' }}>{item.value}</p>
             </div>
           ))}
         </div>

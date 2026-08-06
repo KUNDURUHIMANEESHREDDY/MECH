@@ -27,6 +27,14 @@ export default function SessionsView({ api }) {
     }
   };
 
+  const handleDeleteSession = async (id) => {
+    if (api && api.deleteSession) {
+      await api.deleteSession(id);
+      const updated = await api.listSessions();
+      setSessions(updated || []);
+    }
+  };
+
   return (
     <div>
       <div className="section-header">
@@ -52,7 +60,10 @@ export default function SessionsView({ api }) {
                   <p className="hint" style={{ margin: '4px 0 0' }}>Model: <strong>{s.model}</strong> | Created: {new Date(s.createdAt).toLocaleString()}</p>
                   <p className="hint" style={{ margin: '2px 0 0' }}>"{s.prompt}"</p>
                 </div>
-                <button className="btn btn-secondary btn-sm">Load Session</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-secondary btn-sm">Load Session</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteSession(s.id)}>Delete</button>
+                </div>
               </div>
             ))}
           </div>

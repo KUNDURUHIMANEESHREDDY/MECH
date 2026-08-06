@@ -60,6 +60,18 @@ class DesktopStorage:
                     project_path TEXT,
                     opened_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS experiments (
+                    item_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS sessions (
+                    item_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             for key, value in DEFAULT_SETTINGS.items():
@@ -193,6 +205,24 @@ class DesktopStorage:
             ).fetchone()
         return self._file_from_row(row)
 
+    def list_experiments(self) -> list[dict[str, Any]]:
+        return self._list_json_items("experiments")
+
+    def add_experiment(self, item: dict[str, Any]) -> dict[str, Any]:
+        return self._add_json_item("experiments", item)
+
+    def delete_experiment(self, item_id: str) -> bool:
+        return self._delete_json_item("experiments", item_id)
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        return self._list_json_items("sessions")
+
+    def add_session(self, item: dict[str, Any]) -> dict[str, Any]:
+        return self._add_json_item("sessions", item)
+
+    def delete_session(self, item_id: str) -> bool:
+        return self._delete_json_item("sessions", item_id)
+
     def describe_workspace(self, path: str) -> dict[str, Any]:
         workspace_path = self._require_path(path, "workspace path")
         candidate = Path(workspace_path)
@@ -219,6 +249,41 @@ class DesktopStorage:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _list_json_items(self, table: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT payload FROM {table} ORDER BY created_at, item_id"
+            ).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
+
+    def _add_json_item(self, table: str, item: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            raise StorageError(f"{table} item must be an object")
+        item_id = item.get("id")
+        if not isinstance(item_id, str) or not item_id.strip():
+            raise StorageError(f"{table} item requires a string 'id'")
+        with self._connect() as connection:
+            connection.execute(
+                f"""
+                INSERT INTO {table} (item_id, payload, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(item_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    created_at = excluded.created_at
+                """,
+                (item_id, json.dumps(item), self._now()),
+            )
+        return item
+
+    def _delete_json_item(self, table: str, item_id: str) -> bool:
+        if not isinstance(item_id, str) or not item_id.strip():
+            raise StorageError(f"{table} item id must be a string")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"DELETE FROM {table} WHERE item_id = ?", (item_id,)
+            )
+        return cursor.rowcount > 0
 
     @staticmethod
     def _require_path(value: str, label: str) -> str:

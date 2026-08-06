@@ -1,18 +1,28 @@
 import React, { useState, useMemo } from 'react';
+import { colors } from '../../design/tokens/colors';
 import { AttentionHeatmap } from './panels/AttentionHeatmap';
 import { ActivationHeatmap } from './panels/ActivationHeatmap';
 import { NeuronUMAP } from './neuron-umap/NeuronUMAP';
 import { buildNeuronPoints, idForHeadNeuron, parseNeuronId } from './neuron-umap/data';
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgba(hex: string, a: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 interface Props {
   tokens: string[];
   layers: any[];
   numLayers: number;
   numHeads: number;
-  darkMode: boolean;
 }
 
-export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkMode }: Props) {
+export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Props) {
   const [selectedLayer, setSelectedLayer] = useState(0);
   const [selectedHead, setSelectedHead] = useState(0);
   const [selectedNeuron, setSelectedNeuron] = useState<number | null>(null);
@@ -34,11 +44,14 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
   // Multi-head summary: compute average attention per head for the selected layer
   const layerHeadSummaries = useMemo(() => {
     if (!layer) return [];
-    return layer.heads.map((h: any, i: number) => ({
-      headIndex: i,
-      avgActivation: h.attentionMatrix?.flat().reduce((a: number, b: number) => a + b, 0) / (h.attentionMatrix?.flat().length || 1),
-      maxActivation: Math.max(...(h.attentionMatrix?.flat() ?? [0])),
-    }));
+    return layer.heads.map((h: any, i: number) => {
+      const flat = (h.attentionMatrix as number[] | undefined)?.flat() ?? [];
+      return {
+        headIndex: i,
+        avgActivation: flat.reduce((a: number, b: number) => a + b, 0) / (flat.length || 1),
+        maxActivation: Math.max(...(flat.length ? flat : [0])),
+      };
+    });
   }, [layer]);
 
   // Token-level neuron activation: for each token, which neurons are most active
@@ -51,23 +64,23 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
     })).sort((a, b) => Math.abs(b.activation) - Math.abs(a.activation));
   }, [selNeuronData, tokens]);
 
-  const bg = darkMode ? '#0f172a' : '#f8fafc';
-  const cardBg = darkMode ? '#1e293b' : '#ffffff';
-  const border = darkMode ? '#334155' : '#e2e8f0';
-  const textColor = darkMode ? '#e2e8f0' : '#1e293b';
-  const mutedColor = darkMode ? '#94a3b8' : '#64748b';
+  const bg = colors.canvasParchment;
+  const cardBg = colors.canvas;
+  const border = colors.border;
+  const textColor = colors.ink;
+  const mutedColor = colors.inkMuted48;
 
-  const accent = '#3b82f6';
+  const accent = colors.primary;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'system-ui, sans-serif', fontSize: 12, color: textColor }}>
-      {/* ── Controls Bar ─────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', background: cardBg, padding: 10, borderRadius: 8, border: `1px solid ${border}` }}>
+      {/* ── Controls Bar (horizontal, full width) ────────────── */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: cardBg, padding: 10, borderRadius: 8, border: `1px solid ${border}` }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ color: mutedColor, fontWeight: 600 }}>Layer</span>
           <input type="range" min={0} max={numLayers - 1} value={selectedLayer}
             onChange={e => { setSelectedLayer(Number(e.target.value)); setSelectedHead(0); setSelectedNeuron(null); }}
-            style={{ width: 100 }} />
+            style={{ width: 120 }} />
           <span style={{ fontFamily: 'monospace', minWidth: 24, fontWeight: 700 }}>{selectedLayer}</span>
         </label>
 
@@ -83,7 +96,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
           <span style={{ color: mutedColor, fontWeight: 600 }}>Neuron</span>
           <input type="range" min={0} max={Math.max(neurons.length - 1, 0)} value={selectedNeuron ?? 0}
             onChange={e => setSelectedNeuron(Number(e.target.value))}
-            style={{ width: 100 }} disabled={neurons.length === 0} />
+            style={{ width: 120 }} disabled={neurons.length === 0} />
           <span style={{ fontFamily: 'monospace', minWidth: 24, fontWeight: 700 }}>{selectedNeuron ?? '—'}</span>
         </label>
 
@@ -92,9 +105,9 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
             <button key={tab} onClick={() => setActiveTab(tab)}
               style={{
                 background: activeTab === tab ? accent : bg,
-                color: activeTab === tab ? '#fff' : textColor,
+                color: activeTab === tab ? colors.onDark : textColor,
                 border: `1px solid ${border}`, borderRadius: 4,
-                padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                padding: '3px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 600,
               }}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -113,7 +126,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
               <button key={i} onClick={() => { setSelectedHead(i); setSelectedNeuron(null); }}
                 style={{
                   background: i === selectedHead ? accent : bg,
-                  color: i === selectedHead ? '#fff' : textColor,
+                  color: i === selectedHead ? colors.onDark : textColor,
                   border: `1px solid ${i === selectedHead ? accent : border}`,
                   borderRadius: 4, padding: '4px 8px', cursor: 'pointer',
                   fontSize: 10, fontWeight: i === selectedHead ? 700 : 400,
@@ -127,11 +140,11 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
         </div>
       )}
 
-      {/* ── Main Content Grid ────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'compare' ? '1fr 1fr' : '1fr 1fr', gap: 12 }}>
+      {/* ── Main Content (horizontal flow) ───────────────────── */}
+      <div style={{ display: 'flex', flexDirection: 'row', gap: 12, overflowX: 'auto', alignItems: 'flex-start' }}>
         {/* Attention Heatmap */}
         {(activeTab === 'attention' || activeTab === 'compare') && (
-          <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+          <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, flex: '1 1 0', minWidth: 340 }}>
             <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
               Attention Heatmap — L{selectedLayer} H{selectedHead}
             </div>
@@ -155,7 +168,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
 
         {/* Neuron Activation Panel */}
         {(activeTab === 'neurons' || activeTab === 'spectrum') && (
-          <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+          <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, flex: '1 1 0', minWidth: 340 }}>
             <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
               Neuron Activations — Layer {selectedLayer}
             </div>
@@ -176,7 +189,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
         {/* Compare Panel */}
         {activeTab === 'compare' && (
           <>
-            <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+            <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, flex: '1 1 0', minWidth: 340 }}>
               <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
                 Compare Heads — Layer {selectedLayer}
               </div>
@@ -217,7 +230,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
               )}
             </div>
 
-            <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+            <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, flex: '1 1 0', minWidth: 340 }}>
               <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
                 Head Similarity — Layer {selectedLayer}
               </div>
@@ -228,11 +241,11 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
                   return (
                     <div key={i} style={{
                       width: 36, height: 36, borderRadius: 4,
-                      background: `rgba(59, 130, 246, ${0.1 + (pct / 100) * 0.9})`,
+                      background: rgba(colors.primary, 0.1 + (pct / 100) * 0.9),
                       border: `1px solid ${border}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 9, fontWeight: 600, cursor: 'pointer',
-                      color: pct > 50 ? '#fff' : textColor,
+                      color: pct > 50 ? colors.onDark : textColor,
                     }}
                       onClick={() => { setSelectedHead(i); setActiveTab('attention'); }}
                       title={`H${i}: avg=${s.avgActivation.toFixed(3)}, max=${s.maxActivation.toFixed(3)}`}>
@@ -246,11 +259,11 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
         )}
       </div>
 
-      {/* ── Neuron UMAP ─────────────────────────────────────── */}
+      {/* ── Neuron UMAP (horizontal full-width) ───────────────── */}
       {activeTab === 'umap' && (
-        <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+        <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, width: '100%' }}>
           <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
-            Neuron Map — All Layers & Heads
+            Neuron Map — All Layers &amp; Heads
           </div>
           <NeuronUMAP
             points={umapPoints}
@@ -268,7 +281,6 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads, darkM
               }
               setSelectedNeuron(parsed.neuron);
             }}
-            darkMode={darkMode}
             height={460}
           />
         </div>

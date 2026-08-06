@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Type, Optional, Any
 
 from .base_algorithm import DiscoveryAlgorithm
-from science.models.adapter_base import ModelAdapter
+from backend.science.models.adapter_base import ModelAdapter
 
 
 @dataclass

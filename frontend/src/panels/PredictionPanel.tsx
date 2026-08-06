@@ -2,12 +2,11 @@ import React from 'react';
 
 interface PredictionPanelProps {
   tokens: string[];
-  darkMode: boolean;
 }
 
-export const PredictionPanel: React.FC<PredictionPanelProps> = ({ tokens, darkMode }) => {
-  const cardBg = darkMode ? '#12121a' : '#f8f8fc';
-  const border = darkMode ? '#2a2a3a' : '#e0e0e0';
+export const PredictionPanel: React.FC<PredictionPanelProps> = ({ tokens }) => {
+  const cardBg = 'var(--bg-elev-2)';
+  const border = 'var(--border)';
 
   // Mock Top-K Logit Lens predictions across layers
   const topKPredictions = [
@@ -20,8 +19,8 @@ export const PredictionPanel: React.FC<PredictionPanelProps> = ({ tokens, darkMo
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12 }}>
       <div style={{ background: cardBg, padding: 10, borderRadius: 6, border: `1px solid ${border}` }}>
-        <div style={{ fontWeight: 700, fontSize: 13, color: '#a855f7' }}>Prediction Inspector & Logit Lens</div>
-        <div style={{ color: '#888', marginTop: 2 }}>Tracks intermediate token predictions & Shannon entropy layer by layer</div>
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--purple)' }}>Prediction Inspector & Logit Lens</div>
+        <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>Tracks intermediate token predictions & Shannon entropy layer by layer</div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -40,10 +39,10 @@ export const PredictionPanel: React.FC<PredictionPanelProps> = ({ tokens, darkMo
           >
             <div style={{ fontWeight: 600 }}>Layer {p.layer} Logit Lens</div>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              <span style={{ background: '#a855f7', color: '#fff', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+              <span style={{ background: 'var(--purple)', color: 'var(--bg)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
                 "{p.topToken}" ({(p.prob * 100).toFixed(0)}%)
               </span>
-              <span style={{ color: '#888' }}>Entropy: {p.entropy} bits</span>
+              <span style={{ color: 'var(--text-muted)' }}>Entropy: {p.entropy} bits</span>
             </div>
           </div>
         ))}
