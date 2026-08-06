@@ -25,7 +25,7 @@ import DiscoveryMemoryModal from './components/DiscoveryMemoryModal';
 import WorkspaceSharingModal from './components/WorkspaceSharingModal';
 import ExtensionMarketplaceModal from './components/ExtensionMarketplaceModal';
 import PublicationExportModal from './components/PublicationExportModal';
-import { colors } from './design/tokens';
+import { darkColors } from './design/tokens/colors';
 import './design/styles/global.css';
 
 import CircuitExplorerView from './components/CircuitExplorerView';

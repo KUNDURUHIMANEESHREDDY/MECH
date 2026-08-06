@@ -33,7 +33,10 @@ import {
   ChevronRight,
   Activity,
 } from 'lucide-react';
-import { colors, radii, spacing, typography } from '../design/tokens';
+import { darkColors } from '../design/tokens/colors';
+import { spacing } from '../design/tokens/spacing';
+import { radii } from '../design/tokens/radii';
+import { typography } from '../design/tokens/typography';
 
 const SECTIONS = [
   {
@@ -127,97 +130,116 @@ export default function Sidebar({ pages, active, onSelect, collapsed, onToggle }
     <div
       className={`sidebar${collapsed ? ' collapsed' : ''}`}
       style={{
-        backgroundColor: colors.bgSidebar,
-        width: collapsed ? '0px' : '264px',
-        borderRight: `1px solid ${colors.border}`,
+        backgroundColor: darkColors.bgSecondary,
+        width: collapsed ? spacing.sidebarCollapsedWidth : spacing.sidebarWidth,
+        borderRight: `1px solid ${darkColors.borderPrimary}`,
         display: 'flex',
         flexDirection: 'column',
         transition: 'width 0.2s ease',
         overflow: 'hidden',
       }}
     >
+      {/* Sidebar Header */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: `${spacing.md} ${spacing.md} ${spacing.sm}`,
-          borderBottom: `1px solid ${colors.border}`,
+          padding: `${spacing[3]} ${spacing[3.5]}`,
+          borderBottom: `1px solid ${darkColors.borderPrimary}`,
+          flexShrink: 0,
         }}
       >
-        <h1
-          style={{
-            fontFamily: typography.displayLg.fontFamily,
-            fontSize: typography.displayLg.fontSize,
-            fontWeight: typography.displayLg.fontWeight,
-            letterSpacing: typography.displayLg.letterSpacing,
-            color: colors.ink,
-            margin: 0,
-          }}
-        >
-          Explorer
-        </h1>
+        {!collapsed && (
+          <h1
+            style={{
+              fontFamily: typography.fontFamilySans,
+              fontSize: typography.fontSizeSm,
+              fontWeight: typography.fontWeightSemibold,
+              letterSpacing: typography.letterSpacingWider,
+              color: darkColors.textTertiary,
+              textTransform: 'uppercase',
+              margin: 0,
+            }}
+          >
+            Explorer
+          </h1>
+        )}
         <button
           onClick={onToggle}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           style={{
             width: '32px',
             height: '32px',
-            borderRadius: radii.full,
+            borderRadius: radii.circle,
             border: 'none',
-            background: 'transparent',
-            color: colors.inkMuted80,
+            background: collapsed ? darkColors.bgHover : 'transparent',
+            color: darkColors.textTertiary,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            transition: 'background 0.15s ease, color 0.15s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = darkColors.bgHover;
+            e.currentTarget.style.color = darkColors.textPrimary;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = collapsed ? darkColors.bgHover : 'transparent';
+            e.currentTarget.style.color = darkColors.textTertiary;
           }}
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </div>
+
+      {/* Sidebar Body */}
       {!collapsed && (
-        <div style={{ padding: `${spacing.sm} ${spacing.md}`, flex: 1, overflowY: 'auto' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: spacing.xs,
-              background: colors.canvas,
-              borderRadius: radii.pill,
-              padding: `${spacing.xs} ${spacing.md}`,
-              marginBottom: spacing.md,
-              border: `1px solid ${colors.border}`,
-            }}
-          >
-            <Search size={13} color={colors.inkMuted48} />
-            <input
-              type="text"
-              placeholder="Search views..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
+        <div style={{ padding: `${spacing[2]} 0 ${spacing[3]}`, flex: 1, overflowY: 'auto' }}>
+          {/* Search */}
+          <div style={{ padding: `0 ${spacing[3]} ${spacing[3]}` }}>
+            <div
               style={{
-                border: 'none',
-                outline: 'none',
-                background: 'transparent',
-                fontFamily: typography.body.fontFamily,
-                fontSize: typography.body.fontSize,
-                color: colors.ink,
-                width: '100%',
-                padding: '4px 0',
+                display: 'flex',
+                alignItems: 'center',
+                gap: spacing[2],
+                background: darkColors.bgPrimary,
+                borderRadius: radii.md,
+                padding: `${spacing[2]} ${spacing[3]}`,
+                border: `1px solid ${darkColors.borderPrimary}`,
               }}
-            />
+            >
+              <Search size={14} color={darkColors.textTertiary} />
+              <input
+                type="text"
+                placeholder="Search views..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                style={{
+                  border: 'none',
+                  outline: 'none',
+                  background: 'transparent',
+                  fontFamily: typography.fontFamilySans,
+                  fontSize: typography.fontSizeSm,
+                  color: darkColors.textPrimary,
+                  width: '100%',
+                }}
+              />
+            </div>
           </div>
+
+          {/* Navigation Sections */}
           {SECTIONS.map((section) => (
-            <div key={section.title} style={{ marginBottom: spacing.md }}>
+            <div key={section.title} style={{ marginBottom: spacing[3] }}>
               <div
                 style={{
-                  fontFamily: typography.caption.fontFamily,
-                  fontSize: typography.caption.fontSize,
-                  fontWeight: typography.caption.fontWeight,
-                  letterSpacing: typography.caption.letterSpacing,
-                  color: colors.inkMuted48,
-                  padding: `${spacing.xs} 0`,
+                  fontFamily: typography.fontFamilySans,
+                  fontSize: typography.fontSizeXs,
+                  fontWeight: typography.fontWeightSemibold,
+                  letterSpacing: typography.letterSpacingWider,
+                  color: darkColors.textTertiary,
+                  padding: `${spacing[2]} ${spacing[3]}`,
                   textTransform: 'uppercase',
                 }}
               >
@@ -241,16 +263,29 @@ export default function Sidebar({ pages, active, onSelect, collapsed, onToggle }
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: spacing.sm,
-                        padding: `${spacing.xs} ${spacing.sm}`,
+                        gap: spacing[2],
+                        padding: `${spacing[2]} ${spacing[3]}`,
                         borderRadius: radii.sm,
                         cursor: 'pointer',
-                        backgroundColor: isActive ? colors.accentSoft : 'transparent',
-                        color: isActive ? colors.primary : colors.ink,
-                        fontFamily: typography.body.fontFamily,
-                        fontSize: typography.body.fontSize,
-                        fontWeight: isActive ? typography.bodyStrong.fontWeight : typography.body.fontWeight,
-                        transition: 'background-color 0.15s ease',
+                        backgroundColor: isActive ? darkColors.primaryBg : 'transparent',
+                        color: isActive ? darkColors.primary : darkColors.textSecondary,
+                        fontFamily: typography.fontFamilySans,
+                        fontSize: typography.fontSizeSm,
+                        fontWeight: isActive ? typography.fontWeightSemibold : typography.fontWeightNormal,
+                        transition: 'background-color 0.15s ease, color 0.15s ease',
+                        margin: `0 ${spacing[1.5]}`,
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive) {
+                          e.currentTarget.style.backgroundColor = darkColors.bgHover;
+                          e.currentTarget.style.color = darkColors.textPrimary;
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive) {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                          e.currentTarget.style.color = darkColors.textSecondary;
+                        }
                       }}
                     >
                       {Icon && (
@@ -259,6 +294,17 @@ export default function Sidebar({ pages, active, onSelect, collapsed, onToggle }
                         </span>
                       )}
                       <span>{getLabel(key)}</span>
+                      {isActive && (
+                        <div
+                          style={{
+                            marginLeft: 'auto',
+                            width: '2px',
+                            height: '18px',
+                            borderRadius: '2px',
+                            background: darkColors.primary,
+                          }}
+                        />
+                      )}
                     </div>
                   );
                 })}

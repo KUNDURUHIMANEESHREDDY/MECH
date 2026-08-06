@@ -1,89 +1,158 @@
 import React from 'react';
-import { colors, radii, spacing, typography } from '../../design/tokens';
+import { darkColors } from '../tokens/colors';
+import { spacing } from '../tokens/spacing';
+import { radii } from '../tokens/radii';
+import { typography } from '../tokens/typography';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary-pill' | 'dark-utility' | 'pearl-capsule' | 'store-hero';
-  size?: 'sm' | 'md' | 'lg';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 'outline';
+  size?: 'sm' | 'md' | 'lg' | 'icon';
+  leftIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
+  isLoading?: boolean;
+  fullWidth?: boolean;
 }
 
-const baseStyle: React.CSSProperties = {
-  fontFamily: typography.buttonUtility.fontFamily,
-  fontSize: typography.buttonUtility.fontSize,
-  fontWeight: typography.buttonUtility.fontWeight,
-  lineHeight: typography.buttonUtility.lineHeight,
-  letterSpacing: typography.buttonUtility.letterSpacing,
-  border: 'none',
-  cursor: 'pointer',
-  transition: 'transform 0.1s ease',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: spacing.xs,
-};
-
-const variantStyles: Record<Required<ButtonProps>['variant'], React.CSSProperties> = {
-  primary: {
-    backgroundColor: colors.primary,
-    color: colors.onPrimary,
-    borderRadius: radii.pill,
-    padding: `${spacing.sm} ${spacing.lg}`,
-  },
-  'secondary-pill': {
-    backgroundColor: colors.canvas,
-    color: colors.primary,
-    border: `1px solid ${colors.primary}`,
-    borderRadius: radii.pill,
-    padding: `${spacing.sm} ${spacing.lg}`,
-  },
-  'dark-utility': {
-    backgroundColor: colors.ink,
-    color: colors.onDark,
-    borderRadius: radii.sm,
-    padding: `${spacing.xs} ${spacing.md}`,
-  },
-  'pearl-capsule': {
-    backgroundColor: colors.surfacePearl,
-    color: colors.inkMuted80,
-    border: `3px solid ${colors.dividerSoft}`,
-    borderRadius: radii.md,
-    padding: `${spacing.xs} ${spacing.sm}`,
-  },
-  'store-hero': {
-    backgroundColor: colors.primary,
-    color: colors.onPrimary,
-    borderRadius: radii.pill,
-    padding: `${spacing.md} ${spacing.xl}`,
-    fontFamily: typography.buttonLarge.fontFamily,
-    fontSize: typography.buttonLarge.fontSize,
-    fontWeight: typography.buttonLarge.fontWeight,
-    lineHeight: typography.buttonLarge.lineHeight,
-    letterSpacing: typography.buttonLarge.letterSpacing,
-  },
-};
-
 export const Button: React.FC<ButtonProps> = ({
-  variant = 'primary',
-  size = 'md',
   children,
-  style,
-  ...rest
+  variant = 'secondary',
+  size = 'md',
+  leftIcon,
+  rightIcon,
+  isLoading = false,
+  fullWidth = false,
+  className = '',
+  disabled,
+  ...props
 }) => {
-  const variantStyle = variantStyles[variant];
+  const baseStyles: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+    fontFamily: typography.fontFamilySans,
+    fontWeight: typography.fontWeightMedium,
+    lineHeight: 1,
+    border: 'none',
+    borderRadius: radii.button,
+    cursor: 'pointer',
+    transition: 'all 150ms ease',
+    whiteSpace: 'nowrap',
+    position: 'relative',
+    overflow: 'hidden',
+  };
+
+  const variants: Record<ButtonProps['variant'], React.CSSProperties> = {
+    primary: {
+      background: darkColors.gradientPrimary,
+      color: darkColors.textOnPrimary,
+      boxShadow: '0 2px 4px rgba(79, 70, 229, 0.2)',
+    },
+    secondary: {
+      background: darkColors.bgTertiary,
+      color: darkColors.textPrimary,
+      border: `1px solid ${darkColors.borderPrimary}`,
+    },
+    ghost: {
+      background: 'transparent',
+      color: darkColors.textSecondary,
+    },
+    danger: {
+      background: darkColors.error,
+      color: darkColors.textOnPrimary,
+    },
+    success: {
+      background: darkColors.success,
+      color: darkColors.textOnPrimary,
+    },
+    outline: {
+      background: 'transparent',
+      color: darkColors.textPrimary,
+      border: `1px solid ${darkColors.borderPrimary}`,
+    },
+  };
+
+  const sizes: Record<ButtonProps['size'], React.CSSProperties> = {
+    sm: {
+      padding: `${spacing[1.5]} ${spacing[3]}`,
+      fontSize: typography.fontSizeSm,
+    },
+    md: {
+      padding: `${spacing[2]} ${spacing[4]}`,
+      fontSize: typography.fontSizeSm,
+    },
+    lg: {
+      padding: `${spacing[3]} ${spacing[6]}`,
+      fontSize: typography.fontSizeBase,
+    },
+    icon: {
+      width: spacing[9],
+      height: spacing[9],
+      padding: 0,
+    },
+  };
+
+  const hoverStyles: Record<ButtonProps['variant'], React.CSSProperties> = {
+    primary: {
+      boxShadow: '0 4px 8px rgba(79, 70, 229, 0.3)',
+      transform: 'translateY(-1px)',
+    },
+    secondary: {
+      background: darkColors.bgHover,
+      borderColor: darkColors.borderHover,
+    },
+    ghost: {
+      background: darkColors.bgHover,
+      color: darkColors.textPrimary,
+    },
+    danger: {
+      background: darkColors.errorDark,
+    },
+    success: {
+      background: darkColors.successDark,
+    },
+    outline: {
+      background: darkColors.bgHover,
+      borderColor: darkColors.borderHover,
+    },
+  };
+
+  const mergedStyles: React.CSSProperties = {
+    ...baseStyles,
+    ...variants[variant],
+    ...sizes[size],
+    width: fullWidth ? '100%' : undefined,
+    opacity: disabled || isLoading ? 0.5 : 1,
+    cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
+  };
+
   return (
     <button
-      style={{ ...baseStyle, ...variantStyle, ...style }}
-      onMouseDown={(e) => {
-        e.currentTarget.style.transform = 'scale(0.95)';
-      }}
-      onMouseUp={(e) => {
-        e.currentTarget.style.transform = 'scale(1)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'scale(1)';
-      }}
-      {...rest}
+      className={`btn btn-${variant} btn-${size} ${className}`}
+      style={mergedStyles}
+      disabled={disabled || isLoading}
+      {...props}
     >
-      {children}
+      {isLoading ? (
+        <span
+          style={{
+            width: sizes[size]?.height || sizes[size]?.width || 16,
+            height: sizes[size]?.height || sizes[size]?.width || 16,
+            border: '2px solid rgba(255, 255, 255, 0.3)',
+            borderTopColor: 'transparent',
+            borderRadius: '50%',
+            animation: 'spin 0.6s linear infinite',
+          }}
+        />
+      ) : (
+        <>
+          {leftIcon && <span>{leftIcon}</span>}
+          {children}
+          {rightIcon && <span>{rightIcon}</span>}
+        </>
+      )}
     </button>
   );
 };
+
+export default Button;

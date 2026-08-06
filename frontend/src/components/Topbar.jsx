@@ -1,6 +1,9 @@
 import React from 'react';
 import { Brain, PanelLeft, Sidebar, Share2, Store, FileUp, Command, CircleDot } from 'lucide-react';
-import { colors, radii, spacing, typography } from '../design/tokens';
+import { darkColors } from '../design/tokens/colors';
+import { spacing } from '../design/tokens/spacing';
+import { radii } from '../design/tokens/radii';
+import { typography } from '../design/tokens/typography';
 import { Button } from '../design/components/Button';
 
 export default function Topbar({
@@ -20,24 +23,32 @@ export default function Topbar({
   const statusLabel = pythonStatus === 'connected'
     ? 'Connected'
     : pythonStatus === 'connecting'
-      ? '…'
+      ? '•••'
       : 'Offline';
+
+  const statusColor = pythonStatus === 'connected'
+    ? darkColors.success
+    : pythonStatus === 'connecting'
+      ? darkColors.warning
+      : darkColors.textTertiary;
 
   return (
     <header
       className="topbar"
       style={{
-        backgroundColor: colors.canvas,
-        borderBottom: `1px solid ${colors.hairline}`,
-        height: '46px',
+        backgroundColor: darkColors.bgSecondary,
+        borderBottom: `1px solid ${darkColors.borderPrimary}`,
+        height: spacing.navbarHeight,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: `0 ${spacing.lg}`,
+        padding: `0 ${spacing[4]}`,
         gridArea: 'topbar',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
+      {/* Left Side */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: spacing[2] }}>
+        {/* Toggle Buttons */}
         <button
           onClick={onToggleActivity}
           title={activityCollapsed ? 'Expand activity bar' : 'Collapse activity bar'}
@@ -47,15 +58,25 @@ export default function Topbar({
             borderRadius: radii.sm,
             border: 'none',
             background: 'transparent',
-            color: colors.inkMuted80,
+            color: darkColors.textTertiary,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            transition: 'background 0.15s ease, color 0.15s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = darkColors.bgHover;
+            e.currentTarget.style.color = darkColors.textPrimary;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = darkColors.textTertiary;
           }}
         >
           <PanelLeft size={16} strokeWidth={1.75} />
         </button>
+
         <button
           onClick={onToggleSidebar}
           title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -65,72 +86,138 @@ export default function Topbar({
             borderRadius: radii.sm,
             border: 'none',
             background: 'transparent',
-            color: colors.inkMuted80,
+            color: darkColors.textTertiary,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            transition: 'background 0.15s ease, color 0.15s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = darkColors.bgHover;
+            e.currentTarget.style.color = darkColors.textPrimary;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = darkColors.textTertiary;
           }}
         >
           <Sidebar size={16} strokeWidth={1.75} />
         </button>
+
+        {/* Breadcrumb */}
         <span
           style={{
-            fontFamily: typography.tagline.fontFamily,
-            fontSize: typography.tagline.fontSize,
-            fontWeight: typography.tagline.fontWeight,
-            letterSpacing: typography.tagline.letterSpacing,
-            color: colors.ink,
+            fontFamily: typography.fontFamilySans,
+            fontSize: typography.fontSizeSm,
+            fontWeight: typography.fontWeightMedium,
+            color: darkColors.textSecondary,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
           }}
         >
           {crumb}
         </span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.xs }}>
-        <Button variant="dark-utility" onClick={onOpenDiscoveryMemory} style={{ padding: `${spacing.xs} ${spacing.sm}` }}>
-          <Brain size={14} /> Mem
-        </Button>
-        <Button variant="dark-utility" onClick={onToggleDock} style={{ padding: `${spacing.xs} ${spacing.sm}` }}>
-          <PanelLeft size={14} /> Dock
-        </Button>
-        <Button variant="dark-utility" onClick={onOpenShare} style={{ padding: `${spacing.xs} ${spacing.sm}` }}>
-          <Share2 size={14} /> Share
-        </Button>
-        <Button variant="dark-utility" onClick={onOpenMarketplace} style={{ padding: `${spacing.xs} ${spacing.sm}` }}>
-          <Store size={14} /> Market
-        </Button>
-        <Button variant="dark-utility" onClick={onOpenPublication} style={{ padding: `${spacing.xs} ${spacing.sm}` }}>
-          <FileUp size={14} /> Export
-        </Button>
-        <Button variant="dark-utility" onClick={onToggleCmdPalette} style={{ padding: `${spacing.xs} ${spacing.sm}` }}>
-          <Command size={13} /> P
-        </Button>
+      {/* Right Side */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: spacing[2] }}>
+        {/* Status Indicator */}
         <div
-          data-testid="python-status"
-          data-status={pythonStatus}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: spacing.xs,
-            paddingLeft: spacing.sm,
-            marginLeft: spacing.xs,
-            borderLeft: `1px solid ${colors.border}`,
+            gap: spacing[1.5],
+            fontSize: typography.fontSizeXs,
+            color: darkColors.textTertiary,
+            padding: `${spacing[1.5]} ${spacing[3]}`,
+            background: darkColors.bgPrimary,
+            border: `1px solid ${darkColors.borderPrimary}`,
+            borderRadius: radii.pill,
+            whiteSpace: 'nowrap',
           }}
         >
-          <span
-            className={`dot ${pythonStatus === 'connected' ? 'connected' : pythonStatus === 'connecting' ? 'connecting' : ''}`}
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: pythonStatus === 'connected' ? colors.success : pythonStatus === 'connecting' ? colors.warning : colors.inkMuted48,
-            }}
-          />
-          <span style={{ fontFamily: typography.navLink.fontFamily, fontSize: typography.navLink.fontSize, color: colors.inkMuted80 }}>
-            {statusLabel}
-          </span>
+          <CircleDot size={8} color={statusColor} />
+          <span>{statusLabel}</span>
         </div>
+
+        {/* Action Buttons */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenDiscoveryMemory}
+          leftIcon={<Brain size={14} />}
+        >
+          Mem
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleDock}
+          leftIcon={<PanelLeft size={14} />}
+        >
+          Dock
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenShare}
+          leftIcon={<Share2 size={14} />}
+        >
+          Share
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenMarketplace}
+          leftIcon={<Store size={14} />}
+        >
+          Market
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenPublication}
+          leftIcon={<FileUp size={14} />}
+        >
+          Publish
+        </Button>
+
+        {/* Command Palette */}
+        <button
+          onClick={onToggleCmdPalette}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: spacing[1.5],
+            padding: `${spacing[1.5]} ${spacing[3]}`,
+            background: darkColors.primaryBg,
+            border: `1px solid ${darkColors.primaryBorder}`,
+            borderRadius: radii.md,
+            color: darkColors.primary,
+            fontFamily: typography.fontFamilySans,
+            fontSize: typography.fontSizeXs,
+            fontWeight: typography.fontWeightMedium,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = darkColors.primary;
+            e.currentTarget.style.color = darkColors.textOnPrimary;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = darkColors.primaryBg;
+            e.currentTarget.style.color = darkColors.primary;
+          }}
+        >
+          <Command size={14} />
+          <span>Cmd+K</span>
+        </button>
       </div>
     </header>
   );
