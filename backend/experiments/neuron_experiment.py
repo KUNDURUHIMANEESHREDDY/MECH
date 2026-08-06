@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from .config import ExperimentConfig
-from analysis.experiment_runner import ExperimentRunner
+from backend.analysis.experiment_runner import ExperimentRunner
 
 
 class NeuronExperiment:

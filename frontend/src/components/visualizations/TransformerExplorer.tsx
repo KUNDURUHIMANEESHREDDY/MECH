@@ -74,13 +74,13 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Pro
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'system-ui, sans-serif', fontSize: 12, color: textColor }}>
-      {/* ── Controls Bar ─────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', background: cardBg, padding: 10, borderRadius: 8, border: `1px solid ${border}` }}>
+      {/* ── Controls Bar (horizontal, full width) ────────────── */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: cardBg, padding: 10, borderRadius: 8, border: `1px solid ${border}` }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ color: mutedColor, fontWeight: 600 }}>Layer</span>
           <input type="range" min={0} max={numLayers - 1} value={selectedLayer}
             onChange={e => { setSelectedLayer(Number(e.target.value)); setSelectedHead(0); setSelectedNeuron(null); }}
-            style={{ width: 100 }} />
+            style={{ width: 120 }} />
           <span style={{ fontFamily: 'monospace', minWidth: 24, fontWeight: 700 }}>{selectedLayer}</span>
         </label>
 
@@ -96,7 +96,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Pro
           <span style={{ color: mutedColor, fontWeight: 600 }}>Neuron</span>
           <input type="range" min={0} max={Math.max(neurons.length - 1, 0)} value={selectedNeuron ?? 0}
             onChange={e => setSelectedNeuron(Number(e.target.value))}
-            style={{ width: 100 }} disabled={neurons.length === 0} />
+            style={{ width: 120 }} disabled={neurons.length === 0} />
           <span style={{ fontFamily: 'monospace', minWidth: 24, fontWeight: 700 }}>{selectedNeuron ?? '—'}</span>
         </label>
 
@@ -107,7 +107,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Pro
                 background: activeTab === tab ? accent : bg,
                 color: activeTab === tab ? colors.onDark : textColor,
                 border: `1px solid ${border}`, borderRadius: 4,
-                padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                padding: '3px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 600,
               }}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -140,11 +140,11 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Pro
         </div>
       )}
 
-      {/* ── Main Content Grid ────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'compare' ? '1fr 1fr' : '1fr 1fr', gap: 12 }}>
+      {/* ── Main Content (horizontal flow) ───────────────────── */}
+      <div style={{ display: 'flex', flexDirection: 'row', gap: 12, overflowX: 'auto', alignItems: 'flex-start' }}>
         {/* Attention Heatmap */}
         {(activeTab === 'attention' || activeTab === 'compare') && (
-          <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+          <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, flex: '1 1 0', minWidth: 340 }}>
             <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
               Attention Heatmap — L{selectedLayer} H{selectedHead}
             </div>
@@ -168,7 +168,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Pro
 
         {/* Neuron Activation Panel */}
         {(activeTab === 'neurons' || activeTab === 'spectrum') && (
-          <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+          <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, flex: '1 1 0', minWidth: 340 }}>
             <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
               Neuron Activations — Layer {selectedLayer}
             </div>
@@ -189,7 +189,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Pro
         {/* Compare Panel */}
         {activeTab === 'compare' && (
           <>
-            <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+            <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, flex: '1 1 0', minWidth: 340 }}>
               <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
                 Compare Heads — Layer {selectedLayer}
               </div>
@@ -230,7 +230,7 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Pro
               )}
             </div>
 
-            <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+            <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, flex: '1 1 0', minWidth: 340 }}>
               <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
                 Head Similarity — Layer {selectedLayer}
               </div>
@@ -259,11 +259,11 @@ export function TransformerExplorer({ tokens, layers, numLayers, numHeads }: Pro
         )}
       </div>
 
-      {/* ── Neuron UMAP ─────────────────────────────────────── */}
+      {/* ── Neuron UMAP (horizontal full-width) ───────────────── */}
       {activeTab === 'umap' && (
-        <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}` }}>
+        <div style={{ background: cardBg, borderRadius: 8, padding: 12, border: `1px solid ${border}`, width: '100%' }}>
           <div style={{ fontWeight: 600, color: mutedColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontSize: 11 }}>
-            Neuron Map — All Layers & Heads
+            Neuron Map — All Layers &amp; Heads
           </div>
           <NeuronUMAP
             points={umapPoints}

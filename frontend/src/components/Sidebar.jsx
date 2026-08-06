@@ -134,7 +134,6 @@ export default function Sidebar({ pages, active, onSelect, collapsed, onToggle }
         flexDirection: 'column',
         transition: 'width 0.2s ease',
         overflow: 'hidden',
-        gridArea: 'sidebar',
       }}
     >
       <div

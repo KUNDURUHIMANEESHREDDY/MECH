@@ -21,7 +21,7 @@ from .event_bus import bus, INFERENCE_STARTED, INFERENCE_FINISHED, ACTIVATION_CA
 from .activation_cache import ActivationCache, CachedActivation
 from .profiler import Profiler
 from .session_manager import SessionManager, Session
-from repository.activation_repository import activation_repo, ActivationRecord
+from backend.repository.activation_repository import activation_repo, ActivationRecord
 
 
 def run_inference(

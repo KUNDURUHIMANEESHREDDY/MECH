@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from science.models.adapter_base import ModelAdapter
+from backend.science.models.adapter_base import ModelAdapter
 from .dag_discovery_planner import DynamicDAGPlanner, DynamicDiscoveryDAG
 from .discovery_planner import ResearchGoal
 from .mechanism_claim_registry import MechanismClaimRegistry, RegisteredMechanismClaim

@@ -78,10 +78,9 @@ const NODE_R = 6;
 const LAYER_GAP = 160;
 const NODE_GAP = 18;
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/*
-/* ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------ */
+  /*  Helpers                                                            */
+  /* ------------------------------------------------------------------ */
 
 const fmt = (n: number | undefined | null): string => {
   if (n === undefined || n === null || Number.isNaN(n)) return '—';
@@ -414,16 +413,104 @@ export default function TransformerVisualizer({ onNavigate }: Props) {
   /* ---------------- render ---------------- */
 
   const loaded = arch?.status === 'ok';
-  const graph = graphData;
+  const layers = arch?.layers || [];
+  const modules = arch?.modules || [];
+  const nLayers = layers.length;
+
+  function BlockCard({ layer, idx }: { layer: any; idx: number }) {
+    const comps = layer.components || [];
+    const ln1 = comps.find((c: any) => c.id === 'ln_1');
+    const attn = comps.find((c: any) => c.type === 'attention');
+    const ln2 = comps.find((c: any) => c.id === 'ln_2');
+    const mlp = comps.find((c: any) => c.type === 'mlp');
+    const nHeads = attn?.n_heads || 12;
+
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 6,
+        width: 160, flexShrink: 0,
+        padding: 10, borderRadius: 8,
+        background: colors.surface, border: `1px solid ${colors.hairline}`,
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: colors.inkMuted48, textAlign: 'center' }}>
+          Block {idx}
+        </div>
+
+        <div style={{
+          padding: 6, borderRadius: 4,
+          background: colors.canvas, border: `1px solid ${colors.hairline}`,
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 9, color: colors.inkMuted48 }}>LN₁</div>
+          <div style={{ fontSize: 8, color: colors.bodyMuted }}>{ln1?.dim ?? '—'}d</div>
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center' }}>
+          {Array.from({ length: nHeads }).map((_, h) => {
+            const headId = `block-${idx}-head-${h}`;
+            const isSelected = selectedNode === headId;
+            return (
+              <div
+                key={h}
+                onClick={() => { setSelectedNode(headId); void loadNodeDetail(headId); }}
+                style={{
+                  width: 14, height: 14, borderRadius: 2,
+                  background: isSelected ? colors.purpleBorder : colors.warning,
+                  color: isSelected ? colors.onDark : colors.ink,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 7, fontWeight: 600, cursor: 'pointer',
+                  border: `1px solid ${isSelected ? colors.onDark : colors.hairline}`,
+                }}
+                title={`Head ${h}`}
+              >
+                {h}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{
+          padding: 6, borderRadius: 4,
+          background: colors.canvas, border: `1px solid ${colors.hairline}`,
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 9, color: colors.inkMuted48 }}>LN₂</div>
+          <div style={{ fontSize: 8, color: colors.bodyMuted }}>{ln2?.dim ?? '—'}d</div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 1, height: 60, alignItems: 'flex-end' }}>
+          {Array.from({ length: 8 }).map((_, i) => {
+            const nid = `block-${idx}-mlp-${i}`;
+            return (
+              <div
+                key={i}
+                onClick={() => { setSelectedNode(nid); void loadNodeDetail(nid); }}
+                style={{
+                  flex: 1, minHeight: 2,
+                  background: selectedNode === nid ? colors.primary : colors.inkMuted48,
+                  opacity: 0.4, borderRadius: 1, cursor: 'pointer',
+                }}
+                title={`N${i}`}
+              />
+            );
+          })}
+        </div>
+
+        <div style={{ fontSize: 8, color: colors.bodyMuted, textAlign: 'center' }}>
+          {fmt(layer.n_params)} params
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div data-testid="transformer-visualizer" style={{ padding: 16, height: '100%', display: 'flex', flexDirection: 'column', background: COLORS.bg }}>
       {/* Header + prompt bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-        <h2 style={{ margin: 0, fontSize: 16, color: colors.ink }}>GPT-2 Computational Graph</h2>
-        {loaded && graph && (
+        <h2 style={{ margin: 0, fontSize: 16, color: colors.ink }}>GPT-2 Transformer Architecture</h2>
+        {loaded && (
           <span style={{ fontSize: 11, color: colors.inkMuted48 }}>
-            {arch.model_name} · {graph.nodes.length} nodes · {graph.edges.length} edges
+            {arch.model_name} · {nLayers} layers · {arch.n_heads} heads
           </span>
         )}
         <div style={{ flex: 1 }} />
@@ -456,100 +543,70 @@ export default function TransformerVisualizer({ onNavigate }: Props) {
             {loadingModel ? <>Loading GPT-2<Spinner /></> : 'Load GPT-2'}
           </button>
         </div>
-      ) : !graph ? (
-        <div className="card"><p className="hint">Building graph…</p></div>
       ) : (
         <div style={{ display: 'flex', gap: 0, flex: 1, overflow: 'hidden' }}>
-          {/* Graph SVG */}
-          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-            <svg
-              ref={svgRef}
-              width="100%"
-              height="100%"
-              viewBox={`0 0 ${1200} ${800}`}
-              style={{ cursor: dragging ? 'grabbing' : 'grab', background: COLORS.bg }}
-              onMouseDown={(e) => { setDragging(true); setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y }); }}
-              onMouseMove={(e) => { if (dragging) setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y }); }}
-              onMouseUp={() => setDragging(false)}
-              onMouseLeave={() => setDragging(false)}
-              onWheel={(e) => { e.preventDefault(); setZoom((z) => Math.max(0.2, Math.min(3, z * (e.deltaY > 0 ? 0.95 : 1.05)))); }}
-            >
-              <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-                {/* Edges */}
-                {graph.edges.map((edge, i) => {
-                  const fromNode = graph.nodes.find((n) => n.id === edge.from);
-                  const toNode = graph.nodes.find((n) => n.id === edge.to);
-                  if (!fromNode || !toNode) return null;
-                  const isHighlighted = hoveredNode && (edge.from === hoveredNode || edge.to === hoveredNode);
-                  const isSelected = selectedNode && (edge.from === selectedNode || edge.to === selectedNode);
-                  const color = edge.type === 'residual' ? COLORS.edgeResidual : edge.type === 'attention' ? COLORS.edgeAttention : COLORS.edgeFeedforward;
-                  const opacity = isHighlighted || isSelected ? 0.9 : 0.3;
-                  const width = (isHighlighted || isSelected) ? 2 : 1;
-                  const mx = (fromNode.x + toNode.x) / 2;
-                  const my = (fromNode.y + toNode.y) / 2;
-                  const dx = toNode.x - fromNode.x;
-                  const dy = toNode.y - fromNode.y;
-                  const cx = mx - dy * 0.1;
-                  const cy = my + dx * 0.1;
-                  return (
-                    <path
-                      key={i}
-                      d={`M ${fromNode.x} ${fromNode.y} Q ${cx} ${cy} ${toNode.x} ${toNode.y}`}
-                      stroke={color}
-                      strokeWidth={width}
-                      fill="none"
-                      opacity={opacity}
-                      strokeDasharray={edge.type === 'residual' ? '4 3' : 'none'}
-                    />
-                  );
-                })}
-                {/* Nodes */}
-                {graph.nodes.map((node) => {
-                  const isSelected = selectedNode === node.id;
-                  const isHovered = hoveredNode === node.id;
-                  const color = nodeColor(node);
-                  const r = node.type === 'embedding' || node.type === 'output' ? NODE_R * 2 : NODE_R;
-                  return (
-                    <g
-                      key={node.id}
-                      onMouseEnter={() => setHoveredNode(node.id)}
-                      onMouseLeave={() => setHoveredNode(null)}
-                      onClick={() => { setSelectedNode(node.id); void loadNodeDetail(node.id); }}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <circle
-                        cx={node.x}
-                        cy={node.y}
-                        r={r}
-                        fill={color}
-                        opacity={isSelected ? 1 : isHovered ? 0.9 : 0.7}
-                        stroke={isSelected ? colors.onDark : 'none'}
-                        strokeWidth={isSelected ? 2 : 0}
-                      />
-                      {node.type === 'attention-head' && (
-                        <text x={node.x} y={node.y - r - 4} textAnchor="middle" fill={COLORS.textDim} fontSize={8} fontFamily="inherit">
-                          {node.label}
-                        </text>
-                      )}
-                      {node.type === 'mlp-neuron' && (
-                        <circle
-                          cx={node.x}
-                          cy={node.y}
-                          r={r * 0.5}
-                          fill={ramp(Math.abs(node.activation || 0), VIRIDIS)}
-                          opacity={0.8}
-                        />
-                      )}
-                    </g>
-                  );
-                })}
-              </g>
-            </svg>
-            {/* Zoom controls */}
-            <div style={{ position: 'absolute', bottom: 12, right: 12, display: 'flex', gap: 4 }}>
-              <button className="btn btn-sm" onClick={() => setZoom((z) => Math.min(3, z * 1.2))}>+</button>
-              <button className="btn btn-sm" onClick={() => setZoom((z) => Math.max(0.2, z / 1.2))}>−</button>
-              <button className="btn btn-sm" onClick={() => { setZoom(0.6); setPan({ x: 400, y: 300 }); }}>reset</button>
+          <div style={{
+            flex: 1, overflowX: 'auto', overflowY: 'hidden',
+            paddingBottom: 14,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: 4, minWidth: '0' }}>
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 6,
+                width: 100, flexShrink: 0, padding: 10, borderRadius: 8,
+                background: colors.surface, border: `1px solid ${colors.hairline}`,
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: colors.inkMuted48, textAlign: 'center' }}>WTE</div>
+                <div style={{ fontSize: 9, color: colors.bodyMuted }}>
+                  {fmt(arch.modules?.find((m: any) => m.id === 'wte')?.n_params)} params
+                </div>
+                <div style={{ fontSize: 9, color: colors.bodyMuted }}>
+                  dim: {arch.modules?.find((m: any) => m.id === 'wte')?.shape?.[1] ?? '—'}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', color: colors.hairline }}>
+                →
+              </div>
+
+              {layers.map((layer: any, idx: number) => (
+                <BlockCard key={layer.label || idx} layer={layer} idx={idx} />
+              ))}
+
+              <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', color: colors.hairline }}>
+                →
+              </div>
+
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 6,
+                width: 100, flexShrink: 0, padding: 10, borderRadius: 8,
+                background: colors.surface, border: `1px solid ${colors.hairline}`,
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: colors.inkMuted48, textAlign: 'center' }}>LN_f</div>
+                <div style={{ fontSize: 9, color: colors.bodyMuted }}>
+                  {fmt(arch.modules?.find((m: any) => m.id === 'ln_f')?.n_params)} params
+                </div>
+                <div style={{ fontSize: 9, color: colors.bodyMuted }}>
+                  dim: {arch.modules?.find((m: any) => m.id === 'ln_f')?.dim ?? '—'}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', color: colors.hairline }}>
+                →
+              </div>
+
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 6,
+                width: 100, flexShrink: 0, padding: 10, borderRadius: 8,
+                background: colors.surface, border: `1px solid ${colors.hairline}`,
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: colors.inkMuted48, textAlign: 'center' }}>LM Head</div>
+                <div style={{ fontSize: 9, color: colors.bodyMuted }}>
+                  {fmt(arch.modules?.find((m: any) => m.id === 'lm_head')?.n_params)} params
+                </div>
+                <div style={{ fontSize: 9, color: colors.bodyMuted }}>
+                  vocab: {arch.vocab_size ?? '—'}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -558,7 +615,7 @@ export default function TransformerVisualizer({ onNavigate }: Props) {
             {selectedNode === null ? (
               <div className="card" style={{ border: `1px dashed ${colors.hairline}`, textAlign: 'center', padding: 28 }}>
                 <p className="hint" style={{ margin: 0 }}>
-                  Click a neuron or component node to inspect its weights, connections, and activations.
+                  Click an attention head, MLP neuron, or component to inspect its weights, connections, and activations.
                 </p>
               </div>
             ) : nodeLoading ? (
@@ -569,6 +626,15 @@ export default function TransformerVisualizer({ onNavigate }: Props) {
               <div className="card"><p className="hint">No detail available for this node.</p></div>
             )}
           </div>
+        </div>
+      )}
+
+      {loaded && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: colors.inkMuted48, marginTop: 8 }}>
+          <span>Layers: {nLayers}</span>
+          <span>Heads/Layer: {arch.n_heads}</span>
+          <span>MLP Neurons: {arch.d_mlp}</span>
+          <span>Parameters: {fmt(arch.n_params)}</span>
         </div>
       )}
     </div>

@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from .adapter_base import ModelAdapter, ModelSpec, ActivationResult, PatchResult, AttentionPattern
-from runtime.execution.multi_gpu import TensorParallelPlanner
-from runtime.execution.distributed import RPCManager
+from backend.runtime.execution.multi_gpu import TensorParallelPlanner
+from backend.runtime.execution.distributed import RPCManager
 
 
 class DistributedModelAdapter(ModelAdapter):

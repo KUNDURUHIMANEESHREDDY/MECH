@@ -21,12 +21,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from science.models.adapter_base import ModelAdapter
+from backend.science.models.adapter_base import ModelAdapter
 from .algorithms import get_algorithm
 from .algorithms.base_algorithm import DiscoveryReport
 from .confidence_scorer import PlatformConfidenceEngine
 from .discovery_planner import ResearchGoal, MechanismClaim
-from datasets.dataset_manager import DatasetManager
+from backend.datasets.dataset_manager import DatasetManager
 
 
 @dataclass

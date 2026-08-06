@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const http = require('node:http');
+const fs = require('node:fs');
 const { registerIpcHandlers } = require('./ipc');
 const { getLogger } = require('./logger');
 const { getStorage } = require('./storage');
@@ -11,7 +12,8 @@ const { getStorage } = require('./storage');
 const isDev = !app.isPackaged;
 const RENDERER_DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const BACKEND_PORT = 8000;
-const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
+const BACKEND_HOST = '127.0.0.1';
+const BACKEND_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 
 let mainWindow = null;
 let pythonBackend = null;
@@ -71,6 +73,28 @@ function createMainWindow() {
   return win;
 }
 
+function resolvePythonPath(resourcesPath) {
+  const candidates = [];
+  if (process.env.MECH_PYTHON) candidates.push(process.env.MECH_PYTHON);
+  if (process.env.PYTHON_PATH) candidates.push(process.env.PYTHON_PATH);
+
+  // Use bundled/local Python runtimes when present.
+  candidates.push(path.join(resourcesPath, 'python', 'python.exe'));
+  candidates.push(path.join(resourcesPath, '.venv', 'Scripts', 'python.exe'));
+
+  // Development / local checkout: use the project's virtual environment.
+  const repoRoot = path.join(__dirname, '..', '..');
+  candidates.push(path.join(repoRoot, '.venv', 'Scripts', 'python.exe'));
+  candidates.push(path.join(repoRoot, 'venv', 'Scripts', 'python.exe'));
+
+  for (const candidate of candidates) {
+    try {
+      if (candidate && fs.existsSync(candidate)) return candidate;
+    } catch { }
+  }
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
 async function startBackend(logger) {
   try {
     const res = await new Promise((resolve, reject) => {
@@ -88,13 +112,14 @@ async function startBackend(logger) {
   let pythonPath, scriptPath, cwd, pythonPathEnv;
 
   if (isDev) {
-    pythonPath = 'python';
-    scriptPath = path.join(__dirname, '..', '..', 'backend', 'main.py');
-    cwd = path.join(__dirname, '..', '..');
-    pythonPathEnv = `${cwd};${path.join(cwd, 'backend')}`;
+    const repoRoot = path.join(__dirname, '..', '..');
+    pythonPath = resolvePythonPath(repoRoot);
+    scriptPath = path.join(repoRoot, 'backend', 'main.py');
+    cwd = repoRoot;
+    pythonPathEnv = `${repoRoot};${path.join(repoRoot, 'backend')}`;
   } else {
     const resourcesPath = process.resourcesPath || path.join(__dirname, '..');
-    pythonPath = 'python';
+    pythonPath = resolvePythonPath(resourcesPath);
     scriptPath = path.join(resourcesPath, 'backend', 'main.py');
     cwd = resourcesPath;
     pythonPathEnv = `${resourcesPath};${path.join(resourcesPath, 'backend')}`;
@@ -114,7 +139,9 @@ async function startBackend(logger) {
   child.on('exit', (code) => logger.info('backend_exited', { code }));
   child.on('error', (err) => logger.error('backend_spawn_error', { error: err.message }));
 
-  const deadline = Date.now() + 30000;
+  // Packaged local Python environments can take longer on first launch while
+  // Windows scans/imports native ML packages. Wait so the UI opens connected.
+  const deadline = Date.now() + 180000;
   while (Date.now() < deadline) {
     try {
       const res = await new Promise((resolve, reject) => {
@@ -130,7 +157,7 @@ async function startBackend(logger) {
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  logger.warn('backend_not_ready', { timeout: '30s' });
+  logger.warn('backend_not_ready', { timeout: '180s' });
   return child;
 }
 

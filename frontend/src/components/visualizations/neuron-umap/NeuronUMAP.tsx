@@ -559,3 +559,5 @@ export function NeuronUMAP({
     </div>
   );
 }
+
+export default NeuronUMAP;

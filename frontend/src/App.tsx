@@ -389,6 +389,7 @@ export default function App() {
         onSelect={setActivePage}
         collapsed={activityCollapsed}
         onToggle={() => setActivityCollapsed(!activityCollapsed)}
+        onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
       <Sidebar
         pages={PAGES}

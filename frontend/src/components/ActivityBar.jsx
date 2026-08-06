@@ -9,7 +9,7 @@ const TOP_ICONS = [
   { id: 'code', icon: FileCode2, label: 'Code' },
 ];
 
-export default function ActivityBar({ active, onSelect, collapsed, onToggle }) {
+export default function ActivityBar({ active, onSelect, collapsed, onToggle, onToggleSidebar }) {
   return (
     <div
       className={`activity-bar${collapsed ? ' collapsed' : ''}`}
@@ -23,7 +23,6 @@ export default function ActivityBar({ active, onSelect, collapsed, onToggle }) {
         paddingBottom: spacing.sm,
         transition: 'width 0.2s ease',
         overflow: 'hidden',
-        gridArea: 'activity',
         borderRight: `1px solid ${colors.hairline}`,
       }}
     >
@@ -74,8 +73,8 @@ export default function ActivityBar({ active, onSelect, collapsed, onToggle }) {
         })}
       </div>
       <button
-        onClick={onToggle}
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        onClick={onToggleSidebar}
+        title="Toggle sidebar"
         style={{
           width: '36px',
           height: '36px',
@@ -90,6 +89,24 @@ export default function ActivityBar({ active, onSelect, collapsed, onToggle }) {
         }}
       >
         <Sidebar size={18} strokeWidth={1.75} />
+      </button>
+      <button
+        onClick={onToggle}
+        title={collapsed ? 'Expand activity bar' : 'Collapse activity bar'}
+        style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: radii.full,
+          border: 'none',
+          background: 'transparent',
+          color: colors.inkMuted48,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Settings size={18} strokeWidth={1.75} />
       </button>
     </div>
   );

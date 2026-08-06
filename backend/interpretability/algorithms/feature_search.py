@@ -6,7 +6,7 @@ Searches SAE features across activation magnitudes, descriptions, and dataset ex
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from interpretability.repository.feature_repository import get_feature_repository
+from backend.interpretability.repository.feature_repository import get_feature_repository
 
 
 class FeatureSearchEngine:

@@ -14,16 +14,15 @@ const ROOT = path.join(__dirname, '..');
 function run(cmd, args, opts) {
   // eslint-disable-next-line no-console
   console.log(`[build] ${cmd} ${args.join(' ')}`);
-  // spawnSync of .cmd/.bat files fails with EINVAL on Windows (Node bug,
-  // e.g. nodejs/node#29843) — route them through cmd.exe instead.
+  // Use shell mode on Windows for .cmd/.bat shims. This works from PowerShell,
+  // cmd.exe, and Git Bash/MSYS without nested-quote issues.
   const isWinCmd = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd);
-  const res = isWinCmd
-    ? spawnSync(
-        'cmd.exe',
-        ['/d', '/s', '/c', `"${cmd}" ${args.map(a => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}`],
-        { stdio: 'inherit', cwd: ROOT, ...(opts || {}) },
-      )
-    : spawnSync(cmd, args, { stdio: 'inherit', cwd: ROOT, ...(opts || {}) });
+  const res = spawnSync(cmd, args, {
+    stdio: 'inherit',
+    cwd: ROOT,
+    shell: isWinCmd,
+    ...(opts || {}),
+  });
   if (res.status !== 0) {
     console.error(`[build] ${cmd} ${args.join(' ')} failed with code ${res.status}`);
     process.exit(res.status || 1);

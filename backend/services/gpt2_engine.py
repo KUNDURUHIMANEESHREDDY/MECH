@@ -975,7 +975,20 @@ def patch_neuron(
     layer = max(0, min(_n_layers() - 1, int(layer)))
     d_mlp = _d_mlp()
     neuron_index = max(0, min(d_mlp - 1, int(neuron_index)))
-    prompt = prompt or (_cache.get("prompt") if _cache else "The capital of France is")
+    prompt = prompt or (_cache.get("prompt") if _cache else None)
+    if not prompt:
+        import random
+        _fallback_prompts = [
+            "The capital of France is",
+            "The quick brown fox jumps over",
+            "In a world where artificial intelligence",
+            "The meaning of life is",
+            "Once upon a time there was a",
+            "Machine learning models can",
+            "Scientists recently discovered that",
+            "The future of technology looks like",
+        ]
+        prompt = random.choice(_fallback_prompts)
 
     def run(with_patch: bool):
         hooks = []

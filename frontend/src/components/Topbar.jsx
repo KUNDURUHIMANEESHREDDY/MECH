@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brain, PanelsTopLeft, Share2, Store, FileUp, Command, CircleDot } from 'lucide-react';
+import { Brain, PanelLeft, Sidebar, Share2, Store, FileUp, Command, CircleDot } from 'lucide-react';
 import { colors, radii, spacing, typography } from '../design/tokens';
 import { Button } from '../design/components/Button';
 
@@ -54,7 +54,7 @@ export default function Topbar({
             justifyContent: 'center',
           }}
         >
-          <PanelsTopLeft size={16} strokeWidth={1.75} />
+          <PanelLeft size={16} strokeWidth={1.75} />
         </button>
         <button
           onClick={onToggleSidebar}
@@ -72,7 +72,7 @@ export default function Topbar({
             justifyContent: 'center',
           }}
         >
-          <PanelsTopLeft size={16} strokeWidth={1.75} />
+          <Sidebar size={16} strokeWidth={1.75} />
         </button>
         <span
           style={{
@@ -92,7 +92,7 @@ export default function Topbar({
           <Brain size={14} /> Mem
         </Button>
         <Button variant="dark-utility" onClick={onToggleDock} style={{ padding: `${spacing.xs} ${spacing.sm}` }}>
-          <PanelsTopLeft size={14} /> Dock
+          <PanelLeft size={14} /> Dock
         </Button>
         <Button variant="dark-utility" onClick={onOpenShare} style={{ padding: `${spacing.xs} ${spacing.sm}` }}>
           <Share2 size={14} /> Share

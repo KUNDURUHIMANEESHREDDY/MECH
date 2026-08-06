@@ -16,7 +16,7 @@ export default function CircuitGraphPanel() {
   return (
     <div className="panel-content circuit-graph-panel" data-testid="circuit-graph-panel">
       <h4>Interactive Circuit Graph</h4>
-      <p className="hint">Multi-node graph mapping: Token -> Neuron -> Feature -> Attention Head -> Output Prediction.</p>
+      <p className="hint">Multi-node graph mapping: Token {'→'} Neuron {'→'} Feature {'→'} Attention Head {'→'} Output Prediction.</p>
 
       <div className="graph-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', background: 'var(--bg)', borderRadius: '6px' }}>
         {GRAPH_NODES.map((node, idx) => (

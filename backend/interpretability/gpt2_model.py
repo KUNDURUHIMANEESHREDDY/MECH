@@ -139,8 +139,16 @@ class GPT2Model:
     #  Text generation
     # ------------------------------------------------------------------ #
 
-    def generate(self, prompt: str, max_new_tokens: int = 5) -> str:
-        """Greedy text continuation."""
+    def generate(self, prompt: str, max_new_tokens: int = 10) -> str:
+        """Greedy text continuation.
+
+        Uses greedy decoding (do_sample=False) which is deterministic
+        — the same prompt always yields the same continuation. For a
+        124 M parameter GPT-2 this is fast and reproducible, though
+        longer runs may repeat. For more varied output, callers should
+        sample token-by-token via the inference engine in
+        ``backend.services.gpt2_engine``.
+        """
         with torch.no_grad():
             return self._model.generate(
                 prompt, max_new_tokens=max_new_tokens, do_sample=False

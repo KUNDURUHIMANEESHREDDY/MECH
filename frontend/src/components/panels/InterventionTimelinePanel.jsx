@@ -8,7 +8,7 @@ export default function InterventionTimelinePanel() {
         <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--danger)", margin: 0 }}>
           <Timer size={14} style={{ verticalAlign: "middle", marginRight: 6 }} /> Intervention Timeline & Diff Viewer
         </h2>
-        <p className="hint" style={{ margin: "2px 0 0 0" }}>Track Original State -> Patch Applied -> Output Prediction Change</p>
+        <p className="hint" style={{ margin: "2px 0 0 0" }}>Track Original State {'→'} Patch Applied {'→'} Output Prediction Change</p>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 24 }}>
