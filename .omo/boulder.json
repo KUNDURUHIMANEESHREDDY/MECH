@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "active_work_id": "redesign-ui-shell",
+  "works": {
+    "redesign-ui-shell": {
+      "work_id": "redesign-ui-shell",
+      "active_plan": ".omo/plans/redesign-ui-shell.md",
+      "plan_name": "redesign-ui-shell",
+      "session_ids": ["codex:exec-redesign-ui-shell"],
+      "status": "completed",
+      "worktree_path": null
+    }
+  }
+}
