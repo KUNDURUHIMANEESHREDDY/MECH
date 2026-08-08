@@ -1,15 +1,35 @@
 const BASE = 'http://localhost:8000';
 
+let cachedApiKey: string | null = null;
+
+async function getApiKey(): Promise<string> {
+  if (cachedApiKey) return cachedApiKey;
+  try {
+    if (typeof window !== 'undefined' && window.desktopApi?.getApiKey) {
+      cachedApiKey = await window.desktopApi.getApiKey();
+      return cachedApiKey ?? '';
+    }
+  } catch { }
+  return '';
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+  const apiKey = await getApiKey();
+  const res = await fetch(`${BASE}${path}`, {
+    headers: apiKey ? { 'X-API-Key': apiKey } : undefined,
+  });
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   return res.json();
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
+  const apiKey = await getApiKey();
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
@@ -17,12 +37,14 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: 'DELETE' });
+  const apiKey = await getApiKey();
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'DELETE',
+    headers: apiKey ? { 'X-API-Key': apiKey } : undefined,
+  });
   if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
   return res.json();
 }
-
-const noopResolve = (val?: any) => Promise.resolve(val ?? []);
 
 export const api = {
   pythonPing: () => get<{ status: string }>('/api/status'),
@@ -78,18 +100,21 @@ export const api = {
   },
   runBenchmark: (name: string) => post<unknown>('/api/benchmarks/run', { benchmark_name: name }),
 
-  getAppLogs: () => noopResolve(),
-  getBuildLogs: () => noopResolve(),
+  getAppLogs: () => get<{ logs: any[] }>('/api/logs'),
+  getBuildLogs: () => get<{ logs: any[] }>('/api/build/logs'),
   onBuildEvent: () => () => {},
-  startBuild: () => noopResolve(),
-  clearBuildLogs: () => noopResolve(),
+  startBuild: () => post<{ status: string }>('/api/build/start'),
+  clearBuildLogs: () => post<{ status: string }>('/api/build/clear'),
 
-  listRecentFiles: () => noopResolve(),
-  addRecentFile: () => noopResolve(),
-  clearRecentFiles: () => noopResolve(),
+  listRecentFiles: () => get<{ files: any[] }>('/api/recent'),
+  addRecentFile: (data: Record<string, unknown>) => post<unknown>('/api/recent', data),
+  clearRecentFiles: () => post<{ status: string }>('/api/recent/clear'),
   showInFolder: () => {},
 
-  listProjects: () => noopResolve(),
-  addProject: () => noopResolve(),
-  removeProject: () => noopResolve(),
+  listProjects: () => get<{ projects: any[] }>('/api/projects'),
+  addProject: (data: Record<string, unknown>) => post<unknown>('/api/projects', data),
+  removeProject: (id: string) => del<{ status: string }>(`/api/projects/${id}`),
+
+  analyzeTokens: (prompt: string) =>
+    post<Record<string, unknown>>('/api/runtime/analyze_tokens', { prompt }),
 };

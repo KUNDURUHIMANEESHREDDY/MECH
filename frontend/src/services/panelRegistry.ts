@@ -1,10 +1,9 @@
-import type { LucideIcon } from 'lucide-react';
-import { Brain, Flame, Layers, Search, Telescope, Type, Zap } from 'lucide-react';
+import { pluginRegistry } from '../panel-system/pluginRegistry';
 
 export interface PanelDefinition {
   id: string;
   title: string;
-  icon: LucideIcon;
+  icon: string;
   defaultDock: 'left' | 'center' | 'right' | 'bottom';
   commands: string[];
 }
@@ -31,7 +30,7 @@ export const panelRegistry = new PanelRegistry();
 panelRegistry.register({
   id: 'token_viewer',
   title: 'Token Viewer',
-  icon: Type,
+  icon: 'Type',
   defaultDock: 'center',
   commands: ['toggle_token_viewer', 'view_tokens'],
 });
@@ -39,7 +38,7 @@ panelRegistry.register({
 panelRegistry.register({
   id: 'attention_heatmap',
   title: 'Attention Heatmap',
-  icon: Flame,
+  icon: 'Flame',
   defaultDock: 'center',
   commands: ['toggle_attention_heatmap', 'view_attention'],
 });
@@ -47,7 +46,7 @@ panelRegistry.register({
 panelRegistry.register({
   id: 'activation_heatmap',
   title: 'Activation Heatmap',
-  icon: Zap,
+  icon: 'Zap',
   defaultDock: 'center',
   commands: ['toggle_activation_heatmap', 'view_activations'],
 });
@@ -55,7 +54,7 @@ panelRegistry.register({
 panelRegistry.register({
   id: 'neuron_panel',
   title: 'Neuron Inspector',
-  icon: Brain,
+  icon: 'Brain',
   defaultDock: 'right',
   commands: ['toggle_neuron_panel', 'inspect_neuron'],
 });
@@ -63,7 +62,7 @@ panelRegistry.register({
 panelRegistry.register({
   id: 'layer_inspector',
   title: 'Layer Inspector',
-  icon: Layers,
+  icon: 'Layers',
   defaultDock: 'bottom',
   commands: ['toggle_layer_inspector', 'inspect_layer'],
 });
@@ -71,7 +70,7 @@ panelRegistry.register({
 panelRegistry.register({
   id: 'prediction_inspector',
   title: 'Prediction Inspector',
-  icon: Telescope,
+  icon: 'Telescope',
   defaultDock: 'bottom',
   commands: ['toggle_prediction_inspector', 'inspect_predictions', 'logit_lens'],
 });
@@ -79,7 +78,7 @@ panelRegistry.register({
 panelRegistry.register({
   id: 'token_inspector',
   title: 'Token Inspector',
-  icon: Search,
+  icon: 'Search',
   defaultDock: 'bottom',
   commands: ['toggle_token_inspector', 'inspect_token'],
 });

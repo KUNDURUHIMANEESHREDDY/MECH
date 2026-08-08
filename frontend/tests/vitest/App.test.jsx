@@ -1,16 +1,15 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import App from '../../src/App.tsx';
-import Sidebar from '../../src/components/Sidebar.jsx';
-import ThemeSettings from '../../src/pages/ThemeSettings.jsx';
+import { Navigator } from '../../src/shell/navigator/Navigator';
 
 describe('App shell', () => {
   beforeEach(() => {
     document.documentElement.removeAttribute('data-theme');
   });
 
-  it('renders the sidebar with Neural Debugger navigation items', async () => {
+  it('renders the navigator with navigation items', async () => {
     render(<App />);
     await waitFor(() => {
       expect(screen.getByTestId('nav-workspace')).toBeInTheDocument();
@@ -33,48 +32,33 @@ describe('App shell', () => {
     });
   });
 
-  it('navigates to settings when the sidebar item is clicked', async () => {
+  it('updates the breadcrumb when a nav item is clicked', async () => {
     render(<App />);
     fireEvent.click(screen.getByTestId('nav-settings'));
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+      expect(screen.getByTestId('topbar-crumb')).toHaveTextContent('Settings');
     });
   });
 });
 
-describe('Sidebar', () => {
-  const pages = {
-    workspace: { label: 'Workspace', component: () => null },
-    models: { label: 'Models', component: () => null }
-  };
-
-  it('marks the active item', () => {
-    render(<Sidebar pages={pages} active="models" onSelect={() => {}} />);
-    const item = screen.getByTestId('nav-models');
-    expect(item.className).toMatch(/active/);
+describe('Navigator', () => {
+  it('renders resource tree groups', () => {
+    render(<Navigator />);
+    expect(screen.getByText('Models & Architectures')).toBeInTheDocument();
+    expect(screen.getByText('Mechanistic Analysis')).toBeInTheDocument();
+    expect(screen.getByText('Workspace & Assets')).toBeInTheDocument();
   });
 
-  it('fires onSelect on click and keyboard activation', () => {
-    const onSelect = vi.fn();
-    render(<Sidebar pages={pages} active="workspace" onSelect={onSelect} />);
-    fireEvent.click(screen.getByTestId('nav-models'));
-    expect(onSelect).toHaveBeenCalledWith('models');
-    fireEvent.keyDown(screen.getByTestId('nav-models'), { key: 'Enter' });
-    expect(onSelect).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('ThemeSettings', () => {
-  it('renders the current theme selection', () => {
-    render(<ThemeSettings settings={{ theme: 'dark' }} onChange={() => {}} />);
-    const select = screen.getByTestId('theme-select');
-    expect(select.value).toBe('dark');
-  });
-
-  it('invokes onChange with the new theme', () => {
-    const onChange = vi.fn();
-    render(<ThemeSettings settings={{ theme: 'system' }} onChange={onChange} />);
-    fireEvent.change(screen.getByTestId('theme-select'), { target: { value: 'light' } });
-    expect(onChange).toHaveBeenCalledWith({ theme: 'light' });
+  it('expands groups on click', () => {
+    render(<Navigator />);
+    // Groups start expanded by default, so GPT-2 is visible
+    expect(screen.getByText('GPT-2 Live')).toBeInTheDocument();
+    // Click to collapse the group
+    const groups = screen.getAllByText('Models & Architectures');
+    fireEvent.click(groups[0]);
+    expect(screen.queryByText('GPT-2 Live')).not.toBeInTheDocument();
+    // Click again to expand
+    fireEvent.click(groups[0]);
+    expect(screen.getByText('GPT-2 Live')).toBeInTheDocument();
   });
 });
