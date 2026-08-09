@@ -35,6 +35,10 @@ export const Settings: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!window.appApi) {
+      setLoaded(true);
+      return;
+    }
     window.appApi
       .getSettings()
       .then((s) => {
@@ -51,6 +55,7 @@ export const Settings: React.FC = () => {
   }, []);
 
   const save = async () => {
+    if (!window.appApi) return;
     setSaving(true);
     try {
       await window.appApi.setSettings(toAppSettings(settings));
