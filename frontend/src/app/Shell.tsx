@@ -7,6 +7,7 @@ import { BottomWorkspace } from '../shell/bottom/BottomWorkspace';
 import { CommandPalette } from '../shell/toolbar/CommandPalette';
 import { DockManager } from '../layout/DockManager';
 import { useUIStore } from '../shared/stores/ui';
+import { useWorkspaceStore } from '../shared/stores/workspace';
 
 interface ShellProps {
   children?: React.ReactNode;
