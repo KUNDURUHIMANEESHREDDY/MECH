@@ -17,12 +17,13 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from backend.main import app
+from backend.main import app, _API_KEY
 
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
+    # Non-public routes require the X-API-Key the app's middleware checks.
+    with TestClient(app, headers={"X-API-Key": _API_KEY}) as c:
         yield c
 
 

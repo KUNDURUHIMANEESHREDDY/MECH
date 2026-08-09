@@ -1,22 +1,37 @@
 'use strict';
 
-// The Python backend is an HTTP FastAPI server on :8000 (prefix /api/v1).
-// All handlers proxy to it; the old JSON-lines stdio sidecar no longer exists.
+// The Python backend runs as an in-process stdio sidecar (backend/mech_service.py).
+// All handlers proxy through the PythonBridge ('http' method), which executes the
+// FastAPI app via TestClient — no HTTP server, no ports.
 
-const BACKEND = 'http://localhost:8000/api/v1';
+let getApiKey = () => '';
+let pythonBridge = null;
+
+function setApiKeyResolver(resolver) {
+  getApiKey = resolver || (() => '');
+}
 
 async function callBackend(method, payload = {}) {
-  const res = await fetch(`${BACKEND}/${method}`, {
+  if (!pythonBridge) throw new Error('python_bridge_not_ready');
+  const body = JSON.stringify({ method, payload });
+  const res = await pythonBridge.call('http', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ method, payload }),
+    path: `/api/v1/${method}`,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getApiKey() ? { 'X-API-Key': getApiKey() } : {}),
+    },
+    body,
   });
-  if (!res.ok) throw new Error(`backend ${method} -> HTTP ${res.status}`);
-  const json = await res.json();
+  const status = typeof res.status === 'number' ? res.status : 200;
+  if (status >= 400) throw new Error(`backend ${method} -> HTTP ${status}`);
+  const json = JSON.parse(res.body || '{}');
   return json.result !== undefined ? json.result : json;
 }
 
-function registerRuntimeHandlers({ ipcMain, logger }) {
+function registerRuntimeHandlers({ ipcMain, pythonBridge: bridge, logger, getApiKey }) {
+  pythonBridge = bridge;
+  setApiKeyResolver(getApiKey);
   ipcMain.handle('python:ping', async () => {
     try {
       const data = await callBackend('ping', {});

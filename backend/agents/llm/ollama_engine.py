@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 
 from .engine_base import LLMEngine
 from .prompts import HYPOTHESIS_GENERATION_PROMPT, EXPERIMENT_EVALUATION_PROMPT
+from backend.utils.url_validator import validate_url
 
 
 class OllamaEngine(LLMEngine):
@@ -21,7 +22,7 @@ class OllamaEngine(LLMEngine):
 
     def __init__(self, model: str = "llama3", endpoint: str = "http://localhost:11434/v1/chat/completions") -> None:
         self.model = model
-        self.endpoint = endpoint
+        self.endpoint = validate_url(endpoint, allow_private=True, allow_localhost=True)
 
     def _call_api(self, prompt: str) -> str:
         """Helper to make the REST call to local Ollama."""

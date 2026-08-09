@@ -1,0 +1,160 @@
+/**
+ * Persistence adapter — thin wrapper over Electron's KV store with localStorage fallback.
+ *
+ * In Electron (packaged), the main process exposes `window.desktopApi` with
+ * `settings:get` / `settings:set` IPC handlers backed by better-sqlite3.
+ * In browser/dev mode, localStorage is used transparently.
+ *
+ * The workspace snapshot is stored under a single KV key per workspace so
+ * that layout, windows, camera, model, notes, timeline, and console all
+ * round-trip together.
+ */
+import type { WorkspaceState } from '../types';
+
+const STORAGE_KEY_PREFIX = 'mech-workspace-';
+
+/** Detect Electron renderer context */
+function isElectron(): boolean {
+  return typeof window !== 'undefined' && !!window.desktopApi;
+}
+
+/** Get a reference to the Electron desktopApi (or null) */
+function getApi(): Window['desktopApi'] | null {
+  try {
+    if (typeof window !== 'undefined' && window.desktopApi) {
+      return window.desktopApi;
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+/**
+ * Save a workspace snapshot to persistent storage.
+ * Uses Electron KV when available, localStorage otherwise.
+ */
+export async function saveWorkspace(workspaceId: string, state: WorkspaceState): Promise<void> {
+  const key = `${STORAGE_KEY_PREFIX}${workspaceId}`;
+  const payload = JSON.stringify(state);
+
+  if (isElectron()) {
+    const api = getApi();
+    if (api) {
+      // Use the settings KV — settings:get returns the full settings object.
+      // We nest workspaces inside it to avoid clobbering other settings.
+      const settings = await api.getSettings().catch(() => ({} as Record<string, unknown>));
+      const next = { ...settings, [key]: payload };
+      await api.updateSettings(next);
+      return;
+    }
+  }
+
+  // localStorage fallback (dev mode, web preview)
+  try {
+    localStorage.setItem(key, payload);
+  } catch {
+    /* storage full or disabled — silent fallback */
+  }
+}
+
+/**
+ * Load a workspace snapshot from persistent storage.
+ */
+export async function loadWorkspace(workspaceId: string): Promise<WorkspaceState | null> {
+  const key = `${STORAGE_KEY_PREFIX}${workspaceId}`;
+
+  if (isElectron()) {
+    const api = getApi();
+    if (api) {
+      const settings = await api.getSettings().catch(() => ({} as Record<string, unknown>));
+      const raw = (settings as Record<string, unknown>)?.[key];
+      if (raw && typeof raw === 'string') {
+        try {
+          return JSON.parse(raw) as WorkspaceState;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+  }
+
+  // localStorage fallback
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as WorkspaceState;
+  } catch {
+    /* corrupt data — ignore */
+  }
+  return null;
+}
+
+/**
+ * Delete a workspace snapshot.
+ */
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  const key = `${STORAGE_KEY_PREFIX}${workspaceId}`;
+  if (isElectron()) {
+    const api = getApi();
+    if (api) {
+      const settings = await api.getSettings().catch(() => ({} as Record<string, unknown>));
+      const next = { ...settings };
+      delete (next as Record<string, unknown>)[key];
+      await api.updateSettings(next);
+      return;
+    }
+  }
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* pass */
+  }
+}
+
+/**
+ * List all saved workspace IDs.
+ */
+export async function listWorkspaces(): Promise<string[]> {
+  const prefix = STORAGE_KEY_PREFIX;
+  if (isElectron()) {
+    const api = getApi();
+    if (api) {
+      const settings = await api.getSettings().catch(() => ({} as Record<string, unknown>));
+      return Object.keys(settings as Record<string, unknown>).filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
+    }
+  }
+  try {
+    return Object.keys(localStorage).filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Synchronous storage for hot-path reads (layout, camera) during a session.
+ * Falls back to localStorage when Electron is unavailable.
+ */
+export const storageAdapter = {
+  get: (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set: (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* pass */
+    }
+  },
+  remove: (key: string): void => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* pass */
+    }
+  },
+};

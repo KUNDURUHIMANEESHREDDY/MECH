@@ -81,6 +81,8 @@ class SAEReproductionPipeline:
 
     def _compute_reconstruction_mse(self, features: List[SAEFeature]) -> float:
         """Estimate MSE: lower for higher-quality features."""
+        if not features:
+            return 0.05
         mean_mono = sum(f.monosemanticity_score for f in features) / len(features)
         return round(0.03 + (1.0 - mean_mono) * 0.04, 4)
 
@@ -96,17 +98,18 @@ class SAEReproductionPipeline:
         )
 
         features = self._simulate_sae_features(n_features, seed)
+        n = len(features) if features else 1
 
         # L0 sparsity: fraction of features near-zero per token
         l0_sparsity = round(
-            sum(1 for f in features if f.activation_frequency < 0.05) / len(features), 4
+            sum(1 for f in features if f.activation_frequency < 0.05) / n, 4
         )
         reconstruction_mse = self._compute_reconstruction_mse(features)
         monosemanticity_score = round(
-            sum(f.monosemanticity_score for f in features) / len(features), 4
+            sum(f.monosemanticity_score for f in features) / n, 4
         )
         feature_absorption_rate = round(
-            sum(1 for f in features if f.is_absorbed) / len(features), 4
+            sum(1 for f in features if f.is_absorbed) / n, 4
         )
 
         observed_metrics = {

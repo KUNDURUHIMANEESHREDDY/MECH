@@ -61,18 +61,20 @@ export const Shell: React.FC<ShellProps> = ({
   const activityCollapsed = useUIStore((s) => s.activityCollapsed);
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const setCrumb = useUIStore((s) => s.setCrumb);
+  const openPanel = useWorkspaceStore((s) => s.openPanel);
 
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace(/^#/, '');
       if (hash && PAGE_LABEL_MAP[hash]) {
         setCrumb(PAGE_LABEL_MAP[hash]);
+        openPanel(hash);
       }
     };
     handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [setCrumb]);
+  }, [setCrumb, openPanel]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

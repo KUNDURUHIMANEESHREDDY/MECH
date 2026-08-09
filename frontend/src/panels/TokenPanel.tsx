@@ -1,4 +1,6 @@
 import React from 'react';
+import { FileText } from 'lucide-react';
+import './TokenPanel.css';
 
 interface TokenPanelProps {
   tokens: string[];
@@ -8,37 +10,41 @@ interface TokenPanelProps {
 
 export const TokenPanel: React.FC<TokenPanelProps> = ({ tokens, selectedTokenIdx, onSelectToken }) => {
   if (!tokens || tokens.length === 0) {
-    return <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No token data available.</div>;
+    return <div className="token-panel-empty">No token data available.</div>;
   }
 
   const activeIdx = selectedTokenIdx ?? 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+    <div className="token-panel">
+      <div className="token-chips">
         {tokens.map((t, idx) => (
           <button
             key={idx}
             onClick={() => onSelectToken(idx)}
-            style={{
-              background: idx === activeIdx ? 'var(--accent)' : 'var(--bg-elev-2)',
-              color: idx === activeIdx ? 'var(--bg)' : 'var(--text)',
-              border: 'none',
-              borderRadius: 4,
-              padding: '4px 8px',
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 600,
-            }}
+            className={`token-chip ${idx === activeIdx ? 'active' : ''}`}
           >
-            {t} <span style={{ opacity: 0.6, fontSize: 10 }}>#{idx}</span>
+            {t} <span className="token-idx">#{idx}</span>
           </button>
         ))}
       </div>
-
-      <div style={{ background: 'var(--bg-elev-2)', padding: 10, borderRadius: 6, fontSize: 12 }}>
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>Selected Token: "{tokens[activeIdx]}" (Index {activeIdx})</div>
-        <div style={{ color: 'var(--text-muted)' }}>Embedding Norm: 14.82 | Residual Delta: 2.14 | Next Token Logit: 18.9</div>
+      <div className="token-details">
+        <div className="token-detail-row">
+          <span className="token-detail-label">Selected Token</span>
+          <span className="token-detail-value">"{tokens[activeIdx]}" (Index {activeIdx})</span>
+        </div>
+        <div className="token-detail-row">
+          <span className="token-detail-label">Embedding Norm</span>
+          <span className="token-detail-value">14.82</span>
+        </div>
+        <div className="token-detail-row">
+          <span className="token-detail-label">Residual Delta</span>
+          <span className="token-detail-value">2.14</span>
+        </div>
+        <div className="token-detail-row">
+          <span className="token-detail-label">Next Token Logit</span>
+          <span className="token-detail-value">18.9</span>
+        </div>
       </div>
     </div>
   );

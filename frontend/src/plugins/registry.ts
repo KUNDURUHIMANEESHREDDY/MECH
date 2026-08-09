@@ -6,3 +6,4 @@ import './sae';
 import './logit-lens';
 import './embeddings';
 import './datasets';
+import './tools';

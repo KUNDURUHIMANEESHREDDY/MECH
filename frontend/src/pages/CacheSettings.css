@@ -1,0 +1,16 @@
+.cache-settings {
+  padding: 24px;
+}
+
+.cache-settings h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--text, #1d1d1f);
+}
+
+.cache-settings p {
+  font-size: 13px;
+  color: var(--text-muted, #7a7a7a);
+  margin: 0;
+}

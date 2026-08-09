@@ -1,0 +1,217 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e17]: MECH
+        - generic [ref=e18]: Canvas
+      - button "Collapse activity bar" [ref=e19] [cursor=pointer]
+      - button "Collapse sidebar" [ref=e22] [cursor=pointer]
+      - generic [ref=e25]: Transformer Visualizer
+    - button "Search resources, panels, commands... ⌘K" [ref=e26] [cursor=pointer]:
+      - generic [ref=e30]: Search resources, panels, commands...
+      - generic [ref=e31]: ⌘K
+    - generic [ref=e32]:
+      - button "Run Pass" [ref=e33] [cursor=pointer]
+      - button "Export" [ref=e37] [cursor=pointer]
+      - generic [ref=e42]: Python Ready
+      - button "Workspace Settings" [ref=e46] [cursor=pointer]
+      - button "User Profile" [ref=e50] [cursor=pointer]
+  - generic [ref=e54]:
+    - complementary [ref=e55]:
+      - generic [ref=e56]: Resource Navigator
+      - generic [ref=e63]:
+        - generic [ref=e64]:
+          - generic [ref=e65] [cursor=pointer]: Models & Architectures
+          - generic [ref=e79]:
+            - generic "Open GPT-2 Live in Canvas" [ref=e80] [cursor=pointer]: GPT-2 Live
+            - generic "Open Model Explorer in Canvas" [ref=e85] [cursor=pointer]: Model Explorer
+            - generic "Open Transformer Visualizer in Canvas" [ref=e90] [cursor=pointer]: Transformer Visualizer
+            - generic "Open Neural Explorer in Canvas" [ref=e96] [cursor=pointer]: Neural Explorer
+        - generic [ref=e100]:
+          - generic [ref=e101] [cursor=pointer]: Mechanistic Analysis
+          - generic [ref=e107]:
+            - generic "Open Circuit Explorer in Canvas" [ref=e108] [cursor=pointer]: Circuit Explorer
+            - generic "Open Knowledge Graph in Canvas" [ref=e112] [cursor=pointer]: Knowledge Graph
+            - generic "Open Debugger in Canvas" [ref=e116] [cursor=pointer]: Debugger
+            - generic "Open Benchmark in Canvas" [ref=e121] [cursor=pointer]: Benchmark
+            - generic "Open Benchmark Suite in Canvas" [ref=e124] [cursor=pointer]: Benchmark Suite
+            - generic "Open Experiments in Canvas" [ref=e127] [cursor=pointer]: Experiments
+            - generic "Open Reasoning in Canvas" [ref=e131] [cursor=pointer]: Reasoning
+            - generic "Open Evidence Fusion in Canvas" [ref=e136] [cursor=pointer]: Evidence Fusion
+            - generic "Open Analytics in Canvas" [ref=e141] [cursor=pointer]: Analytics
+            - generic "Open Health in Canvas" [ref=e144] [cursor=pointer]: Health
+            - generic "Open Campaigns in Canvas" [ref=e148] [cursor=pointer]: Campaigns
+        - generic [ref=e152]:
+          - generic [ref=e153] [cursor=pointer]: Workspace & Assets
+          - generic [ref=e159]:
+            - generic "Open Workspace in Canvas" [ref=e160] [cursor=pointer]: Workspace
+            - generic "Open Models in Canvas" [ref=e164] [cursor=pointer]: Models
+            - generic "Open Prompts in Canvas" [ref=e176] [cursor=pointer]: Prompts
+            - generic "Open Build in Canvas" [ref=e181] [cursor=pointer]: Build
+            - generic "Open Sessions in Canvas" [ref=e186] [cursor=pointer]: Sessions
+            - generic "Open Reports in Canvas" [ref=e191] [cursor=pointer]: Reports
+            - generic "Open Plugins in Canvas" [ref=e195] [cursor=pointer]: Plugins
+            - generic "Open Research Notebook in Canvas" [ref=e201] [cursor=pointer]: Research Notebook
+            - generic "Open Lab Notebook in Canvas" [ref=e206] [cursor=pointer]: Lab Notebook
+            - generic "Open Paper Reproduction in Canvas" [ref=e211] [cursor=pointer]: Paper Reproduction
+            - generic "Open Settings in Canvas" [ref=e215] [cursor=pointer]: Settings
+            - generic "Open Logging in Canvas" [ref=e219] [cursor=pointer]: Logging
+            - generic "Open Projects in Canvas" [ref=e223] [cursor=pointer]: Projects
+            - generic "Open Recent Files in Canvas" [ref=e227] [cursor=pointer]: Recent Files
+    - main [ref=e232]:
+      - generic [ref=e233]:
+        - generic [ref=e235]:
+          - generic [ref=e236]: Attention Heatmap
+          - button "×" [ref=e237] [cursor=pointer]
+        - generic [ref=e241]:
+          - generic [ref=e242]:
+            - generic [ref=e243]: Neuron Inspector
+            - button "×" [ref=e244] [cursor=pointer]
+          - generic [ref=e246]:
+            - generic [ref=e247]: Neuron Inspector
+            - paragraph [ref=e260]: No neuron data available.
+        - generic [ref=e261]:
+          - generic [ref=e262]:
+            - generic [ref=e263]: Logit Lens
+            - button "×" [ref=e264] [cursor=pointer]
+          - generic [ref=e266]:
+            - generic [ref=e267]:
+              - textbox "Run a prompt to read top logits…" [ref=e268]
+              - button "Read Logits" [ref=e269] [cursor=pointer]
+            - generic [ref=e270]:
+              - generic [ref=e271]: Layer sweep
+              - generic [ref=e272]: Run an inference to populate layer activations. Each row shows the tokens each layer focuses on most on the way to the prediction.
+        - generic [ref=e273]:
+          - generic [ref=e274]:
+            - generic [ref=e275]: Circuit Explorer
+            - button "×" [ref=e276] [cursor=pointer]
+          - generic [ref=e278]:
+            - generic [ref=e279]: Circuit graph — attention aggregation
+            - generic [ref=e280]: No activations loaded yet. Run an inference to compute real per-layer, per-head attention circuit metrics (focal heads, induction-like previous-token attention, prefix priming).
+        - generic [ref=e281]:
+          - generic [ref=e282]:
+            - generic [ref=e283]: Dataset Viewer
+            - button "×" [ref=e284] [cursor=pointer]
+          - generic [ref=e286]:
+            - generic [ref=e287]: Dataset Catalog — probing corpora
+            - generic [ref=e288]:
+              - generic [ref=e289]:
+                - generic [ref=e290]:
+                  - generic [ref=e291]: Induction (copying)
+                  - generic [ref=e292]: 3 probes
+                - generic [ref=e293]: "Repeated patterns: the model must copy the first segment once it repeats. Exercises prefix-matching / QK-composition circuits."
+                - generic [ref=e294]:
+                  - generic [ref=e295]:
+                    - code [ref=e296]: The cat chased the dog. The cat chased the
+                    - button "Run" [ref=e297] [cursor=pointer]
+                  - generic [ref=e298]:
+                    - code [ref=e299]: Alpha beta gamma alpha beta
+                    - button "Run" [ref=e300] [cursor=pointer]
+                  - generic [ref=e301]:
+                    - code [ref=e302]: London Paris Berlin London Paris
+                    - button "Run" [ref=e303] [cursor=pointer]
+              - generic [ref=e304]:
+                - generic [ref=e305]:
+                  - generic [ref=e306]: Indirect Object Identification
+                  - generic [ref=e307]: 3 probes
+                - generic [ref=e308]: "Classic name-mixing probes: when John and Mary both appear, identify who performed the verb."
+                - generic [ref=e309]:
+                  - generic [ref=e310]:
+                    - code [ref=e311]: When John and Mary went to the store, Mary gave the book to
+                    - button "Run" [ref=e312] [cursor=pointer]
+                  - generic [ref=e313]:
+                    - code [ref=e314]: After Bob and Alice met, Alice hugged
+                    - button "Run" [ref=e315] [cursor=pointer]
+                  - generic [ref=e316]:
+                    - code [ref=e317]: Tom and Jerry argued, but Tom apologized to
+                    - button "Run" [ref=e318] [cursor=pointer]
+              - generic [ref=e319]:
+                - generic [ref=e320]:
+                  - generic [ref=e321]: Factual recall
+                  - generic [ref=e322]: 3 probes
+                - generic [ref=e323]: Common-knowledge completions probing stored factual associations.
+                - generic [ref=e324]:
+                  - generic [ref=e325]:
+                    - code [ref=e326]: The capital of France is
+                    - button "Run" [ref=e327] [cursor=pointer]
+                  - generic [ref=e328]:
+                    - code [ref=e329]: Water boils at
+                    - button "Run" [ref=e330] [cursor=pointer]
+                  - generic [ref=e331]:
+                    - code [ref=e332]: The Sun rises in the
+                    - button "Run" [ref=e333] [cursor=pointer]
+              - generic [ref=e334]:
+                - generic [ref=e335]:
+                  - generic [ref=e336]: Semantic relations
+                  - generic [ref=e337]: 3 probes
+                - generic [ref=e338]: Paraphrase-prone completions to inspect synonym handling in residual stream.
+                - generic [ref=e339]:
+                  - generic [ref=e340]:
+                    - code [ref=e341]: The old man walked slowly and felt very
+                    - button "Run" [ref=e342] [cursor=pointer]
+                  - generic [ref=e343]:
+                    - code [ref=e344]: She was cold, so she put on a warm
+                    - button "Run" [ref=e345] [cursor=pointer]
+                  - generic [ref=e346]:
+                    - code [ref=e347]: The dog barked loudly at the
+                    - button "Run" [ref=e348] [cursor=pointer]
+              - generic [ref=e349]:
+                - generic [ref=e350]:
+                  - generic [ref=e351]: Syntax / agreement
+                  - generic [ref=e352]: 4 probes
+                - generic [ref=e353]: Number and tense agreement probes for parser-like circuit behavior.
+                - generic [ref=e354]:
+                  - generic [ref=e355]:
+                    - code [ref=e356]: The children play with their
+                    - button "Run" [ref=e357] [cursor=pointer]
+                  - generic [ref=e358]:
+                    - code [ref=e359]: He has been working for hours and has
+                    - button "Run" [ref=e360] [cursor=pointer]
+                  - generic [ref=e361]:
+                    - code [ref=e362]: Every student brings their own
+                    - button "Run" [ref=e363] [cursor=pointer]
+        - generic [ref=e364]:
+          - generic [ref=e365]:
+            - generic [ref=e366]: Embedding Viewer
+            - button "×" [ref=e367] [cursor=pointer]
+          - generic [ref=e369]:
+            - generic [ref=e370]: Token embeddings — cosine similarity
+            - generic [ref=e372]: No activations loaded yet. Run an inference to build real contextual token vectors from the attention maps and inspect their pairwise cosine similarity.
+        - generic [ref=e373]:
+          - generic [ref=e374]:
+            - generic [ref=e375]: SAE Feature Inspector
+            - button "×" [ref=e376] [cursor=pointer]
+          - generic [ref=e378]:
+            - generic [ref=e379]: SAE features — sparse activations
+            - generic [ref=e381]: No features active yet. Run an inference to decode real sparse feature activations (non-zero neurons) for each layer.
+        - generic [ref=e402]:
+          - generic [ref=e403]:
+            - generic [ref=e404]: Model Explorer
+            - button "×" [ref=e405] [cursor=pointer]
+          - generic [ref=e407]:
+            - heading "Transformer Explorer" [level=1] [ref=e408]
+            - paragraph [ref=e409]: "Model: Not loaded"
+        - generic [ref=e410]:
+          - generic [ref=e411]:
+            - generic [ref=e412]: Transformer Visualizer
+            - button "×" [ref=e413] [cursor=pointer]
+          - generic [ref=e415]:
+            - heading "Transformer Visualizer" [level=1] [ref=e416]
+            - paragraph [ref=e417]: "Model: Not loaded"
+    - complementary [ref=e382]:
+      - generic [ref=e383]: Inspector
+      - generic [ref=e385]: Select a resource to inspect.
+  - generic [ref=e387]:
+    - generic [ref=e388]:
+      - button "Console" [ref=e389] [cursor=pointer]
+      - button "Timeline" [ref=e390] [cursor=pointer]
+      - button "Logs" [ref=e391] [cursor=pointer]
+      - button "Notes" [ref=e392] [cursor=pointer]
+      - button "Results" [ref=e393] [cursor=pointer]
+      - button "Terminal" [ref=e394] [cursor=pointer]
+      - button "Exports" [ref=e395] [cursor=pointer]
+      - button "Errors" [ref=e396] [cursor=pointer]
+      - button "Tasks" [ref=e397] [cursor=pointer]
+    - generic [ref=e400]:
+      - generic [ref=e401]: "[5:58:14 PM]"
+      - text: MECH Visual Research Canvas initialised.

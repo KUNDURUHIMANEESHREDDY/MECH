@@ -8,9 +8,13 @@ if (typeof window !== 'undefined') {
 
   const makeBackendCall = async (method, payload = {}) => {
     try {
+      const apiKey = (await window.desktopApi?.getApiKey?.()) || '';
       const res = await fetch(`${BACKEND_URL}/api/v1/${method}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+        },
         body: JSON.stringify({ method, payload }),
       });
       const json = await res.json();

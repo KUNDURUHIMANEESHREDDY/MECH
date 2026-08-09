@@ -23,15 +23,16 @@ class NeuronInspector:
         Returns:
             Dict containing mean, max, variance, and feature classification.
         """
-        vals = activations or [0.12, 0.45, 2.41, 0.05, 0.88]
-        mean_act = sum(vals) / len(vals)
-        max_act = max(vals)
+        vals = activations if activations is not None and len(activations) > 0 else [0.12, 0.45, 2.41, 0.05, 0.88]
+        mean_act = sum(vals) / len(vals) if vals else 0.0
+        max_act = max(vals) if vals else 0.0
+        firing_freq = len([v for v in vals if v > 0.5]) / len(vals) if vals else 0.0
         return {
             "layer": layer,
             "neuron_index": neuron_index,
             "neuron_id": f"L{layer}_N{neuron_index}",
             "mean_activation": round(mean_act, 4),
             "max_activation": round(max_act, 4),
-            "firing_frequency": round(len([v for v in vals if v > 0.5]) / len(vals), 2),
+            "firing_frequency": round(firing_freq, 2),
             "feature_label": f"Layer {layer} Feature #{neuron_index}",
         }

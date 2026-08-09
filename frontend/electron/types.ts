@@ -609,6 +609,13 @@ export type PromptApi = {
 
 export type DesktopApi = {
   ping(): Promise<{ ok: boolean; storage: string }>;
+  getApiKey(): Promise<string>;
+  httpRequest(request: {
+    method?: string;
+    path?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  }): Promise<{ status: number; statusText: string; headers: Record<string, string>; body: string }>;
   getSettings(): Promise<Settings>;
   updateSettings(settings: Settings): Promise<Settings>;
   listRecentProjects(limit?: number): Promise<RecentProject[]>;

@@ -86,7 +86,10 @@ class ActivationDataLoader:
 
         Expected keys: activations, attention, residuals, layer_names
         """
-        data = np.load(path, allow_pickle=True)
+        path = Path(path).resolve()
+        if not path.is_file():
+            raise ValueError(f"NPZ file not found: {path}")
+        data = np.load(path, allow_pickle=False)
 
         activations = data["activations"]  # (num_layers, seq_len, hidden_dim)
         attention = data["attention"]  # (num_layers, num_heads, seq_len, seq_len)

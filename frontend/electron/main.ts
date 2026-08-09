@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { CHANNELS } from "./ipc/channels";
@@ -20,6 +20,23 @@ function getAppRoot(): string {
     return process.resourcesPath;
   }
   return path.resolve(__dirname, "..");
+}
+
+function getApiKey(): string {
+  const candidatePaths = [
+    path.join(app.getPath("userData"), "storage", "api_key.txt"),
+    path.join(getAppRoot(), "..", "storage", "api_key.txt"),
+    path.join(getAppRoot(), "storage", "api_key.txt"),
+  ];
+  for (const keyPath of candidatePaths) {
+    try {
+      const content = readFileSync(keyPath, "utf-8").trim();
+      if (content) return content;
+    } catch {
+      // Continue searching next candidate path
+    }
+  }
+  return "";
 }
 
 function createPythonBridge(): PythonBridge {
@@ -47,10 +64,12 @@ function registerIpcHandlers(bridge: PythonBridge, desktopLogger: DesktopLogger)
     async (_event, method: string, params: Record<string, unknown> = {}) => {
       desktopLogger.info("Renderer IPC request", { method });
       return bridge.request(method, params);
-    }
+    },
   );
 
   ipcMain.handle(CHANNELS.logsList, () => desktopLogger.getEntries());
+
+  ipcMain.handle(CHANNELS.getApiKey, () => getApiKey());
 
   ipcMain.handle(CHANNELS.workspaceChooseCachePath, async () => {
     const result = await dialog.showOpenDialog({

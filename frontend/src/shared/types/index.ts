@@ -1,4 +1,6 @@
-export type { FC } from 'react';
+import type { FC } from 'react';
+
+export type { FC };
 
 /* ---------- Runtime DTOs (data contract) ---------- */
 

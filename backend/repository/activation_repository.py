@@ -256,8 +256,8 @@ class LegacyActivationRepository:
         for key, vals in groups.items():
             aggregated[key] = {
                 "count": len(vals),
-                "mean": round(sum(vals) / len(vals), 4),
-                "max": max(vals),
+                "mean": round(sum(vals) / len(vals), 4) if vals else 0.0,
+                "max": max(vals) if vals else 0.0,
             }
         return {"grouped_by": group_by, "groups": aggregated}
 

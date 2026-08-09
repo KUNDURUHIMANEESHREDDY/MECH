@@ -12,7 +12,7 @@ const readline = require('node:readline');
  * The Python side implements the same protocol in `python/main.py`.
  */
 class PythonBridge {
-  constructor({ logger, pythonPath, scriptPath }) {
+  constructor({ logger, pythonPath, scriptPath, pythonPathEnv, env, cwd }) {
     this.logger = logger;
     this.proc = null;
     this.pid = null;
@@ -20,6 +20,9 @@ class PythonBridge {
     this.nextId = 1;
     this.rl = null;
     this.pythonPath = pythonPath || process.env.PYTHON_PATH || (process.platform === 'win32' ? 'py' : 'python3');
+    this.pythonPathEnv = pythonPathEnv || null;
+    this.extraEnv = env || null;
+    this.cwd = cwd || null;
     if (scriptPath) {
       this.scriptPath = scriptPath;
     } else if (process.resourcesPath && !require('fs').existsSync(path.join(__dirname, '..', 'backend'))) {
@@ -29,15 +32,24 @@ class PythonBridge {
     }
   }
 
+  _buildEnv() {
+    const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+    if (this.pythonPathEnv) env.PYTHONPATH = this.pythonPathEnv;
+    else env.PYTHONPATH = path.join(__dirname, '..');
+    if (this.extraEnv) Object.assign(env, this.extraEnv);
+    return env;
+  }
+
   start() {
     return new Promise((resolve, reject) => {
       try {
         if (this.pythonPath === 'bundled') {
-          this.proc = spawn(this.scriptPath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+          this.proc = spawn(this.scriptPath, [], { stdio: ['pipe', 'pipe', 'pipe'], cwd: this.cwd, env: this._buildEnv() });
         } else {
           this.proc = spawn(this.pythonPath, [this.scriptPath], {
             stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONPATH: path.join(__dirname, '..') }
+            cwd: this.cwd,
+            env: this._buildEnv()
           });
         }
       } catch (err) {

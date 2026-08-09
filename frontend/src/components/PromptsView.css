@@ -1,0 +1,16 @@
+.prompts-view {
+  padding: 24px;
+}
+
+.prompts-view h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--text, #1d1d1f);
+}
+
+.prompts-view p {
+  font-size: 13px;
+  color: var(--text-muted, #7a7a7a);
+  margin: 0;
+}

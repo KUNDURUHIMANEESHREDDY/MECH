@@ -1,0 +1,20 @@
+.theme-settings {
+  padding: 24px;
+}
+
+.theme-settings h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 12px;
+  color: var(--text, #1d1d1f);
+}
+
+.theme-select {
+  background: var(--bg-elev, #ffffff);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text, #1d1d1f);
+  outline: none;
+}

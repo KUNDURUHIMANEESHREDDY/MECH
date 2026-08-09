@@ -1,0 +1,24 @@
+.layer-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-sidebar, #fafafa);
+  border-right: 1px solid var(--border, #e0e0e0);
+}
+
+.layer-sidebar-header {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-light, #f0f0f0);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text, #1d1d1f);
+}
+
+.layer-sidebar-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted, #7a7a7a);
+}

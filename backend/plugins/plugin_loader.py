@@ -100,17 +100,28 @@ class PluginLoader:
         return plugin
 
     def load_from_file(self, filepath: str | Path) -> MechPlugin:
-        """Import a plugin from an absolute .py file path (no package required).
+        """Import a plugin from a .py file within the plugin library directory.
 
         Args:
             filepath: Absolute path to the plugin's __init__.py or single .py file.
 
         Returns:
             Instantiated MechPlugin.
+
+        Raises:
+            PluginLoadError: If the file is outside the allowed plugin directory.
         """
-        filepath = Path(filepath)
-        if not filepath.exists():
+        filepath = Path(filepath).resolve()
+        if not filepath.is_file():
             raise PluginLoadError(f"Plugin file not found: {filepath}")
+
+        try:
+            resolved_library = self._library_root.resolve()
+            filepath.resolve().relative_to(resolved_library)
+        except ValueError:
+            raise PluginLoadError(
+                f"Plugin file '{filepath}' is outside the allowed plugin directory '{self._library_root}'."
+            )
 
         module_name = f"_mech_plugin_{filepath.stem}_{id(filepath)}"
         spec = importlib.util.spec_from_file_location(module_name, filepath)

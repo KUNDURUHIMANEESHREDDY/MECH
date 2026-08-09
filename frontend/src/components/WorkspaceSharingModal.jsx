@@ -1,3 +1,3 @@
 /**
- * @deprecated Legacy modals removed. The canvas shell uses panels + command palette.
+ * @deprecated Legacy page-based components removed. The canvas shell uses panels only.
  */

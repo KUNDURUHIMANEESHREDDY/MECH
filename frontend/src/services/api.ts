@@ -2,7 +2,7 @@ const BASE = 'http://localhost:8000';
 
 let cachedApiKey: string | null = null;
 
-async function getApiKey(): Promise<string> {
+export async function getApiKey(): Promise<string> {
   if (cachedApiKey) return cachedApiKey;
   try {
     if (typeof window !== 'undefined' && window.desktopApi?.getApiKey) {

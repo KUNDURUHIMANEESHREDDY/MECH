@@ -3,7 +3,6 @@ import { ChevronRight, ChevronDown, Folder, FileText, Brain, Layers, Flame, Zap,
 import { useWorkspaceStore } from '../../shared/stores/workspace';
 import { useUIStore } from '../../shared/stores/ui';
 import { Resource, ResourceKind } from '../../shared/types';
-import { pluginRegistry } from '../../panel-system/pluginRegistry';
 
 interface NavTreeItem {
   id: string;
@@ -90,9 +89,7 @@ export const Navigator: React.FC = () => {
       kind: item.kind,
       label: item.label,
     };
-    const plugins = pluginRegistry.getByResourceKind(item.kind);
-    const targetPanel = plugins.length > 0 ? plugins[0].id : 'token_viewer';
-    openResource(res, targetPanel);
+    openResource(res, item.navKey);
   };
 
   const handleNavClick = (item: NavTreeItem) => {
@@ -101,6 +98,14 @@ export const Navigator: React.FC = () => {
     }
     if (item.label) {
       setCrumb(item.label);
+    }
+    if (item.navKey) {
+      const res: Resource = {
+        id: item.id,
+        kind: item.kind,
+        label: item.label,
+      };
+      openResource(res, item.navKey);
     }
   };
 
@@ -134,7 +139,7 @@ export const Navigator: React.FC = () => {
                       onClick={() => handleNavClick(child)}
                       onDoubleClick={() => handleDoubleClick(child)}
                       style={childItemStyle}
-                      title={`Double-click to open ${child.label} in Canvas`}
+                      title={`Open ${child.label} in Canvas`}
                     >
                       {child.icon}
                       <span style={{ flex: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>

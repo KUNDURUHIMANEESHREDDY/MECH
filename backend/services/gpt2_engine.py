@@ -107,6 +107,10 @@ def info() -> Dict[str, Any]:
         "d_model": _d_model(),
         "d_mlp": _d_mlp(),
         "d_head": _head_dim(),
+        # Frontend ModelInfo contract keys (used by GPT-2 Live panel).
+        "num_layers": _n_layers(),
+        "num_heads": _n_heads(),
+        "hidden_dim": _d_model(),
         "vocab_size": int(_cfg().vocab_size),
         "n_positions": int(getattr(_cfg(), "n_positions", 1024)),
         "n_params": int(n_params),
@@ -286,49 +290,52 @@ def architecture() -> Dict[str, Any]:
 
 def _forward(prompt: str) -> Dict[str, Any]:
     global _cache
-    inputs = _tokenizer(prompt, return_tensors="pt")
-    device = next(_model.parameters()).device
-    inputs = {k: v.to(device) for k, v in inputs.items()}
+    with _lock:
+        inputs = _tokenizer(prompt, return_tensors="pt")
+        device = next(_model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
 
-    mlp_pre: Dict[int, Any] = {}
-    mlp_post: Dict[int, Any] = {}
-    hooks = []
+        mlp_pre: Dict[int, Any] = {}
+        mlp_post: Dict[int, Any] = {}
+        hooks = []
 
-    for li, block in enumerate(_model.transformer.h):
-        # c_fc output = pre-activation (before GELU)
-        hooks.append(
-            block.mlp.c_fc.register_forward_hook(
-                lambda mod, inp, out, i=li: mlp_pre.__setitem__(i, out.detach())
-            )
-        )
-        # c_proj input = post-GELU activations (the actual neuron firing)
-        hooks.append(
-            block.mlp.c_proj.register_forward_hook(
-                lambda mod, inp, out, i=li: mlp_post.__setitem__(
-                    i, inp[0].detach() if isinstance(inp, tuple) else inp.detach()
+        for li, block in enumerate(_model.transformer.h):
+            # c_fc output = pre-activation (before GELU)
+            hooks.append(
+                block.mlp.c_fc.register_forward_hook(
+                    lambda mod, inp, out, i=li: mlp_pre.__setitem__(i, out.detach())
                 )
             )
-        )
+            # c_proj input = post-GELU activations (the actual neuron firing)
+            hooks.append(
+                block.mlp.c_proj.register_forward_hook(
+                    lambda mod, inp, out, i=li: mlp_post.__setitem__(
+                        i, inp[0].detach() if isinstance(inp, tuple) else inp.detach()
+                    )
+                )
+            )
 
-    try:
-        with torch.no_grad():
-            out = _model(**inputs, output_attentions=True, output_hidden_states=True)
-    finally:
-        for h in hooks:
-            h.remove()
+        try:
+            with torch.no_grad():
+                out = _model(**inputs, output_attentions=True, output_hidden_states=True)
+        finally:
+            for h in hooks:
+                h.remove()
 
-    seq_ids = inputs["input_ids"][0].tolist()
-    _cache = {
-        "prompt": prompt,
-        "ids": seq_ids,
-        "str_tokens": [_decode(i) for i in seq_ids],
-        "logits": out.logits[0, -1].detach().cpu(),
-        "attentions": [a[0].detach().cpu().numpy() for a in out.attentions],
-        "hidden": [h[0].detach().cpu().numpy() for h in out.hidden_states],
-        "mlp_pre": {i: t[0].cpu() for i, t in mlp_pre.items()},   # [seq, d_mlp]
-        "mlp_post": {i: t[0].cpu() for i, t in mlp_post.items()},  # [seq, d_mlp]
-    }
-    return _cache
+        seq_ids = inputs["input_ids"][0].tolist()
+        _cache = {
+            "prompt": prompt,
+            "ids": seq_ids,
+            "str_tokens": [_decode(i) for i in seq_ids],
+            "logits": out.logits[0, -1].detach().cpu(),
+            "attentions": [a[0].detach().cpu().numpy() for a in out.attentions],
+            "hidden": [h[0].detach().cpu().numpy() for h in out.hidden_states],
+            "mlp_pre": {i: t[0].cpu() for i, t in mlp_pre.items()},   # [seq, d_mlp]
+            "mlp_post": {i: t[0].cpu() for i, t in mlp_post.items()},  # [seq, d_mlp]
+        }
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return _cache
 
 
 def run_prompt(prompt: str) -> Dict[str, Any]:
@@ -1104,14 +1111,18 @@ def infer(prompt: str, model_name: str) -> Dict[str, Any]:
     neuron_activations = []
     for li in range(_n_layers()):
         if li in c.get("mlp_post", {}):
-            last = c["mlp_post"][li][-1]
+            acts_all = c["mlp_post"][li]
+            last = acts_all[-1]
             top = torch.topk(last.abs(), k=min(16, last.numel()))
-            for idx, val in zip(top.indices.tolist(), last[top.indices].tolist()):
+            for idx in top.indices.tolist():
                 neuron_activations.append(
                     {
                         "layer": li,
                         "index": int(idx),
-                        "activation": round(float(val), 4),
+                        "activation": round(float(last[idx]), 4),
+                        "token_activations": [
+                            round(float(v), 4) for v in acts_all[:, idx].tolist()
+                        ],
                     }
                 )
     return {

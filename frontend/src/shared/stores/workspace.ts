@@ -31,6 +31,11 @@ const DEFAULT_PANELS: Record<string, boolean> = {
   layer_inspector: true,
   prediction_inspector: true,
   token_inspector: true,
+  logit_lens: true,
+  circuit_explorer: true,
+  dataset_viewer: true,
+  embedding_viewer: true,
+  sae_feature: true,
 };
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({

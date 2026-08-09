@@ -1,8 +1,18 @@
-"""Automate every API endpoint against the running MECH backend."""
-import json, urllib.request, urllib.error, sys
+import json, urllib.request, urllib.error, sys, os
+from pathlib import Path
 
 BASE = "http://localhost:8000"
 errors = []
+
+def get_api_key():
+    if "MECH_API_KEY" in os.environ:
+        return os.environ["MECH_API_KEY"]
+    key_path = Path(__file__).parent / "storage" / "api_key.txt"
+    if key_path.exists():
+        return key_path.read_text(encoding="utf-8").strip()
+    return ""
+
+API_KEY = get_api_key()
 
 def call(method, path, body=None):
     url = f"{BASE}{path}"
@@ -10,6 +20,8 @@ def call(method, path, body=None):
     req = urllib.request.Request(url, data=data, method=method)
     if data:
         req.add_header("Content-Type", "application/json")
+    if API_KEY:
+        req.add_header("X-API-Key", API_KEY)
     try:
         resp = urllib.request.urlopen(req, timeout=30)
         status = resp.status

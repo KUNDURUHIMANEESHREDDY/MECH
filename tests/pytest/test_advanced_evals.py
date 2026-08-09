@@ -22,9 +22,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 sys.path.insert(0, str(BACKEND_DIR.parent))
 
-from backend.main import app  # noqa: E402
+from backend.main import app, _API_KEY  # noqa: E402
 
-client = TestClient(app, raise_server_exceptions=False)
+client = TestClient(app, raise_server_exceptions=False, headers={"X-API-Key": _API_KEY})
 
 
 # ── 1. Health & Root ────────────────────────────────────────────────────

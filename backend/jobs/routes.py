@@ -3,6 +3,8 @@
 from fastapi import APIRouter, HTTPException
 from typing import Any, Dict, Optional
 
+from backend.utils.url_validator import SSRFViolation, validate_url
+
 router = APIRouter(prefix="/jobs", tags=["job-automation"])
 
 
@@ -239,8 +241,7 @@ async def create_workflow(payload: Dict[str, Any]) -> Dict[str, Any]:
         user_id=payload.get("user_id", "default"),
         name=payload.get("name", ""),
         provider=payload.get("provider", "n8n"),
-        webhook_url=payload.get("webhook_url", ""),
-        api_key=payload.get("api_key"),
+        webhook_url=validate_url(payload.get("webhook_url", "") or "", allow_private=False, allow_localhost=False),
         trigger_event=payload.get("trigger_event", "new_application"),
         settings=payload.get("settings"),
     )

@@ -2,21 +2,70 @@
 
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
-const http = require('node:http');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { registerIpcHandlers } = require('./ipc');
 const { getLogger } = require('./logger');
 const { getStorage } = require('./storage');
+const { getPythonBridge } = require('./python');
 
 const isDev = !app.isPackaged;
 const RENDERER_DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
-const BACKEND_PORT = 8000;
-const BACKEND_HOST = '127.0.0.1';
-const BACKEND_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+const SIDECAR_SCRIPT = 'mech_service.py';
 
 let mainWindow = null;
-let pythonBackend = null;
+let pythonBridge = null;
+let apiKey = null;
+
+// Renderer (src/services/api.ts) reads the API key via preload's
+// desktopApi.getApiKey() and sends it as the X-API-Key header. We generate it
+// once in userData and hand the same value to the spawned backend via
+// MECH_API_KEY so both sides agree.
+function getApiKeyFilePath() {
+  return path.join(app.getPath('userData'), 'storage', 'api_key.txt');
+}
+
+function ensureApiKey() {
+  if (apiKey) return apiKey;
+  const keyFile = getApiKeyFilePath();
+  try {
+    const existing = fs.readFileSync(keyFile, 'utf-8').trim();
+    if (existing) {
+      apiKey = existing;
+      return apiKey;
+    }
+  } catch { /* not persisted yet */ }
+  const fresh = crypto.randomBytes(32).toString('base64url');
+  try {
+    fs.mkdirSync(path.dirname(keyFile), { recursive: true });
+    fs.writeFileSync(keyFile, fresh, { encoding: 'utf-8', mode: 0o600 });
+  } catch { /* non-fatal: key still valid for this session */ }
+  apiKey = fresh;
+  return apiKey;
+}
+
+function getBackendKeyFilePath() {
+  // Where a detached/manual backend writes its key:
+  // dev: <repoRoot>/storage/api_key.txt, packaged: <resources>/storage/api_key.txt
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath || path.join(__dirname, '..'), 'storage', 'api_key.txt');
+  }
+  return path.join(__dirname, '..', '..', 'storage', 'api_key.txt');
+}
+
+function resolveApiKeyForRenderer() {
+  // 1. Key we generated (userData) — matches MECH_API_KEY when we spawned.
+  try {
+    const k = fs.readFileSync(getApiKeyFilePath(), 'utf-8').trim();
+    if (k) return k;
+  } catch { }
+  // 2. Key written by a backend we reused (started detached / manually).
+  try {
+    const k = fs.readFileSync(getBackendKeyFilePath(), 'utf-8').trim();
+    if (k) return k;
+  } catch { }
+  return '';
+}
 
 function createMainWindow() {
   const logger = getLogger();
@@ -55,7 +104,7 @@ function createMainWindow() {
     return { action: 'deny' };
   });
 
-  if (isDev) {
+  if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(RENDERER_DEV_URL).catch((err) => {
       logger.error('renderer_load_failed', { error: err.message });
     });
@@ -95,78 +144,41 @@ function resolvePythonPath(resourcesPath) {
   return process.platform === 'win32' ? 'python' : 'python3';
 }
 
-async function startBackend(logger) {
-  try {
-    const res = await new Promise((resolve, reject) => {
-      const req = http.get(`${BACKEND_URL}/health`, (res) => { res.resume(); resolve(res); });
-      req.on('error', reject);
-      req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
-    });
-    if (res.statusCode && res.statusCode < 500) {
-      logger.info('backend_reuse', { url: BACKEND_URL });
-      return null;
-    }
-  } catch {
-  }
+async function startSidecar(logger) {
+  const repoRoot = path.join(__dirname, '..', '..');
+  const resourcesPath = process.resourcesPath || path.join(__dirname, '..');
+  const base = app.isPackaged ? resourcesPath : repoRoot;
 
-  let pythonPath, scriptPath, cwd, pythonPathEnv;
+  const pythonPath = resolvePythonPath(base);
+  const scriptPath = path.join(base, 'backend', SIDECAR_SCRIPT);
+  const pythonPathEnv = `${base};${path.join(base, 'backend')}`;
+  const storageDb = path.join(base, 'backend', 'storage', 'mech.db');
 
-  if (isDev) {
-    const repoRoot = path.join(__dirname, '..', '..');
-    pythonPath = resolvePythonPath(repoRoot);
-    scriptPath = path.join(repoRoot, 'backend', 'main.py');
-    cwd = repoRoot;
-    pythonPathEnv = `${repoRoot};${path.join(repoRoot, 'backend')}`;
-  } else {
-    const resourcesPath = process.resourcesPath || path.join(__dirname, '..');
-    pythonPath = resolvePythonPath(resourcesPath);
-    scriptPath = path.join(resourcesPath, 'backend', 'main.py');
-    cwd = resourcesPath;
-    pythonPathEnv = `${resourcesPath};${path.join(resourcesPath, 'backend')}`;
-  }
+  logger.info('sidecar_spawning', { pythonPath, scriptPath, base });
 
-  logger.info('backend_spawning', { pythonPath, scriptPath, cwd, pythonPathEnv });
-
-  const child = spawn(pythonPath, [scriptPath], {
-    cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PYTHONPATH: pythonPathEnv, PYTHONUNBUFFERED: '1' },
-    windowsHide: true,
+  const bridge = getPythonBridge({
+    logger,
+    pythonPath,
+    scriptPath,
+    pythonPathEnv,
+    cwd: base,
+    env: {
+      MECH_API_KEY: ensureApiKey(),
+      MECH_STORAGE_DB: storageDb,
+    },
   });
 
-  child.stdout?.on('data', (d) => logger.info('backend_stdout', { line: d.toString().trim() }));
-  child.stderr?.on('data', (d) => logger.warn('backend_stderr', { line: d.toString().trim() }));
-  child.on('exit', (code) => logger.info('backend_exited', { code }));
-  child.on('error', (err) => logger.error('backend_spawn_error', { error: err.message }));
-
-  // Packaged local Python environments can take longer on first launch while
-  // Windows scans/imports native ML packages. Wait so the UI opens connected.
-  const deadline = Date.now() + 180000;
-  while (Date.now() < deadline) {
-    try {
-      const res = await new Promise((resolve, reject) => {
-        const req = http.get(`${BACKEND_URL}/health`, (res) => { res.resume(); resolve(res); });
-        req.on('error', reject);
-        req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
-      });
-      if (res.statusCode && res.statusCode < 500) {
-        logger.info('backend_ready', { url: BACKEND_URL });
-        return child;
-      }
-    } catch { }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-
-  logger.warn('backend_not_ready', { timeout: '180s' });
-  return child;
+  await bridge.start();
+  logger.info('sidecar_ready');
+  return bridge;
 }
 
-async function stopBackend(child, logger) {
-  if (!child || child.killed) return;
+async function stopSidecar(bridge, logger) {
+  if (!bridge) return;
   try {
-    child.kill();
+    await bridge.stop();
   } catch (e) {
-    logger.error('backend_kill_error', { error: e.message });
+    logger.error('sidecar_stop_error', { error: e.message });
   }
 }
 
@@ -178,8 +190,33 @@ async function bootstrap() {
   await storage.init();
   logger.info('storage_ready', { db: storage.dbPath });
 
-  pythonBackend = await startBackend(logger);
-  registerIpcHandlers({ ipcMain, storage, logger });
+  const bridge = await startSidecar(logger);
+  pythonBridge = bridge;
+
+  // Renderer-side services call window.desktopApi.httpRequest() for anything
+  // that used to go to http://localhost:8000/api/*. Route it to the sidecar.
+  ipcMain.handle('mech:http', async (_event, request) => {
+    const payload = request || {};
+    const headers = { ...(payload.headers || {}) };
+    if (!headers['X-API-Key']) headers['X-API-Key'] = resolveApiKeyForRenderer();
+    return bridge.call('http', {
+      method: payload.method || 'GET',
+      path: payload.path || '/',
+      headers,
+      body: payload.body ?? '',
+    });
+  });
+
+  ipcMain.handle('mech:ping', async () => {
+    try {
+      return { ok: true, ...(await bridge.call('ping', {})) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  registerIpcHandlers({ ipcMain, storage, pythonBridge: bridge, logger, getApiKey: resolveApiKeyForRenderer });
+  ipcMain.handle('api-key:get', () => resolveApiKeyForRenderer());
 
   mainWindow = createMainWindow();
 }
@@ -200,7 +237,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', async () => {
   const logger = getLogger();
-  await stopBackend(pythonBackend, logger);
+  await stopSidecar(pythonBridge, logger);
 });
 
 app.on('activate', () => {

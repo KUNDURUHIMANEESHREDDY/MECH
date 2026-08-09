@@ -1,9 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, List
 import hashlib
+import logging
 import os
 import random
 from pathlib import Path
+
+logger = logging.getLogger("MECH.dispatcher")
 
 # Real GPT-2 inference engine (torch + transformers) is imported lazily so the
 # desktop app can open immediately. Falls back to seeded stand-ins when absent.
@@ -19,6 +22,24 @@ _store = DesktopStorage(_STORAGE_PATH)
 _store.initialize()
 _unified_registry = None
 _engine = None
+
+
+def _safe_int(value: Any, default: int, min_val: int | None = None, max_val: int | None = None) -> int:
+    """Safely parse an integer from a payload value with bounds checking."""
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return default
+    if min_val is not None and result < min_val:
+        return min_val
+    if max_val is not None and result > max_val:
+        return max_val
+    return result
+
+
+def _safe_error_message(exc: Exception) -> str:
+    """Return a safe error message without exposing internal details."""
+    return "An internal server error occurred."
 
 
 def get_registry():
@@ -74,7 +95,13 @@ def load_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return engine.load()
-    return {"status": "loaded", "model_name": name}
+    return {
+        "status": "loaded",
+        "model_name": name,
+        "num_layers": 12,
+        "num_heads": 12,
+        "hidden_dim": 768,
+    }
 
 
 @router.get("/models/{name}")
@@ -85,6 +112,8 @@ def get_model_info(name: str) -> Dict[str, Any]:
         "hidden_size": 768,
         "vocab_size": 50257,
         "num_heads": 12,
+        "num_layers": 12,
+        "hidden_dim": 768,
     }
 
 
@@ -358,9 +387,9 @@ def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
 def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.activations(int(payload.get("layer", 0)))
-    layer = max(0, min(11, int(payload.get("layer", 0))))
-    seq = int(payload.get("seq_len", 12))
+        return engine.activations(_safe_int(payload.get("layer", 0), 0, 0, 11))
+    layer = _safe_int(payload.get("layer", 0), 0, 0, 11)
+    seq = _safe_int(payload.get("seq_len", 12), 12, 1, 1024)
     return {
         "status": "ok",
         "layer": layer,
@@ -374,9 +403,9 @@ def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
 def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.attention_head(int(payload.get("layer", 0)), int(payload.get("head", 0)))
-    layer = int(payload.get("layer", 0)) % 12
-    head = int(payload.get("head", 0)) % 12
+        return engine.attention_head(_safe_int(payload.get("layer", 0), 0, 0, 11), _safe_int(payload.get("head", 0), 0, 0, 11))
+    layer = _safe_int(payload.get("layer", 0), 0) % 12
+    head = _safe_int(payload.get("head", 0), 0) % 12
     tokens = payload.get("tokens") or _random_token_sequence()
     n = len(tokens)
     rng = random.Random(_seed(f"{layer}:{head}:{' '.join(tokens)}"))
@@ -396,13 +425,13 @@ def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return engine.patch_head(
-            int(payload.get("layer", 9)),
-            int(payload.get("head", 9)),
+            _safe_int(payload.get("layer", 9), 9, 0, 11),
+            _safe_int(payload.get("head", 9), 9, 0, 11),
             payload.get("pos_token", "Paris"),
             payload.get("neg_token", "London"),
         )
-    layer = int(payload.get("layer", 9)) % 12
-    head = int(payload.get("head", 9)) % 12
+    layer = _safe_int(payload.get("layer", 9), 9) % 12
+    head = _safe_int(payload.get("head", 9), 9) % 12
     pos_token = payload.get("pos_token", "Paris")
     neg_token = payload.get("neg_token", "London")
     rng = random.Random(_seed(f"{layer}:{head}:{pos_token}:{neg_token}"))
@@ -462,7 +491,7 @@ def gpt2_architecture(payload: Dict[str, Any] = None) -> Dict[str, Any]:
 
 @router.post("/gpt2/layer")
 def gpt2_layer(payload: Dict[str, Any]) -> Dict[str, Any]:
-    layer = int(payload.get("layer", 0))
+    layer = _safe_int(payload.get("layer", 0), 0, 0, 11)
     engine = get_engine()
     if engine and engine.is_available():
         return engine.layer_detail(layer)
@@ -474,10 +503,10 @@ def gpt2_neurons(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return engine.list_neurons(
-            layer=int(payload.get("layer", 0)),
+            layer=_safe_int(payload.get("layer", 0), 0, 0, 11),
             component=str(payload.get("component", "mlp")),
-            page=int(payload.get("page", 0)),
-            page_size=int(payload.get("page_size", 128)),
+            page=_safe_int(payload.get("page", 0), 0, 0),
+            page_size=_safe_int(payload.get("page_size", 128), 128, 1, 1024),
             sort_by=str(payload.get("sort_by", "index")),
             order=str(payload.get("order", "asc")),
             q=str(payload.get("q", "")),
@@ -490,10 +519,10 @@ def gpt2_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return engine.neuron_detail(
-            layer=int(payload.get("layer", 0)),
-            neuron_index=int(payload.get("neuron_index", 0)),
+            layer=_safe_int(payload.get("layer", 0), 0, 0, 11),
+            neuron_index=_safe_int(payload.get("neuron_index", 0), 0, 0),
             component=str(payload.get("component", "mlp")),
-            top_k_weights=int(payload.get("top_k_weights", 16)),
+            top_k_weights=_safe_int(payload.get("top_k_weights", 16), 16, 1, 512),
         )
     return {"status": "error", "error": "torch/transformers not available"}
 
@@ -503,8 +532,8 @@ def gpt2_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return engine.head_detail(
-            layer=int(payload.get("layer", 0)),
-            head=int(payload.get("head", 0)),
+            layer=_safe_int(payload.get("layer", 0), 0, 0, 11),
+            head=_safe_int(payload.get("head", 0), 0, 0, 11),
         )
     return {"status": "error", "error": "torch/transformers not available"}
 
@@ -522,4 +551,81 @@ def gpt2_patch_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"status": "error", "error": "torch/transformers not available"}
 
 
+# ---------------------------------------------------------------------------
+# App / Build / Projects / Recent endpoints (previously NOOP in frontend)
+# ---------------------------------------------------------------------------
+
+@router.get("/logs")
+def get_app_logs() -> Dict[str, Any]:
+    return {"logs": []}
+
+
+@router.get("/build/logs")
+def get_build_logs() -> Dict[str, Any]:
+    return {"logs": []}
+
+
+@router.post("/build/start")
+def start_build(payload: Dict[str, Any] = None) -> Dict[str, Any]:
+    return {"status": "started"}
+
+
+@router.post("/build/clear")
+def clear_build_logs() -> Dict[str, Any]:
+    return {"status": "cleared"}
+
+
+@router.get("/projects")
+def list_projects() -> Dict[str, Any]:
+    return {"projects": []}
+
+
+@router.post("/projects")
+def create_project(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {"status": "created", "project": payload}
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: str) -> Dict[str, Any]:
+    return {"status": "deleted", "id": project_id}
+
+
+@router.get("/recent")
+def list_recent_files() -> Dict[str, Any]:
+    return {"files": []}
+
+
+@router.post("/recent")
+def add_recent_file(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {"status": "added"}
+
+
+@router.post("/recent/clear")
+def clear_recent_files() -> Dict[str, Any]:
+    return {"status": "cleared"}
+
+
+# ---------------------------------------------------------------------------
+# Legacy JSON-RPC style dispatcher (catch-all)
+# ---------------------------------------------------------------------------
+
 from .legacy_dispatcher import build_dispatcher  # noqa: E402
+
+_legacy_dispatcher = build_dispatcher()
+
+dispatch_router = APIRouter()
+
+
+@dispatch_router.post("/{method:path}")
+@dispatch_router.get("/{method:path}")
+async def dispatch_legacy(method: str, payload: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Catch-all dispatcher for legacy JSON-RPC style endpoints."""
+    method = method.lstrip("/")
+    handler = _legacy_dispatcher.get(method)
+    if handler is None:
+        raise HTTPException(status_code=404, detail=f"Unknown method: {method}")
+    try:
+        return handler(payload or {})
+    except Exception:
+        logger.exception("Legacy dispatch error for method=%s", method)
+        raise HTTPException(status_code=500, detail=_safe_error_message(Exception()))

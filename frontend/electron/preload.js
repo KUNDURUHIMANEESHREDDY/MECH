@@ -4,7 +4,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // Expose a safe, minimal API to the renderer via contextBridge.
 contextBridge.exposeInMainWorld('appApi', {
-  // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   resetSettings: () => ipcRenderer.invoke('settings:reset'),
@@ -55,4 +54,13 @@ contextBridge.exposeInMainWorld('appApi', {
   // System
   openExternal: (url) => ipcRenderer.invoke('system:openExternal', url),
   showInFolder: (p) => ipcRenderer.invoke('system:showInFolder', p)
+});
+
+// API-key bridge + serverless fetch transport used by src/services/*.
+// httpRequest() executes any "http://localhost:8000/..." renderer fetch against
+// the in-process sidecar; the main process maps it to the PythonBridge 'http' call.
+contextBridge.exposeInMainWorld('desktopApi', {
+  getApiKey: () => ipcRenderer.invoke('api-key:get'),
+  httpRequest: (request) => ipcRenderer.invoke('mech:http', request),
+  ping: () => ipcRenderer.invoke('mech:ping')
 });

@@ -6,9 +6,9 @@ const { registerWorkspaceHandlers } = require('./workspace');
 const { registerStorageHandlers } = require('./storage');
 const { registerEventHandlers } = require('./events');
 
-function registerIpcHandlers({ ipcMain, storage, pythonBridge, logger }) {
+function registerIpcHandlers({ ipcMain, storage, pythonBridge, logger, getApiKey }) {
   registerSettingsHandlers({ ipcMain, storage, logger });
-  registerRuntimeHandlers({ ipcMain, pythonBridge, logger });
+  registerRuntimeHandlers({ ipcMain, pythonBridge, logger, getApiKey });
   registerWorkspaceHandlers({ ipcMain, storage, logger });
   registerStorageHandlers({ ipcMain, storage, logger });
   registerEventHandlers({ ipcMain, logger });

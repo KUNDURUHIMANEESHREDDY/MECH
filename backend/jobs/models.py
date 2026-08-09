@@ -33,12 +33,12 @@ class Application(Base):
     job_url = Column(String, nullable=True)
     job_type = Column(String, nullable=True)  # full-time, part-time, internship, contract
     status = Column(String, default="applied")  # applied, shortlisted, interview, offer, rejected, withdrawn
-    resume_id = Column(String, nullable=True, ForeignKey("resumes.id"))
+    resume_id = Column(String, ForeignKey("resumes.id"), nullable=True)
     workflow_id = Column(String, nullable=True)
-    workflow_config_id = Column(String, nullable=True, ForeignKey("workflow_configs.id"))
+    workflow_config_id = Column(String, ForeignKey("workflow_configs.id"), nullable=True)
     applied_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    metadata = Column(JSON, default=dict)
+    extra_metadata = Column(JSON, default=dict)
 
     resume = relationship("Resume", back_populates="applications")
     workflow_config = relationship("WorkflowConfig", back_populates="applications")
@@ -58,7 +58,7 @@ class Application(Base):
             "workflow_config_id": self.workflow_config_id,
             "applied_at": self.applied_at.isoformat() if self.applied_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "metadata": self.metadata or {},
+            "metadata": self.extra_metadata or {},
         }
 
 
@@ -74,7 +74,7 @@ class Resume(Base):
     is_primary = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    metadata = Column(JSON, default=dict)
+    extra_metadata = Column(JSON, default=dict)
 
     applications = relationship("Application", back_populates="resume")
 
@@ -89,7 +89,7 @@ class Resume(Base):
             "is_primary": self.is_primary,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "metadata": self.metadata or {},
+            "metadata": self.extra_metadata or {},
         }
 
 

@@ -9,11 +9,14 @@ Each task defines:
 
 from __future__ import annotations
 
+import logging
 import random
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("MECH.benchmarking")
 
 
 class BenchmarkTask(str, Enum):

@@ -1,3 +1,9 @@
-/**
- * @deprecated Legacy panels removed. The canvas shell uses plugins from src/plugins/.
- */
+import React from 'react';
+
+export default function InterventionTimelinePanel() {
+  return (
+    <div style={{ padding: 12, color: 'var(--text-muted)' }}>
+      Intervention Timeline — connect intervention data.
+    </div>
+  );
+}

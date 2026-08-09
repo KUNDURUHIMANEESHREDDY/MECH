@@ -1,3 +1,11 @@
-/**
- * @deprecated Legacy settings pages removed. Settings are now handled in the canvas shell.
- */
+import React from 'react';
+import './ModelsSettings.css';
+
+export const ModelsSettings: React.FC = () => {
+  return (
+    <div className="models-settings">
+      <h1>Models Settings</h1>
+      <p>Configure model defaults.</p>
+    </div>
+  );
+};

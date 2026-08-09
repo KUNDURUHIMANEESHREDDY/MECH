@@ -31,6 +31,14 @@ VALID_THEMES = {"system", "light", "dark"}
 
 
 class DesktopStorage:
+    ALLOWED_TABLES = {
+        'settings',
+        'recent_projects',
+        'recent_files',
+        'experiments',
+        'sessions',
+    }
+
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
 
@@ -251,6 +259,8 @@ class DesktopStorage:
         return datetime.now(timezone.utc).isoformat()
 
     def _list_json_items(self, table: str) -> list[dict[str, Any]]:
+        if table not in self.ALLOWED_TABLES:
+            raise StorageError(f"Invalid table name: {table}")
         with self._connect() as connection:
             rows = connection.execute(
                 f"SELECT payload FROM {table} ORDER BY created_at, item_id"
@@ -258,6 +268,8 @@ class DesktopStorage:
         return [json.loads(row["payload"]) for row in rows]
 
     def _add_json_item(self, table: str, item: dict[str, Any]) -> dict[str, Any]:
+        if table not in self.ALLOWED_TABLES:
+            raise StorageError(f"Invalid table name: {table}")
         if not isinstance(item, dict):
             raise StorageError(f"{table} item must be an object")
         item_id = item.get("id")
@@ -277,6 +289,8 @@ class DesktopStorage:
         return item
 
     def _delete_json_item(self, table: str, item_id: str) -> bool:
+        if table not in self.ALLOWED_TABLES:
+            raise StorageError(f"Invalid table name: {table}")
         if not isinstance(item_id, str) or not item_id.strip():
             raise StorageError(f"{table} item id must be a string")
         with self._connect() as connection:

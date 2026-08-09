@@ -1,0 +1,72 @@
+.token-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.token-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.token-chip {
+  background: var(--bg-elev-2, #f5f5f5);
+  color: var(--text, #1d1d1f);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.token-chip:hover {
+  background: var(--bg-hover, #f0f0f0);
+}
+
+.token-chip.active {
+  background: var(--accent, #0066cc);
+  color: var(--bg, #ffffff);
+  border-color: var(--accent, #0066cc);
+}
+
+.token-idx {
+  opacity: 0.6;
+  font-size: 10px;
+  margin-left: 2px;
+}
+
+.token-details {
+  background: var(--bg-elev-2, #f5f5f5);
+  border: 1px solid var(--border-light, #f0f0f0);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.token-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.token-detail-label {
+  color: var(--text-muted, #7a7a7a);
+  font-size: 12px;
+}
+
+.token-detail-value {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text, #1d1d1f);
+}
+
+.token-panel-empty {
+  color: var(--text-muted, #7a7a7a);
+  font-size: 12px;
+}

@@ -18,6 +18,7 @@ import json
 import os
 import random
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -46,10 +47,17 @@ class DatasetManager:
     """Manages versioned, reproducible datasets with Triple-SHA verification."""
 
     def __init__(self, data_dir: str) -> None:
-        self.data_dir = data_dir
-        self.manifest_path = os.path.join(data_dir, "golden_manifest.json")
+        self.data_dir = str(Path(data_dir).resolve())
+        self.manifest_path = os.path.join(self.data_dir, "golden_manifest.json")
         self._datasets: Dict[str, Dict[str, Any]] = {}
         self._manifest = self._load_manifest()
+
+    def _resolve_safe_path(self, relative_path: str) -> Path:
+        """Resolve a relative path and ensure it stays within data_dir."""
+        resolved = (Path(self.data_dir) / relative_path).resolve()
+        if not str(resolved).startswith(self.data_dir):
+            raise ValueError(f"Path traversal detected: {relative_path}")
+        return resolved
 
     def _load_manifest(self) -> Dict[str, Dict[str, Any]]:
         """Loads the golden manifest, aliasing dataset folder names (e.g. ``ioi``)
@@ -320,10 +328,11 @@ class DatasetManager:
             The file path written to.
         """
         self.validate(data)
-        out_dir = os.path.join(self.data_dir, dataset_name)
+        safe_name = os.path.basename(dataset_name)
+        out_dir = self._resolve_safe_path(safe_name)
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, "dataset.json")
+        out_path = out_dir / "dataset.json"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         self._datasets[dataset_name] = data
-        return out_path
+        return str(out_path)
