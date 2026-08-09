@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronRight, ChevronDown, Folder, FileText, Brain, Layers, Flame, Zap, Cpu, Bookmark, Activity, Code, Database, BarChart, BookOpen, FlaskConical, Search, FolderTree } from 'lucide-react';
+import { ChevronRight, ChevronDown, Folder, FileText, Brain, Layers, Flame, Zap, Cpu, Activity, Code, BarChart, BookOpen, FlaskConical, Search, FolderTree } from 'lucide-react';
 import { useWorkspaceStore } from '../../shared/stores/workspace';
 import { useUIStore } from '../../shared/stores/ui';
 import { Resource, ResourceKind } from '../../shared/types';
@@ -69,15 +69,18 @@ const RESOURCE_TREE: NavTreeItem[] = [
   },
 ];
 
-export const Navigator: React.FC = () => {
+export const FeaturesDrawer: React.FC = () => {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     group_models: true,
     group_analysis: true,
     group_workspace: true,
   });
 
-  const { openResource, openPanel } = useWorkspaceStore();
+  const { openResource } = useWorkspaceStore();
   const setCrumb = useUIStore((s) => s.setCrumb);
+  const open = useUIStore((s) => !s.sidebarCollapsed);
+
+  if (!open) return null;
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -110,10 +113,10 @@ export const Navigator: React.FC = () => {
   };
 
   return (
-    <aside className="shell-navigator" style={navStyle}>
+    <aside className="shell-navigator" data-testid="features-drawer" style={drawerStyle}>
       <div style={headerStyle}>
         <FolderTree size={14} style={{ color: 'var(--color-primary, #0066cc)' }} />
-        <span style={{ fontWeight: 600, fontSize: '12px', letterSpacing: '-0.2px' }}>Resource Navigator</span>
+        <span style={{ fontWeight: 600, fontSize: '12px', letterSpacing: '-0.2px' }}>Features</span>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 4px' }}>
@@ -121,10 +124,7 @@ export const Navigator: React.FC = () => {
           const isExp = expanded[group.id];
           return (
             <div key={group.id} style={{ marginBottom: '4px' }}>
-              <div
-                onClick={() => toggleExpand(group.id)}
-                style={groupItemStyle}
-              >
+              <div onClick={() => toggleExpand(group.id)} style={groupItemStyle}>
                 {isExp ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 {group.icon}
                 <span style={{ fontWeight: 600 }}>{group.label}</span>
@@ -157,7 +157,11 @@ export const Navigator: React.FC = () => {
   );
 };
 
-const navStyle: React.CSSProperties = {
+const drawerStyle: React.CSSProperties = {
+  position: 'fixed',
+  top: 'var(--topbar-h, 44px)',
+  left: 0,
+  bottom: 0,
   width: 'var(--sidebar-width, 240px)',
   background: 'var(--bg-sidebar, #fafafa)',
   borderRight: '1px solid var(--border, #e0e0e0)',
@@ -165,6 +169,7 @@ const navStyle: React.CSSProperties = {
   flexDirection: 'column',
   userSelect: 'none',
   fontSize: '12px',
+  zIndex: 20,
 };
 
 const headerStyle: React.CSSProperties = {

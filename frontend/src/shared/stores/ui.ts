@@ -18,7 +18,7 @@ export type UIStore = UIState & {
 export const useUIStore = create<UIStore>((set) => ({
   commandPaletteOpen: false,
   activityCollapsed: false,
-  sidebarCollapsed: false,
+  sidebarCollapsed: true,
   crumb: 'MECH',
 
   toggleCommandPalette: () =>

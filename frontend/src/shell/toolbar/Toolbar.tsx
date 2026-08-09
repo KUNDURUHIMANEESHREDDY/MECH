@@ -47,7 +47,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({ onOpenCommandPalette, pythonSt
 
         <button
           onClick={toggleSidebar}
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          data-testid="features-toggle"
+          title={sidebarCollapsed ? 'Open features' : 'Close features'}
           style={{
             width: '32px',
             height: '32px',

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Toolbar } from '../shell/toolbar/Toolbar';
-import { Navigator } from '../shell/navigator/Navigator';
+import { FeaturesDrawer } from '../shell/features/FeaturesDrawer';
 import { WorkspaceCanvas } from '../shell/workspace/WorkspaceCanvas';
 import { Inspector } from '../shell/inspector/Inspector';
 import { BottomWorkspace } from '../shell/bottom/BottomWorkspace';
@@ -115,7 +115,7 @@ export const Shell: React.FC<ShellProps> = ({
     >
       <Toolbar onOpenCommandPalette={handleOpenCommandPalette} pythonStatus={pythonStatus} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
-        <Navigator />
+        <FeaturesDrawer />
         <WorkspaceCanvas>
           <DockManager />
         </WorkspaceCanvas>

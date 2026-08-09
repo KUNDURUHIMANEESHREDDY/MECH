@@ -56,14 +56,28 @@ async function dismissError(page) {
 test('shell renders sidebar nav items', async ({ page }) => {
   await page.goto('/');
   await dismissError(page);
+  await page.getByTestId('features-toggle').click();
   for (const [key] of NAV_PAGES.slice(0, 10)) {
     await expect(page.getByTestId(`nav-${key}`)).toBeVisible();
   }
 });
 
+test('features drawer opens and closes via its toggle button', async ({ page }) => {
+  await page.goto('/');
+  await dismissError(page);
+  const drawer = page.getByTestId('features-drawer');
+  const toggle = page.getByTestId('features-toggle');
+  await expect(drawer).toHaveCount(0);
+  await toggle.click();
+  await expect(drawer).toHaveCount(1, { timeout: 2000 });
+  await toggle.click();
+  await expect(drawer).toHaveCount(0, { timeout: 2000 });
+});
+
 test('each nav page renders and updates breadcrumb + hash', async ({ page }) => {
   await page.goto('/');
   await dismissError(page);
+  await page.getByTestId('features-toggle').click();
   for (const [key, label] of NAV_PAGES) {
     const item = page.getByTestId(`nav-${key}`);
     await item.scrollIntoViewIfNeeded();

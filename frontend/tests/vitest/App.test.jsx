@@ -2,11 +2,13 @@ import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import App from '../../src/App.tsx';
-import { Navigator } from '../../src/shell/navigator/Navigator';
+import { FeaturesDrawer } from '../../src/shell/features/FeaturesDrawer';
+import { useUIStore } from '../../src/shared/stores/ui';
 
 describe('App shell', () => {
   beforeEach(() => {
     document.documentElement.removeAttribute('data-theme');
+    useUIStore.setState({ sidebarCollapsed: false });
   });
 
   it('renders the navigator with navigation items', async () => {
@@ -41,16 +43,20 @@ describe('App shell', () => {
   });
 });
 
-describe('Navigator', () => {
+describe('FeaturesDrawer', () => {
+  beforeEach(() => {
+    useUIStore.setState({ sidebarCollapsed: false });
+  });
+
   it('renders resource tree groups', () => {
-    render(<Navigator />);
+    render(<FeaturesDrawer />);
     expect(screen.getByText('Models & Architectures')).toBeInTheDocument();
     expect(screen.getByText('Mechanistic Analysis')).toBeInTheDocument();
     expect(screen.getByText('Workspace & Assets')).toBeInTheDocument();
   });
 
   it('expands groups on click', () => {
-    render(<Navigator />);
+    render(<FeaturesDrawer />);
     // Groups start expanded by default, so GPT-2 is visible
     expect(screen.getByText('GPT-2 Live')).toBeInTheDocument();
     // Click to collapse the group
