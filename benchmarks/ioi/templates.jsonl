@@ -1,0 +1,6 @@
+{"seq": "When Mary and John went to the store, John gave a drink to", "io": " Mary", "s": " John", "template_id": "IOI_T1"}
+{"seq": "When Tom and Lisa went to the park, Tom gave a gift to", "io": " Lisa", "s": " Tom", "template_id": "IOI_T2"}
+{"seq": "When Alice and Bob went to the school, Bob gave a book to", "io": " Alice", "s": " Bob", "template_id": "IOI_T3"}
+{"seq": "When David and Emma went to the office, David gave a letter to", "io": " Emma", "s": " David", "template_id": "IOI_T4"}
+{"seq": "When Peter and Sarah went to the lab, Sarah gave a note to", "io": " Peter", "s": " Sarah", "template_id": "IOI_T5"}
+{"seq": "When James and Kate went to the cafe, James gave a cup to", "io": " Kate", "s": " James", "template_id": "IOI_T6"}

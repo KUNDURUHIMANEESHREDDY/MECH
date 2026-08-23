@@ -44,6 +44,8 @@ def test_sprint3_deliverable_full_workflow():
         "clean_prompt": prompt,
         "corrupted_prompt": "The capital of Rome is",
     })
+    # Causal mediation (ROME causal-MLP, subject position) localizes the factual
+    # association to the middle MLP layers; gpt2-small peaks at layer 8.
     assert trace["max_causal_layer"] == 8
 
     # 4. AI 3: Activation Patch & Prediction Comparison

@@ -41,11 +41,28 @@ const ghost: React.CSSProperties = {
 export const DebuggerPanel: FC<PanelContext> = () => {
   const { state: model, listModels, load, infer, clearError } = useModel();
   const consoleLogs = useWorkspaceStore((s) => s.console);
-  const timeline = useWorkspaceStore((s) => s.timeline);
-  const [probe, setProbe] = useState('The capital of France is');
+  const DYNAMIC_SEEDS = [
+    'The capital of France is',
+    'Two plus two equals',
+    'When Mary gave the book to John, John thanked',
+    'The official language of Spain is',
+    'The sequence a b a b a b a',
+  ];
+  const [probe, setProbe] = useState(() => DYNAMIC_SEEDS[Math.floor(Math.random() * DYNAMIC_SEEDS.length)]);
 
   useEffect(() => {
     if (model.availableModels.length === 0 && !model.loading) void listModels();
+    void (async () => {
+      try {
+        const { api } = await import('../../services/api');
+        const res = await api.getSessionProbes();
+        if (res?.probes?.length) {
+          setProbe(res.probes[Math.floor(Math.random() * res.probes.length)].clean_prompt);
+        }
+      } catch {
+        // Fallback seed already set
+      }
+    })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runProbe = async () => {

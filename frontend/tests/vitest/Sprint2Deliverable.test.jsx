@@ -1,9 +1,17 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { RecentFiles } from '../../src/components/RecentFiles';
+import { LayerSidebar } from '../../src/components/LayerSidebar';
 
-import { describe, it } from 'vitest';
+describe('Sprint2Deliverable', () => {
+  it('renders RecentFiles component with title and refresh controls', () => {
+    render(<RecentFiles />);
+    expect(screen.getByText('Recent Files')).toBeInTheDocument();
+  });
 
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+  it('renders LayerSidebar with layer list', () => {
+    render(<LayerSidebar layers={12} activeLayer={0} onSelectLayer={() => {}} />);
+    expect(screen.getByText('Layers')).toBeInTheDocument();
+  });
 });

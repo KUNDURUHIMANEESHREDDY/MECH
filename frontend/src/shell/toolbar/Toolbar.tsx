@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Brain, Search, Play, Download, Settings, User, Activity, PanelLeft, Sidebar } from 'lucide-react';
 import { useUIStore } from '../../shared/stores/ui';
 import { useWorkspaceStore } from '../../shared/stores/workspace';
+import { ProvenanceBadge } from '../../shared/components/ProvenanceBadge';
 
 interface ToolbarProps {
   onOpenCommandPalette: () => void;
@@ -111,6 +112,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({ onOpenCommandPalette, pythonSt
           <Activity size={12} />
           <span>{pythonStatus ? 'Python Ready' : 'Python Offline'}</span>
         </div>
+
+        {/* Prominent provenance badge — LIVE PyTorch vs DEMO MODE */}
+        <ProvenanceBadge />
 
         <button style={iconBtnStyle} title="Workspace Settings">
           <Settings size={15} />

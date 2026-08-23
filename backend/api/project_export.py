@@ -13,7 +13,11 @@ class ProjectExporter:
     def export_project(self, project_id: str, dest_dir: str = "./exports") -> Dict[str, Any]:
         """Creates a .interp-project zip archive containing all research artifacts."""
         os.makedirs(dest_dir, exist_ok=True)
-        archive_path = os.path.join(dest_dir, f"{project_id}.interp-project")
+        # Prevent path traversal: only the last path component is used as the
+        # archive filename, keeping the output strictly inside dest_dir.
+        safe_id = os.path.basename(project_id.strip().rstrip(os.sep)) or "project"
+        safe_id = safe_id.replace("..", "_").replace(" ", "_")
+        archive_path = os.path.join(dest_dir, f"{safe_id}.interp-project")
         
         # Real integration: Query the DB for project artifacts
         from ..core.database import SessionLocal, SessionRecord, ReportRecord, ExperimentRecord

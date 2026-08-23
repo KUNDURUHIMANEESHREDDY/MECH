@@ -10,23 +10,29 @@ const AttentionHeatmapBody: FC<PanelContext> = () => {
   const { state: model } = useModel();
   const sel = useSelectionStore();
   const tokens = model.result?.tokens.map(t => t.text) ?? [];
-  const layer = model.result?.layers[sel.layer ?? 0];
+  const allLayers = model.result?.layers ?? [];
+  const layer = allLayers[sel.layer ?? 0];
   const head = layer?.heads[sel.head ?? 0];
   const matrix = head?.attentionMatrix ?? [];
   const [hoveredToken, setHoveredToken] = useState<number | null>(null);
+
   return (
     <AttentionHeatmap
       matrix={matrix}
       tokens={tokens}
       hoveredToken={hoveredToken}
       onHoverToken={setHoveredToken}
+      allLayers={allLayers}
+      selectedLayer={sel.layer ?? 0}
+      selectedHead={sel.head ?? 0}
+      onSelectLayerHead={(l, h) => sel.setSelectedHead(l, h)}
     />
   );
 };
 
 pluginRegistry.register({
   id: 'attention_heatmap',
-  title: 'Attention Heatmap',
+  title: 'BertViz Attention Visualizer',
   icon: 'Flame',
   category: 'attention',
   resourceKinds: ['model', 'head'],

@@ -1,0 +1,8 @@
+{
+  "campaign_id": "camp_test_job_distributed",
+  "total_tasks": 1,
+  "completed_tasks": 1,
+  "failed_tasks": 0,
+  "pending_tasks": 0,
+  "timestamp": "2026-08-19T12:50:47.408748Z"
+}

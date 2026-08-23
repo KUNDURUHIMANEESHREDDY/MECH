@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { registerIpcHandlers } = require('./ipc');
@@ -82,7 +83,7 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       spellcheck: false
     }
   });
@@ -100,7 +101,19 @@ function createMainWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url).catch(() => undefined);
+    // Only allow http(s) external links to leave the app; block file:,
+    // javascript:, data: and other schemes that openExternal would otherwise
+    // honour.
+    let safe = false;
+    try {
+      const parsed = new URL(url);
+      safe = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      safe = false;
+    }
+    if (safe) {
+      shell.openExternal(url).catch(() => undefined);
+    }
     return { action: 'deny' };
   });
 
@@ -126,15 +139,43 @@ function resolvePythonPath(resourcesPath) {
   const candidates = [];
   if (process.env.MECH_PYTHON) candidates.push(process.env.MECH_PYTHON);
   if (process.env.PYTHON_PATH) candidates.push(process.env.PYTHON_PATH);
+  if (process.env.VIRTUAL_ENV) {
+    if (process.platform === 'win32') {
+      candidates.push(path.join(process.env.VIRTUAL_ENV, 'Scripts', 'python.exe'));
+      candidates.push(path.join(process.env.VIRTUAL_ENV, 'python.exe'));
+    } else {
+      candidates.push(path.join(process.env.VIRTUAL_ENV, 'bin', 'python'));
+    }
+  }
 
-  // Use bundled/local Python runtimes when present.
-  candidates.push(path.join(resourcesPath, 'python', 'python.exe'));
-  candidates.push(path.join(resourcesPath, '.venv', 'Scripts', 'python.exe'));
+  const execDir = path.dirname(process.execPath || '');
+  const searchRoots = [
+    resourcesPath,
+    execDir,
+    __dirname,
+    typeof app.getAppPath === 'function' ? app.getAppPath() : null,
+    process.cwd()
+  ].filter(Boolean);
 
-  // Development / local checkout: use the project's virtual environment.
-  const repoRoot = path.join(__dirname, '..', '..');
-  candidates.push(path.join(repoRoot, '.venv', 'Scripts', 'python.exe'));
-  candidates.push(path.join(repoRoot, 'venv', 'Scripts', 'python.exe'));
+  for (const root of searchRoots) {
+    let curr = root;
+    for (let depth = 0; depth < 8; depth++) {
+      if (process.platform === 'win32') {
+        candidates.push(path.join(curr, '.venv', 'Scripts', 'python.exe'));
+        candidates.push(path.join(curr, 'venv', 'Scripts', 'python.exe'));
+        candidates.push(path.join(curr, 'python', 'python.exe'));
+        candidates.push(path.join(curr, 'python.exe'));
+      } else {
+        candidates.push(path.join(curr, '.venv', 'bin', 'python'));
+        candidates.push(path.join(curr, 'venv', 'bin', 'python'));
+        candidates.push(path.join(curr, 'python', 'bin', 'python'));
+        candidates.push(path.join(curr, 'bin', 'python'));
+      }
+      const parent = path.dirname(curr);
+      if (parent === curr) break;
+      curr = parent;
+    }
+  }
 
   for (const candidate of candidates) {
     try {
@@ -147,10 +188,27 @@ function resolvePythonPath(resourcesPath) {
 async function startSidecar(logger) {
   const repoRoot = path.join(__dirname, '..', '..');
   const resourcesPath = process.resourcesPath || path.join(__dirname, '..');
-  const base = app.isPackaged ? resourcesPath : repoRoot;
+  let base = app.isPackaged ? resourcesPath : repoRoot;
+
+  let scriptPath = path.join(base, 'backend', SIDECAR_SCRIPT);
+  if (!fs.existsSync(scriptPath)) {
+    const execDir = path.dirname(process.execPath || '');
+    const candidates = [
+      path.join(resourcesPath, 'backend', SIDECAR_SCRIPT),
+      path.join(execDir, 'resources', 'backend', SIDECAR_SCRIPT),
+      path.join(__dirname, '..', '..', 'backend', SIDECAR_SCRIPT),
+      path.join(process.cwd(), 'backend', SIDECAR_SCRIPT),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        scriptPath = c;
+        base = path.dirname(path.dirname(c));
+        break;
+      }
+    }
+  }
 
   const pythonPath = resolvePythonPath(base);
-  const scriptPath = path.join(base, 'backend', SIDECAR_SCRIPT);
   const pythonPathEnv = `${base};${path.join(base, 'backend')}`;
   const storageDb = path.join(base, 'backend', 'storage', 'mech.db');
 
@@ -168,8 +226,12 @@ async function startSidecar(logger) {
     },
   });
 
-  await bridge.start();
-  logger.info('sidecar_ready');
+  try {
+    await bridge.start();
+    logger.info('sidecar_ready');
+  } catch (err) {
+    logger.error('sidecar_start_failed', { error: err.message });
+  }
   return bridge;
 }
 
@@ -190,26 +252,99 @@ async function bootstrap() {
   await storage.init();
   logger.info('storage_ready', { db: storage.dbPath });
 
-  const bridge = await startSidecar(logger);
-  pythonBridge = bridge;
+  const backendUrl = process.env.VITE_BACKEND_URL || process.env.BACKEND_URL;
+  const directHttpMode = !!backendUrl;
+
+  let bridge;
+  if (directHttpMode) {
+    logger.info('direct_http_mode', { backendUrl });
+    pythonBridge = null;
+  } else {
+    bridge = await startSidecar(logger);
+    pythonBridge = bridge;
+  }
 
   // Renderer-side services call window.desktopApi.httpRequest() for anything
-  // that used to go to http://localhost:8000/api/*. Route it to the sidecar.
+  // that used to go to http://localhost:8000/api/*. Route it to the sidecar,
+  // or fall back to an active HTTP backend server.
   ipcMain.handle('mech:http', async (_event, request) => {
     const payload = request || {};
     const headers = { ...(payload.headers || {}) };
     if (!headers['X-API-Key']) headers['X-API-Key'] = resolveApiKeyForRenderer();
-    return bridge.call('http', {
-      method: payload.method || 'GET',
-      path: payload.path || '/',
-      headers,
-      body: payload.body ?? '',
-    });
+    if (bridge && bridge.proc) {
+      try {
+        return await bridge.call('http', {
+          method: payload.method || 'GET',
+          path: payload.path || '/',
+          headers,
+          body: payload.body ?? '',
+        });
+      } catch (err) {
+        logger.warn('bridge_http_failed_trying_fallback', { error: err.message });
+      }
+    }
+
+    // Fallback: proxy directly to local HTTP server
+    const backendUrl = process.env.VITE_BACKEND_URL || process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+    try {
+      const http = require('node:http');
+      const https = require('node:https');
+      const url = new URL(backendUrl);
+      const transport = url.protocol === 'https:' ? https : http;
+      return await new Promise((resolve, reject) => {
+        const reqPath = payload.path || '/';
+        const reqMethod = payload.method || 'GET';
+        const postData = typeof payload.body === 'string' ? payload.body : (payload.body ? JSON.stringify(payload.body) : '');
+        if (postData && !headers['Content-Length']) {
+          headers['Content-Length'] = Buffer.byteLength(postData);
+        }
+        const req = transport.request({
+          hostname: url.hostname,
+          port: url.port || (url.protocol === 'https:' ? '443' : '80'),
+          path: reqPath,
+          method: reqMethod,
+          headers
+        }, (res) => {
+          let chunks = '';
+          res.on('data', (c) => { chunks += c; });
+          res.on('end', () => {
+            resolve({
+              status: res.statusCode || 200,
+              statusText: res.statusMessage || '',
+              headers: res.headers || {},
+              body: chunks
+            });
+          });
+        });
+        req.on('error', (e) => reject(e));
+        if (postData) req.write(postData);
+        req.end();
+      });
+    } catch (fallbackErr) {
+      throw new Error(`Failed to reach backend: ${fallbackErr.message}`);
+    }
   });
 
   ipcMain.handle('mech:ping', async () => {
+    if (bridge && bridge.proc) {
+      try {
+        return { ok: true, ...(await bridge.call('ping', {})) };
+      } catch (err) {
+        // try fallback
+      }
+    }
+    const backendUrl = process.env.VITE_BACKEND_URL || process.env.BACKEND_URL || 'http://127.0.0.1:8000';
     try {
-      return { ok: true, ...(await bridge.call('ping', {})) };
+      const http = require('node:http');
+      const https = require('node:https');
+      const url = new URL(backendUrl);
+      const transport = url.protocol === 'https:' ? https : http;
+      return await new Promise((resolve) => {
+        const req = transport.get(`${backendUrl}/health`, (res) => {
+          resolve({ ok: res.statusCode === 200, status: 'running' });
+        });
+        req.on('error', (err) => resolve({ ok: false, error: err.message }));
+      });
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -247,10 +382,15 @@ app.on('activate', () => {
 });
 
 app.on('web-contents-created', (_event, contents) => {
+  // Restrict renderer navigations to either the dev server or the packaged
+  // app's own frontend directory. The generic 'file://' prefix previously
+  // permitted navigation to ANY local file (LFI risk); we now scope it to the
+  // app's bundled frontend root.
+  const appFileRoot = pathToFileURL(path.join(__dirname, '..')).href;
   contents.on('will-navigate', (event, url) => {
-    const allowed = [RENDERER_DEV_URL, 'file://'];
-    if (!allowed.some((prefix) => url.startsWith(prefix))) {
-      event.preventDefault();
+    if (url.startsWith(RENDERER_DEV_URL) || url.startsWith(appFileRoot)) {
+      return;
     }
+    event.preventDefault();
   });
 });

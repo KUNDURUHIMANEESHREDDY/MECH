@@ -1,27 +1,8 @@
-"""Artifact Manager.
+"""Backward-compatible re-export of ArtifactManager from backend.research_platform.services.artifact_manager."""
 
-Manages plots, images, reports, and workspace bundles.
-"""
+from backend.research_platform.services.artifact_manager import (
+    ArtifactManager,
+    Artifact,
+)
 
-from __future__ import annotations
-
-from typing import Any, Dict, List, Optional
-
-
-class ArtifactManager:
-    """Manager for experiment artifacts."""
-
-    def __init__(self) -> None:
-        self._artifacts: Dict[str, Dict[str, Any]] = {}
-
-    def store_artifact(self, artifact_id: str, artifact_type: str, data: Any) -> Dict[str, Any]:
-        rec = {
-            "artifact_id": artifact_id,
-            "type": artifact_type,
-            "data": data,
-        }
-        self._artifacts[artifact_id] = rec
-        return rec
-
-    def get_artifact(self, artifact_id: str) -> Optional[Dict[str, Any]]:
-        return self._artifacts.get(artifact_id)
+__all__ = ["ArtifactManager", "Artifact"]

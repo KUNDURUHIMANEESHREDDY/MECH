@@ -14,16 +14,13 @@ describe('App shell', () => {
   it('renders the navigator with navigation items', async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByTestId('nav-workspace')).toBeInTheDocument();
+      expect(screen.getByTestId('nav-active_investigation')).toBeInTheDocument();
       expect(screen.getByTestId('nav-models')).toBeInTheDocument();
-      expect(screen.getByTestId('nav-prompts')).toBeInTheDocument();
-      expect(screen.getByTestId('nav-debugger')).toBeInTheDocument();
-      expect(screen.getByTestId('nav-experiments')).toBeInTheDocument();
-      expect(screen.getByTestId('nav-sessions')).toBeInTheDocument();
-      expect(screen.getByTestId('nav-reports')).toBeInTheDocument();
+      expect(screen.getByTestId('nav-model_explorer')).toBeInTheDocument();
       expect(screen.getByTestId('nav-settings')).toBeInTheDocument();
       expect(screen.getByTestId('nav-logging')).toBeInTheDocument();
-      expect(screen.getByTestId('nav-build')).toBeInTheDocument();
+      expect(screen.getByTestId('nav-compute_center')).toBeInTheDocument();
+      expect(screen.getByTestId('nav-attention_heatmap')).toBeInTheDocument();
     });
   });
 
@@ -50,21 +47,23 @@ describe('FeaturesDrawer', () => {
 
   it('renders resource tree groups', () => {
     render(<FeaturesDrawer />);
-    expect(screen.getByText('Models & Architectures')).toBeInTheDocument();
-    expect(screen.getByText('Mechanistic Analysis')).toBeInTheDocument();
-    expect(screen.getByText('Workspace & Assets')).toBeInTheDocument();
+    expect(screen.getByText('Workspace')).toBeInTheDocument();
+    expect(screen.getByText('Model')).toBeInTheDocument();
+    expect(screen.getByText('Analysis')).toBeInTheDocument();
+    expect(screen.getByText('Research')).toBeInTheDocument();
+    expect(screen.getByText('System')).toBeInTheDocument();
   });
 
   it('expands groups on click', () => {
     render(<FeaturesDrawer />);
-    // Groups start expanded by default, so GPT-2 is visible
-    expect(screen.getByText('GPT-2 Live')).toBeInTheDocument();
-    // Click to collapse the group
-    const groups = screen.getAllByText('Models & Architectures');
+    // Groups start expanded by default, so nav items are visible
+    expect(screen.getByText('Overview (Active Investigation)')).toBeInTheDocument();
+    // Click to collapse the Workspace group
+    const groups = screen.getAllByText('Workspace');
     fireEvent.click(groups[0]);
-    expect(screen.queryByText('GPT-2 Live')).not.toBeInTheDocument();
+    expect(screen.queryByText('Overview (Active Investigation)')).not.toBeInTheDocument();
     // Click again to expand
     fireEvent.click(groups[0]);
-    expect(screen.getByText('GPT-2 Live')).toBeInTheDocument();
+    expect(screen.getByText('Overview (Active Investigation)')).toBeInTheDocument();
   });
 });

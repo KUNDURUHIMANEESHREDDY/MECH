@@ -48,3 +48,18 @@
 ### Main Content (flex-1)
 ### Console (180px, collapsible)
 ### StatusBar (26px)
+
+---
+
+## AI Research Assistant Integration (Canvas & Studio)
+
+1. **Collaborative Canvas (ReactFlow)**:
+   * When the AI Research Assistant executes an experiment or runs circuit discovery (ACDC), candidate circuits and causal mediation flows are rendered automatically onto the visual graph canvas.
+   * Nodes represent Attention Heads, Neurons, and SAE Features with live attribution weights and mediation scores.
+
+2. **Interactive Research Notebooks**:
+   * Synchronized notebook environment where the AI assistant writes experimental rationale, logs raw tensor measurements, and embeds interactive heatmaps.
+   * Allows human researchers to modify prompts, tweak intervention parameters, and re-trigger execution in real time.
+
+3. **Command Palette & AI Chat Drawer**:
+   * Quick-launch mechanistic queries via `Ctrl/Cmd + K` or through the interactive research co-pilot drawer.

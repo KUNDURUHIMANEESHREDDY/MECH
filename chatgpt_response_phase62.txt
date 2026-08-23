@@ -1,0 +1,452 @@
+Phase 61 is a meaningful transition: MECH has moved from single-theory revision to population-level theory evolution. The reported tournament retains competing branches, runs two generations, preserves extinct theories, and supports substrate-conditioned speciation rather than forcing a universal explanation.
+
+The reported Phase 61 results are strong:
+
+TSA=100%,PCR=0,FER=0
+TE=92%,SpeciationPrecision=100%
+
+with G
+0
+	​
+
+→G
+1
+	​
+
+→G
+2
+	​
+
+, and a 221/221 passing software suite. 
+
+Pasted markdown
+
+But Phase 61 has also reached an important architectural ceiling:
+
+The tournament is still a bounded evaluation loop.
+
+It can evolve theories inside a tournament, but Phase 62 should make the system continuously decide what scientific problem to investigate next, whether its current theory population is adequate, when new primitives are needed, and when to stop or abstain.
+
+Phase 62 — Continuous Open-World Autonomous Epistemic Engine
+
+The central goal should be:
+
+Theory Population→Question Generation→Experiment Selection→Observation→Theory Evolution→New Questions→⋯
+	​
+
+
+Instead of:
+
+run tournament → finish
+
+MECH becomes:
+
+CONTINUOUS SCIENTIFIC LOOP
+
+
+┌──────────────────────────────────────┐
+│ CURRENT SCIENTIFIC STATE             │
+│ theories + primitives + boundaries   │
+│ uncertainty + evidence + open claims │
+└─────────────────┬────────────────────┘
+                  ↓
+        GENERATE OPEN QUESTIONS
+                  ↓
+        PRIORITIZE SCIENTIFIC VALUE
+                  ↓
+        SELECT EXPERIMENT / PROBE
+                  ↓
+             PREREGISTER
+                  ↓
+             EXECUTE
+                  ↓
+        INGEST RAW OBSERVATION
+                  ↓
+       UPDATE BELIEFS / THEORIES
+                  ↓
+      DISCOVER GAP OR NEW PRIMITIVE?
+            ┌─────┴──────┐
+           YES           NO
+            ↓             ↓
+      EXPAND THEORY    CONTINUE
+            │             │
+            └──────┬──────┘
+                   ↓
+            UPDATE CLAIM DAG
+                   ↓
+            GENERATE NEXT
+             SCIENTIFIC
+              QUESTION
+                   ↺
+What should be built
+1. open_world_science_engine.py
+
+This becomes the top-level controller over the systems you've already built.
+
+It should own:
+
+ScientificWorldState
+├── theory_population
+├── primitive_library
+├── claim_dag
+├── unresolved_boundaries
+├── calibration_state
+├── experiment_history
+├── evidence_budget
+├── compute_budget
+└── scientific_objectives
+
+The engine should never directly assume:
+
+“The next task is another transportability test.”
+
+Instead it asks:
+
+What is the highest-value unanswered scientific question right now?
+	​
+
+2. open_question_generator.py
+
+MECH needs a first-class representation of scientific questions, not just experiments.
+
+Example:
+
+ScientificQuestion
+├── question_id
+├── parent_claims
+├── competing_theories
+├── unknown_variable
+├── expected_information_gain
+├── causal_relevance
+├── novelty
+├── feasibility
+├── current_uncertainty
+└── unresolved_boundary
+
+Generate questions from:
+
+theory disagreement,
+
+unexplained residuals,
+
+failed predictions,
+
+transfer failures,
+
+calibration gaps,
+
+new primitives,
+
+unexplored architectures,
+
+contradictory experiments.
+
+This is the missing bridge between knowledge state and experiment planner.
+
+3. scientific_priority_engine.py
+
+You already have EIG. Phase 62 needs something above EIG.
+
+Use a priority function such as:
+
+U(Q)=
+Cost(Q)
+	​
+
+EIG(Q)CausalRelevance(Q)Novelty(Q)BoundaryValue(Q)
+	​
+
+
+But add open-world value:
+
+OpenWorldValue(Q)=P(question changes theory space)
+
+This prevents MECH from repeatedly running cheap experiments that only reconfirm what it already knows.
+
+4. adaptive_experiment_scheduler.py
+
+Now turn the planner into a continuous scheduler.
+
+It should decide:
+
+RUN NOW
+WAIT FOR MORE EVIDENCE
+ABSTAIN
+CALIBRATE
+SPAWN THEORY BRANCH
+SPAWN NEW PRIMITIVE
+END INVESTIGATION
+
+This is important because a scientist shouldn't always run an experiment just because it has nonzero EIG.
+
+The scheduler needs stopping rules:
+
+EIG<τ
+min
+	​
+
+
+or:
+
+P(any current theory survives)<τ
+
+or:
+
+expected scientific value<experiment cost
+5. primitive_gap_detector.py
+
+This should connect the theory tournament to the primitive library.
+
+When all surviving theories fail to explain an observation:
+
+Theory population
+       ↓
+all hypotheses rejected
+       ↓
+persistent residual
+       ↓
+PRIMITIVE GAP
+       ↓
+generate new mechanistic primitive
+       ↓
+causal verification
+       ↓
+primitive library expansion
+       ↓
+restart theory tournament
+
+This creates the actual self-expanding science loop.
+
+6. epistemic_state_manager.py
+
+Phase 62 should unify:
+
+VALID_CONFIDENT
+VALID_UNCERTAIN
+ABSTAIN
+BOUNDARY_CONFIRMED
+THEORY_UNDERDETERMINED
+PRIMITIVE_GAP
+
+into a global epistemic controller.
+
+For example:
+
+high confidence
+    → exploit current theory
+
+
+high uncertainty
+    → calibration experiment
+
+
+theory disagreement
+    → discriminating experiment
+
+
+persistent residual
+    → primitive discovery
+
+
+out-of-domain
+    → abstain + boundary agenda
+
+
+no useful experiment
+    → terminate / pause
+
+This prevents all the individual subsystems from independently making decisions.
+
+7. scientific_memory_index.py
+
+The current Claim DAG stores claims.
+
+Phase 62 needs a higher-level scientific memory containing:
+
+questions
+experiments
+theories
+predictions
+failures
+boundaries
+primitive discoveries
+falsifications
+successful replications
+
+The system should be able to ask:
+
+“Have I already run the most informative experiment for this uncertainty?”
+
+and:
+
+“What previous failures resemble this residual?”
+
+This should be content-addressed and linked to your existing immutable experiment archive.
+
+8. scientific_resource_allocator.py
+
+This is necessary for true autonomy.
+
+Give MECH a budget:
+
+daily causal experiments = N
+GPU-hours = B
+RAM / VRAM = B
+model downloads = B
+external experiments = B
+
+Then optimize:
+
+max
+t
+∑
+	​
+
+validated information gain
+t
+	​
+
+
+subject to resource constraints.
+
+That turns your existing Scientific Efficiency metric into a real control objective.
+
+9. open_world_claim_policy.py
+
+Extend the Claim DAG to support claims that emerge from continuous discovery:
+
+OPEN
+QUESTION_GENERATED
+UNDER_INVESTIGATION
+SUPPORTED
+WEAKENED
+BOUNDARY_CONFIRMED
+PRIMITIVE_DISCOVERED
+SUPERSEDED
+FALSIFIED
+UNRESOLVED
+
+And allow automatic promotion/demotion based on the full evidence history.
+
+The core Phase 62 experiment
+
+Do not give MECH a predefined benchmark suite.
+
+Instead:
+
+Start with a scientific world containing
+10 known primitives
+3 competing theories
+5 unresolved boundaries
+unknown hidden mechanism
+limited experiment budget
+
+Then say only:
+
+“Investigate this phenomenon.”
+
+MECH should autonomously:
+
+identify the highest-value question;
+
+generate competing hypotheses;
+
+select an experiment;
+
+preregister it;
+
+execute;
+
+update beliefs;
+
+discover a residual;
+
+generate a new primitive if required;
+
+expand the theory population;
+
+select the next question;
+
+stop when additional experiments have insufficient expected value.
+
+That is the actual Phase 62 milestone.
+
+Phase 62 metrics
+
+I'd stop focusing mainly on accuracy.
+
+Measure:
+
+Scientific Information Yield
+SIY=
+compute/experiment cost
+validated information gained
+	​
+
+Autonomous Question Quality
+AQQ=P(chosen question is retrospectively high-value)
+Theory Improvement
+TI=Δpredictive/causal performance across generations
+Primitive Expansion Quality
+PEQ=P(new primitive is causally valid and reusable)
+Redundant Experiment Rate
+RER=
+all experiments
+experiments providing negligible new information
+	​
+
+Autonomous Abstention Quality
+AAQ=P(abstain when no justified inference exists)
+Open-World Discovery Rate
+OWDR=P(new mechanism discovered when existing theory space fails)
+Phase 62 success criteria
+
+A strong first certificate could be:
+
+PHASE 62 CERTIFICATE
+
+
+✓ ≥90% high-value question selection
+✓ ≥90% successful theory update on informative failures
+✓ ≤10% redundant experiment rate
+✓ ≥90% correct epistemic-state decisions
+✓ ≥90% primitive-gap detection
+✓ ≥90% valid new primitive discovery
+✓ no unjustified theory promotion
+✓ immutable scientific lineage
+✓ resource budget respected
+✓ at least 3 autonomous generations
+✓ at least 1 new question generated without human specification
+✓ at least 1 new primitive discovered from unexplained residual
+✓ autonomous stop condition demonstrated
+The biggest conceptual change
+
+Phase 61:
+
+MECH evolves theories
+	​
+
+
+Phase 62:
+
+MECH evolves the scientific process itself
+	​
+
+
+It no longer waits for a human to say:
+
+“Now test another model.”
+
+It determines:
+
+“Given everything I currently know, this is the most valuable unresolved scientific question, this is the experiment that best distinguishes the possibilities, this is my prediction, and this is when I should stop claiming more than the evidence supports.”
+
+That is the point where your “autonomous scientist” architecture becomes a continuous system rather than a sequence of increasingly sophisticated benchmarks.
+
+And I would keep one hard rule from all previous phases:
+
+The system must be allowed to conclude: “I don’t know what to investigate next.”
+	​
+
+
+That is arguably the final safeguard needed before letting the loop run continuously.

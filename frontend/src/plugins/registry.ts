@@ -7,3 +7,6 @@ import './logit-lens';
 import './embeddings';
 import './datasets';
 import './tools';
+import './experiments';
+import './skills';
+import './research';

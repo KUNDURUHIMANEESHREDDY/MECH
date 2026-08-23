@@ -19,6 +19,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .discovery_planner import ResearchGoal
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -121,7 +124,8 @@ class ResearchCampaignManager:
                 for item in data.get("campaigns", []):
                     c = ResearchCampaign.from_dict(item)
                     self._campaigns[c.campaign_id] = c
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
             self._seed_defaults()
 
     def save(self) -> None:

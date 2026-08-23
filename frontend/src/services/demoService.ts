@@ -26,16 +26,18 @@ export function demoAvailableModels(): string[] {
   return [...FALLBACK_MODELS];
 }
 
-/** ModelInfo with status 'demo' so panels can show a demo-mode badge. */
+/** ModelInfo with status 'demo' and explicit synthetic provenance. */
 export function demoModelInfo(modelName: string): ModelInfo {
   return {
     model_name: modelName,
     status: 'demo',
+    provenance: 'DEMO_SYNTHETIC',
     num_layers: NUM_LAYERS,
     num_heads: NUM_HEADS,
     hidden_dim: 768,
   };
 }
+
 
 /* ---------- helpers ---------- */
 
@@ -164,6 +166,8 @@ export function demoInference(prompt: string, maxNewTokens = 10): InferenceRespo
 
   return {
     model_name: 'gpt2',
+    status: 'demo',
+    provenance: 'DEMO_SYNTHETIC',
     tokens: fullTokens,
     generated_text: fullTokens.map((t) => t.text).join(' '),
     attention_maps: attentionMapsFor(rng, fullTokens),
@@ -172,3 +176,43 @@ export function demoInference(prompt: string, maxNewTokens = 10): InferenceRespo
     memory_util: Math.round((34 + rng() * 28) * 10) / 10,
   };
 }
+
+/** Demo interaction response for Model Interaction feature. */
+export interface InteractDemoResponse {
+  status: 'demo';
+  provenance: 'DEMO_SYNTHETIC';
+  backend: string;
+  model: string;
+  prompt: string;
+  response: string;
+  n_generated: number;
+  latency_ms: number;
+}
+
+export function demoInteraction(req: { prompt: string; backend?: string; max_new_tokens?: number; temperature?: number }): InteractDemoResponse {
+  const rng = mulberry32(hashSeed(req.prompt));
+  const backend = req.backend ?? 'gpt2';
+  const maxNew = Math.min(Math.max(1, req.max_new_tokens ?? 64), 512);
+  const temp = Math.max(0, Math.min(2, req.temperature ?? 0.7));
+  
+  const suffixes = [
+    ' continues naturally with generated text that flows from the prompt context.',
+    ' and then the model produces a coherent continuation based on the input.',
+    ' which leads to an extended response demonstrating whole-answer generation.',
+    ' followed by additional tokens forming a complete thought.',
+  ];
+  
+  const suffix = suffixes[Math.floor(rng() * suffixes.length)];
+  const response = `${req.prompt.trim()}${suffix}`;
+  
+  return {
+    status: 'demo',
+    provenance: 'DEMO_SYNTHETIC',
+    backend,
+    model: req.backend === 'ollama' ? 'llama3' : req.backend === 'openai' ? 'gpt-4o' : 'gpt2',
+    prompt: req.prompt,
+    response,
+    n_generated: Math.floor(rng() * maxNew) + 1,
+    latency_ms: Math.floor(rng() * 200) + 10,
+  };
+}

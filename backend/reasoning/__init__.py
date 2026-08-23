@@ -1,12 +1,30 @@
-"""Reasoning journey tracing and neuron debugging for model interpretability."""
+"""
+MECH Reasoning Agent
 
-from backend.reasoning.journey_tracer import JourneyStage, ReasoningJourney, ReasoningJourneyTracer
-from backend.reasoning.neuron_debugger import NeuronDebugger, NeuronInspection
+Scientific Research Orchestrator that sits between Agent 1 (scientific engine)
+and Agent 2 (UI). Manages hypothesis lifecycle, experiment planning,
+falsification testing, and evidence reasoning.
+
+IMPORTANT: This module NEVER fabricates experimental evidence.
+All measurements come from Agent 1's scientific engine.
+"""
+
+from backend.reasoning.research_orchestrator import (
+    ScientificResearchOrchestrator,
+    Hypothesis,
+    ExperimentSpecification,
+    EvidenceChain,
+    CandidatePriority,
+    ResearchLoopState,
+    HypothesisState,
+)
 
 __all__ = [
-    "JourneyStage",
-    "NeuronDebugger",
-    "NeuronInspection",
-    "ReasoningJourney",
-    "ReasoningJourneyTracer",
+    "ScientificResearchOrchestrator",
+    "Hypothesis",
+    "ExperimentSpecification",
+    "EvidenceChain",
+    "CandidatePriority",
+    "ResearchLoopState",
+    "HypothesisState",
 ]

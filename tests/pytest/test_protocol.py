@@ -17,13 +17,12 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from backend.main import app, _API_KEY
+from backend.main import app
 
 
 @pytest.fixture(scope="module")
 def client():
-    # Non-public routes require the X-API-Key the app's middleware checks.
-    with TestClient(app, headers={"X-API-Key": _API_KEY}) as c:
+    with TestClient(app) as c:
         yield c
 
 
@@ -31,7 +30,7 @@ def test_root_roundtrip(client):
     res = client.get("/")
     assert res.status_code == 200
     body = res.json()
-    assert body["name"] == "MECH Platform"
+    assert body["name"] == "MECH Research Platform"
     assert body["status"] == "running"
 
 

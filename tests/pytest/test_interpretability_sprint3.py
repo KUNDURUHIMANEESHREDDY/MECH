@@ -19,6 +19,8 @@ def test_causal_tracing():
         "clean_prompt": "The capital of France is",
         "corrupted_prompt": "The capital of Rome is",
     })
+    # Causal mediation (ROME causal-MLP, subject position) localizes the factual
+    # association to the middle MLP layers; gpt2-small peaks at layer 8.
     assert trace["max_causal_layer"] == 8
     assert len(trace["layer_effects"]) == 12
 

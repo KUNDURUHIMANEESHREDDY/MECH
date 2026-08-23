@@ -26,7 +26,7 @@ class DiscoveryLifecycleState:
         self.discovery_id = discovery_id
         self.title = title
         self.state = "Candidate"
-        self.created_at = _dt.datetime.utcnow().isoformat() + "Z"
+        self.created_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
         self.updated_at = self.created_at
         self.history: List[Dict[str, Any]] = [
             {"state": "Candidate", "timestamp": self.created_at, "note": "Discovery proposed"}
@@ -37,7 +37,8 @@ class DiscoveryLifecycleState:
             raise ValueError(f"Invalid discovery state transition to {new_state}")
 
         self.state = new_state
-        self.updated_at = _dt.datetime.utcnow().isoformat() + "Z"
+        self.updated_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+
         record = {"state": new_state, "timestamp": self.updated_at, "note": note}
         self.history.append(record)
         return record

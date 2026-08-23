@@ -2,7 +2,7 @@
 
 Validates: Activations -> Compress -> Decompress -> Verify Numerical Integrity.
 """
-from api.dispatcher import build_dispatcher
+from backend.api.legacy_dispatcher import build_dispatcher
 
 
 def test_compression_roundtrip():

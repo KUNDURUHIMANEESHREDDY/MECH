@@ -4,6 +4,8 @@
 // All handlers proxy through the PythonBridge ('http' method), which executes the
 // FastAPI app via TestClient — no HTTP server, no ports.
 
+const http = require('node:http');
+
 let getApiKey = () => '';
 let pythonBridge = null;
 
@@ -11,22 +13,64 @@ function setApiKeyResolver(resolver) {
   getApiKey = resolver || (() => '');
 }
 
-async function callBackend(method, payload = {}) {
-  if (!pythonBridge) throw new Error('python_bridge_not_ready');
-  const body = JSON.stringify({ method, payload });
-  const res = await pythonBridge.call('http', {
-    method: 'POST',
-    path: `/api/v1/${method}`,
-    headers: {
+async function httpFallback(method, payload) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({ method, payload });
+    const headers = {
       'Content-Type': 'application/json',
-      ...(getApiKey() ? { 'X-API-Key': getApiKey() } : {}),
-    },
-    body,
+      'Content-Length': Buffer.byteLength(postData),
+      ...(getApiKey() ? { 'X-API-Key': getApiKey() } : {})
+    };
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 8000,
+      path: `/api/v1/${method}`,
+      method: 'POST',
+      headers
+    }, (res) => {
+      let chunks = '';
+      res.on('data', (c) => { chunks += c; });
+      res.on('end', () => {
+        try {
+          if (res.statusCode >= 400) {
+            return reject(new Error(`HTTP ${res.statusCode}: ${chunks}`));
+          }
+          const json = JSON.parse(chunks || '{}');
+          resolve(json.result !== undefined ? json.result : json);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('error', (err) => reject(err));
+    req.write(postData);
+    req.end();
   });
-  const status = typeof res.status === 'number' ? res.status : 200;
-  if (status >= 400) throw new Error(`backend ${method} -> HTTP ${status}`);
-  const json = JSON.parse(res.body || '{}');
-  return json.result !== undefined ? json.result : json;
+}
+
+async function callBackend(method, payload = {}) {
+  if (pythonBridge && pythonBridge.proc) {
+    try {
+      const body = JSON.stringify({ method, payload });
+      const res = await pythonBridge.call('http', {
+        method: 'POST',
+        path: `/api/v1/${method}`,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(getApiKey() ? { 'X-API-Key': getApiKey() } : {}),
+        },
+        body,
+      });
+      const status = typeof res.status === 'number' ? res.status : 200;
+      if (status < 400) {
+        const json = JSON.parse(res.body || '{}');
+        return json.result !== undefined ? json.result : json;
+      }
+    } catch (bridgeErr) {
+      // Fall through to httpFallback
+    }
+  }
+  return httpFallback(method, payload);
 }
 
 function registerRuntimeHandlers({ ipcMain, pythonBridge: bridge, logger, getApiKey }) {

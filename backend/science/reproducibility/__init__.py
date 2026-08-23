@@ -22,11 +22,13 @@ from .factual_recall_pipeline import FactualRecallPipeline
 from .arithmetic_pipeline import ArithmeticPipeline
 from .sae_pipeline import SAEReproductionPipeline
 from .copy_task_pipeline import CopyTaskPipeline
+from .hallucination_pipeline import HallucinationCompetitionPipeline, HallucinationEvidenceReport, CrossoverPoint
 
 # Backward-compatible aliases
 IOIPipeline = IOIReproductionPipeline
 GreaterThanPipeline = GreaterThanCircuitPipeline
 SAEPipeline = SAEReproductionPipeline
+HallucinationPipeline = HallucinationCompetitionPipeline
 
 __all__ = [
     "MetricResult", "ReproducibilityReport", "ReproducibilityReportEngine",
@@ -45,6 +47,8 @@ __all__ = [
     "BenchmarkRunner",
     "InductionHeadsPipeline", "IOIReproductionPipeline", "LogitLensPipeline",
     "GreaterThanCircuitPipeline", "FactualRecallPipeline", "ArithmeticPipeline",
-    "SAEReproductionPipeline", "CopyTaskPipeline",
+    "SAEReproductionPipeline", "CopyTaskPipeline", "HallucinationCompetitionPipeline",
+    "HallucinationPipeline", "HallucinationEvidenceReport", "CrossoverPoint",
     "IOIPipeline", "GreaterThanPipeline", "SAEPipeline",
 ]
+

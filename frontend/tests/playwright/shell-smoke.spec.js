@@ -1,36 +1,37 @@
 const { test, expect } = require('@playwright/test');
 
-// Labels must match App.tsx PAGES (source of the Topbar breadcrumb).
+// Labels must match App.tsx Shell PAGE_LABEL_MAP (source of the Topbar crumb).
+// navKeys mirror the FeaturesDrawer RESOURCE_TREE.
 const NAV_PAGES = [
-  ['explorer', 'Model Explorer'],
-  ['gpt2', 'GPT-2 Live'],
-  ['transformer', 'Transformer Visualizer'],
-  ['workspace', 'Workspace'],
-  ['neuralexplorer', 'Neural Explorer'],
-  ['knowledgegraph', 'Knowledge Graph'],
-  ['circuitexplorer', 'Circuit Explorer'],
+  ['active_investigation', 'Overview (Active Investigation)'],
   ['models', 'Models'],
-  ['prompts', 'Prompts'],
-  ['debugger', 'Debugger'],
-  ['build', 'Build'],
-  ['benchmark', 'Benchmark'],
-  ['benchmarksuite', 'Benchmark Suite'],
-  ['experiments', 'Experiments'],
-  ['sessions', 'Sessions'],
-  ['reports', 'Reports'],
-  ['reasoning', 'Reasoning'],
-  ['evidencefusion', 'Evidence Fusion'],
-  ['analytics', 'Analytics'],
-  ['health', 'Health'],
-  ['campaigns', 'Campaigns'],
-  ['plugins', 'Plugins'],
-  ['notebook', 'Research Notebook'],
-  ['labnotebook', 'Lab Notebook'],
-  ['reproduction', 'Paper Reproduction'],
-  ['settings', 'Settings'],
-  ['logging', 'Logging'],
+  ['dataset_viewer', 'Datasets & Probes'],
+  ['hypothesis_lab', 'Hypothesis Lab & Falsification'],
+  ['mechanism_builder', 'Visual Mechanism Builder'],
+  ['evidence_graph', 'Evidence Graph & Provenance'],
+  ['report_mode', 'Research Artifacts & Reports'],
+  ['model_explorer', 'Model Architecture Explorer'],
+  ['transformer', 'Transformer Visualizer'],
+  ['attention_heatmap', 'Attention Lab'],
+  ['neuron_panel', 'Neuron & MLP Explorer'],
+  ['sae_feature', 'SAE Feature Explorer'],
+  ['circuit_explorer', 'Circuit Explorer'],
+  ['logit_lens', 'Logit Lens & Trajectory'],
+  ['intervention_lab', 'Causal Intervention Lab'],
+  ['experiment_builder', 'Experiment Builder'],
+  ['experiment_monitor', 'Experiment Monitor'],
+  ['evidence_explorer', 'Evidence Explorer'],
+  ['research_graph', 'Research Graph'],
+  ['research_notebook', 'Research Notebook'],
+  ['experiment_notebook', 'Research Notebook'],
+  ['health', 'Reproducibility & Validation'],
+  ['compute_center', 'Compute Center & Jobs'],
+  ['real_time_dag', 'Storage & Telemetry DAG'],
+  ['logging', 'Execution Logs'],
   ['projects', 'Projects'],
-  ['recent', 'Recent Files'],
+  ['settings', 'Settings'],
+  ['ui_adversarial_tester', 'UI Adversarial Tester'],
+  ['acceptance_test_verifier', 'Acceptance Test Verifier'],
 ];
 
 const HASH_ONLY_PAGES = [
@@ -58,7 +59,7 @@ test('shell renders sidebar nav items', async ({ page }) => {
   await dismissError(page);
   await page.getByTestId('features-toggle').click();
   for (const [key] of NAV_PAGES.slice(0, 10)) {
-    await expect(page.getByTestId(`nav-${key}`)).toBeVisible();
+    await expect(page.getByTestId(`nav-${key}`).first()).toBeVisible();
   }
 });
 
@@ -79,14 +80,17 @@ test('each nav page renders and updates breadcrumb + hash', async ({ page }) => 
   await dismissError(page);
   await page.getByTestId('features-toggle').click();
   for (const [key, label] of NAV_PAGES) {
-    const item = page.getByTestId(`nav-${key}`);
+    const item = page.getByTestId(`nav-${key}`).first();
     await item.scrollIntoViewIfNeeded();
     // The ErrorUI overlay can reappear mid-sweep and swallow the click
     // (see dismissError). Retry: dismiss, click, and only accept once the
     // hash actually changed.
     await expect(async () => {
       await dismissError(page);
+      await item.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(250);
       await item.click({ force: true });
+      await page.waitForTimeout(350);
       await expect(page).toHaveURL(new RegExp(`#${key}$`), { timeout: 2000 });
     }).toPass({ timeout: 15_000 });
     await dismissError(page);

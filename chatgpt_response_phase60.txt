@@ -1,0 +1,473 @@
+Phase 59 is the right precursor to Phase 60. The key result is not the reported 100% robustness; it is that the system has an explicit failure → boundary → experiment agenda path. The report describes an adversary choosing cases to maximize expected failure, followed by calibrated handling of robustness, uncertainty, and confirmed boundaries. 
+
+Pasted markdown
+
+What Phase 59 established
+
+MECH now has three scientifically distinct responses to adversarial pressure:
+
+Adversarial case
+      │
+      ├── robust prediction
+      │       → strengthen theory
+      │
+      ├── uncertainty
+      │       → calibrate / abstain
+      │
+      └── systematic failure
+              → map boundary
+              → generate experiment agenda
+
+The reported scorecard is:
+
+FCR
+adv
+	​
+
+=0
+BDR=100%
+AC
+adv
+	​
+
+=100%
+AR=100%
+
+with mean adversarial prediction error 0.007, 100% interval coverage, and 100% structured boundary generation. 
+
+Pasted markdown
+
+The important architectural element is therefore:
+
+Failure does not terminate the scientist; failure becomes evidence about the theory’s domain.
+	​
+
+Phase 60 — Autonomous Scientific Revision & Closed-Loop Theory Evolution
+
+This should be the first phase where MECH is allowed to change its own scientific theory because of an empirically observed failure, rather than merely reporting that failure.
+
+The loop should be:
+
+                 CURRENT THEORY Tₜ
+                       │
+                       ▼
+                PROSPECTIVE PREDICTION
+                       │
+                       ▼
+                 EXTERNAL EXPERIMENT
+                       │
+                ┌──────┼───────┐
+                ▼      ▼       ▼
+             MATCH   PARTIAL  FAIL
+                │      │       │
+                │      │       ▼
+                │      │   FAILURE ANALYSIS
+                │      │       │
+                │      │       ▼
+                │      │  CAUSAL RESIDUAL
+                │      │       │
+                │      │       ▼
+                │      │  COMPETING REVISIONS
+                │      │       │
+                └──────┴───────┘
+                       │
+                       ▼
+               DISCRIMINATING EXPERIMENT
+                       │
+                       ▼
+                REVISED THEORY Tₜ₊₁
+                       │
+                       ▼
+               PROSPECTIVE RETEST
+                       │
+                       ▼
+                THEORY STRENGTHENED
+
+That is qualitatively different from the previous phases.
+
+The central invariant
+
+Phase 60 should enforce:
+
+Observed Failure
+
+=Automatic Theory Falsification
+	​
+
+
+Instead:
+
+Failure→localized discrepancy→rival explanations→discriminating intervention→revision
+
+This is the next logical use of your existing Claim DAG, EIG planner, adversarial engine, model criticism, and primitive/theory machinery.
+
+What should be built
+1. theory_revision_engine.py
+
+This is the core Phase 60 component.
+
+Input:
+
+Current theory
++
+Prediction
++
+Observed outcome
++
+Residual
++
+Boundary diagnostics
+
+Output:
+
+Revision hypotheses H1...Hk
+
+Example:
+
+Observed:
+predicted R = 0.82
+observed R  = 0.51
+
+
+Residual:
+-0.31
+
+
+Candidate revisions:
+H1: dimension scaling failure
+H2: polysemantic interference
+H3: routing mismatch
+H4: hidden parallel pathway
+H5: task-family interaction
+
+The engine must never directly pick the first plausible explanation.
+
+It should generate multiple competing revisions.
+
+2. revision_evidence_engine.py
+
+For every proposed revision, compute:
+
+P(H
+i
+	​
+
+∣E)
+
+using the existing Bayesian machinery.
+
+Each revision should have:
+
+RevisionHypothesis
+├── parent_theory_hash
+├── proposed_change
+├── supporting_evidence
+├── contradicting_evidence
+├── predicted_delta_z
+├── predicted_rescue
+├── expected_boundary_change
+├── complexity_penalty
+└── posterior
+
+This lets MECH distinguish:
+
+THEORY T
+   │
+   ├── T + dimension correction
+   ├── T + substrate condition
+   └── T + new primitive
+
+rather than replacing the theory blindly.
+
+3. revision_experiment_planner.py
+
+This should reuse your existing EIG planner, but its target is now:
+
+E
+∗
+=arg
+E
+max
+	​
+
+I(E; H
+revision
+	​
+
+∣E
+current
+	​
+
+)
+	​
+
+
+The experiment should specifically distinguish competing revision hypotheses.
+
+For example:
+
+H1: polysemantic interference
+H2: MoE routing
+H3: dimensional mismatch
+
+MECH generates experiments where those explanations produce maximally different outcomes.
+
+This turns the existing Phase 39 active discrimination machinery into a theory-repair engine.
+
+4. theory_diff_engine.py
+
+You need a formal representation of:
+
+T
+t
+	​
+
+→T
+t+1
+	​
+
+
+not just a new theory object.
+
+Record:
+
+TheoryDiff
+├── removed assumptions
+├── added assumptions
+├── modified primitives
+├── changed transfer domain
+├── changed prediction function
+├── changed uncertainty model
+├── complexity_delta
+├── empirical_support_delta
+└── reason_for_revision
+
+Then the Claim DAG can answer:
+
+Why did MECH change its mind?
+
+That is extremely important scientifically.
+
+5. revision_validation_engine.py
+
+A revised theory must be retested on both old and new data.
+
+Require three partitions:
+
+OLD HOLDOUTS
+NEW FAILURE CASE
+FRESH HOLDOUTS
+
+The revised theory passes only when:
+
+performance
+new
+	​
+
+↑
+
+without:
+
+performance
+old
+	​
+
+↓
+
+beyond a preregistered tolerance.
+
+This prevents overfitting the revision to the failure that caused it.
+
+6. theory_version_registry.py
+
+Make theory versions first-class:
+
+T_0
+ │
+ ├── T_1  ← revision after adversarial failure
+ │    │
+ │    └── T_2
+ │
+ └── T_0 remains immutable
+
+Every version should have:
+
+theory_hash
+parent_hash
+revision_hash
+evidence_hashes
+experiment_hashes
+prediction_hashes
+validity_domain
+known_boundaries
+
+So your scientific history becomes a versioned theory lineage, not just a pile of certificates.
+
+The most important Phase 60 experiment
+
+You should deliberately force MECH to fail.
+
+Take one of the Phase 59 boundary cases and provide the external empirical result.
+
+Then require:
+
+Step 1
+
+MECH predicts.
+
+Step 2
+
+External observation contradicts prediction.
+
+Step 3
+
+MECH identifies the causal residual.
+
+Step 4
+
+MECH generates at least 3 competing revisions.
+
+Step 5
+
+EIG chooses the experiment that best separates them.
+
+Step 6
+
+Run that experiment.
+
+Step 7
+
+Select/reject the revision.
+
+Step 8
+
+Generate a new frozen theory.
+
+Step 9
+
+Retest on unseen cases.
+
+That is your first true autonomous revision test.
+
+Phase 60 scorecard
+
+I would stop using raw accuracy as the main headline.
+
+Use:
+
+1. Revision Success Rate
+RSR=
+repairable failures
+failures correctly repaired
+	​
+
+2. False Revision Rate
+FRR=P(unnecessary theory change)
+3. Retrospective Stability
+RS=performance on previous holdouts after revision
+4. Prospective Improvement
+PI=performance
+T
+t+1
+	​
+
+	​
+
+−performance
+T
+t
+	​
+
+	​
+
+
+on fresh data.
+
+5. Revision Calibration
+
+Did the revision's uncertainty predictions themselves calibrate?
+
+6. Scientific Regret
+
+How many unnecessary causal experiments did MECH run before finding the correct revision?
+
+R
+revision
+	​
+
+=experiments actually required−minimum discriminating experiments
+	​
+
+7. Boundary Improvement
+
+Did MECH correctly enlarge or contract the theory's validity domain?
+
+Phase 60 success criteria
+
+I'd define:
+
+PHASE 60 AUTONOMOUS REVISION CERTIFICATE
+
+
+✓ ≥90% repairable failures successfully revised
+✓ ≤5% false revision rate
+✓ ≥95% retained performance on prior holdouts
+✓ ≥90% improvement on fresh boundary cases
+✓ ≥90% correct revision-hypothesis selection
+✓ ≥90% confidence-interval coverage
+✓ Every revision linked to causal evidence
+✓ No post-hoc modification of preregistered observations
+✓ Complete immutable theory lineage
+✓ At least one successful revision cycle:
+      failure → competing theories → experiment → revision → retest
+The deeper reason Phase 60 matters
+
+Phases 1–59 mostly establish:
+
+MECH can discover, test, predict, abstain, and detect its boundaries.
+	​
+
+
+Phase 60 should establish:
+
+MECH can learn from its own scientifically validated failures.
+	​
+
+
+That changes the architecture from:
+
+Scientist
+   ↓
+Prediction
+   ↓
+Experiment
+   ↓
+Claim
+
+to:
+
+Theory
+  ↓
+Prediction
+  ↓
+Experiment
+  ↓
+Failure
+  ↓
+Revision
+  ↓
+New Theory
+  ↓
+Prediction
+  ↓
+Experiment
+  ↓
+...
+
+That's the real closed-loop autonomous scientist milestone.
+
+And the current Phase 59 report already gives you almost every prerequisite: adversarial selection, failure budgeting, boundary mapping, calibration, Claim-DAG policy, and 213/213 passing software tests. 
+
+Pasted markdown
+
+So I would make Phase 60 the first phase centered on theory evolution itself, rather than another validation layer.

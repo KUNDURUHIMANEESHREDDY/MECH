@@ -1,0 +1,443 @@
+Phase 62 is the strongest architectural milestone so far because it changes MECH from an autonomous investigator into an autonomous continuous scientific control loop. The reported system generates questions, chooses experiments, detects primitive gaps, evolves theories, and can stop or abstain; the benchmark reports 96% AQQ, 94% theory improvement, 100% primitive-gap precision, 0% redundant experiments, 100% abstention quality, and three autonomous cycles. 
+
+Pasted markdown
+
+That said, Phase 63 should not simply add “more autonomy.” The current engine is still fundamentally centered on transformer-internal causal structure. The next scientifically meaningful step is to test whether the mechanisms MECH discovers can be grounded in invariants that survive changes of representation, modality, and physical substrate.
+
+Phase 63 — Universal Causal Grounding & Cross-Modal Physical Invariant Engine
+
+The central question should be:
+
+When MECH discovers a causal mechanism, can it determine which aspects are true computational/causal invariants and which are artifacts of a particular model, representation, modality, or substrate?
+
+The key distinction becomes:
+
+Implementation
+
+=Mechanism
+
+=Invariant
+	​
+
+
+A circuit in one transformer is an implementation.
+A computational program is a mechanism.
+A property that survives across architectures/modalities is a candidate invariant.
+
+The Phase 63 loop
+                 DISCOVERED MECHANISM M
+                         │
+                         ▼
+                ABSTRACT MECHANISM
+                    PROGRAM P
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+       MODEL A         MODEL B        MODEL C
+      Transformer       MoE            SSM
+          │              │              │
+          └──────────────┼──────────────┘
+                         ▼
+                 INVARIANT TESTING
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+     SAME CAUSAL      CHANGES WITH    FAILS
+      FUNCTION          SUBSTRATE
+          │              │              │
+          ▼              ▼              ▼
+       INVARIANT      CONDITIONAL     FALSIFIED
+                         INVARIANT
+                         │
+                         ▼
+                CROSS-MODAL TEST
+                         │
+              ┌──────────┴──────────┐
+              ▼                     ▼
+       TEXT / VISION / AUDIO   MULTIMODAL
+              │                     │
+              └──────────┬──────────┘
+                         ▼
+                  PHYSICAL GROUNDING
+                         │
+                         ▼
+What should be built
+1. causal_invariant_engine.py
+
+Represent every discovered mechanism as an abstract object:
+
+CausalMechanism
+├── mechanism_id
+├── source_theory_hash
+├── computational_program
+├── input/output signature
+├── causal interventions
+├── invariance hypotheses
+├── known substrate constraints
+└── evidence lineage
+
+Then derive candidate invariants such as:
+
+I
+1
+	​
+
+=causal ordering
+I
+2
+	​
+
+=mediation topology
+I
+3
+	​
+
+=input-output transformation
+I
+4
+	​
+
+=intervention response
+I
+5
+	​
+
+=composition law
+
+The engine should distinguish:
+
+UNIVERSAL_INVARIANT
+SUBSTRATE_CONDITIONED_INVARIANT
+MODALITY_CONDITIONED_INVARIANT
+MODEL_SPECIFIC
+UNRESOLVED
+2. cross_representation_alignment.py
+
+Your existing cross-model alignment machinery should be generalized from:
+
+model A↔model B
+
+to:
+
+representation
+A
+	​
+
+↔representation
+B
+	​
+
+
+For example:
+
+text circuit
+   ↓
+symbolic program
+   ↓
+vision mechanism
+   ↓
+audio mechanism
+
+The alignment should be based on functional/causal behavior, not neuron IDs.
+
+3. cross_modal_mechanism_adapter.py
+
+Introduce modality-independent primitives:
+
+CausalPrimitive
+├── relational_binding
+├── routing
+├── comparison
+├── inhibition
+├── accumulation
+├── selection
+├── memory_lookup
+└── composition
+
+Each modality adapter maps the raw substrate onto the common primitive interface.
+
+Example:
+
+TEXT:
+attention head → relational_binding
+
+
+VISION:
+cross-attention block → relational_binding
+
+
+AUDIO:
+temporal routing module → relational_binding
+
+The scientific claim should only be promoted when the causal behavior, not merely the label, matches.
+
+4. physical_invariant_probe_engine.py
+
+This should be the heart of the “physical grounding” part.
+
+Instead of only asking:
+
+Does the same circuit exist?
+
+ask:
+
+Does the same intervention produce the same functional change?
+
+For a mechanism M:
+
+ΔY
+A
+	​
+
+(I
+M
+	​
+
+)≈ΔY
+B
+	​
+
+(I
+M
+	​
+
+)
+
+under an appropriate correspondence transform.
+
+Measure:
+
+Causal Transfer Fidelity=1−
+max(ϵ,∣ΔY
+A
+	​
+
+∣)
+∣ΔY
+A
+	​
+
+−ΔY
+B
+	​
+
+∣
+	​
+
+
+Then test:
+
+scaling,
+
+noise,
+
+quantization,
+
+architecture,
+
+sequence length,
+
+modality,
+
+hardware/runtime.
+
+5. physical_grounding_engine.py
+
+This needs careful terminology.
+
+I would not claim “physical grounding” merely because a tensor was measured on hardware.
+
+Instead define physical grounding as:
+
+a mechanism whose causal signature survives controlled perturbations of its computational substrate within a declared equivalence class.
+
+So build:
+
+GroundingDomain
+├── architecture
+├── precision
+├── hardware
+├── implementation
+├── modality
+├── task
+└── intervention family
+
+Then classify:
+
+PHYSICALLY_GROUNDED
+SUBSTRATE_CONDITIONED
+REPRESENTATION_DEPENDENT
+UNRESOLVED
+6. counterfactual_invariance_engine.py
+
+This is important for distinguishing true invariants from correlations.
+
+For candidate invariant I, generate perturbations c:
+
+I(c(M))
+=
+?
+I(M)
+
+Examples:
+
+permuting internal neurons,
+
+changing layer widths,
+
+quantization,
+
+changing architecture family,
+
+changing modality encoding,
+
+adding irrelevant features,
+
+modifying routing sparsity.
+
+A genuine invariant should preserve its causal signature, not necessarily its exact internal implementation.
+
+7. cross_modal_claim_policy.py
+
+Extend the Claim DAG with:
+
+CANDIDATE_INVARIANT
+CROSS_MODEL_SUPPORTED
+CROSS_ARCH_SUPPORTED
+CROSS_MODAL_SUPPORTED
+SUBSTRATE_CONDITIONED
+PHYSICAL_GROUNDING_CONFIRMED
+INVARIANT_FALSIFIED
+
+And make the promotion ladder explicit:
+
+Model-specific→Cross-model→Cross-architecture→Cross-modal→Physical grounding
+
+Never skip levels.
+
+8. universal_causal_ontology.py
+
+Phase 63 should begin building a causal ontology of mechanisms:
+
+                    COMPUTATION
+                        │
+            ┌───────────┼───────────┐
+            ▼           ▼           ▼
+         ROUTING     MEMORY       CONTROL
+            │           │           │
+       ┌────┴───┐       │      ┌────┴────┐
+       ▼        ▼       ▼      ▼         ▼
+   relational  token  lookup  inhibit  select
+   binding
+
+The ontology shouldn't be manually defined as truth.
+
+It should be provisional, evidence-backed, and revisable by the same Phase 60/61 theory-evolution machinery.
+
+The critical Phase 63 experiment
+
+Take one mechanism that MECH already understands well—for example a relational/induction mechanism.
+
+Then test it through the full ladder:
+
+GPT-2
+  ↓
+Llama
+  ↓
+Mistral
+  ↓
+MoE
+  ↓
+SSM
+  ↓
+vision model
+  ↓
+audio model
+  ↓
+multimodal model
+
+At every step:
+
+MECH produces a preregistered causal prediction.
+
+External intervention is executed.
+
+Raw causal outcome is returned.
+
+Causal invariant score is computed.
+
+Claim DAG updates.
+
+The important outcome is not necessarily “universal.”
+
+You might discover:
+
+UNIVERSAL:
+    relational binding
+
+
+TEXT-CONDITIONED:
+    token-position implementation
+
+
+MOE-CONDITIONED:
+    expert routing realization
+
+
+SSM-CONDITIONED:
+    recurrent state realization
+
+
+VISION:
+    spatial correspondence realization
+
+That would actually be a much more scientifically interesting result than forcing one mechanism into every architecture.
+
+Phase 63 scorecard
+
+I would introduce:
+
+1. Cross-Architecture Invariance
+CAI
+2. Cross-Modal Invariance
+CMI
+3. Causal Signature Fidelity
+CSF
+4. Physical Grounding Rate
+PGR
+5. False-Universalization Rate
+
+This should be near zero:
+
+FUR=P(universal claim∣evidence only supports conditional)
+6. Boundary Detection
+BDR
+7. Intervention Equivalence
+IEQ
+8. Invariant Reuse
+
+Can a previously discovered invariant predict a new implementation without rediscovering the mechanism from scratch?
+
+That last metric could become the most important.
+
+Phase 63 success gate
+
+A reasonable first milestone:
+
+PHASE 63 CERTIFICATE
+
+
+✓ ≥90% causal signature preservation across held-out architectures
+✓ ≥85% cross-modal mechanism classification
+✓ ≥90% correct substrate-conditioned detection
+✓ ≤2% false universalization
+✓ ≥90% boundary detection
+✓ ≥90% prospective intervention prediction
+✓ ≥90% invariant reuse on new implementations
+✓ at least 3 modalities
+✓ at least 4 architecture families
+✓ at least 1 confirmed conditional invariant
+✓ at least 1 falsified universal-invariant hypothesis
+Why this is the right next step
+
+Phase 62 establishes:

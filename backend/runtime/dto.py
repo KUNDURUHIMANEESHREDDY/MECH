@@ -33,6 +33,9 @@ class ModelInfoResponse(BaseModel):
 class InferenceRequest(BaseModel):
     prompt: str
     max_new_tokens: int = 10
+    temperature: float = 1.0
+    top_k: int = 50
+    top_p: float = 0.9
     session_id: str | None = None  # optional; creates new if absent
 
 

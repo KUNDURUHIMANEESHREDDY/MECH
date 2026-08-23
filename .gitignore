@@ -27,15 +27,47 @@ frontend/playwright-report/
 .env.local
 .env.*
 
+# Secrets and runtime artifacts (NEVER commit)
+storage/api_key.txt
+tokens/
+*.db
+*.db-shm
+*.db-wal
+storage/activations_cache/
+storage/mech.db*
+**/api_key.txt
+
+# Runtime state written by the app
+backend/storage/storage/
+backend/storage/artifacts/
+
 # Editors
 .vscode/
 .idea/
+
+# Audit/debug one-off scripts and their outputs
+audit-*
+*-out.txt
+*-err.txt
 
 # Agent tooling and session state
 .continue/
 .omo/run-continuation/
 frontend/audit_*
+.codegraph/
+.freebuff/
+.hermes/
+.opencode/
+.pytest-tmp/
+
+# Vendored third-party agent skill packs
+skills/
+vite.config.mts.timestamp-*
+
+# One-off ChatGPT phase bridge scripts (responses are kept as chatgpt_response_phase*.txt)
+backend/discovery/send_phase*_to_chatgpt.py
+backend/discovery/fetch_chatgpt_phase*.py
+backend/discovery/get_chatgpt_response.py
 
 # Misc untracked junk
-New folder*/
 attn_L10_H7.png

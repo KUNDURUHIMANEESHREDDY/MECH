@@ -1,0 +1,6 @@
+{"seq": "When Mary and John went to the store, Mary gave a drink to", "io": " John", "s": " Mary", "template_id": "IOI_T1", "corruption": "subject_object_swap"}
+{"seq": "When Tom and Lisa went to the park, Lisa gave a gift to", "io": " Tom", "s": " Lisa", "template_id": "IOI_T2", "corruption": "subject_object_swap"}
+{"seq": "When Alice and Bob went to the school, Alice gave a book to", "io": " Bob", "s": " Alice", "template_id": "IOI_T3", "corruption": "subject_object_swap"}
+{"seq": "When David and Emma went to the office, Emma gave a letter to", "io": " David", "s": " Emma", "template_id": "IOI_T4", "corruption": "subject_object_swap"}
+{"seq": "When Peter and Sarah went to the lab, Peter gave a note to", "io": " Sarah", "s": " Peter", "template_id": "IOI_T5", "corruption": "subject_object_swap"}
+{"seq": "When James and Kate went to the cafe, Kate gave a cup to", "io": " James", "s": " Kate", "template_id": "IOI_T6", "corruption": "subject_object_swap"}

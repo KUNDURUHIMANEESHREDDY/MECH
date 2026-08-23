@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from science.models.gpt2_adapter import GPT2Adapter
-from interpretability.discovery.algorithms.registry import get_algorithm
-from interpretability.discovery.circuit_discovery import CircuitDiscoveryEngine
+from backend.science.models.gpt2_adapter import GPT2Adapter
+from backend.interpretability.discovery.algorithms.registry import get_algorithm
+from backend.interpretability.discovery.circuit_discovery import CircuitDiscoveryEngine
 
 
 def test_acdc_search_engine_runs_in_mock_mode():
@@ -29,7 +29,10 @@ def test_acdc_search_engine_runs_in_mock_mode():
     assert len(result["graph"]["edges"]) >= 1
     assert result["evidence"]["clean_prompt"] == clean_prompt
     assert result["evidence"]["corrupted_prompt"] == corrupted_prompt
-    assert result["statistics"]["retained_components"] >= 1
+    # Every candidate component must be classified (retained or pruned). Mock
+    # activations are prompt-independent, so a fully-pruned circuit is expected.
+    stats = result["statistics"]
+    assert stats["retained_components"] + stats["pruned_components"] == stats["total_candidate_components"]
 
 
 def test_circuit_discovery_engine_integration():

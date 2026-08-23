@@ -23,10 +23,18 @@ export interface ModelState {
   error: string | null;
 }
 
+export interface InferenceParams {
+  prompt: string;
+  maxNewTokens?: number;
+  temperature?: number;
+  topK?: number;
+  topP?: number;
+}
+
 export interface ModelStore extends ModelState {
   listModels: () => Promise<void>;
   load: (modelName: string) => Promise<void>;
-  infer: (prompt: string, maxNewTokens?: number) => Promise<ProcessedResult>;
+  infer: (promptOrParams: string | InferenceParams, maxNewTokens?: number) => Promise<ProcessedResult>;
   dispose: () => void;
   clearError: () => void;
 }
@@ -68,10 +76,13 @@ export const useModelStore = create<ModelStore>((set, get) => ({
     }
   },
 
-  infer: async (prompt, maxNewTokens = 10) => {
+  infer: async (promptOrParams, maxNewTokens = 10) => {
     set({ running: true, error: null });
     try {
-      const raw: InferenceResponse = await runInference(prompt, maxNewTokens);
+      const params = typeof promptOrParams === 'string'
+        ? { prompt: promptOrParams, maxNewTokens }
+        : promptOrParams;
+      const raw: InferenceResponse = await runInference(params, params.maxNewTokens ?? maxNewTokens);
       const { modelInfo } = get();
       const numLayers = modelInfo?.num_layers ?? 12;
       const numHeads = modelInfo?.num_heads ?? 12;

@@ -79,8 +79,8 @@ class PluginRegistry:
             if pid in self._plugins:
                 try:
                     self._plugins[pid].on_unload()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Plugin '%s' on_unload() raised: %s", pid, exc)
             self._plugins[pid] = plugin
             try:
                 plugin.on_load()
@@ -110,8 +110,8 @@ class PluginRegistry:
             for pid, plugin in list(self._plugins.items()):
                 try:
                     plugin.on_unload()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Plugin '%s' on_unload() raised: %s", pid, exc)
             self._plugins.clear()
 
     # ------------------------------------------------------------------ #

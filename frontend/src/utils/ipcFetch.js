@@ -35,18 +35,22 @@ async function shimFetch(input, init) {
     }
   }
 
-  const result = await window.desktopApi.httpRequest({
-    method: requestInit.method || 'GET',
-    path: url.pathname + url.search,
-    headers,
-    body: body ?? '',
-  });
+  try {
+    const result = await window.desktopApi.httpRequest({
+      method: requestInit.method || 'GET',
+      path: url.pathname + url.search,
+      headers,
+      body: body ?? '',
+    });
 
-  return new Response(result.body || '', {
-    status: result.status || 200,
-    statusText: result.statusText || '',
-    headers: result.headers || {},
-  });
+    return new Response(result.body || '', {
+      status: result.status || 200,
+      statusText: result.statusText || '',
+      headers: result.headers || {},
+    });
+  } catch (err) {
+    return window.__mechNativeFetch(input, init);
+  }
 }
 
 if (typeof window !== 'undefined' && !window.__mechIpcfetchInstalled) {

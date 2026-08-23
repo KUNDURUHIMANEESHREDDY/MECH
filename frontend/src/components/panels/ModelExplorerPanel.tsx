@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Layers, Flame, Loader2, Play, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { Layers, Flame, Loader2, Play, AlertTriangle, Download, Columns, X } from 'lucide-react';
 import { colors } from '../../design/tokens/colors';
 import { useModel } from '../../shared/hooks/useModel';
 import { useSelectionStore } from '../../shared/stores/selection';
-import type { FC, PanelContext } from '../../shared/types';
+import type { FC, PanelContext, ProcessedResult } from '../../shared/types';
 import { AttentionHeatmap } from '../visualizations/panels/AttentionHeatmap';
 import { ActivationHeatmap } from '../visualizations/panels/ActivationHeatmap';
 import { TokenViewer } from '../visualizations/panels/TokenViewer';
@@ -52,6 +52,12 @@ export const ModelExplorerPanel: FC<PanelContext> = () => {
   const [hovered, setHovered] = useState<number | null>(null);
   const [layerNum, setLayerNum] = useState(0);
   const [headNum, setHeadNum] = useState(0);
+  const [comparisonMode, setComparisonMode] = useState(false);
+  const [secondResult, setSecondResult] = useState<ProcessedResult | null>(null);
+  const [secondPrompt, setSecondPrompt] = useState('The quick brown fox');
+  const [loadingSecond, setLoadingSecond] = useState(false);
+  const [selectedTokens, setSelectedTokens] = useState<Set<number>>(new Set());
+  const heatmapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (model.availableModels.length === 0 && !model.loading) void listModels();
@@ -93,6 +99,57 @@ export const ModelExplorerPanel: FC<PanelContext> = () => {
     clearError();
     await infer(prompt);
   };
+
+  const handleRunComparison = async () => {
+    setLoadingSecond(true);
+    try {
+      const result = await infer(secondPrompt);
+      setSecondResult(result);
+    } finally {
+      setLoadingSecond(false);
+    }
+  };
+
+  const toggleTokenSelection = (index: number) => {
+    setSelectedTokens((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
+  const exportHeatmap = useCallback(() => {
+    if (!heatmapRef.current) return;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    const svgElements = heatmapRef.current.querySelectorAll('svg');
+    if (svgElements.length === 0) return;
+    
+    const svg = svgElements[0];
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const img = new Image();
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    
+    img.onload = () => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      
+      const link = document.createElement('a');
+      link.download = `attention-heatmap-L${layerNum}-H${headNum}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    };
+    img.src = url;
+  }, [layerNum, headNum]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, color: colors.body }}>
@@ -145,11 +202,11 @@ export const ModelExplorerPanel: FC<PanelContext> = () => {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, color: colors.bodyMuted }}>
               <Flame size={13} color={colors.primary} /> Layer
-<select
-              value={layerNum < layers.length ? layerNum : 0}
-              onChange={(e) => selectHead(Number(e.target.value), headNum)}
-              style={selectStyle}
-            >
+              <select
+                value={layerNum < layers.length ? layerNum : 0}
+                onChange={(e) => selectHead(Number(e.target.value), headNum)}
+                style={selectStyle}
+              >
                 {layers.map((l) => (
                   <option key={l.index} value={l.index}>L{l.index}</option>
                 ))}
@@ -164,19 +221,108 @@ export const ModelExplorerPanel: FC<PanelContext> = () => {
               </select>
             </label>
             <span style={{ fontSize: 11, color: colors.bodyMuted }}>L{layer.index}·H{head?.index}</span>
+            
+            <button
+              onClick={() => setComparisonMode(!comparisonMode)}
+              style={{
+                ...btn,
+                background: comparisonMode ? colors.primary : colors.surfacePearl,
+                color: comparisonMode ? colors.onPrimary : colors.ink,
+                border: `1px solid ${comparisonMode ? colors.primary : colors.hairline}`,
+              }}
+            >
+              <Columns size={13} />
+              Compare
+            </button>
+            
+            <button onClick={exportHeatmap} style={{ ...btn, background: colors.surfacePearl, color: colors.ink, border: `1px solid ${colors.hairline}` }}>
+              <Download size={13} />
+              Export
+            </button>
           </div>
 
           {/* Attention */}
           <div style={card}>
             <div style={{ fontWeight: 700, color: colors.ink, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Layers size={14} color={colors.primary} /> Attention · L{layer.index} H{head?.index}
+              <Layers size={14} color={colors.primary} /> BertViz Attention · L{layer.index} H{head?.index}
             </div>
-            <AttentionHeatmap
-              matrix={head?.attentionMatrix ?? []}
-              tokens={tokens}
-              hoveredToken={hovered}
-              onHoverToken={setHovered}
-            />
+            <div ref={heatmapRef}>
+              <AttentionHeatmap
+                matrix={head?.attentionMatrix ?? []}
+                tokens={tokens}
+                hoveredToken={hovered}
+                onHoverToken={setHovered}
+                allLayers={model.result?.layers ?? []}
+                selectedLayer={layer.index}
+                selectedHead={head?.index ?? 0}
+                onSelectLayerHead={selectHead}
+              />
+            </div>
+          </div>
+
+          {/* Comparison Mode */}
+          {comparisonMode && (
+            <div style={card}>
+              <div style={{ fontWeight: 700, color: colors.ink }}>Comparison</div>
+              <textarea
+                value={secondPrompt}
+                onChange={(e) => setSecondPrompt(e.target.value)}
+                rows={2}
+                placeholder="Enter second prompt for comparison..."
+                style={{ width: '100%', boxSizing: 'border-box', padding: 8, borderRadius: 6, border: `1px solid ${colors.hairline}`, fontFamily: 'monospace', fontSize: 12, background: colors.canvas, color: colors.ink }}
+              />
+              <button
+                onClick={handleRunComparison}
+                disabled={loadingSecond}
+                style={{ ...btn, opacity: loadingSecond ? 0.5 : 1 }}
+              >
+                {loadingSecond ? <Loader2 size={13} className="spin" /> : <Play size={13} />}
+                Run Comparison
+              </button>
+              
+              {secondResult && (
+                <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: colors.bodyMuted, marginBottom: 4 }}>Prompt 1</div>
+                    <div style={{ fontSize: 12, color: colors.ink }}>{prompt}</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: colors.bodyMuted, marginBottom: 4 }}>Prompt 2</div>
+                    <div style={{ fontSize: 12, color: colors.ink }}>{secondPrompt}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Token Selection */}
+          <div style={card}>
+            <div style={{ fontWeight: 700, color: colors.ink, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Sequence</span>
+              {selectedTokens.size > 0 && (
+                <span style={{ fontSize: 11, color: colors.primary }}>{selectedTokens.size} selected</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {tokens.map((t, i) => (
+                <div
+                  key={i}
+                  onClick={() => toggleTokenSelection(i)}
+                  style={{
+                    padding: '3px 6px',
+                    borderRadius: 4,
+                    fontSize: 10,
+                    background: selectedTokens.has(i) ? colors.primary : colors.canvas,
+                    color: selectedTokens.has(i) ? colors.onPrimary : colors.ink,
+                    border: `1px solid ${selectedTokens.has(i) ? colors.primary : colors.hairline}`,
+                    cursor: 'pointer',
+                    transition: 'all 0.1s ease',
+                  }}
+                >
+                  {t}
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Activations */}

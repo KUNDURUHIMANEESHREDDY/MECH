@@ -31,6 +31,22 @@ class TraceableEvidenceGraph:
             {"source": "ev_ioi", "target": "pub_ioi", "relation": "substantiates"},
         ]
 
+    def add_evidence(self, node_id: str, claim: str, evidence_data: Dict[str, Any]) -> Dict[str, Any]:
+        node = {
+            "id": node_id,
+            "type": "Evidence",
+            "claim": claim,
+            "data": evidence_data,
+            "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        }
+        self.nodes.append(node)
+        self.edges.append({
+            "source": node_id,
+            "target": "c_ioi",
+            "relation": "supports",
+        })
+        return node
+
     def get_provenance_trace(self, target_id: str = "pub_ioi") -> List[Dict[str, Any]]:
         return list(self.nodes)
 
@@ -40,5 +56,6 @@ class TraceableEvidenceGraph:
             "edges_count": len(self.edges),
             "nodes": self.nodes,
             "edges": self.edges,
-            "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
+            "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         }
+

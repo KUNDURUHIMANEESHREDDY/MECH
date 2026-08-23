@@ -48,4 +48,7 @@ export const colors = {
   pinkSoft: '#fce7f3',
   pinkBorder: '#f9a8d4',
   pinkText: '#9d174d',
+  borderLight: '#e2e8f0',
+  bodyText: '#243044',
+  primarySoft: '#eaf4ff',
 } as const;

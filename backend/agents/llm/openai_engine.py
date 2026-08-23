@@ -173,3 +173,51 @@ class OpenAIEngine(LLMEngine):
             "prompt": "Paris Hilton went to the store.",
             "expected_firing": False
         }
+
+    # ------------------------------------------------------------------
+    # Generic chat completion for Model Interaction feature
+    # ------------------------------------------------------------------
+    def chat(
+        self,
+        prompt: str,
+        system: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 256,
+    ) -> Dict[str, Any]:
+        """Generic chat completion — returns whole answer, not single token."""
+        if not self.api_key:
+            return {"status": "error", "backend": "openai", "error": "OPENAI_API_KEY not set"}
+
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        data = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        req = urllib.request.Request(
+            self.endpoint,
+            data=json.dumps(data).encode("utf-8"),
+            headers=headers,
+        )
+
+        try:
+            with urllib.request.urlopen(req) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                content = result["choices"][0]["message"]["content"].strip()
+            return {"status": "ok", "backend": "openai", "response": content}
+        except urllib.error.URLError as e:
+            return {
+                "status": "error",
+                "backend": "openai",
+                "error": f"OpenAI API call failed: {e}",
+            }

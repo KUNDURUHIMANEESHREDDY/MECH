@@ -20,9 +20,25 @@ class SemanticDriftReport:
     overall_drift: float
     universality_score: float
     shared_concepts: List[str]
+    novel_concepts: List[str]
     missing_concepts: List[str]
     split_concepts: List[Dict[str, Any]]
     merged_concepts: List[Dict[str, Any]]
+    provenance: str = "STATISTICAL_MATCHING"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "model_a": self.model_a,
+            "model_b": self.model_b,
+            "overall_drift": round(self.overall_drift, 4),
+            "universality_score": round(self.universality_score, 4),
+            "shared_concepts": self.shared_concepts,
+            "novel_concepts": self.novel_concepts,
+            "missing_concepts": self.missing_concepts,
+            "split_concepts": self.split_concepts,
+            "merged_concepts": self.merged_concepts,
+            "provenance": self.provenance,
+        }
 
 
 class ComparativeDiscoveryEngine:
@@ -41,16 +57,19 @@ class ComparativeDiscoveryEngine:
             overall_drift=drift_data["drift_score"],
             universality_score=drift_data["persistence"],
             shared_concepts=drift_data["shared_concepts"],
-            missing_concepts=[],
-            split_concepts=drift_data["split_concepts"],
-            merged_concepts=[]
+            novel_concepts=drift_data.get("novel_concepts", []),
+            missing_concepts=drift_data.get("missing_concepts", []),
+            split_concepts=drift_data.get("split_concepts", []),
+            merged_concepts=[],
+            provenance="STATISTICAL_MATCHING",
         )
+
 
     def generate_publication_figures(self, report: SemanticDriftReport) -> Dict[str, Any]:
         """Emits data structures for cross-model evolution graphs and dendrograms."""
         return {
             "evolution_graph": {
                 "nodes": [report.model_a, report.model_b],
-                "edges": [{"from": report.model_a, "to": report.model_b, "weight": report.universality_score}]
+                "edges": [{"from": report.model_a, "to": report.model_b, "weight": report.universality_score}],
             }
         }

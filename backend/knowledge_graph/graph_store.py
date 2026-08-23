@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from .ontology import NodeType, EdgeType
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -138,8 +141,8 @@ class GraphStore:
                         self.adjacency_in[edge.target_id] = set()
                     self.adjacency_in[edge.target_id].add(edge.edge_id)
                 return
-            except Exception:
-                pass
+            except (ValueError, KeyError, TypeError) as exc:
+                logger.warning("Failed to load knowledge graph from disk, using baseline: %s", exc)
 
         self._build_default_baseline()
 

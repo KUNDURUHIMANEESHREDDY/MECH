@@ -6,19 +6,37 @@ loaded HuggingFace GPT-2 model — nothing is hardcoded per neuron/layer.
 from __future__ import annotations
 
 import math
+import logging
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    import numpy as np
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+logger = logging.getLogger("MECH.services.gpt2_engine")
 
+ML_AVAILABLE = False
+np = None  # type: ignore
+torch = None  # type: ignore
+AutoModelForCausalLM = None  # type: ignore
+AutoTokenizer = None  # type: ignore
+
+
+def _ensure_ml_imported() -> bool:
+    global ML_AVAILABLE, np, torch, AutoModelForCausalLM, AutoTokenizer
+    if ML_AVAILABLE:
+        return True
+    try:
+        import numpy as _np
+        import torch as _torch
+        from transformers import AutoModelForCausalLM as _AutoModelForCausalLM, AutoTokenizer as _AutoTokenizer
+    except (ImportError, OSError) as exc:
+        logger.debug("ML imports unavailable: %s", exc)
+        return False
+    np = _np
+    torch = _torch
+    AutoModelForCausalLM = _AutoModelForCausalLM
+    AutoTokenizer = _AutoTokenizer
     ML_AVAILABLE = True
-except Exception:
-    ML_AVAILABLE = False
-    np = None  # type: ignore
-    torch = None  # type: ignore
+    return True
+
 
 _lock = threading.Lock()
 _model: Any = None
@@ -27,11 +45,11 @@ _cache: Dict[str, Any] = {}
 
 
 def is_available() -> bool:
-    return ML_AVAILABLE
+    return _ensure_ml_imported()
 
 
 def _ensure_loaded() -> Optional[Dict[str, Any]]:
-    if not ML_AVAILABLE:
+    if not _ensure_ml_imported():
         return {"status": "error", "error": "torch/transformers not installed"}
     if _model is None:
         r = load()
@@ -42,7 +60,7 @@ def _ensure_loaded() -> Optional[Dict[str, Any]]:
 
 def load() -> Dict[str, Any]:
     global _model, _tokenizer
-    if not ML_AVAILABLE:
+    if not _ensure_ml_imported():
         return {"status": "error", "error": "torch/transformers not installed"}
     if _model is not None:
         return info()
@@ -55,8 +73,9 @@ def load() -> Dict[str, Any]:
                 _model = AutoModelForCausalLM.from_pretrained(
                     "gpt2", local_files_only=True, attn_implementation="eager"
                 )
-            except Exception:
+            except (OSError, EnvironmentError) as exc:
                 # Fall back to download if local cache is missing
+                logger.debug("Local model load failed, attempting download: %s", exc)
                 _tokenizer = AutoTokenizer.from_pretrained("gpt2")
                 _model = AutoModelForCausalLM.from_pretrained(
                     "gpt2", attn_implementation="eager"
@@ -342,6 +361,12 @@ def run_prompt(prompt: str) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
         return err
+    if not prompt or not str(prompt).strip():
+        return {
+            "status": "error",
+            "error_code": "INVALID_INPUT",
+            "error": "Prompt cannot be empty or whitespace.",
+        }
     c = _forward(prompt)
     logits = c["logits"]
     probs = torch.softmax(logits, dim=-1)
@@ -365,6 +390,116 @@ def run_prompt(prompt: str) -> Dict[str, Any]:
         "n_layers": _n_layers(),
         "d_mlp": _d_mlp(),
         "d_model": _d_model(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Real logit-lens trajectory (no fabricated predictions)
+# ---------------------------------------------------------------------------
+def logit_lens_trajectory(prompt: str, top_k: int = 3) -> Dict[str, Any]:
+    """Real per-layer logit-lens: projects each cached residual through the
+    unembedding matrix and returns the actual top tokens per layer."""
+    err = _ensure_loaded()
+    if err:
+        return err
+    if not prompt or not str(prompt).strip():
+        return {"status": "error", "error_code": "INVALID_INPUT", "error": "Prompt cannot be empty."}
+
+    c = _forward(prompt)
+    W_U = getattr(_model, "lm_head", None)
+    W_U = W_U.weight if W_U is not None else _model.transformer.wte.weight
+    traj = []
+    last_token_next = _decode(int(torch.argmax(c["logits"])))
+    for li in range(_n_layers()):
+        resid = torch.tensor(c["hidden"][li + 1])[-1]  # last-token residual after layer li
+        logits_l = (resid.float() @ W_U.float().T).detach()
+        probs = torch.softmax(logits_l, dim=-1)
+        topk = torch.topk(probs, top_k)
+        toks = [
+            {
+                "token": _decode(int(i)),
+                "probability": round(float(probs[i]), 4),
+                "logit": round(float(logits_l[i]), 4),
+            }
+            for i in topk.indices
+        ]
+        traj.append({"layer": li, "top": toks})
+    return {
+        "status": "ok",
+        "prompt": prompt,
+        "trajectory": traj,
+        "next_token": last_token_next,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Real activation patching (causal ablation) — no fabricated metrics
+# ---------------------------------------------------------------------------
+def run_activation_patch(
+    base_prompt: str,
+    source_prompt: str,
+    patch_components: "set",
+    target_token: str = " Paris",
+) -> "Dict[str, Any]":
+    """Runs the model on `base_prompt` while substituting the cached activations of
+    `patch_components` (a set of (layer, 'attn'|'mlp') tuples) from `source_prompt`.
+    Returns the real logit of `target_token` under this patched forward pass.
+
+    This is genuine causal intervention (activation patching), not a heuristic.
+    """
+    err = _ensure_loaded()
+    if err:
+        return err
+    device = next(_model.parameters()).device
+    base_in = _tokenizer(base_prompt, return_tensors="pt").to(device)
+    src_in = _tokenizer(source_prompt, return_tensors="pt").to(device)
+
+    src_cache: Dict[tuple, Any] = {}
+
+    def _capture(kind):
+        def _h(_mod, _inp, out):
+            src_cache[kind] = out[0].detach() if kind[1] == "attn" else out.detach()
+        return _h
+
+    hooks = []
+    try:
+        with torch.no_grad():
+            for li, block in enumerate(_model.transformer.h):
+                hooks.append(block.attn.register_forward_hook(_capture((li, "attn"))))
+                hooks.append(block.mlp.register_forward_hook(_capture((li, "mlp"))))
+            _model(**src_in)
+            for h in hooks:
+                h.remove()
+            hooks = []
+
+            def _patch(kind):
+                def _h(_mod, _inp, out):
+                    if kind in patch_components:
+                        if kind[1] == "attn":
+                            return (src_cache[kind], None)
+                        return src_cache[kind]
+                    return out
+                return _h
+
+            for li, block in enumerate(_model.transformer.h):
+                hooks.append(block.attn.register_forward_hook(_patch((li, "attn"))))
+                hooks.append(block.mlp.register_forward_hook(_patch((li, "mlp"))))
+            out = _model(**base_in)
+            for h in hooks:
+                h.remove()
+            hooks = []
+    finally:
+        for h in hooks:
+            try:
+                h.remove()
+            except Exception:
+                pass
+
+    logits = out.logits[0, -1]
+    return {
+        "status": "ok",
+        "target_token": target_token,
+        "target_logit": round(float(_token_logit(target_token, logits)), 4),
     }
 
 
@@ -1083,10 +1218,20 @@ def ioi(io_name: str, subj_name: str) -> Dict[str, Any]:
     }
 
 
-def infer(prompt: str, model_name: str) -> Dict[str, Any]:
+def infer(
+    prompt: str,
+    model_name: str,
+    temperature: float = 1.0,
+    top_k: int = 50,
+    top_p: float = 0.9,
+    max_new_tokens: int = 10,
+) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
         return err
+
+    if not prompt or not prompt.strip():
+        raise ValueError("INVALID_INPUT: Prompt must not be empty or whitespace only.")
     c = _forward(prompt)
     logits = c["logits"]
     next_id = int(torch.argmax(torch.softmax(logits, dim=-1)))
@@ -1134,4 +1279,69 @@ def infer(prompt: str, model_name: str) -> Dict[str, Any]:
         "n_layers": _n_layers(),
         "d_mlp": _d_mlp(),
         "d_model": _d_model(),
+    }
+
+
+def generate(
+    prompt: str,
+    model_name: str = "gpt2",
+    max_new_tokens: int = 64,
+    temperature: float = 0.7,
+    do_sample: bool = True,
+    top_k: int = 50,
+    top_p: float = 0.9,
+) -> Dict[str, Any]:
+    """Generate full text continuation (multi-token), not just single next token."""
+    err = _ensure_loaded()
+    if err:
+        return err
+
+    inputs = _tokenizer(prompt, return_tensors="pt")
+    device = next(_model.parameters()).device
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    start_len = inputs["input_ids"].shape[1]
+
+    with torch.no_grad():
+        out_ids = _model.generate(
+            inputs["input_ids"],
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+            temperature=temperature if do_sample else None,
+            top_k=top_k if do_sample else None,
+            top_p=top_p if do_sample else None,
+            pad_token_id=_tokenizer.eos_token_id,
+            eos_token_id=_tokenizer.eos_token_id,
+            return_dict_in_generate=True,
+            output_scores=True,
+        )
+
+    generated_ids = out_ids.sequences[0][start_len:].tolist()
+    generated_text = _tokenizer.decode(generated_ids, skip_special_tokens=True)
+    generated_tokens = [
+        {"text": _decode(i), "id": i} for i in generated_ids
+    ]
+
+    # Also get the original prompt tokens
+    prompt_ids = inputs["input_ids"][0].tolist()
+    prompt_tokens = [
+        {"text": _decode(i), "id": i} for i in prompt_ids
+    ]
+
+    # Combine for full text
+    full_text = _tokenizer.decode(out_ids.sequences[0], skip_special_tokens=True)
+
+    return {
+        "status": "ok",
+        "model_name": model_name,
+        "backend": "gpt2",
+        "prompt": prompt,
+        "response": generated_text,  # just the continuation
+        "full_text": full_text,  # prompt + continuation
+        "prompt_tokens": prompt_tokens,
+        "generated_tokens": generated_tokens,
+        "n_generated": len(generated_tokens),
+        "n_prompt": len(prompt_tokens),
+        "temperature": temperature if do_sample else 0.0,
+        "max_new_tokens": max_new_tokens,
     }

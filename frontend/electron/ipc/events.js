@@ -93,8 +93,19 @@ function registerEventHandlers({ ipcMain, logger }) {
 
   ipcMain.handle('system:openExternal', async (_event, url) => {
     const { shell } = require('electron');
-    await shell.openExternal(url);
-    return { ok: true };
+    // Only allow http(s) links to leave the app. Reject file:, javascript:,
+    // data: and any other scheme that shell.openExternal would otherwise honour.
+    let safe = false;
+    try {
+      const parsed = new URL(url);
+      safe = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      safe = false;
+    }
+    if (safe) {
+      await shell.openExternal(url);
+    }
+    return { ok: safe };
   });
   ipcMain.handle('system:showInFolder', async (_event, p) => {
     const { shell } = require('electron');

@@ -78,17 +78,16 @@ class RuntimeDecisionEngine:
         n3 = DecisionGraphNode("KnowledgeRetrieval", 0.92, {"model_name": model_name}, {"found_profile": kb_prof is not None}, now_str)
 
         # 4. Pareto Frontier Generation
+        # NOTE: These are placeholder estimates. Real implementation should compute
+        # from actual hardware specs, model size, and historical performance data.
         pareto_options = [
-            {"label": "Cheapest", "backend": "Kubernetes", "gpu": "NVIDIA A10G", "precision": "INT8", "estimated_runtime_sec": 78.0, "estimated_cost_usd": 0.08},
-            {"label": "Balanced", "backend": "Ray", "gpu": "NVIDIA A100", "precision": "FP16", "estimated_runtime_sec": 52.0, "estimated_cost_usd": 0.14},
-            {"label": "Fastest", "backend": "Ray_H100", "gpu": "NVIDIA H100", "precision": "FP16", "estimated_runtime_sec": 42.0, "estimated_cost_usd": 0.25},
+            {"label": "Cheapest", "backend": "Kubernetes", "gpu": "NVIDIA A10G", "precision": "INT8", "estimated_runtime_sec": None, "estimated_cost_usd": None, "note": "Estimates unavailable - requires hardware profiling"},
+            {"label": "Balanced", "backend": "Ray", "gpu": "NVIDIA A100", "precision": "FP16", "estimated_runtime_sec": None, "estimated_cost_usd": None, "note": "Estimates unavailable - requires hardware profiling"},
+            {"label": "Fastest", "backend": "Ray_H100", "gpu": "NVIDIA H100", "precision": "FP16", "estimated_runtime_sec": None, "estimated_cost_usd": None, "note": "Estimates unavailable - requires hardware profiling"},
         ]
 
         # 5. Counterfactual evaluations
-        counterfactuals = [
-            {"backend": "Kubernetes", "why_not": "Chosen for Lowest Cost policy; slower than Ray by 26s.", "runtime_diff_sec": 26.0, "cost_diff_usd": -0.06},
-            {"backend": "Ray_H100", "why_not": "Fastest completion option; rejected under Lowest Cost policy ($0.25 vs $0.08).", "runtime_diff_sec": -36.0, "cost_diff_usd": 0.17},
-        ]
+        counterfactuals = []
 
         # Arbitrate primary choice based on Policy Objective
         if user_objective == "Lowest Cost":

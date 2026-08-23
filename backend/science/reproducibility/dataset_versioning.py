@@ -12,6 +12,9 @@ import sys
 import os
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -48,7 +51,8 @@ def _safe_version(pkg: str) -> str:
     try:
         import importlib.metadata
         return importlib.metadata.version(pkg)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Swallowed exception: %s", exc)
         return "not-installed"
 
 

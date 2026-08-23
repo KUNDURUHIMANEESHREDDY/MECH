@@ -1,0 +1,492 @@
+Phase 60 is the point where MECH stops merely repairing a theory and starts maintaining an evolving theory population.
+
+The reported Phase 60 result is strong: MECH revised T
+0
+	​
+
+→T
+1
+	​
+
+ after a sparse-MoE failure, generated competing explanations, selected a discriminating experiment with 0.92 bits EIG, and retained prior performance while improving fresh-holdout performance. The report gives RSR 100%, RS 100%, PI 98.4%, FRR 0%, and 100% CI coverage. 
+
+Pasted markdown
+
+Phase 61 — Multi-Generation Autonomous Theory Branching & Open-World Tournament
+
+The key transition should be:
+
+single revision chain T
+0
+	​
+
+→T
+1
+	​
+
+⟶branching theory population
+	​
+
+
+Instead of replacing T
+0
+	​
+
+ with T
+1
+	​
+
+, MECH should preserve multiple plausible descendants:
+
+                         T0
+                    base theory
+                  /     |      \
+                T1a    T1b     T1c
+              MoE     scaling  substrate
+               │        │        │
+            T2a/T2b   T2c     T2d/T2e
+               \        |        /
+                \       |       /
+                 OPEN-WORLD
+                 TOURNAMENT
+                       │
+             discriminating experiments
+                       │
+                 ┌─────┴─────┐
+                 ▼           ▼
+              survives     falsified
+                 │
+                 ▼
+          minimal surviving
+             explanation
+The scientific objective
+
+Phase 61 should answer:
+
+Can MECH maintain multiple competing theories across generations, actively test them against one another, discover genuinely new branches when residuals demand them, and avoid collapsing prematurely onto the first plausible explanation?
+
+That is a much harder problem than Phase 60.
+
+What should be built
+1. theory_population_manager.py
+
+Replace the single active theory pointer with an immutable population:
+
+TheoryPopulation
+├── generation
+├── theories[]
+├── parent_hash
+├── posterior_weights
+├── validity_domains
+├── unresolved_boundaries
+└── population_hash
+
+Every theory remains immutable.
+
+A revision creates a child, not an overwrite:
+
+T
+i
+	​
+
+→{T
+i1
+	​
+
+,T
+i2
+	​
+
+,…,T
+ik
+	​
+
+}
+
+This preserves alternative explanations rather than destroying them.
+
+2. theory_branching_engine.py
+
+Generate branches from a failure or ambiguity.
+
+Example:
+
+T0 failure
+   │
+   ├── branch A: routing correction
+   ├── branch B: scale-dependent correction
+   ├── branch C: polysemantic interaction
+   └── branch D: new primitive
+
+Each branch must contain:
+
+hypothesis+predictions+complexity+validity domain+required experiments
+
+Do not let the branch generator simply create cosmetic variants.
+
+3. open_world_tournament_engine.py
+
+This is the core Phase 61 engine.
+
+It should repeatedly select experiments that maximize discrimination across all surviving theories:
+
+E
+∗
+=arg
+E
+max
+	​
+
+I(E;T∣E)
+
+where T is the current theory population.
+
+The experiment is not chosen to make one preferred theory win. It is chosen to maximize information about which theory survives.
+
+4. theory_prediction_matrix.py
+
+For every candidate experiment:
+
+                 Experiment E1   E2   E3   E4
+Theory T1             4.2       3.1  0.8  1.2
+Theory T2             1.3       3.0  2.4  1.1
+Theory T3             4.0       0.7  2.1  1.3
+Theory T4             0.9       3.2  0.6  4.8
+
+This gives MECH a direct view of where theories disagree.
+
+Then:
+
+Disagreement(E)=Var
+T
+	​
+
+[E(y∣T)]
+
+and combine this with:
+
+EIG
+
+experiment cost
+
+validity
+
+calibration
+
+expected falsification power
+
+5. theory_complexity_engine.py
+
+Phase 37 already had explanatory compression.
+
+Phase 61 should make complexity generation-aware.
+
+Track:
+
+C(T)=C
+nodes
+	​
+
++C
+edges
+	​
+
++C
+parameters
+	​
+
++C
+new primitives
+	​
+
++C
+exceptions
+	​
+
+
+and penalize theories that accumulate special cases.
+
+A theory should not survive simply because it can explain everything by adding exceptions.
+
+6. theory_tournament_scorer.py
+
+Don't select theories using prediction accuracy alone.
+
+Use something like:
+
+U(T)=F
+causal
+	​
+
++F
+predictive
+	​
+
++F
+OOD
+	​
+
++F
+replication
+	​
+
+−λC(T)−γU
+assumptions
+	​
+
+
+while keeping posterior belief separate:
+
+P(T∣E)
+
+That preserves the distinction between:
+
+scientific support and model preference.
+
+7. theory_speciation_engine.py
+
+This is a particularly important addition.
+
+Sometimes two theories should not collapse into one.
+
+MECH should detect:
+
+T1 works for Transformer dense models
+T2 works for MoE
+T3 works for SSM
+
+and conclude:
+
+substrate-conditioned theory family
+	​
+
+
+rather than forcing a universal theory.
+
+This connects directly to the boundary behavior established in previous phases.
+
+8. theory_extinction_engine.py
+
+When a theory loses:
+
+ACTIVE
+   ↓
+WEAKENED
+   ↓
+SUPERSEDED
+   ↓
+FALSIFIED_REVERTED
+
+But never delete it.
+
+Record exactly:
+
+why eliminated
+which experiment eliminated it
+which competing theory won
+posterior before
+posterior after
+confidence
+
+That makes the tournament scientifically auditable.
+
+9. open_world_theory_generator.py
+
+This is what makes Phase 61 genuinely new.
+
+The tournament should periodically request new theories that are not descendants of the current population when:
+
+T
+max
+	​
+
+P(E∣T)
+
+is still poor, or when the residual is unexplained.
+
+So:
+
+known theories fail
+       ↓
+residual remains
+       ↓
+new hypothesis generation
+       ↓
+new theory enters population
+       ↓
+tournament
+
+That creates open-ended theory evolution, rather than endless refinement of the first theory family.
+
+The critical experiment for Phase 61
+
+I would make one benchmark deliberately adversarial:
+
+Start with three plausible theories
+T1 — simple transportability law
+T2 — substrate-conditioned law
+T3 — new primitive / mechanism
+
+Give MECH an open-world task where:
+
+all three explain existing observations,
+
+their predictions diverge on several interventions,
+
+one is simplest,
+
+one is most flexible,
+
+one is initially least probable but potentially correct.
+
+Then let the tournament run without a manually specified correct answer.
+
+MECH should:
+
+generate the prediction matrix;
+
+choose the most discriminating experiment;
+
+execute it;
+
+update posteriors;
+
+eliminate or retain theories;
+
+generate a new branch if all fail;
+
+repeat until a stopping criterion is met.
+
+Phase 61 metrics
+
+Do not use another single headline accuracy.
+
+Use a population-level scorecard.
+
+Theory Survival Calibration
+TSC=calibration of P(T∣E)
+Tournament Efficiency
+TE=
+causal experiments
+information gained
+	​
+
+Theory Selection Accuracy
+TSA=P(correct theory retained)
+Premature Collapse Rate
+PCR=P(true theory discarded before discrimination)
+
+This one is very important.
+
+Branching Quality
+BQ=
+total generated theories
+useful distinct theories
+	​
+
+Open-World Recovery
+OWR=P(new correct theory generated after population failure)
+Complexity Efficiency
+CE=
+ΔC(T)
+validated explanatory improvement
+	​
+
+Phase 61 success criteria
+
+I would define a preregistered gate such as:
+
+PHASE 61 TOURNAMENT CERTIFICATE
+
+
+✓ ≥90% correct theory retention
+✓ ≥90% discriminating-experiment selection
+✓ ≤5% premature theory collapse
+✓ ≤5% false theory elimination
+✓ ≥90% abstention when population is underdetermined
+✓ ≥90% successful recovery of missing theory after population failure
+✓ no deletion of falsified theory lineage
+✓ complexity penalty enforced
+✓ ≥2 generations of theory evolution
+✓ at least one branch eliminated by prospective evidence
+✓ at least one branch survives on fresh holdouts
+
+The two-generation requirement matters. Otherwise Phase 61 is just Phase 60 with multiple candidates.
+
+Phase 61 should integrate everything you've built
+                    THEORY POPULATION
+                           │
+         ┌─────────────────┼─────────────────┐
+         ▼                 ▼                 ▼
+       Theory A           Theory B          Theory C
+         │                 │                 │
+         └─────────────────┼─────────────────┘
+                           ▼
+                  Prediction Matrix
+                           │
+                           ▼
+                     Max-EIG Planner
+                           │
+                           ▼
+                 External Experiment
+                           │
+                    ┌──────┴──────┐
+                    ▼             ▼
+                 Evidence       Failure
+                    │             │
+                    ▼             ▼
+               Posterior       Residual
+                 update           │
+                    │             ▼
+                    │       New theory generation
+                    │             │
+                    └──────┬──────┘
+                           ▼
+                    Next generation
+                           │
+                           ▼
+                     TOURNAMENT
+The deeper milestone
+
+Phase 60 established:
+
+MECH can revise a theory
+	​
+
+
+Phase 61 should establish:
+
+MECH can maintain, compete, branch, eliminate, and regenerate theories autonomously
+	​
+
+
+That's the natural next scientific boundary.
+
+And importantly, do not make Phase 61 aim for one final universal theory. Your architecture should be comfortable ending with:
+
+{T
+dense
+	​
+
+,T
+MoE
+	​
+
+,T
+SSM
+	​
+
+}
+
+when the evidence supports substrate-conditioned mechanisms.
+
+That would be scientifically stronger than forcing:
+
+T
+universal
+	​
+
+
+just because the system wants one answer.
+
+Phase 60's reported 217/217 regression state gives you a strong software foundation; Phase 61 should now test epistemic population dynamics, not just add another validation score.

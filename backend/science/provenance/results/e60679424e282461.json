@@ -1,0 +1,107 @@
+{
+  "experiment_id": "e60679424e282461",
+  "experiment_type": "causal_circuit",
+  "timestamp_utc": "2026-08-17T00:00:00Z",
+  "mech_version": "2.0.0",
+  "device": "cpu",
+  "precision": "float32",
+  "library_versions": {
+    "torch": "2.13.0+cpu",
+    "transformer_lens": "unknown",
+    "sae_lens": "6.49.1",
+    "bertviz": "unknown",
+    "circuitsvis": "1.43.3",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "python": "3.13.15"
+  },
+  "model_id": "gpt2",
+  "model_weights_sha256": "ioi_benchmark_run",
+  "tokenizer_hash": "855ec41a9d90094e",
+  "sae_id": null,
+  "sae_weights_sha256": null,
+  "prompt_dataset_hash": "ea7a7c932785351712e89f10bf33af55b6b1d21f4692c233260b9351f4d5bf02",
+  "prompts_used": [
+    "When Mary and John went to the store, John gave a drink to",
+    "When Tom and Lisa went to the park, Tom gave a gift to",
+    "When Alice and Bob went to the school, Bob gave a book to",
+    "When David and Emma went to the office, David gave a letter to",
+    "When Peter and Sarah went to the lab, Sarah gave a note to",
+    "When James and Kate went to the cafe, James gave a cup to"
+  ],
+  "random_seeds": [
+    42
+  ],
+  "intervention_specification": {
+    "task": "IOI",
+    "corruption": "subject_object_swap"
+  },
+  "baseline_measurements": {
+    "mean_logit_diff": 2.9311
+  },
+  "raw_effect_measurements": [
+    2.47654,
+    4.066093,
+    -3.750031,
+    5.036568,
+    0.256088,
+    9.501541
+  ],
+  "control_distribution": {
+    "n_controls": 6,
+    "raw_values": [
+      2.47654,
+      4.066093,
+      -3.750031,
+      5.036568,
+      0.256088,
+      9.501541
+    ],
+    "mean": 2.931133,
+    "std": 4.100645,
+    "median": 3.271317,
+    "percentile_95": 8.385298,
+    "percentile_99": 9.278292
+  },
+  "replication_measurements": [
+    {
+      "template": "IOI_T1",
+      "logit_diff": 2.4765
+    },
+    {
+      "template": "IOI_T2",
+      "logit_diff": 4.0661
+    },
+    {
+      "template": "IOI_T3",
+      "logit_diff": -3.75
+    },
+    {
+      "template": "IOI_T4",
+      "logit_diff": 5.0366
+    },
+    {
+      "template": "IOI_T5",
+      "logit_diff": 0.2561
+    },
+    {
+      "template": "IOI_T6",
+      "logit_diff": 9.5015
+    }
+  ],
+  "bootstrap_statistics": {
+    "n_bootstrap": 500,
+    "effect_size": 2.931133,
+    "ci_lower": -0.356294,
+    "ci_upper": 6.415712,
+    "ci_width": 6.772006
+  },
+  "spearman_rho": null,
+  "spearman_p_value": null,
+  "pearson_r": null,
+  "dla_approximation_quality": null,
+  "evidence_level": "SUPPORTED",
+  "falsification_status": "SUPPORTED",
+  "is_reproducible": true,
+  "statistical_caveat": "IOI benchmark: mean logit diff=2.9311 95%CI=[-0.3563,6.4157]. Cross-template variance=16.815287. Reference circuit (Wang et al.) applicable to GPT-2 small: True. Dataset SHA-256=ea7a7c932785..."
+}

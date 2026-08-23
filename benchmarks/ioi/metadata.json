@@ -1,0 +1,1 @@
+{"dataset_id": "ioi_v1", "version": "1.0", "description": "Frozen IOI indirect-object identification benchmark. Corruption: subject_object_swap.", "reference_circuit": "Wang et al. 2022 / Anthropic GPT-2 small IOI circuit", "templates_sha256": "COMPUTED_ON_LOAD", "corruptions_sha256": "COMPUTED_ON_LOAD"}

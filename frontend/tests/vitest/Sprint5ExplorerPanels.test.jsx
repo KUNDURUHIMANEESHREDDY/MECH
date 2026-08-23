@@ -1,9 +1,17 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { PaperReproductionView } from '../../src/components/PaperReproductionView';
+import { PluginSDKView } from '../../src/components/PluginSDKView';
 
-import { describe, it } from 'vitest';
+describe('Sprint5ExplorerPanels', () => {
+  it('renders PaperReproductionView with paper benchmarks', () => {
+    render(<PaperReproductionView />);
+    expect(screen.getByText(/Paper Reproduction/i)).toBeInTheDocument();
+  });
 
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+  it('renders PluginSDKView component', () => {
+    render(<PluginSDKView />);
+    expect(screen.getByText(/Plugins/i)).toBeInTheDocument();
+  });
 });

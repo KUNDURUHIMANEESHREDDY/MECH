@@ -3,11 +3,8 @@ import { commandManager } from '../shared/managers/commandManager';
 import { sessionManager } from '../shared/managers/sessionManager';
 
 export interface AppState {
-  // UI state
+  // Navigation
   activePage: string;
-  sidebarCollapsed: boolean;
-  activityCollapsed: boolean;
-  commandPaletteOpen: boolean;
 
   // Model state
   activeModel: string | null;
@@ -32,9 +29,6 @@ export interface AppState {
 
   // Actions
   setActivePage: (page: string) => void;
-  toggleSidebar: () => void;
-  toggleActivity: () => void;
-  setCommandPaletteOpen: (open: boolean) => void;
   setActiveModel: (model: string | null) => void;
   setPythonStatus: (status: boolean) => void;
   setGpuUtil: (util: number | null) => void;
@@ -43,10 +37,10 @@ export interface AppState {
   clearConsole: () => void;
   setSelectedLayer: (layer: number | null) => void;
   setSelectedHead: (head: number | null) => void;
-  openPanel: (panelId: string) => void;
 }
 
 const PAGES = {
+  aiassistant: { label: 'AI Research Assistant', path: '/aiassistant' },
   workspace: { label: 'Workspace', path: '/workspace' },
   models: { label: 'Models', path: '/models' },
   explorer: { label: 'Model Explorer', path: '/explorer' },
@@ -75,11 +69,8 @@ const PAGES = {
   recent: { label: 'Recent Files', path: '/recent' },
 };
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set) => ({
   activePage: 'workspace',
-  sidebarCollapsed: false,
-  activityCollapsed: false,
-  commandPaletteOpen: false,
   activeModel: null,
   pythonStatus: false,
   gpuUtil: null,
@@ -98,9 +89,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activePage: page });
     commandManager.publish('page.changed', { page });
   },
-  toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-  toggleActivity: () => set((state) => ({ activityCollapsed: !state.activityCollapsed })),
-  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   setActiveModel: (model) => set({ activeModel: model }),
   setPythonStatus: (status) => set({ pythonStatus: status }),
   setGpuUtil: (util) => set({ gpuUtil: util }),
@@ -112,7 +100,4 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearConsole: () => set({ consoleLogs: [] }),
   setSelectedLayer: (layer) => set((state) => ({ selection: { ...state.selection, layer } })),
   setSelectedHead: (head) => set((state) => ({ selection: { ...state.selection, head } })),
-  openPanel: (panelId) => {
-    commandManager.publish('panel.opened', { panelId });
-  },
 }));

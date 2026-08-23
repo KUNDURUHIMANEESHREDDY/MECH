@@ -89,8 +89,9 @@ class MechanismRegistry:
             "scientific_quality_score": scientific_quality_score,
             "expected_impact_score": expected_impact_score,
             "status": "Validated",
-            "registered_at": _dt.datetime.utcnow().isoformat() + "Z",
+            "registered_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "provenance": asdict(prov_obj),
+
         }
         self.mechanisms[mechanism_id] = entry
         return entry

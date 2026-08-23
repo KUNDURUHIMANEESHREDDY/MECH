@@ -1,9 +1,11 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { ReasoningTraceView } from '../../src/components/ReasoningTraceView';
 
-import { describe, it } from 'vitest';
-
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+describe('ReasoningTraceView', () => {
+  it('renders reasoning timeline title and filters', () => {
+    render(<ReasoningTraceView />);
+    expect(screen.getByText(/Reasoning Trace/i)).toBeInTheDocument();
+  });
 });

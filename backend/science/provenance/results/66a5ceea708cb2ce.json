@@ -1,0 +1,71 @@
+{
+  "experiment_id": "66a5ceea708cb2ce",
+  "experiment_type": "induction_head",
+  "timestamp_utc": "2026-08-17T00:00:00Z",
+  "mech_version": "2.0.0",
+  "device": "cpu",
+  "precision": "float32",
+  "library_versions": {
+    "torch": "2.13.0+cpu",
+    "transformer_lens": "unknown",
+    "sae_lens": "6.49.1",
+    "bertviz": "unknown",
+    "circuitsvis": "1.43.3",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "python": "3.13.15"
+  },
+  "model_id": "gpt2",
+  "model_weights_sha256": "test_sha256",
+  "tokenizer_hash": "test_tok_sha256",
+  "sae_id": null,
+  "sae_weights_sha256": null,
+  "prompt_dataset_hash": "cb2fea287ffb357f914bffe2f58c7583bb74a60f3f96f259866c94b77a843a2d",
+  "prompts_used": [
+    "test prompt"
+  ],
+  "random_seeds": [
+    42
+  ],
+  "intervention_specification": {
+    "layer": 5,
+    "head": 5
+  },
+  "baseline_measurements": {
+    "prefix_attention_score": 0.42
+  },
+  "raw_effect_measurements": [
+    0.25,
+    0.3,
+    0.28
+  ],
+  "control_distribution": {
+    "n_controls": 3,
+    "raw_values": [
+      0.01,
+      0.02,
+      0.015
+    ],
+    "mean": 0.015,
+    "std": 0.004082,
+    "median": 0.015,
+    "percentile_95": 0.0195,
+    "percentile_99": 0.0199
+  },
+  "replication_measurements": [],
+  "bootstrap_statistics": {
+    "n_bootstrap": 1000,
+    "effect_size": 0.276667,
+    "ci_lower": 0.25,
+    "ci_upper": 0.3,
+    "ci_width": 0.05
+  },
+  "spearman_rho": null,
+  "spearman_p_value": null,
+  "pearson_r": null,
+  "dla_approximation_quality": null,
+  "evidence_level": "SUPPORTED",
+  "falsification_status": "SUPPORTED",
+  "is_reproducible": true,
+  "statistical_caveat": "Test caveat for Phase 13 API boundary test."
+}

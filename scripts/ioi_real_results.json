@@ -1,0 +1,36 @@
+{
+  "experiment": "Real IOI Production Run",
+  "model": "gpt2-small",
+  "timestamp": "2026-08-20T13:07:37.798573",
+  "data": {
+    "subject_prompt": "When Mary and John went to the store, John gave a drink to",
+    "control_prompt": "When Mary and John went to the store, Mary gave a drink to",
+    "subject_top_token": " Mary",
+    "control_top_token": " John",
+    "activations_sample": [
+      0.4597,
+      -0.2731,
+      0.6932,
+      0.7852,
+      -0.919,
+      -1.4482,
+      -0.9973,
+      -0.5754,
+      -4.1049,
+      1.5965
+    ],
+    "attention_heads": 12,
+    "intervention_deltas": [
+      0.022316,
+      0.08886,
+      -0.008369,
+      0.729736,
+      -0.382347,
+      0.457458
+    ],
+    "control_mean_delta": 0.151275634765625,
+    "control_std_delta": 0.38964878030871847,
+    "cohens_d": 0.3882358739728876,
+    "manifest_hash": "5a291902e8eb3fef24c67cc57bf9484cae220510a7f6a08325232c64099b93f4"
+  }
+}

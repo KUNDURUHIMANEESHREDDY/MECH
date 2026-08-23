@@ -24,6 +24,9 @@ import torch
 
 from .event_bus import bus, SESSION_CREATED, SESSION_CLOSED
 from .errors import SessionNotFoundError
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 _DB_PATH = os.environ.get("MODEL_EXPLORER_DB", str(Path(__file__).parent.parent / "runtime.db"))
@@ -119,8 +122,8 @@ class SessionManager:
                 for row in rows:
                     s = Session.from_row(row)
                     self._sessions[s.session_id] = s
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
 
     def _persist(self, session: Session) -> None:
         try:
@@ -133,8 +136,8 @@ class SessionManager:
                     session.to_row(),
                 )
                 conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
 
     def create_session(
         self,
@@ -176,8 +179,8 @@ class SessionManager:
                 with sqlite3.connect(self._db_path) as conn:
                     conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
                     conn.commit()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Swallowed exception: %s", exc)
             return True
         return False
 
@@ -187,8 +190,8 @@ class SessionManager:
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute("DELETE FROM sessions")
                 conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
 
     def count(self) -> int:
         return len(self._sessions)

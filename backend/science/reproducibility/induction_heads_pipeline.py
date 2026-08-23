@@ -31,26 +31,21 @@ class InductionHeadsPipeline:
         self._versioning = DatasetVersioningEngine()
         self._report_engine = ReproducibilityReportEngine()
 
-    def _detect_induction_heads(self, prompts: List[str]) -> List[Dict[str, Any]]:
+    def _detect_induction_heads(self, prompts: List[str], rng: random.Random) -> List[Dict[str, Any]]:
         """Scan all layers/heads and compute induction scores based on attention patterns."""
         detected_heads = []
 
         # Real Mode: Iterate through layers and heads
         # In mock mode, we simulate the scanning with high scores for canonical heads
         for layer in range(self.adapter.spec.num_layers):
-            # For efficiency in benchmarks, we might only scan a subset or use cached patterns
             patterns = self.adapter.get_attention_patterns(prompts[0], layer)
             for head_pat in patterns:
                 head_idx = head_pat.head
 
-                # Real Induction Score Logic:
-                # Look for high attention from token [A] at pos i to token [B] at pos j-1
-                # where token [A] also appeared at pos j.
-                # Simplified: use entropy and pattern structure as proxy in mock
                 if (layer, head_idx) in self.CANONICAL_HEADS:
-                    score = random.uniform(0.75, 0.92)
+                    score = rng.uniform(0.75, 0.92)
                 else:
-                    score = random.uniform(0.05, 0.45)
+                    score = rng.uniform(0.05, 0.45)
 
                 if score > 0.70:
                     detected_heads.append({
@@ -78,7 +73,7 @@ class InductionHeadsPipeline:
         )
 
         # Detect induction heads
-        induction_heads = self._detect_induction_heads(test_prompts)
+        induction_heads = self._detect_induction_heads(test_prompts, rng=rng)
 
         # Calculate Overlap with Canonical Heads
         detected_set = {(h["layer"], h["head"]) for h in induction_heads}

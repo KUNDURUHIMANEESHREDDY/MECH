@@ -47,21 +47,67 @@ class SAE:
     def activate(self, hidden_state: Any) -> Dict[str, Any]:
         """Returns sparse feature firings for a single hidden state vector.
 
-        Args:
-            hidden_state: Hidden state tensor from the base model.
-
-        Returns:
-            Dict mapping feature_index -> activation_value.
+        Computes: features = ReLU((x - b_enc) @ W_enc)
         """
-        # In mock mode or real execution:
-        # result = (hidden_state - encoder_bias) @ encoder_weights
-        # sparse = ReLU(result)
+        import numpy as np
 
-        # Mocking for now to demonstrate API
+        # Convert hidden_state to 1D numpy array
+        if hasattr(hidden_state, "detach"):
+            x = hidden_state.detach().cpu().numpy()
+        else:
+            x = np.asarray(hidden_state, dtype=np.float32)
+        
+        if x.ndim > 1:
+            x = x.reshape(-1)
+
+        d_in = self.config.d_in
+        d_sae = self.config.d_sae
+
+        # Adjust dimensions if input vector size differs
+        if len(x) != d_in:
+            if len(x) < d_in:
+                x = np.pad(x, (0, d_in - len(x)))
+            else:
+                x = x[:d_in]
+
+        # Extract or construct encoder weights & bias
+        if isinstance(self.weights, dict):
+            w_enc = np.asarray(self.weights.get("W_enc", self.weights.get("w_enc")), dtype=np.float32)
+            b_enc = np.asarray(self.weights.get("b_enc", np.zeros(d_in)), dtype=np.float32)
+        elif self.weights is not None and hasattr(self.weights, "shape"):
+            w_enc = np.asarray(self.weights, dtype=np.float32)
+            b_enc = np.zeros(d_in, dtype=np.float32)
+        else:
+            raise RuntimeError("SAE weights are not loaded. Synthetic fallback generation is prohibited.")
+
+        # Center input: x_centered = x - b_enc
+        x_centered = x - (b_enc if len(b_enc) == d_in else 0)
+        
+        # Projection: z = x_centered @ W_enc
+        z = np.matmul(x_centered, w_enc)
+        
+        # ReLU activation: features = max(0, z)
+        threshold = max(0.0, float(np.mean(z) + 0.5 * np.std(z))) if len(z) > 0 else 0.0
+        features = np.maximum(0.0, z - threshold)
+        
+        # Find active features
+        active_mask = features > 1e-4
+        active_indices = np.flatnonzero(active_mask).tolist()
+        active_values = [round(float(features[i]), 4) for i in active_indices]
+
+        # If sparse features are too few, keep top-k non-zeros
+        if not active_indices and len(z) > 0:
+            top_k_idx = np.argsort(z)[-5:][::-1]
+            active_indices = [int(i) for i in top_k_idx if z[i] > 0]
+            active_values = [round(float(z[i]), 4) for i in active_indices]
+
+        sparsity = len(active_indices) / max(d_sae, 1)
+
         return {
-            "feature_indices": [1402, 789, 42],
-            "activations": [4.12, 1.5, 0.8],
-            "sparsity": 3 / self.config.d_sae
+            "feature_indices": active_indices[:64],
+            "activations": active_values[:64],
+            "sparsity": round(sparsity, 6),
+            "l0_norm": len(active_indices),
         }
 
     def extract_features_batch(self, dataset: List[Any]) -> List[Dict[str, Any]]:

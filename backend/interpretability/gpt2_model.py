@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import warnings
 from typing import Any
 
 import numpy as np
 import torch
+
+logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore")
 
@@ -29,6 +32,15 @@ class GPT2Model:
         self._logits: np.ndarray | None = None
         self._cache: dict[str, torch.Tensor] | None = None
 
+    def _get_model_device(self) -> torch.device:
+        """Returns the actual active torch device of the model parameters."""
+        if hasattr(self._model, "cfg") and hasattr(self._model.cfg, "device") and self._model.cfg.device:
+            return torch.device(self._model.cfg.device)
+        try:
+            return next(self._model.parameters()).device
+        except (StopIteration, AttributeError):
+            return torch.device(self._device)
+
     # ------------------------------------------------------------------ #
     #  Model config properties
     # ------------------------------------------------------------------ #
@@ -51,7 +63,7 @@ class GPT2Model:
 
     @property
     def device(self) -> str:
-        return self._device
+        return str(self._get_model_device())
 
     @property
     def prompt(self) -> str:
@@ -529,7 +541,7 @@ class GPT2Model:
             resid_vectors.append(last_resid)
 
             # Apply ln_final + unembed to get logits at this layer
-            resid_t = torch.from_numpy(last_resid).to(self._device)
+            resid_t = torch.from_numpy(last_resid).to(self._get_model_device())
             normalized = self._model.ln_final(resid_t)
             logits_t = self._model.unembed(normalized)
             logits_np = logits_t.detach().cpu().numpy()
@@ -1182,8 +1194,8 @@ class GPT2Model:
             encoded = self._model.tokenizer(
                 batch, padding=True, return_tensors="pt"
             )
-            input_ids = encoded["input_ids"].to(self._device)
-            attn_mask = encoded["attention_mask"].to(self._device)
+            input_ids = encoded["input_ids"].to(self._get_model_device())
+            attn_mask = encoded["attention_mask"].to(self._get_model_device())
 
             with torch.no_grad():
                 _, cache = self._model.run_with_cache(input_ids)
@@ -1262,7 +1274,7 @@ class GPT2Model:
 
         # Final logit
         resid_final = self.get_cache("blocks.11.hook_resid_post")[-1, :]
-        resid_t = torch.from_numpy(resid_final).to(self._device)
+        resid_t = torch.from_numpy(resid_final).to(self._get_model_device())
         final_logit = float(
             self._model.unembed(self._model.ln_final(resid_t))[int(target_id)]
             .detach()
@@ -1278,8 +1290,8 @@ class GPT2Model:
             attn_out = self.get_cache(f"blocks.{l}.hook_attn_out")[-1, :]
             mlp_out = self.get_cache(f"blocks.{l}.hook_mlp_out")[-1, :]
 
-            attn_t = torch.from_numpy(attn_out).to(self._device)
-            mlp_t = torch.from_numpy(mlp_out).to(self._device)
+            attn_t = torch.from_numpy(attn_out).to(self._get_model_device())
+            mlp_t = torch.from_numpy(mlp_out).to(self._get_model_device())
 
             attn_logit = float(
                 self._model.unembed(self._model.ln_final(attn_t))[int(target_id)]
@@ -1495,7 +1507,7 @@ class GPT2Model:
                 attn_a.append({"layer": l, "head": h, "pattern": pat[h].tolist()})
 
         def _logit_lens_for_prompt():
-            return [{"layer": l, "predictions": _top_k_preds(self._model.unembed(self._model.ln_final(torch.from_numpy(self.get_cache(f"blocks.{l}.hook_resid_post")[-1, :]).to(self._device))).detach().cpu().numpy(), top_k)} for l in range(self.num_layers)]
+            return [{"layer": l, "predictions": _top_k_preds(self._model.unembed(self._model.ln_final(torch.from_numpy(self.get_cache(f"blocks.{l}.hook_resid_post")[-1, :]).to(self._get_model_device()))).detach().cpu().numpy(), top_k)} for l in range(self.num_layers)]
 
         lens_a = _logit_lens_for_prompt()
 
@@ -1653,8 +1665,8 @@ class GPT2Model:
                 for cat, sc in ll.get("category_scores", {}).items():
                     cat_sum[cat] = cat_sum.get(cat, 0.0) + sc
                 cat_cnt += 1
-            except Exception:
-                pass
+            except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+                logger.debug("logit_lens failed for prompt %d: %s", i, exc)
         if cat_cnt > 0:
             report["category_scores"] = {k: round(v / cat_cnt, 4) for k, v in sorted(cat_sum.items(), key=lambda x: -x[1]) if v / cat_cnt > 0.01}
 

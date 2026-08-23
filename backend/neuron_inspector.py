@@ -1,10 +1,13 @@
-"""Backward-compatible re-export of GPT2Model for the Electron desktop sidecar.
+"""Unified backward-compatible re-export of Neuron Inspectors and Models for the Electron sidecar and legacy modules.
 
-The sidecar at ``frontend/scripts/desktop_service.py`` imports
-``GPT2Model`` from ``backend.neuron_inspector``, but the class actually
-lives in ``backend.interpretability.gpt2_model``. This module re-exports
-it so that import resolves correctly.
+Provides access to:
+- ``GPT2Model``: TransformerLens / PyTorch GPT-2 inference engine.
+- ``NeuronInspector``: Analytical interpretability neuron inspector (activations, statistics, top tokens, batch/layer search).
+- ``ExplorerNeuronInspector``: UI Neural Explorer inspector (histograms, connectivity, SAE feature overlap, literature).
 """
-from backend.interpretability.gpt2_model import GPT2Model
 
-__all__ = ["GPT2Model"]
+from backend.interpretability.gpt2_model import GPT2Model
+from backend.interpretability.neuron_inspector import NeuronInspector
+from backend.science.explorer.neuron_inspector import NeuronInspector as ExplorerNeuronInspector
+
+__all__ = ["GPT2Model", "NeuronInspector", "ExplorerNeuronInspector"]

@@ -1,9 +1,17 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { ModelExplorerPanel } from '../../src/components/panels/ModelExplorerPanel';
+import { ModelsCatalogPanel } from '../../src/components/panels/ModelsCatalogPanel';
 
-import { describe, it } from 'vitest';
+describe('Visualization', () => {
+  it('renders ModelExplorerPanel with architecture views', () => {
+    render(<ModelExplorerPanel />);
+    expect(screen.getByText(/Load Model/i)).toBeInTheDocument();
+  });
 
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+  it('renders ModelsCatalogPanel with model list', () => {
+    render(<ModelsCatalogPanel />);
+    expect(screen.getByText(/Model catalog/i)).toBeInTheDocument();
+  });
 });

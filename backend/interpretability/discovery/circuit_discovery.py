@@ -35,29 +35,11 @@ class CircuitDiscoveryEngine:
             except Exception as e:
                 return {"error": str(e)}
             
-        # Fallback Mock for UI
-        cid = f"circ_mock_{hash(dataset_name) & 0xffffffff:08x}"
+        # Fail-closed abstention when adapter is not provided
         return {
-            "algorithm": "mock",
+            "error": "EXECUTION_REQUIRED",
+            "message": "Live model adapter is required for circuit discovery. Synthetic fallback generation is prohibited.",
+            "status": "abstained",
             "dataset_id": f"{dataset_name}_{prompt_id}",
-            "model_id": "mock",
-            "runtime_ms": 150.0,
-            "statistics": {},
-            "evidence": {},
-            "confidence": 0.95,
-            "graph": {
-                "nodes": [
-                    {"id": "T_0", "type": "Token", "label": "Prompt"},
-                    {"id": "N_L8_N402", "type": "Neuron", "label": "L8_N402 (IOI)"},
-                    {"id": "P_0", "type": "Prediction", "label": "Target"},
-                ],
-                "edges": [
-                    {"source": "T_0", "target": "N_L8_N402", "weight": 0.88, "confidence": 0.94},
-                    {"source": "N_L8_N402", "target": "P_0", "weight": 0.95, "confidence": 0.98},
-                ],
-                "score": 0.945
-            },
-            "artifacts": [],
-            "provenance": {},
             "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
         }

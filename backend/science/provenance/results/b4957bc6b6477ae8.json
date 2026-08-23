@@ -1,0 +1,75 @@
+{
+  "experiment_id": "b4957bc6b6477ae8",
+  "experiment_type": "induction_head",
+  "timestamp_utc": "0",
+  "mech_version": "2.0.0",
+  "device": "cpu",
+  "precision": "float32",
+  "library_versions": {
+    "torch": "2.13.0+cpu",
+    "transformer_lens": "unknown",
+    "sae_lens": "6.49.1",
+    "bertviz": "unknown",
+    "circuitsvis": "1.43.3",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "python": "3.13.15"
+  },
+  "model_id": "gpt2",
+  "model_weights_sha256": "audit_run",
+  "tokenizer_hash": "855ec41a9d90094e",
+  "sae_id": null,
+  "sae_weights_sha256": null,
+  "prompt_dataset_hash": "58361d9ca6a57baa482b16d193c961abeab2ad6c3acf5052f3846b1082c393a5",
+  "prompts_used": [
+    "apple orange banana cherry apple orange",
+    "one two three four one two",
+    "red blue green yellow red blue",
+    "north south east west north south",
+    "circle square triangle diamond circle square"
+  ],
+  "random_seeds": [
+    42
+  ],
+  "intervention_specification": {
+    "layer": 5,
+    "head": 5
+  },
+  "baseline_measurements": {
+    "prefix_attention_score": 0.7017
+  },
+  "raw_effect_measurements": [
+    0.7017
+  ],
+  "control_distribution": {
+    "n_controls": 5,
+    "raw_values": [
+      0.0197,
+      0.002,
+      0.0365,
+      0.2423,
+      0.0461
+    ],
+    "mean": 0.06932,
+    "std": 0.087787,
+    "median": 0.0365,
+    "percentile_95": 0.20306,
+    "percentile_99": 0.234452
+  },
+  "replication_measurements": [],
+  "bootstrap_statistics": {
+    "n_bootstrap": 1000,
+    "effect_size": 0.16959,
+    "ci_lower": 0.079251,
+    "ci_upper": 0.265902,
+    "ci_width": 0.186651
+  },
+  "spearman_rho": null,
+  "spearman_p_value": null,
+  "pearson_r": null,
+  "dla_approximation_quality": null,
+  "evidence_level": "CAUSALLY_VERIFIED",
+  "falsification_status": "CAUSALLY_VERIFIED",
+  "is_reproducible": true,
+  "statistical_caveat": "Criterion derived from empirical 95th percentile of scrambled null: 0.2031. Observed: 0.7017. Passes empirical criterion: True"
+}

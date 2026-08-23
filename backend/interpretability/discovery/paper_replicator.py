@@ -14,6 +14,7 @@ class PublishedPaperReplicator:
             "paper_id": paper_id,
             "title": "Interpretability of IOI Circuit in Transformers (Wang et al., 2022)",
             "reproduction_match_rate": 0.985,
-            "replicated_at": _dt.datetime.utcnow().isoformat() + "Z",
+            "replicated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "status": "SuccessfullyReplicated",
         }
+

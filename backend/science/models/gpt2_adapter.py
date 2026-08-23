@@ -8,9 +8,12 @@ activation patching via the unified ModelAdapter interface.
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import random
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from .adapter_base import (
     ActivationResult, AttentionPattern, ModelAdapter, ModelSpec, PatchResult
@@ -69,7 +72,9 @@ class GPT2Adapter(ModelAdapter):
         layer: int,
         neuron_index: Optional[int] = None,
     ) -> List[ActivationResult]:
-        if not self.spec.mock_mode and self._model is not None:
+        if not self.spec.mock_mode:
+            if self._model is None:
+                raise RuntimeError("Live GPT-2 model is uninitialized.")
             outputs = self._forward_with_hooks(prompt)
             hidden = outputs.hidden_states[layer]          # [1, seq, d_model]
             results = []
@@ -85,22 +90,26 @@ class GPT2Adapter(ModelAdapter):
                     ))
             return results
 
-        # Mock path
-        n_indices = [neuron_index] if neuron_index is not None else list(range(8))
-        return [
-            ActivationResult(
-                layer=layer, token_index=0, neuron_index=n,
-                activation_value=_mock_activation(layer, n, prompt),
-                context_prompt=prompt,
-                top_k_tokens=[{"token": " Paris", "prob": 0.82}, {"token": " France", "prob": 0.11}],
-            )
-            for n in n_indices
-        ]
+        # CRITICAL: Mock path raises error instead of returning fabricated data
+        raise RuntimeError(
+            f"Cannot compute activations for '{prompt[:50]}...' - "
+            "model is in mock_mode. Mock activations must never reach "
+            "EvidenceRecord, Finding, or ScientificConclusion. "
+            "Load a real model to compute actual activations."
+        )
 
     def get_attention_patterns(self, prompt: str, layer: int) -> List[AttentionPattern]:
-        if not self.spec.mock_mode and self._model is not None:
+        if not self.spec.mock_mode:
+            if self._model is None:
+                raise RuntimeError("Live GPT-2 model is uninitialized.")
             outputs = self._forward_with_hooks(prompt)
+            # attentions is a tuple of per-layer tensors; extract target layer
             attn = outputs.attentions[layer]               # [1, heads, seq, seq]
+            if isinstance(attn, tuple):
+                attn = attn[0]
+            import torch as _torch
+            if not isinstance(attn, _torch.Tensor):
+                attn = _torch.tensor(attn)
             tokens = self._tokenizer.tokenize(prompt)
             patterns = []
             for h in range(self.spec.num_heads):
@@ -109,16 +118,18 @@ class GPT2Adapter(ModelAdapter):
                 patterns.append(AttentionPattern(layer=layer, head=h, pattern_matrix=mat, tokens=tokens, attn_entropy=round(entropy, 4)))
             return patterns
 
-        # Mock path
-        seq_len = max(4, len(prompt.split()))
-        patterns = []
-        for h in range(self.spec.num_heads):
-            mat = [[round(random.uniform(0.05, 0.35), 3) for _ in range(seq_len)] for _ in range(seq_len)]
-            patterns.append(AttentionPattern(layer=layer, head=h, pattern_matrix=mat, tokens=prompt.split()[:seq_len], attn_entropy=round(1.2 + h * 0.08, 4)))
-        return patterns
+        # CRITICAL: Mock path raises error instead of returning fabricated data
+        raise RuntimeError(
+            f"Cannot compute attention patterns for '{prompt[:50]}...' - "
+            "model is in mock_mode. Mock attention patterns must never reach "
+            "EvidenceRecord, Finding, or ScientificConclusion. "
+            "Load a real model to compute actual attention patterns."
+        )
 
     def get_logits(self, prompt: str) -> Dict[str, Any]:
-        if not self.spec.mock_mode and self._model is not None:
+        if not self.spec.mock_mode:
+            if self._model is None:
+                raise RuntimeError("Live GPT-2 model is uninitialized.")
             import torch
             inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
             with torch.no_grad():
@@ -133,19 +144,19 @@ class GPT2Adapter(ModelAdapter):
                 "top_token": self._tokenizer.decode([top5.indices[0]]),
             }
 
-        # Mock
-        for prefix, tokens in self._KNOWN_TOP_TOKENS.items():
-            if prefix in prompt:
-                return {
-                    "prompt": prompt,
-                    "top_tokens": [{"token": t, "logit": p * 10, "prob": p} for t, p in tokens],
-                    "top_token": tokens[0][0],
-                }
-        return {"prompt": prompt, "top_tokens": [{"token": " the", "logit": 4.5, "prob": 0.45}], "top_token": " the"}
+        # CRITICAL: Mock path raises error instead of returning fabricated data
+        raise RuntimeError(
+            f"Cannot compute logits for '{prompt[:50]}...' - "
+            "model is in mock_mode. Mock logits must never reach "
+            "EvidenceRecord, Finding, or ScientificConclusion. "
+            "Load a real model to compute actual logits."
+        )
 
     def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
         """Patch a specific neuron in the MLP layer."""
-        if not self.spec.mock_mode and self._model is not None:
+        if not self.spec.mock_mode:
+            if self._model is None:
+                raise RuntimeError("Live GPT-2 model is uninitialized.")
             import torch
             inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
             
@@ -156,8 +167,13 @@ class GPT2Adapter(ModelAdapter):
             top_token_before = self._tokenizer.decode([orig_top.indices[0]])
 
             def patch_hook(module, input, output):
-                if output.shape[-1] > neuron_index:
-                    output[0, -1, neuron_index] = patch_value
+                # PyTorch forward hooks may return a tuple; unpack if needed
+                if isinstance(output, tuple):
+                    out_tensor = output[0]
+                else:
+                    out_tensor = output
+                if out_tensor.shape[-1] > neuron_index:
+                    out_tensor[0, -1, neuron_index] = patch_value
                 return output
 
             layer_module = self._model.transformer.h[layer].mlp
@@ -168,6 +184,7 @@ class GPT2Adapter(ModelAdapter):
                     patched_logits = self._model(**inputs).logits[0, -1, :]
                 patched_top = patched_logits.topk(1)
                 patched_logit_for_orig_token = float(patched_logits[orig_top.indices[0]])
+
                 top_token_after = self._tokenizer.decode([patched_top.indices[0]])
 
                 return PatchResult(
@@ -183,12 +200,12 @@ class GPT2Adapter(ModelAdapter):
             finally:
                 handle.remove()
 
-        # Mock Path
-        original = _mock_activation(layer, neuron_index, prompt)
-        return PatchResult(
-            original_logit=original, patched_logit=patch_value, delta=round(patch_value - original, 4),
-            top_token_before=" Paris", top_token_after=" France" if abs(patch_value - original) > 1.0 else " Paris",
-            layer=layer, neuron_index=neuron_index, patch_value=patch_value,
+        # CRITICAL: Mock path raises error instead of returning fabricated data
+        raise RuntimeError(
+            f"Cannot patch activation for '{prompt[:50]}...' - "
+            "model is in mock_mode. Mock patch results must never reach "
+            "EvidenceRecord, Finding, or ScientificConclusion. "
+            "Load a real model to perform actual activation patching."
         )
 
     def patch_head_output(
@@ -208,6 +225,11 @@ class GPT2Adapter(ModelAdapter):
             # GPT-2 Attention head output patching (hooking 'attn.c_proj' or internal 'attn')
             # For simplicity, we hook the entire attention block output and mask the specific head
             def head_patch_hook(module, input, output):
+                # PyTorch forward hooks may return a tuple; unpack if needed
+                if isinstance(output, tuple):
+                    out_tensor = output[0]
+                else:
+                    out_tensor = output
                 # GPT-2 output shape: [batch, seq, d_model]
                 # Head dimension: d_model / num_heads
                 d_head = self.spec.d_model // self.spec.num_heads
@@ -216,11 +238,11 @@ class GPT2Adapter(ModelAdapter):
 
                 if patch_vector is not None:
                     # Inject specific vector (e.g. mean ablation vector)
-                    v = torch.tensor(patch_vector, device=output.device, dtype=output.dtype)
-                    output[0, -1, start:end] = v
+                    v = torch.tensor(patch_vector, device=out_tensor.device, dtype=out_tensor.dtype)
+                    out_tensor[0, -1, start:end] = v
                 else:
                     # Zero ablation
-                    output[0, -1, start:end] = 0.0
+                    out_tensor[0, -1, start:end] = 0.0
                 return output
 
             layer_module = self._model.transformer.h[layer].attn
@@ -245,11 +267,12 @@ class GPT2Adapter(ModelAdapter):
             finally:
                 handle.remove()
 
-        # Mock Path
-        return PatchResult(
-            original_logit=0.82, patched_logit=0.45, delta=-0.37,
-            top_token_before=" Paris", top_token_after=" France",
-            layer=layer, neuron_index=head_index, patch_value=0.0
+        # CRITICAL: Mock path raises error instead of returning fabricated data
+        raise RuntimeError(
+            f"Cannot patch head output for layer {layer}, head {head_index} - "
+            "model is in mock_mode. Mock patch results must never reach "
+            "EvidenceRecord, Finding, or ScientificConclusion. "
+            "Load a real model to perform actual head patching."
         )
 
     def run_isolated_circuit(self, prompt: str, head_list: List[str]) -> Dict[str, Any]:
@@ -263,7 +286,9 @@ class GPT2Adapter(ModelAdapter):
                 try:
                     parts = h_str.replace("L", "").split("H")
                     active_heads.add((int(parts[0]), int(parts[1])))
-                except Exception: continue
+                except (ValueError, IndexError) as exc:
+                    logger.debug("Skipping malformed head spec %r: %s", h_str, exc)
+                    continue
 
             handles = []
             d_head = self.spec.d_model // self.spec.num_heads
@@ -303,8 +328,13 @@ class GPT2Adapter(ModelAdapter):
             finally:
                 for h in handles: h.remove()
 
-        # Mock Path
-        return {"top_token": " Mary", "top_tokens": [{"token": " Mary", "logit": 3.2}]}
+        # CRITICAL: Mock path raises error instead of returning fabricated data
+        raise RuntimeError(
+            f"Cannot run isolated circuit for heads {head_list} - "
+            "model is in mock_mode. Mock circuit results must never reach "
+            "EvidenceRecord, Finding, or ScientificConclusion. "
+            "Load a real model to perform actual circuit isolation."
+        )
 
     def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:
         if not self.spec.mock_mode and self._model is not None:
@@ -313,4 +343,11 @@ class GPT2Adapter(ModelAdapter):
                 {"layer": i, "norm": round(float(h[0, -1, :].norm()), 4)}
                 for i, h in enumerate(outputs.hidden_states)
             ]
-        return [{"layer": i, "norm": round(1.8 + i * 0.3, 4)} for i in range(self.spec.num_layers + 1)]
+        
+        # CRITICAL: Mock path raises error instead of returning fabricated data
+        raise RuntimeError(
+            f"Cannot get residual stream for '{prompt[:50]}...' - "
+            "model is in mock_mode. Mock residual stream must never reach "
+            "EvidenceRecord, Finding, or ScientificConclusion. "
+            "Load a real model to compute actual residual stream norms."
+        )

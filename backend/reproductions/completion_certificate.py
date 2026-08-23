@@ -1,7 +1,11 @@
 import json
 import hashlib
+import logging
 from datetime import datetime
 from typing import Dict, Any
+
+logger = logging.getLogger("MECH.reproductions.completion_certificate")
+
 
 class CompletionCertificateGenerator:
     """
@@ -20,7 +24,8 @@ class CompletionCertificateGenerator:
         try:
              with open(f"{project_dir}/research_manifest.json", 'rb') as f:
                  manifest_hash = hashlib.sha256(f.read()).hexdigest()
-        except: pass
+        except (OSError, IOError) as exc:
+             logger.debug("Could not read research_manifest.json: %s", exc)
 
         certificate = {
             "project_name": project_name,

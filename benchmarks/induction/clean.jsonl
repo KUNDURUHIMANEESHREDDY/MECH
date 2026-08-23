@@ -1,0 +1,8 @@
+{"seq": "The cat sat on the mat the cat", "repeated": "cat", "target": " sat", "template_id": "T1"}
+{"seq": "Alice Bob walked together Alice Bob", "repeated": "Alice", "target": " Bob", "template_id": "T2"}
+{"seq": "The doctor said alpha beta alpha beta", "repeated": "alpha", "target": " beta", "template_id": "T3"}
+{"seq": "red blue green yellow red blue", "repeated": "red", "target": " blue", "template_id": "T4"}
+{"seq": "one two three four one two", "repeated": "one", "target": " two", "template_id": "T5"}
+{"seq": "Mary John walked to school Mary John", "repeated": "Mary", "target": " John", "template_id": "T6"}
+{"seq": "north south east west north south", "repeated": "north", "target": " south", "template_id": "T7"}
+{"seq": "The president said hello world hello world", "repeated": "hello", "target": " world", "template_id": "T8"}

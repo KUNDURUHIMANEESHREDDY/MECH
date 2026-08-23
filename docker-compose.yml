@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # Main API service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: mech-api
+    ports:
+      - "8000:8000"
+    environment:
+      - MECH_STORAGE_DB=/app/storage/mech.db
+      - MECH_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+      - MECH_API_KEY=${MECH_API_KEY:-mech_dev_key_default}
+      - LOG_LEVEL=INFO
+      # Wire the Redis container as the distributed rate-limit backend.
+      # When unset (local dev / Electron sidecar), the server falls back to
+      # an in-process in-memory store automatically.
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - mech-storage:/app/storage
+      - mech-logs:/app/logs
+      - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+
+  # Frontend development server
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: mech-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_MECH_API_KEY=mech_dev_key_default
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    working_dir: /app
+    command: npm run dev:renderer -- --host 0.0.0.0
+    restart: unless-stopped
+
+  # Redis for rate limiting (production)
+  redis:
+    image: redis:7-alpine
+    container_name: mech-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - mech-redis:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  mech-storage:
+  mech-logs:
+  mech-redis:
+
+networks:
+  default:
+    name: mech-network

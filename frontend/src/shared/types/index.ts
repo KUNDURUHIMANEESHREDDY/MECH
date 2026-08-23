@@ -25,6 +25,8 @@ export interface TokenInfo {
 
 export interface InferenceResponse {
   model_name: string;
+  status?: string;
+  provenance?: string;
   tokens: TokenInfo[];
   generated_text: string;
   attention_maps: AttentionMap[];
@@ -36,10 +38,12 @@ export interface InferenceResponse {
 export interface ModelInfo {
   model_name: string;
   status: string;
+  provenance?: string;
   num_layers: number;
   num_heads: number;
   hidden_dim: number;
 }
+
 
 /* ---------- Visualization state (derived from DTOs) ---------- */
 
@@ -118,6 +122,7 @@ export interface PanelPlugin {
   category: string;
   resourceKinds: ResourceKind[];
   defaultDock: 'left' | 'center' | 'right' | 'bottom';
+  fullWidth?: boolean;
   Body: FC<PanelContext>;
   Header?: FC<PanelContext>;
   Inspector?: FC<PanelContext>;

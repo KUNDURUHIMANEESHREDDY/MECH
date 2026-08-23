@@ -19,7 +19,7 @@ export function attentionMapsToLayers(
     const heads: HeadData[] = [];
     for (let hi = 0; hi < numHeads; hi++) {
       const map = maps.find(m => m.layer === li && m.head === hi);
-      const matrix = map?.matrix ?? fallbackMatrix(tokens.length);
+      const matrix = map?.matrix ?? [];
       heads.push({
         index: hi,
         attentionMatrix: matrix,
@@ -30,8 +30,4 @@ export function attentionMapsToLayers(
   }
 
   return layers;
-}
-
-function fallbackMatrix(n: number): number[][] {
-  return Array.from({ length: n }, () => Array.from({ length: n }, () => 0));
 }

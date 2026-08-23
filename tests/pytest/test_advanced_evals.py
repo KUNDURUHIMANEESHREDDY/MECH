@@ -22,9 +22,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 sys.path.insert(0, str(BACKEND_DIR.parent))
 
-from backend.main import app, _API_KEY  # noqa: E402
+from backend.main import app  # noqa: E402
 
-client = TestClient(app, raise_server_exceptions=False, headers={"X-API-Key": _API_KEY})
+client = TestClient(app, raise_server_exceptions=False)
 
 
 # ── 1. Health & Root ────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ class TestHealthRoot:
         r = client.get("/")
         assert r.status_code == 200
         body = r.json()
-        assert body["name"] == "MECH Platform"
+        assert body["name"] == "MECH Research Platform"
         assert body["version"] == "2.0.0"
         assert body["status"] == "running"
 

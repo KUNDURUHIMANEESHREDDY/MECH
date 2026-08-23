@@ -1,9 +1,13 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { ResearchAnalyticsView } from '../../src/components/ResearchAnalyticsView';
 
-import { describe, it } from 'vitest';
-
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+describe('ResearchAnalyticsView', () => {
+  it('renders analytics metrics and refresh button', () => {
+    render(<ResearchAnalyticsView />);
+    expect(screen.getByText('Analytics')).toBeInTheDocument();
+    expect(screen.getByText(/Experiment runs/i)).toBeInTheDocument();
+    expect(screen.getByText(/Tokens generated/i)).toBeInTheDocument();
+  });
 });

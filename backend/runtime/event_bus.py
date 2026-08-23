@@ -6,9 +6,13 @@ for later replay — useful for debugging and the neural debugger.
 """
 
 from __future__ import annotations
+
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 # ── Event types ──────────────────────────────────────────────────
@@ -82,8 +86,8 @@ class EventLog:
             if event_type is None or event.type == event_type:
                 try:
                     fn(event)
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001 - replay must not crash on subscriber errors
+                    logger.debug("Event subscriber callback raised for %s: %s", event.type, exc)
 
     def clear(self) -> None:
         self._entries.clear()
@@ -131,8 +135,8 @@ class EventBus:
         for fn in self._subscribers.get(event_type, []):
             try:
                 fn(event)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Swallowed exception: %s", exc)
 
     def clear(self) -> None:
         self._subscribers.clear()

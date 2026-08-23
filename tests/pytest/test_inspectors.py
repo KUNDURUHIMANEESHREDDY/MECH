@@ -1,5 +1,5 @@
 """Tests for all Mechanistic Interpretability inspectors."""
-from interpretability.inspectors import (
+from backend.interpretability.inspectors import (
     AttentionInspector,
     LayerInspector,
     NeuronInspector,

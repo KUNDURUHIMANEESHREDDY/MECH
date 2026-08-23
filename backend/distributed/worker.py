@@ -9,9 +9,12 @@ to the Evidence Aggregator. Workers NEVER mutate global belief registries direct
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from ..interpretability.discovery.algorithms import get_algorithm
 from ..interpretability.discovery.algorithms.base_algorithm import DiscoveryReport
@@ -46,21 +49,56 @@ class WorkerExecutionResult:
 
 
 class DistributedWorker:
-    """Isolated execution worker running on a assigned cluster node."""
+    """Isolated execution worker running on an assigned cluster node."""
 
     def __init__(self, worker_id: str = "gpu_worker_0", adapter: Optional[ModelAdapter] = None) -> None:
         self.worker_id = worker_id
-        self.adapter = adapter or GPT2Adapter(variant="small", mock_mode=True)
+        self.adapter = adapter
+
+    def _resolve_adapter(self, model_id: str, config_override: Optional[Dict[str, Any]] = None) -> ModelAdapter:
+        """
+        Dynamically resolves model adapter for the worker node.
+        
+        NEVER falls back to mock mode. If the model cannot be loaded,
+        raises an error to prevent fabricated results from reaching
+        EvidenceRecord or DiscoveryReport.
+        """
+        if self.adapter is not None:
+            return self.adapter
+        
+        cfg = config_override or {}
+        mock_mode = cfg.get("mock_mode", False)
+        
+        # CRITICAL: Never allow mock_mode in distributed execution
+        if mock_mode:
+            raise RuntimeError(
+                f"Distributed worker rejecting mock_mode=True for model '{model_id}'. "
+                "Mock data must never reach DiscoveryReport or EvidenceRecord."
+            )
+        
+        from ..science.models.adapter_registry import ModelAdapterRegistry
+        registry = ModelAdapterRegistry()
+        try:
+            adapter = registry.get_adapter(model_id, mock_mode=False)
+            return adapter
+        except (ImportError, ValueError, KeyError, OSError) as exc:
+            # CRITICAL: Return explicit error instead of mock fallback
+            raise RuntimeError(
+                f"Cannot load model '{model_id}' on worker '{self.worker_id}'. "
+                f"Model adapter resolution failed: {exc}. "
+                "Refusing to fall back to mock mode - this would produce fabricated scientific results."
+            ) from exc
 
     def execute_task(self, task: ExperimentTask) -> WorkerExecutionResult:
         """Executes experiment task in isolation on worker hardware."""
         t0 = time.time()
         try:
-            alg_instance = get_algorithm(task.algorithm_name, self.adapter)
+            adapter = self._resolve_adapter(task.model_id, task.config_override)
+            alg_instance = get_algorithm(task.algorithm_name, adapter)
             report: DiscoveryReport = alg_instance.run(task.dataset_shard)
 
             execution_ms = (time.time() - t0) * 1000
-            flops = 1.5e12 * (execution_ms / 1000.0)
+            flops = 1.5e12 * max(0.01, execution_ms / 1000.0)
 
             return WorkerExecutionResult(
                 task_id=task.task_id,
@@ -68,7 +106,7 @@ class DistributedWorker:
                 status="Success",
                 discovery_report=report.to_dict(),
                 execution_time_ms=round(execution_ms, 2),
-                compute_flops=flops
+                compute_flops=flops,
             )
         except Exception as e:
             execution_ms = (time.time() - t0) * 1000
@@ -78,5 +116,5 @@ class DistributedWorker:
                 status="Error",
                 error_message=str(e),
                 execution_time_ms=round(execution_ms, 2),
-                compute_flops=0.5e12
+                compute_flops=0.5e12,
             )

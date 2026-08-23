@@ -10,6 +10,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -58,6 +61,11 @@ class ModelSpec:
     supports_sae: bool = True
     mock_mode: bool = False       # True during unit tests (no real weights loaded)
 
+    @property
+    def name(self) -> str:
+        return self.model_id
+
+
 
 class ModelAdapter(ABC):
     """Unified interface for mechanistic interpretability across model families."""
@@ -78,9 +86,12 @@ class ModelAdapter(ABC):
             self._model, self._tokenizer = self._manager.get_model_and_tokenizer(
                 self.spec.hf_repo_id
             )
-        except Exception:
-            # Graceful degradation: fall back to mock mode if weights unavailable
-            self.spec = ModelSpec(**{**self.spec.__dict__, "mock_mode": True})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
+            # When in live mode, leave _model as None to fail closed on downstream queries
+            self._model = None
+            self._tokenizer = None
+
 
     @abstractmethod
     def get_activations(

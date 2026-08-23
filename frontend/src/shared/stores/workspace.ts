@@ -10,6 +10,7 @@ interface WorkspaceStoreActions {
   openPanel: (panelId: string) => void;
   closePanel: (panelId: string) => void;
   togglePanel: (panelId: string) => void;
+  setVisiblePanels: (panels: Record<string, boolean>) => void;
   updateCamera: (camera: { x: number; y: number; zoom: number }) => void;
   addNote: (title: string, content: string) => void;
   addConsoleLog: (level: 'info' | 'warn' | 'error', message: string) => void;
@@ -24,17 +25,12 @@ interface WorkspaceStoreActions {
 export type WorkspaceStore = WorkspaceState & WorkspaceStoreActions;
 
 const DEFAULT_PANELS: Record<string, boolean> = {
-  token_viewer: true,
+  active_investigation: true,
   attention_heatmap: true,
-  activation_heatmap: true,
   neuron_panel: true,
-  layer_inspector: true,
-  prediction_inspector: true,
-  token_inspector: true,
   logit_lens: true,
   circuit_explorer: true,
   dataset_viewer: true,
-  embedding_viewer: true,
   sae_feature: true,
 };
 
@@ -107,6 +103,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     } else {
       get().openPanel(panelId);
     }
+  },
+
+  setVisiblePanels: (panels: Record<string, boolean>) => {
+    set({ visiblePanels: panels });
   },
 
   updateCamera: (camera) => {

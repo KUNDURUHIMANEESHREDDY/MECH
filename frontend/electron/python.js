@@ -33,7 +33,7 @@ class PythonBridge {
   }
 
   _buildEnv() {
-    const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+    const env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' };
     if (this.pythonPathEnv) env.PYTHONPATH = this.pythonPathEnv;
     else env.PYTHONPATH = path.join(__dirname, '..');
     if (this.extraEnv) Object.assign(env, this.extraEnv);

@@ -1,0 +1,82 @@
+{
+  "experiment_id": "56f7f7253d2c751e",
+  "experiment_type": "induction_head",
+  "timestamp_utc": "2026-08-17T00:00:00Z",
+  "mech_version": "2.0.0",
+  "device": "cpu",
+  "precision": "float32",
+  "library_versions": {
+    "torch": "2.13.0+cpu",
+    "transformer_lens": "unknown",
+    "sae_lens": "6.49.1",
+    "bertviz": "unknown",
+    "circuitsvis": "1.43.3",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "python": "3.13.15"
+  },
+  "model_id": "gpt2",
+  "model_weights_sha256": "test_hash_sha256",
+  "tokenizer_hash": "test_tok_sha256",
+  "sae_id": null,
+  "sae_weights_sha256": null,
+  "prompt_dataset_hash": "84ac16040dac4198cce4b74f747ad61c2e2a2be455834f74aeae75916e667c4a",
+  "prompts_used": [
+    "Alice Bob Charlie Alice Bob"
+  ],
+  "random_seeds": [
+    42
+  ],
+  "intervention_specification": {
+    "layer": 5,
+    "head": 5,
+    "ablation": "zero"
+  },
+  "baseline_measurements": {
+    "clean_logit": 3.14,
+    "prefix_attention_score": 0.42
+  },
+  "raw_effect_measurements": [
+    0.25,
+    0.3,
+    0.28
+  ],
+  "control_distribution": {
+    "n_controls": 5,
+    "raw_values": [
+      0.01,
+      0.02,
+      0.015,
+      0.018,
+      0.012
+    ],
+    "mean": 0.015,
+    "std": 0.003688,
+    "median": 0.015,
+    "percentile_95": 0.0196,
+    "percentile_99": 0.01992
+  },
+  "replication_measurements": [
+    {
+      "template_1": 0.27
+    },
+    {
+      "template_2": 0.29
+    }
+  ],
+  "bootstrap_statistics": {
+    "n_bootstrap": 1000,
+    "effect_size": 0.272,
+    "ci_lower": 0.258,
+    "ci_upper": 0.288,
+    "ci_width": 0.03
+  },
+  "spearman_rho": null,
+  "spearman_p_value": null,
+  "pearson_r": null,
+  "dla_approximation_quality": null,
+  "evidence_level": "SUPPORTED",
+  "falsification_status": "SUPPORTED",
+  "is_reproducible": true,
+  "statistical_caveat": "Test manifest for Phase 12 audit."
+}

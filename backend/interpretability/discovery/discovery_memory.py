@@ -17,6 +17,7 @@ Research Question ➔ Semantic Search ➔ Unified Multi-Modal Memory Results:
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import math
 import re
 import time
@@ -24,6 +25,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from .mechanism_claim_registry import MechanismClaimRegistry, RegisteredMechanismClaim
+
+logger = logging.getLogger(__name__)
 from .representation_engine import RepresentationEngine
 from ..reproducibility.paper_registry import PaperRegistry
 
@@ -229,8 +232,8 @@ class DiscoveryMemoryEngine:
                         relevance_score=round(score, 3),
                         metadata={"year": p.year, "authors": p.authors[:2]}
                     ))
-        except Exception:
-            pass
+        except (ValueError, KeyError, AttributeError, RuntimeError) as exc:
+            logger.debug("Discovery memory search section failed, skipping: %s", exc)
 
         # Sort all result categories by relevance score
         claims_res.sort(key=lambda x: x.relevance_score, reverse=True)

@@ -1,0 +1,392 @@
+Phase 57 is a solid continuation, and the result changes what Phase 58 should optimize for.
+
+The key achievement is that MECH now evaluates three qualitatively different prospective outcomes—positive transfer, negative transfer, and calibrated abstention—rather than testing only successful predictions. The reported suite gives 99.39% positive-transfer fidelity, 98.57% negative-transfer fidelity, 100% abstention fidelity, and 0.59% cross-trial heterogeneity. It also has an automatic downgrade path when an uncalibrated failure occurs. 
+
+Pasted markdown
+
+What Phase 57 establishes
+
+The important new invariant is:
+
+Predict
+
+=Always predict success
+
+MECH can now produce:
+
+{TRANSFER, NEGATIVE TRANSFER, ABSTAIN}
+
+and the external observations are reportedly consistent with all three regimes. 
+
+Pasted markdown
+
+That is a better scientific test than simply increasing the number of positive replications.
+
+However, there is still a fundamental limitation:
+
+Phase 57 is still evaluating a preselected tri-regime suite whose task/model pairs are known to the benchmark designer.
+
+So the next phase should not be “more trials of the same design.”
+
+Phase 58 — Cross-Model / Cross-Task Prospective Generalization
+
+The objective should be:
+
+Test whether MECH's predictive mechanistic law generalizes to combinations of model, task, and mechanism that were not used when the law and its calibration were developed.
+
+The crucial change is held-out combinatorial structure.
+
+                    CALIBRATION SET
+          known models × known tasks × known mechanisms
+                              │
+                              ▼
+                   FREEZE PREDICTIVE LAW
+                              │
+                         SHA-256 seal
+                              │
+                              ▼
+                 ┌──────────────────────┐
+                 │   HELD-OUT GRID      │
+                 │                      │
+                 │ New Model            │
+                 │ New Task             │
+                 │ New Mechanism        │
+                 │ New Pairing          │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+                    PRE-SEALED PREDICTION
+                            │
+                            ▼
+                   EXTERNAL EXECUTION
+                            │
+                            ▼
+                   RAW OBSERVATION
+                            │
+                            ▼
+                  PREDICTION vs REALITY
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+           TRANSFER       NEGATIVE      ABSTAIN
+              │             │             │
+              └─────────────┼─────────────┘
+                            ▼
+                    CLAIM-DAG UPDATE
+What should be built
+1. heldout_generalization_engine.py
+
+Build a strict train/calibration/test partition over:
+
+model family
+architecture
+model size
+task family
+mechanistic phenomenon
+source→target pairing
+
+The critical invariant:
+
+D
+calibration
+	​
+
+∩D
+heldout
+	​
+
+=∅
+
+and preferably stronger:
+
+ModelFamily
+test
+	​
+
+
+⊆ModelFamily
+calibration
+	​
+
+
+for at least part of the benchmark.
+
+Use multiple split types:
+
+Split A — New model
+Split B — New task
+Split C — New task × model pairing
+Split D — New architecture family
+Split E — New mechanism
+
+That will tell you what kind of generalization MECH actually possesses.
+
+2. prospective_generalization_protocol.py
+
+Every held-out case should produce an immutable prediction object:
+
+ProspectivePrediction
+├── source_claim_hash
+├── predictive_model_hash
+├── model_hash
+├── tokenizer_hash
+├── task_hash
+├── predicted_transfer_class
+├── predicted_delta_z
+├── predicted_delta_p
+├── predicted_rescue
+├── predictive_interval
+├── abstention_probability
+├── timestamp
+├── analysis_plan_hash
+└── preregistration_hash
+
+No ground truth should be available when this object is generated.
+
+3. generalization_calibration_engine.py
+
+This is where Phase 58 should be more rigorous than Phase 57.
+
+Track:
+
+ϵ
+Δz
+	​
+
+,ϵ
+Δp
+	​
+
+,ϵ
+R
+	​
+
+,J
+circuit
+	​
+
+,class accuracy,abstention calibration.
+
+But also measure calibration as a function of novelty.
+
+For example:
+
+ϵ(d
+OOD
+	​
+
+)
+
+where d
+OOD
+	​
+
+ is a predefined novelty score based on architecture/task/mechanism distance.
+
+You want to know:
+
+Does MECH's prediction error increase smoothly as it moves farther outside its training/calibration domain?
+
+That gives you a real generalization curve instead of one aggregate score.
+
+4. negative_control_generalization_engine.py
+
+This is important.
+
+Do not allow MECH to succeed simply because the held-out tasks were easy variants of known ones.
+
+Generate matched controls:
+
+held-out positive case
+        vs
+same model, wrong mechanism
+        vs
+same task, wrong architecture
+        vs
+same architecture, wrong task
+        vs
+random pairing
+
+Then require the transportability law to distinguish them.
+
+5. generalization_claim_policy.py
+
+Extend the existing living Claim DAG states with:
+
+HELDOUT_SUPPORTED
+HELDOUT_PARTIAL
+OOD_SUPPORTED
+BOUNDARY_CONFIRMED
+OOD_FALSIFIED
+GENERALIZATION_UNRESOLVED
+
+And make the current downgrade mechanism more granular.
+
+For example:
+
+In-domain supported→held-out unsupported
+
+should not necessarily falsify the underlying mechanistic claim.
+
+It should first downgrade the generalization claim.
+
+This is consistent with the epistemic separation you've already built.
+
+The most important new benchmark
+
+Phase 58 should contain a crossed holdout.
+
+For example:
+
+Calibration:
+Llama → Qwen, factual
+Gemma → Llama, arithmetic
+Mistral → Mixtral, induction
+
+
+Held-out:
+Llama → Mixtral, arithmetic
+Qwen → Gemma, induction
+Mistral → Llama, factual
+
+MECH has seen each individual ingredient, but not the combination.
+
+That tests whether it has learned a mechanistic relationship or merely memorized model/task pairings.
+
+A stronger split would be:
+
+TRAIN:
+Transformer families only
+
+
+TEST:
+SSM / MoE / hybrid architecture
+
+with a mandatory abstention outcome when the learned law is outside its calibrated domain.
+
+New scientific metrics for Phase 58
+
+Do not make one giant “generalization score.”
+
+Track:
+
+1. Held-Out Prospective Accuracy
+HPA=
+held-out predictions
+correct held-out predictions
+	​
+
+2. Class Calibration
+Transfer-Class Accuracy
+
+for:
+
+{TRANSFER,NEGATIVE,ABSTAIN}
+3. Calibration Gap
+ECE
+heldout
+	​
+
+4. Novelty-conditioned error
+E[ϵ∣d
+OOD
+	​
+
+]
+5. Generalization Efficiency
+GE=
+new causal experiments
+validated held-out mechanistic information
+	​
+
+6. False-Confidence Rate
+
+This should become a first-class metric:
+
+FCR
+heldout
+	​
+
+=P(confident prediction∧wrong)
+	​
+
+
+This is more important than raw accuracy for MECH.
+
+Phase 58 success criterion
+
+I'd make the preregistered gate something like:
+
+HELDOUT GENERALIZATION CERTIFICATE
+
+
+├── HPA ≥ 0.90
+├── Transfer-class accuracy ≥ 0.90
+├── ECE ≤ 0.05
+├── FCRheldout ≤ 0.02
+├── 95% predictive interval coverage ≥ 0.90
+├── Negative-transfer recall ≥ 0.90
+├── Abstention precision ≥ 0.90
+├── Cross-task / cross-model heterogeneity ≤ 0.05
+└── No post-hoc retraining
+
+And importantly:
+
+failure should not terminate the experiment.
+
+It should produce:
+
+GENERALIZATION GAP
+       ↓
+identify novelty dimension
+       ↓
+calibration agenda
+       ↓
+new experiments
+       ↓
+re-fit / revise law
+
+That closes the loop between your Phase 25 calibration system and Phase 58 generalization.
+
+Then Phase 59
+
+Only after Phase 58 succeeds should you move to:
+
+Phase 59 — Independent Adversarial Prospective Replication
+
+Have an external authority choose the held-out model/task combinations after the predictive law is frozen.
+
+That prevents MECH's developers from selecting the easiest holdouts.
+
+Bottom line
+
+Phase 57 successfully proves, according to the supplied benchmark, that MECH can handle:
+
+success+failure+abstention
+	​
+
+
+across a prospective multi-trial suite. 
+
+Pasted markdown
+
+Phase 58 should now test whether that capability generalizes to combinations MECH has never seen.
+
+So the concrete build list is:
+
+backend/discovery/
+├── heldout_generalization_engine.py
+├── prospective_generalization_protocol.py
+├── generalization_calibration_engine.py
+├── negative_control_generalization_engine.py
+└── generalization_claim_policy.py
+
+
+tests/pytest/
+└── test_cross_model_task_prospective_generalization.py
+
+And the core scientific question becomes:
+
+Did MECH actually learn a mechanistic principle, or did it learn the benchmark's model/task combinations?
+
+Phase 58 should be designed to answer exactly that.

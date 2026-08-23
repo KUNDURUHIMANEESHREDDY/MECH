@@ -93,10 +93,31 @@ export const PromptsView: React.FC = () => {
       </div>
 
       {prompts.length === 0 && (
-        <div style={{ fontSize: 12, color: colors.bodyMuted, border: `1px dashed ${colors.hairline}`, borderRadius: 8, padding: 16 }}>
-          No saved prompts yet. Save reusable probes and run them against the loaded model.
+        <div style={{ fontSize: 12, color: colors.bodyMuted, border: `1px dashed ${colors.hairline}`, borderRadius: 8, padding: 16, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+          <span>No saved prompts yet. Save reusable probes or populate from the active dynamic session.</span>
+          <button
+            onClick={async () => {
+              try {
+                const { api } = await import('../services/api');
+                const res = await api.getSessionProbes();
+                if (res?.probes?.length) {
+                  const sampled = res.probes.map((p) => ({
+                    id: p.probe_id,
+                    title: p.category.replace('_', ' ').toUpperCase(),
+                    prompt: p.clean_prompt,
+                    createdAt: new Date().toLocaleTimeString(),
+                  }));
+                  persist(sampled);
+                }
+              } catch { }
+            }}
+            style={{ background: colors.accentSoft, color: colors.primary, border: `1px solid ${colors.hairline}`, borderRadius: 6, padding: '5px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+          >
+            Load Dynamic Session Probes
+          </button>
         </div>
       )}
+
 
       {prompts.map((p) => (
         <div key={p.id} style={{ border: `1px solid ${colors.hairline}`, borderRadius: 8, background: colors.canvas, padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>

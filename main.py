@@ -1,89 +1,50 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-import logging
-from pathlib import Path
-import asyncio
+"""MECH Platform - Unified Server Entry Point.
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
+Loads the core FastAPI application from backend.main and serves the frontend
+single-page application (SPA) when built dist files are present.
+"""
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+
+import uvicorn
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+# Import the configured FastAPI app from backend.main
+from backend.main import app
 
 logger = logging.getLogger("MECH")
 
-app = FastAPI(
-    title="MECH Research Platform",
-    version="2.0",
-    description="Mechanistic Interpretability Research Platform"
-)
+PROJECT_ROOT = Path(__file__).resolve().parent
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 
-# Allow frontend (Vite)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "null", "file://"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Mount frontend assets and provide SPA fallback if dist exists
+if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").is_file():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-PROJECT_ROOT = Path(__file__).parent
-
-@app.on_event("startup")
-async def _preload_gpt2_engine():
-    """Pre-load GPT-2 model at startup to avoid first-request timeout."""
-    try:
-        from backend.services import gpt2_engine
-        if gpt2_engine.is_available():
-            logger.info("Pre-loading GPT-2 engine (torch/transformers)...")
-            result = await asyncio.to_thread(gpt2_engine.load)
-            status = result.get("status", "unknown")
-            logger.info(f"GPT-2 engine pre-loaded: status={status}")
-        else:
-            logger.info("GPT-2 engine not available — using seeded fallbacks.")
-    except Exception as e:
-        logger.warning(f"GPT-2 pre-loading failed: {e}")
-
-@app.get("/")
-def home():
-    return {
-        "name": "MECH Research Platform",
-        "status": "running",
-        "version": "2.0"
-    }
-
-
-@app.get("/health")
-def health():
-    return {
-        "status": "healthy"
-    }
-
-
-# --------------------------
-# Register API routers
-# --------------------------
-try:
-    from backend.api.dispatcher import router as api_router
-    app.include_router(api_router, prefix="/api")
-    logger.info("API Dispatcher loaded.")
-except Exception as e:
-    logger.warning(f"Dispatcher not loaded: {e}")
-
-# Try loading the v2 runtime API if available
-try:
-    from backend.api.runtime_api import router as runtime_router
-    app.include_router(runtime_router, prefix="/api/v2")
-    logger.info("Runtime v2 API loaded.")
-except Exception:
-    pass
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        if full_path == "api" or full_path.startswith("api/") or full_path in {"health", "docs", "redoc", "openapi.json"}:
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(str(candidate))
+        return FileResponse(str(FRONTEND_DIST / "index.html"))
 
 if __name__ == "__main__":
-    logger.info("Starting MECH Platform...")
+    port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    logger.info(f"Starting MECH Platform on http://{host}:{port} ...")
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=host,
+        port=port,
         reload=False,
         timeout_keep_alive=600,
     )

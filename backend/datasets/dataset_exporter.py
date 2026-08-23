@@ -80,9 +80,13 @@ class DatasetExporter:
         meta = manager._manifest.get(dataset_id)
         if not meta: raise ValueError(f"Dataset {dataset_id} not found.")
 
-        bundle_id = f"{dataset_id}_v{meta['version']}"
+        # Prevent path traversal: derive a safe filename from dataset_id so the
+        # archive is always written strictly inside output_dir.
+        safe_id = os.path.basename(str(dataset_id).strip().rstrip(os.sep)) or "dataset"
+        safe_id = safe_id.replace("..", "_").replace("/", "_").replace("\\", "_")
+        bundle_id = f"{safe_id}_v{meta['version']}"
         bundle_uuid = str(uuid.uuid4()).upper()
-        zip_name = f"{bundle_id}_repro.zip"
+        zip_name = f"{bundle_id}_repro.zip".replace("/", "_").replace("\\", "_")
         zip_path = os.path.join(output_dir, zip_name)
 
         # 0. Compute Health Score

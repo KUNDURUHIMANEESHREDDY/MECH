@@ -64,9 +64,12 @@ class ModelManager:
                 hf_repo_id,
                 revision=revision,
                 torch_dtype=torch.float16 if self._device != "cpu" else torch.float32,
+                attn_implementation="eager",
             )
             model.to(self._device)
             model.eval()
+            model.config.output_attentions = True
+            model.config.output_hidden_states = True
 
             self._cache[cache_key] = model
             self._tokenizer_cache[cache_key] = tokenizer

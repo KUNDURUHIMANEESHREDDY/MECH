@@ -1,9 +1,19 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { TransformerExplorer } from '../../src/components/TransformerExplorer';
 
-import { describe, it } from 'vitest';
+describe('TransformerVisualizer', () => {
+  it('switches between Attention, MLP, and LayerNorm tabs', () => {
+    render(<TransformerExplorer />);
+    expect(screen.getByTestId('mha-panel')).toBeInTheDocument();
 
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+    const mlpTab = screen.getByTestId('tab-mlp');
+    fireEvent.click(mlpTab);
+    expect(screen.getByTestId('mlp-panel')).toBeInTheDocument();
+
+    const lnTab = screen.getByTestId('tab-ln');
+    fireEvent.click(lnTab);
+    expect(screen.getByTestId('ln-panel')).toBeInTheDocument();
+  });
 });

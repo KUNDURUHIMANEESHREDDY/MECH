@@ -1,9 +1,17 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { ReportsView } from '../../src/components/ReportsView';
+import { ResearchNotebook } from '../../src/components/ResearchNotebook';
 
-import { describe, it } from 'vitest';
+describe('Sprint5Deliverable', () => {
+  it('renders ReportsView component with report generator', () => {
+    render(<ReportsView />);
+    expect(screen.getByText(/Research Reports/i)).toBeInTheDocument();
+  });
 
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+  it('renders ResearchNotebook component', () => {
+    render(<ResearchNotebook />);
+    expect(screen.getByText(/Research Notebook/i)).toBeInTheDocument();
+  });
 });

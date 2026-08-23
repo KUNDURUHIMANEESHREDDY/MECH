@@ -1,68 +1,16 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useWorkspaceStore } from '../shared/stores/workspace';
 import { pluginRegistry } from '../panel-system/pluginRegistry';
-
-import { Gpt2View } from '../components/Gpt2View';
-import { ModelsView } from '../components/ModelsView';
-import { TransformerVisualizer } from '../components/TransformerVisualizer';
-import { NeuralExplorerView } from '../components/NeuralExplorerView';
-import { CircuitExplorerView } from '../components/CircuitExplorerView';
-import { KnowledgeGraphView } from '../components/KnowledgeGraphView';
-import { DebuggerView } from '../components/DebuggerView';
-import { BenchmarkDashboard } from '../components/BenchmarkDashboard';
-import { BenchmarkSuiteView } from '../components/BenchmarkSuiteView';
-import { ExperimentsView } from '../components/ExperimentsView';
-import { ReasoningTraceView } from '../components/ReasoningTraceView';
-import { EvidenceFusionView } from '../components/EvidenceFusionView';
-import { ResearchAnalyticsView } from '../components/ResearchAnalyticsView';
-import { ScientificHealthView } from '../components/ScientificHealthView';
-import { CampaignWorkspaceView } from '../components/CampaignWorkspaceView';
-import { Workspace } from '../components/Workspace';
-import { PromptsView } from '../components/PromptsView';
-import { BuildLog } from '../components/BuildLog';
-import { SessionsView } from '../components/SessionsView';
-import { ReportsView } from '../components/ReportsView';
-import { PluginSDKView } from '../components/PluginSDKView';
-import { ResearchNotebook } from '../components/ResearchNotebook';
-import { PaperReproductionView } from '../components/PaperReproductionView';
-import { Settings } from '../components/Settings';
-import { Logging } from '../components/Logging';
-import { Projects } from '../components/Projects';
-import { RecentFiles } from '../components/RecentFiles';
-import { Gpt2NeuronExplorer } from '../components/Gpt2NeuronExplorer';
-
-const VIEW_COMPONENT_MAP: Record<string, { title: string; Component: React.ComponentType<any>; fullWidth?: boolean }> = {
-  gpt2: { title: 'GPT-2 Live Engine', Component: Gpt2View, fullWidth: true },
-  explorer: { title: 'Model Explorer', Component: ModelsView, fullWidth: true },
-  models: { title: 'Models Catalog', Component: ModelsView, fullWidth: true },
-  transformer: { title: 'Transformer Visualizer', Component: TransformerVisualizer, fullWidth: true },
-  neuralexplorer: { title: 'Neural Explorer', Component: NeuralExplorerView, fullWidth: true },
-  circuitexplorer: { title: 'Circuit Explorer', Component: CircuitExplorerView, fullWidth: true },
-  knowledgegraph: { title: 'Knowledge Graph', Component: KnowledgeGraphView, fullWidth: true },
-  debugger: { title: 'Neural Debugger', Component: DebuggerView, fullWidth: true },
-  benchmark: { title: 'Benchmark Dashboard', Component: BenchmarkDashboard, fullWidth: true },
-  benchmarksuite: { title: 'Benchmark Suite', Component: BenchmarkSuiteView, fullWidth: true },
-  experiments: { title: 'Experiments', Component: ExperimentsView, fullWidth: true },
-  reasoning: { title: 'Reasoning Trace', Component: ReasoningTraceView, fullWidth: true },
-  evidencefusion: { title: 'Evidence Fusion', Component: EvidenceFusionView, fullWidth: true },
-  analytics: { title: 'Research Analytics', Component: ResearchAnalyticsView, fullWidth: true },
-  health: { title: 'Scientific Health', Component: ScientificHealthView, fullWidth: true },
-  campaigns: { title: 'Campaign Workspace', Component: CampaignWorkspaceView, fullWidth: true },
-  workspace: { title: 'Workspace Dashboard', Component: Workspace, fullWidth: true },
-  prompts: { title: 'Prompts Manager', Component: PromptsView, fullWidth: true },
-  build: { title: 'Build Output', Component: BuildLog, fullWidth: true },
-  sessions: { title: 'Sessions Manager', Component: SessionsView, fullWidth: true },
-  reports: { title: 'Reports & Papers', Component: ReportsView, fullWidth: true },
-  plugins: { title: 'Plugins & SDK', Component: PluginSDKView, fullWidth: true },
-  notebook: { title: 'Research Notebook', Component: ResearchNotebook, fullWidth: true },
-  labnotebook: { title: 'Lab Notebook', Component: ResearchNotebook, fullWidth: true },
-  reproduction: { title: 'Paper Reproduction', Component: PaperReproductionView, fullWidth: true },
-  settings: { title: 'Settings', Component: Settings, fullWidth: true },
-  logging: { title: 'System Logging', Component: Logging, fullWidth: true },
-  projects: { title: 'Projects Manager', Component: Projects, fullWidth: true },
-  recent: { title: 'Recent Files', Component: RecentFiles, fullWidth: true },
-  gpt2explorer: { title: 'GPT-2 Neuron Explorer', Component: Gpt2NeuronExplorer, fullWidth: true },
-};
+import { colors } from '../design/tokens/colors';
+import {
+  Maximize2,
+  Minimize2,
+  X,
+  LayoutGrid,
+  Columns,
+  Sparkles,
+  Plus,
+} from 'lucide-react';
 
 const EmptyState: React.FC = () => (
   <div
@@ -72,35 +20,22 @@ const EmptyState: React.FC = () => (
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      color: 'var(--text-muted, #7a7a7a)',
+      color: colors.bodyMuted,
       gap: '16px',
       fontSize: '14px',
       userSelect: 'none',
       padding: '40px',
+      backgroundColor: colors.canvas,
+      height: '100%',
+      boxSizing: 'border-box',
     }}
   >
-    <svg
-      width="52"
-      height="52"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.25"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ opacity: 0.3 }}
-    >
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M9 3v18" />
-      <path d="M3 9h6" />
-      <path d="M3 15h6" />
-    </svg>
     <div style={{ textAlign: 'center' }}>
-      <div style={{ fontWeight: 600, fontSize: '15px', marginBottom: '6px', color: 'var(--text, #1d1d1f)' }}>
-        Visual Research Canvas
+      <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '6px', color: colors.ink }}>
+        Scientific Research Canvas
       </div>
-      <div style={{ fontSize: '13px', color: 'var(--text-muted, #7a7a7a)', maxWidth: '280px', lineHeight: 1.5 }}>
-        Click a resource in the Navigator or press <kbd style={{ background: 'var(--bg-elev-2, #f0f0f0)', border: '1px solid var(--border, #d0d0d0)', borderRadius: '4px', padding: '1px 5px', fontSize: '11px', fontWeight: 600 }}>⌘K</kbd> to open a view.
+      <div style={{ fontSize: '13px', color: colors.bodyMuted, maxWidth: '340px', lineHeight: 1.5 }}>
+        Select a tool from the Navigator or press <kbd style={{ background: colors.surfacePearl, border: `1px solid ${colors.border}`, borderRadius: '4px', padding: '1px 5px', fontSize: '11px', fontWeight: 600 }}>⌘K</kbd> to open an analysis view.
       </div>
     </div>
   </div>
@@ -109,101 +44,225 @@ const EmptyState: React.FC = () => (
 export const DockManager: React.FC = () => {
   const visiblePanels = useWorkspaceStore((s) => s.visiblePanels);
   const closePanel = useWorkspaceStore((s) => s.closePanel);
+  const openPanel = useWorkspaceStore((s) => s.openPanel);
+
+  const [layoutMode, setLayoutMode] = useState<'tabs' | 'split' | 'grid'>('tabs');
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
   const openPanelIds = Object.entries(visiblePanels)
     .filter(([, visible]) => visible)
     .map(([id]) => id);
 
+  // Track panel additions so we can focus a panel the researcher actually
+  // opened (drawer click or hash route) without hijacking the default tab
+  // on first mount.
+  const prevOpenRef = useRef<string[]>(openPanelIds);
+  useEffect(() => {
+    const prev = prevOpenRef.current;
+    const newlyOpened = openPanelIds.filter((id) => !prev.includes(id));
+    if (newlyOpened.length > 0) {
+      setActiveTabId(newlyOpened[newlyOpened.length - 1]);
+    }
+    prevOpenRef.current = openPanelIds;
+  }, [openPanelIds.join('|')]);
+
+  // Set default active tab if current active tab is closed or null
+  const currentTabId = (activeTabId && openPanelIds.includes(activeTabId))
+    ? activeTabId
+    : (openPanelIds.length > 0 ? openPanelIds[0] : null);
+
   if (openPanelIds.length === 0) {
     return <EmptyState />;
   }
+
+  const dummyCtx: any = {
+    selection: { resource: null, layer: null, head: null, neuron: null, token: null },
+    workspace: {},
+  };
 
   return (
     <div
       style={{
         flex: 1,
         display: 'flex',
-        flexWrap: 'wrap',
-        gap: '8px',
-        padding: '12px',
-        overflow: 'auto',
-        alignContent: 'flex-start',
+        flexDirection: 'column',
         height: '100%',
+        backgroundColor: colors.canvas,
+        overflow: 'hidden',
         boxSizing: 'border-box',
       }}
     >
-      {openPanelIds.map((panelId) => {
-        const plugin = pluginRegistry.get(panelId);
-        const viewEntry = VIEW_COMPONENT_MAP[panelId];
+      {/* Top Canvas Tab & Layout Switcher Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: colors.surfaceTile1,
+          borderBottom: `1px solid ${colors.border}`,
+          padding: '0 8px',
+          height: '36px',
+          userSelect: 'none',
+          boxSizing: 'border-box',
+        }}
+      >
+        {/* Open Panels Tabs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', overflowX: 'auto', flex: 1, height: '100%' }}>
+          {openPanelIds.map((panelId) => {
+            const plugin = pluginRegistry.get(panelId);
+            const title = plugin?.title || panelId;
+            const isActive = currentTabId === panelId;
 
-        if (!plugin && !viewEntry) return null;
-
-        const title = plugin ? plugin.title : viewEntry.title;
-        const fullWidth = viewEntry?.fullWidth;
-
-        const dummyCtx: any = {
-          selection: { resource: null, layer: null, head: null, neuron: null, token: null },
-          workspace: {},
-        };
-
-        return (
-          <div
-            key={panelId}
-            style={{
-              background: 'var(--color-canvas, #ffffff)',
-              border: '1px solid var(--border, #e0e0e0)',
-              borderRadius: '10px',
-              minWidth: fullWidth ? '100%' : '320px',
-              flex: fullWidth ? '1 1 100%' : '1 1 320px',
-              maxWidth: fullWidth ? '100%' : '600px',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-              marginBottom: '8px',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '8px 12px',
-                borderBottom: '1px solid var(--border-light, #f0f0f0)',
-                background: 'var(--bg-elev-1, #fafafa)',
-                fontSize: '12px',
-                fontWeight: 600,
-                color: 'var(--text, #1d1d1f)',
-              }}
-            >
-              <span>{title}</span>
-              <button
-                onClick={() => closePanel(panelId)}
+            return (
+              <div
+                key={panelId}
+                onClick={() => setActiveTabId(panelId)}
                 style={{
-                  background: 'none',
-                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '0 12px',
+                  height: '100%',
+                  fontSize: '12px',
+                  fontWeight: isActive ? 700 : 500,
+                  color: isActive ? colors.primary : colors.body,
+                  backgroundColor: isActive ? colors.canvas : 'transparent',
+                  borderRight: `1px solid ${colors.borderLight}`,
+                  borderBottom: isActive ? `2px solid ${colors.primary}` : 'none',
                   cursor: 'pointer',
-                  color: 'var(--text-muted, #7a7a7a)',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  lineHeight: 1,
+                  whiteSpace: 'nowrap',
                 }}
-                title="Close panel"
               >
-                ×
-              </button>
-            </div>
-            <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
-              {plugin ? (
-                <plugin.Body {...dummyCtx} />
-              ) : (
-                <viewEntry.Component />
-              )}
-            </div>
+                <span>{title}</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closePanel(panelId);
+                    if (currentTabId === panelId) {
+                      const next = openPanelIds.find((id) => id !== panelId);
+                      setActiveTabId(next || null);
+                    }
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: colors.bodyMuted,
+                    fontSize: '14px',
+                    padding: 0,
+                    lineHeight: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                  title="Close view"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Layout Mode Toggles */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
+          <button
+            onClick={() => setLayoutMode('tabs')}
+            style={{
+              ...modeBtnStyle,
+              backgroundColor: layoutMode === 'tabs' ? colors.primary : colors.canvas,
+              color: layoutMode === 'tabs' ? colors.onPrimary : colors.body,
+            }}
+            title="Tabbed Single View (Full Width)"
+          >
+            Tabbed
+          </button>
+          <button
+            onClick={() => setLayoutMode('split')}
+            style={{
+              ...modeBtnStyle,
+              backgroundColor: layoutMode === 'split' ? colors.primary : colors.canvas,
+              color: layoutMode === 'split' ? colors.onPrimary : colors.body,
+            }}
+            title="Split Side-by-Side View"
+          >
+            <Columns size={12} /> Split
+          </button>
+          <button
+            onClick={() => setLayoutMode('grid')}
+            style={{
+              ...modeBtnStyle,
+              backgroundColor: layoutMode === 'grid' ? colors.primary : colors.canvas,
+              color: layoutMode === 'grid' ? colors.onPrimary : colors.body,
+            }}
+            title="Grid Multi-Panel View"
+          >
+            <LayoutGrid size={12} /> Grid
+          </button>
+        </div>
+      </div>
+
+      {/* Canvas View Content */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+        {layoutMode === 'tabs' && currentTabId && (
+          <div style={{ flex: 1, height: '100%', overflow: 'auto' }}>
+            {(() => {
+              const plugin = pluginRegistry.get(currentTabId);
+              if (!plugin) return <EmptyState />;
+              return <plugin.Body {...dummyCtx} />;
+            })()}
           </div>
-        );
-      })}
+        )}
+
+        {layoutMode === 'split' && (
+          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${Math.min(openPanelIds.length, 3)}, 1fr)`, height: '100%', overflow: 'hidden' }}>
+            {openPanelIds.slice(0, 3).map((panelId) => {
+              const plugin = pluginRegistry.get(panelId);
+              if (!plugin) return null;
+              return (
+                <div key={panelId} style={{ borderRight: `1px solid ${colors.border}`, height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, backgroundColor: colors.surfaceTile1, borderBottom: `1px solid ${colors.borderLight}` }}>
+                    {plugin.title}
+                  </div>
+                  <div style={{ flex: 1, overflow: 'auto' }}>
+                    <plugin.Body {...dummyCtx} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {layoutMode === 'grid' && (
+          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '8px', padding: '8px', overflow: 'auto' }}>
+            {openPanelIds.map((panelId) => {
+              const plugin = pluginRegistry.get(panelId);
+              if (!plugin) return null;
+              return (
+                <div key={panelId} style={{ border: `1px solid ${colors.border}`, borderRadius: '8px', backgroundColor: colors.surfaceTile1, overflow: 'hidden', height: '480px', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, backgroundColor: colors.canvas, borderBottom: `1px solid ${colors.borderLight}` }}>
+                    {plugin.title}
+                  </div>
+                  <div style={{ flex: 1, overflow: 'auto' }}>
+                    <plugin.Body {...dummyCtx} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
+};
+
+const modeBtnStyle: React.CSSProperties = {
+  padding: '3px 8px',
+  borderRadius: '4px',
+  border: `1px solid ${colors.border}`,
+  fontSize: '11px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '4px',
 };

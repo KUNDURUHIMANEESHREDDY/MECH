@@ -1,0 +1,1 @@
+{"dataset_id": "factual_recall_v1", "version": "1.0", "description": "Frozen factual recall benchmark: capitals, landmarks, inventors.", "queries_sha256": "COMPUTED_ON_LOAD"}

@@ -2,7 +2,7 @@
 
 Validates: Residual -> Logit Lens -> Tuned Lens -> Compare Projections.
 """
-from api.dispatcher import build_dispatcher
+from backend.api.legacy_dispatcher import build_dispatcher
 
 
 def test_lens_comparison_workflow():

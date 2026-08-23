@@ -13,6 +13,9 @@ from .adapter_base import (
     ActivationResult, AttentionPattern, ModelAdapter, ModelSpec, PatchResult
 )
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 class TransformerLensAdapter(ModelAdapter):
     """Adapter for TransformerLens HookedTransformer models."""
@@ -38,12 +41,19 @@ class TransformerLensAdapter(ModelAdapter):
             import transformer_lens
             from transformer_lens import HookedTransformer
             self._tl_model = HookedTransformer.from_pretrained(self.spec.hf_repo_id)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
             self.spec.mock_mode = True
 
     def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
         if self.spec.mock_mode or self._tl_model is None:
-            return [] # Mock data handled by base if needed
+            # CRITICAL: Mock path raises error instead of returning empty/fabricated data
+            raise RuntimeError(
+                f"Cannot compute activations for '{prompt[:50]}...' - "
+                "TransformerLens model is unavailable. Mock activations must never reach "
+                "EvidenceRecord, Finding, or ScientificConclusion. "
+                "Load a real model to compute actual activations."
+            )
 
         # Real TL implementation
         logits, cache = self._tl_model.run_with_cache(prompt)
@@ -63,7 +73,13 @@ class TransformerLensAdapter(ModelAdapter):
 
     def get_attention_patterns(self, prompt: str, layer: int) -> List[AttentionPattern]:
         if self.spec.mock_mode or self._tl_model is None:
-            return []
+            # CRITICAL: Mock path raises error instead of returning empty/fabricated data
+            raise RuntimeError(
+                f"Cannot compute attention patterns for '{prompt[:50]}...' - "
+                "TransformerLens model is unavailable. Mock attention patterns must never reach "
+                "EvidenceRecord, Finding, or ScientificConclusion. "
+                "Load a real model to compute actual attention patterns."
+            )
 
         logits, cache = self._tl_model.run_with_cache(prompt)
         attn = cache[f"blocks.{layer}.attn.hook_pattern"][0] # [heads, seq, seq]
@@ -80,10 +96,13 @@ class TransformerLensAdapter(ModelAdapter):
 
     def get_logits(self, prompt: str) -> Dict[str, Any]:
         if self.spec.mock_mode or self._tl_model is None:
-            # Match GPT2Adapter mock behavior for alignment testing
-            from .gpt2_adapter import GPT2Adapter
-            mock_adapter = GPT2Adapter(variant="small", mock_mode=True)
-            return mock_adapter.get_logits(prompt)
+            # CRITICAL: Mock path raises error instead of returning fabricated data
+            raise RuntimeError(
+                f"Cannot compute logits for '{prompt[:50]}...' - "
+                "TransformerLens model is unavailable. Mock logits must never reach "
+                "EvidenceRecord, Finding, or ScientificConclusion. "
+                "Load a real model to compute actual logits."
+            )
 
         logits = self._tl_model(prompt)[0, -1, :]
         top5 = logits.topk(5)
@@ -99,10 +118,13 @@ class TransformerLensAdapter(ModelAdapter):
     def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
         """Patch a specific neuron in the MLP layer using HookedTransformer hooks."""
         if self.spec.mock_mode or self._tl_model is None:
-            # Match GPT2Adapter mock behavior for alignment testing
-            from .gpt2_adapter import GPT2Adapter
-            mock_adapter = GPT2Adapter(variant="small", mock_mode=True)
-            return mock_adapter.patch_activation(prompt, layer, neuron_index, patch_value)
+            # CRITICAL: Mock path raises error instead of returning fabricated data
+            raise RuntimeError(
+                f"Cannot patch activation for '{prompt[:50]}...' - "
+                "TransformerLens model is unavailable. Mock patch results must never reach "
+                "EvidenceRecord, Finding, or ScientificConclusion. "
+                "Load a real model to perform actual activation patching."
+            )
 
         # Real TL implementation
         # 1. Original Logits
@@ -140,9 +162,13 @@ class TransformerLensAdapter(ModelAdapter):
     ) -> PatchResult:
         """Patch the output of a specific attention head (head-level causal intervention)."""
         if self.spec.mock_mode or self._tl_model is None:
-            from .gpt2_adapter import GPT2Adapter
-            mock_adapter = GPT2Adapter(variant="small", mock_mode=True)
-            return mock_adapter.patch_head_output(prompt, layer, head_index, patch_vector)
+            # CRITICAL: Mock path raises error instead of returning fabricated data
+            raise RuntimeError(
+                f"Cannot patch head output for layer {layer}, head {head_index} - "
+                "TransformerLens model is unavailable. Mock patch results must never reach "
+                "EvidenceRecord, Finding, or ScientificConclusion. "
+                "Load a real model to perform actual head patching."
+            )
 
         import torch
         # 1. Original Logits
@@ -182,8 +208,13 @@ class TransformerLensAdapter(ModelAdapter):
 
     def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:
         if self.spec.mock_mode or self._tl_model is None:
-            # Match GPT2Adapter mock behavior for alignment testing
-            return [{"layer": i, "norm": round(1.8 + i * 0.3, 4)} for i in range(self.spec.num_layers + 1)]
+            # CRITICAL: Mock path raises error instead of returning fabricated data
+            raise RuntimeError(
+                f"Cannot get residual stream for '{prompt[:50]}...' - "
+                "model is in mock_mode. Mock residual stream norms must never reach "
+                "EvidenceRecord, Finding, or ScientificConclusion. "
+                "Load a real model to compute actual residual stream norms."
+            )
 
         logits, cache = self._tl_model.run_with_cache(prompt)
         # TL resid_post includes embedding as blocks.0.hook_resid_pre or similar

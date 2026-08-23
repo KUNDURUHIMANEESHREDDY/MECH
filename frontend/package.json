@@ -75,20 +75,11 @@
         "to": "backend",
         "filter": [
           "**/*",
-          "!__pycache__",
-          "!**/*.pyc"
-        ]
-      },
-      {
-        "from": "../.venv",
-        "to": ".venv",
-        "filter": [
-          "**/*",
           "!**/__pycache__/**",
           "!**/*.pyc",
-          "!**/pip*/**",
-          "!**/setuptools*/**",
-          "!**/wheel*/**"
+          "!**/*.pyo",
+          "!**/*.pyd",
+          "!**/tests/**"
         ]
       }
     ]

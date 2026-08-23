@@ -1,1 +1,6 @@
-@"C:\Users\himaneeshreddyk\AppData\Local\Python\pythoncore-3.14-64\python.exe" %*
+@echo off
+if exist "%~dp0.venv\Scripts\python.exe" (
+    "%~dp0.venv\Scripts\python.exe" %*
+) else (
+    python %*
+)

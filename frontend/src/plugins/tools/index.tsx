@@ -14,14 +14,16 @@ import type { FC, PanelContext, ResourceKind } from '../../shared/types';
 /* ---- Real panel components (components/panels) ---- */
 import { GPT2LivePanel } from '../../components/panels/GPT2LivePanel';
 import { ModelExplorerPanel } from '../../components/panels/ModelExplorerPanel';
+import { TransformerNetworkPanel } from '../../components/panels/TransformerNetworkPanel';
 import { NeuralExplorerPanel } from '../../components/panels/NeuralExplorerPanel';
+import { Gpt2NeuronExplorerPanel } from '../../components/panels/Gpt2NeuronExplorerPanel';
 import { KnowledgeGraphPanel } from '../../components/panels/KnowledgeGraphPanel';
 import { DebuggerPanel } from '../../components/panels/DebuggerPanel';
 import { BenchmarkPanel, BenchmarkSuitePanel } from '../../components/panels/BenchmarkPanel';
 import { ModelsCatalogPanel } from '../../components/panels/ModelsCatalogPanel';
+import { ModelInteractionPanel } from '../../components/panels/ModelInteractionPanel';
 
 /* ---- Existing view components reused as tool bodies ---- */
-import { CircuitExplorerView } from '../../components/CircuitExplorerView';
 import { ExperimentsView } from '../../components/ExperimentsView';
 import { ReasoningTraceView } from '../../components/ReasoningTraceView';
 import { EvidenceFusionView } from '../../components/EvidenceFusionView';
@@ -41,22 +43,25 @@ import { Settings } from '../../components/Settings';
 import { Logging } from '../../components/Logging';
 import { Projects } from '../../components/Projects';
 import { RecentFiles } from '../../components/RecentFiles';
+import { AIResearchAssistantView } from '../../components/AIResearchAssistantView';
 
-/** Real Circuit Explorer body if the circuit plugin is registered, else the legacy view. */
-const circuitBody = pluginRegistry.get('circuit_explorer')?.Body ?? CircuitExplorerView;
+/** Circuit Explorer body — the circuit plugin registers before this module loads. */
+const circuitBody = pluginRegistry.get('circuit_explorer')?.Body ?? (() => null);
 
 interface ToolSpec {
   id: string;
   title: string;
   kind: ResourceKind;
   Body: FC<PanelContext>;
+  fullWidth?: boolean;
 }
 
 const TOOLS: ToolSpec[] = [
   /* ---- Model analysis cluster: real interactive panels ---- */
   { id: 'gpt2', title: 'GPT-2 Live', kind: 'model', Body: GPT2LivePanel },
+  { id: 'interact', title: 'Model Interaction', kind: 'model', Body: ModelInteractionPanel },
   { id: 'explorer', title: 'Model Explorer', kind: 'model', Body: ModelExplorerPanel },
-  { id: 'transformer', title: 'Transformer Visualizer', kind: 'model', Body: ModelExplorerPanel },
+  { id: 'transformer', title: 'Transformer Visualizer', kind: 'model', Body: TransformerNetworkPanel },
   { id: 'neuralexplorer', title: 'Neural Explorer', kind: 'neuron', Body: NeuralExplorerPanel },
   { id: 'circuitexplorer', title: 'Circuit Explorer', kind: 'circuit', Body: circuitBody },
   { id: 'knowledgegraph', title: 'Knowledge Graph', kind: 'circuit', Body: KnowledgeGraphPanel },
@@ -64,8 +69,10 @@ const TOOLS: ToolSpec[] = [
   { id: 'benchmark', title: 'Benchmark', kind: 'experiment', Body: BenchmarkPanel },
   { id: 'benchmarksuite', title: 'Benchmark Suite', kind: 'experiment', Body: BenchmarkSuitePanel },
   { id: 'models', title: 'Models', kind: 'model', Body: ModelsCatalogPanel },
+  { id: 'gpt2explorer', title: 'GPT-2 Neuron Explorer', kind: 'neuron', Body: Gpt2NeuronExplorerPanel },
 
   /* ---- Existing tools ---- */
+  { id: 'aiassistant', title: 'AI Research Assistant', kind: 'session', Body: AIResearchAssistantView },
   { id: 'experiments', title: 'Experiments', kind: 'experiment', Body: ExperimentsView },
   { id: 'reasoning', title: 'Reasoning', kind: 'session', Body: ReasoningTraceView },
   { id: 'evidencefusion', title: 'Evidence Fusion', kind: 'session', Body: EvidenceFusionView },
@@ -95,6 +102,7 @@ for (const tool of TOOLS) {
     category: 'tool',
     resourceKinds: [tool.kind],
     defaultDock: 'center',
+    fullWidth: true,
     Body: tool.Body,
   });
 }

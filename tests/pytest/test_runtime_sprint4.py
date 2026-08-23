@@ -1,5 +1,5 @@
 """Tests for AI 2 Runtime Sprint 4 Large Scale Execution epics."""
-from api.dispatcher import build_dispatcher
+from backend.api.legacy_dispatcher import build_dispatcher
 
 
 def test_runtime_orchestration_submit():

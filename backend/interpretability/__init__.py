@@ -1,106 +1,83 @@
-"""
-Neuron Inspector - A neural network activation analysis toolkit.
+"""Neuron Inspector - A neural network activation analysis toolkit.
 
 Architecture:
 
     Runtime
 
-    ↓
+    |
 
     ActivationRepository
 
-    ↓
+    |
 
     Inspectors
-        │
-        ├── NeuronInspector
-        ├── AttentionInspector
-        ├── ResidualInspector
-        ├── LayerInspector
-        ├── TokenInspector
-        └── LogitInspector
+        | - NeuronInspector
+        | - AttentionInspector
+        | - ResidualInspector
+        | - LayerInspector
+        | - TokenInspector
+        | - LogitInspector
 
-    ↓
+    |
 
     REST API (v1)
 
-    ↓
+    |
 
     Frontend
 """
 
-from .models import (
-    Statistics,
-    NeuronInspection,
-    AttentionInspection,
-    ResidualInspection,
-    LayerInspection,
-    TokenInspection,
-    LogitInspection,
-    HeadRanking,
-    ActivationSearchResult,
-    VisualizationDTO,
-    # Backward-compatible aliases
-    NeuronData,
-    AttentionData,
-    ResidualData,
-    LayerData,
-    HeatmapData,
-)
-from .statistics import StatisticsComputer
-from .runtime import Runtime
-from .mock_runtime import MockRuntime, get_default_runtime
-from .repository import ActivationRepository
-from .neuron_inspector import NeuronInspector
-from .attention_inspector import AttentionInspector
-from .residual_inspector import ResidualInspector
-from .layer_inspector import LayerInspector
-from .token_inspector import TokenInspector
-from .logit_inspector import LogitInspector
-from .heatmap import VisualizationGenerator, HeatmapGenerator
-from .api import app
+# Eager imports here would pull torch/transformers (~11s) into every app/API
+# startup (logit_lens -> runtime.logits and friends). Names are resolved on
+# first attribute access instead; direct submodule imports are unaffected.
 
-# Sub-packages
-from . import algorithms
-from . import sae
-from . import causal
-from . import semantics
+_LAZY_EXPORTS = {
+    "Statistics": (".models", "Statistics"),
+    "NeuronInspection": (".models", "NeuronInspection"),
+    "AttentionInspection": (".models", "AttentionInspection"),
+    "ResidualInspection": (".models", "ResidualInspection"),
+    "LayerInspection": (".models", "LayerInspection"),
+    "TokenInspection": (".models", "TokenInspection"),
+    "LogitInspection": (".models", "LogitInspection"),
+    "HeadRanking": (".models", "HeadRanking"),
+    "ActivationSearchResult": (".models", "ActivationSearchResult"),
+    "VisualizationDTO": (".models", "VisualizationDTO"),
+    "NeuronData": (".models", "NeuronData"),
+    "AttentionData": (".models", "AttentionData"),
+    "ResidualData": (".models", "ResidualData"),
+    "LayerData": (".models", "LayerData"),
+    "HeatmapData": (".models", "HeatmapData"),
+    "StatisticsComputer": (".statistics", "StatisticsComputer"),
+    "Runtime": (".runtime", "Runtime"),
+    "MockRuntime": (".mock_runtime", "MockRuntime"),
+    "get_default_runtime": (".mock_runtime", "get_default_runtime"),
+    "ActivationRepository": (".repository", "ActivationRepository"),
+    "NeuronInspector": (".neuron_inspector", "NeuronInspector"),
+    "AttentionInspector": (".attention_inspector", "AttentionInspector"),
+    "ResidualInspector": (".residual_inspector", "ResidualInspector"),
+    "LayerInspector": (".layer_inspector", "LayerInspector"),
+    "TokenInspector": (".token_inspector", "TokenInspector"),
+    "LogitInspector": (".logit_inspector", "LogitInspector"),
+    "VisualizationGenerator": (".heatmap", "VisualizationGenerator"),
+    "HeatmapGenerator": (".heatmap", "HeatmapGenerator"),
+    "app": (".api", "app"),
+    "algorithms": (".algorithms", None),
+    "sae": (".sae", None),
+    "causal": (".causal", None),
+    "semantics": (".semantics", None),
+}
 
 __version__ = "2.0.0"
-__all__ = [
-    # Models
-    "Statistics",
-    "NeuronInspection",
-    "AttentionInspection",
-    "ResidualInspection",
-    "LayerInspection",
-    "TokenInspection",
-    "LogitInspection",
-    "HeadRanking",
-    "ActivationSearchResult",
-    "VisualizationDTO",
-    # Backward-compatible aliases
-    "NeuronData",
-    "AttentionData",
-    "ResidualData",
-    "LayerData",
-    "HeatmapData",
-    # Core
-    "StatisticsComputer",
-    "Runtime",
-    "MockRuntime",
-    "get_default_runtime",
-    "ActivationRepository",
-    # Inspectors
-    "NeuronInspector",
-    "AttentionInspector",
-    "ResidualInspector",
-    "LayerInspector",
-    "TokenInspector",
-    "LogitInspector",
-    # Visualization
-    "VisualizationGenerator",
-    "HeatmapGenerator",
-    # API
-    "app",
-]
+__all__ = list(_LAZY_EXPORTS)
+
+
+def __getattr__(name: str):
+    entry = _LAZY_EXPORTS.get(name)
+    if entry is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    module = importlib.import_module(entry[0], __name__)
+    value = module if entry[1] is None else getattr(module, entry[1])
+    globals()[name] = value
+    return value

@@ -1,7 +1,7 @@
-"""Epic 2: Model Manager — multi-model support.
+"""Epic 2: Model Manager — multi-model support & layer paging.
 
 Supports loading, unloading, switching, and listing models.
-Extensible registry: add new models by name.
+Provides progressive layer streaming and provenance weight digests.
 
 Supported architectures:
     - GPT2 family (gpt2, gpt2-medium, distilgpt2)
@@ -14,14 +14,16 @@ Supported architectures:
 
 from __future__ import annotations
 
+import hashlib
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import torch
 import torch.nn as nn
-
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from .errors import ModelLoadError, ModelNotFoundError
-from .event_bus import bus, MODEL_LOADED, MODEL_LOADING, MODEL_UNLOADED, MODEL_SWITCHED
-
+from .event_bus import MODEL_LOADED, MODEL_LOADING, MODEL_SWITCHED, MODEL_UNLOADED, bus
+from .memory.layer_pager import LayerExecutionOutput, LayerPager
 
 # ── Registry ─────────────────────────────────────────────────────
 
@@ -48,6 +50,7 @@ _FUTURE_MODELS: dict[str, ModelEntry] = {
 _loaded_model: nn.Module | None = None
 _loaded_tokenizer = None
 _loaded_name: str | None = None
+_loaded_weights_digest: str = "unknown"
 
 
 # ── API ──────────────────────────────────────────────────────────
@@ -66,16 +69,25 @@ def model_info(name: str) -> dict:
         "hf_id": entry["hf_id"],
         "family": entry["family"],
         "loaded": name == _loaded_name,
+        "weights_digest": _loaded_weights_digest if name == _loaded_name else "unloaded",
         **{k: v for k, v in entry.items() if k not in ("hf_id", "family")},
     }
 
 
+def compute_model_weights_digest(model: nn.Module) -> str:
+    """Computes a fast structural checksum of model parameter shapes and dtypes."""
+    summary_parts = []
+    for name, param in model.named_parameters():
+        summary_parts.append(f"{name}:{list(param.shape)}:{param.dtype}")
+    raw = "|".join(summary_parts[:100])  # Sample first 100 tensors for speed
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def load_model(name: str) -> dict:
-    global _loaded_model, _loaded_tokenizer, _loaded_name
+    global _loaded_model, _loaded_tokenizer, _loaded_name, _loaded_weights_digest
 
     entry = _MODEL_REGISTRY.get(name)
     if entry is None:
-        # Check future models
         future = _FUTURE_MODELS.get(name)
         if future is None:
             raise ModelNotFoundError(
@@ -87,7 +99,6 @@ def load_model(name: str) -> dict:
         )
 
     hf_id = str(entry["hf_id"])
-
     bus.emit(MODEL_LOADING, model_name=name, hf_id=hf_id)
 
     try:
@@ -106,11 +117,13 @@ def load_model(name: str) -> dict:
         )
         _loaded_model.eval()
         _loaded_name = name
+        _loaded_weights_digest = compute_model_weights_digest(_loaded_model)
 
         config = _loaded_model.config
         info = {
             "model_name": name,
             "status": "loaded",
+            "weights_digest": _loaded_weights_digest,
             "num_layers": getattr(config, "n_layer", getattr(config, "num_hidden_layers", 0)),
             "num_heads": getattr(config, "n_head", getattr(config, "num_attention_heads", 0)),
             "hidden_dim": getattr(config, "n_embd", getattr(config, "hidden_size", 0)),
@@ -123,11 +136,12 @@ def load_model(name: str) -> dict:
 
 
 def _unload_current() -> None:
-    global _loaded_model, _loaded_tokenizer, _loaded_name
+    global _loaded_model, _loaded_tokenizer, _loaded_name, _loaded_weights_digest
     old_name = _loaded_name
     _loaded_model = None
     _loaded_tokenizer = None
     _loaded_name = None
+    _loaded_weights_digest = "unknown"
     if old_name:
         bus.emit(MODEL_UNLOADED, model_name=old_name)
 
@@ -152,5 +166,38 @@ def get_model_and_tokenizer():
     return _loaded_model, _loaded_tokenizer
 
 
+def get_current_model_name() -> Optional[str]:
+    return _loaded_name
+
+
+def get_current_weights_digest() -> str:
+    return _loaded_weights_digest
+
+
 def is_loaded() -> bool:
     return _loaded_model is not None
+
+
+def get_layer_pager(device: str = "cpu", offload_to_cpu: bool = False) -> LayerPager:
+    """Creates a LayerPager configured for current runtime."""
+    return LayerPager(device=device, offload_to_cpu=offload_to_cpu)
+
+
+def run_layer_paged_forward(
+    prompt: str,
+    interventions: Optional[Dict[int, Callable[[torch.Tensor], torch.Tensor]]] = None,
+    capture_layers: Optional[List[int]] = None,
+    session_id: str = "paged_session",
+) -> LayerExecutionOutput:
+    """Convenience method to execute layer-paged forward pass on current loaded model."""
+    if _loaded_model is None or _loaded_tokenizer is None:
+        load_model("gpt2")
+    pager = get_layer_pager()
+    return pager.run_sequential_forward(
+        model=_loaded_model,
+        tokenizer=_loaded_tokenizer,
+        prompt=prompt,
+        interventions=interventions,
+        capture_layers=capture_layers,
+        session_id=session_id,
+    )

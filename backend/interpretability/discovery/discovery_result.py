@@ -35,7 +35,8 @@ class DiscoveryResultDTO:
         self.artifacts = artifacts or []
         self.related_features = related_features or []
         self.related_circuits = related_circuits or []
-        self.timestamp = _dt.datetime.utcnow().isoformat() + "Z"
+        self.timestamp = _dt.datetime.now(_dt.timezone.utc).isoformat()
+
 
     def to_dict(self) -> Dict[str, Any]:
         return {

@@ -13,7 +13,8 @@ class ProjectionModel:
     """Interface for layer projection models (Logit Lens, Tuned Lens)."""
 
     def project(self, prompt: str, layer: int) -> Dict[str, Any]:
-        raise NotImplementedError
+        """Project intermediate activations at the given layer to vocabulary logits."""
+        raise NotImplementedError("Subclasses must implement project()")
 
 
 class LogitLens(ProjectionModel):
@@ -32,8 +33,5 @@ class LogitLens(ProjectionModel):
             "top_token": target_layer["top_prediction"],
             "top_logit": target_layer["top_logit"],
             "entropy": target_layer["entropy"],
-            "top_k_tokens": [
-                {"token": target_layer["top_prediction"], "logit": target_layer["top_logit"], "probability": 0.78},
-                {"token": " France", "logit": target_layer["top_logit"] - 1.2, "probability": 0.12},
-            ],
+            "top_k_tokens": target_layer.get("top_k_tokens", []),
         }

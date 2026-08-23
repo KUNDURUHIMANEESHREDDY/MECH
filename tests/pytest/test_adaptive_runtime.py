@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from api.dispatcher import build_dispatcher
-from runtime.adaptive.adaptive_cache_engine import AdaptiveCacheEngine
-from runtime.adaptive.calibration_engine import PredictionCalibrationEngine
-from runtime.adaptive.energy_cost_optimizer import EnergyCostOptimizerEngine
-from runtime.adaptive.execution_episodes import ExecutionEpisodesEngine
-from runtime.adaptive.fault_diagnostics import AutonomousFaultDiagnosticsEngine
-from runtime.adaptive.policy_engine import HardwareConstraints, PolicyEngine
-from runtime.adaptive.predictive_autoscaler import PredictiveAutoscalerEngine
-from runtime.adaptive.runtime_analytics import RuntimeAnalyticsSuite
-from runtime.adaptive.runtime_decision_engine import RuntimeDecisionEngine
-from runtime.adaptive.runtime_knowledge_base import RuntimeKnowledgeBaseEngine
-from runtime.adaptive.runtime_simulator import RuntimeSimulatorEngine
-from runtime.adaptive.workload_fingerprints import WorkloadFingerprintsEngine
+from backend.api.legacy_dispatcher import build_dispatcher
+from backend.runtime.adaptive.adaptive_cache_engine import AdaptiveCacheEngine
+from backend.runtime.adaptive.calibration_engine import PredictionCalibrationEngine
+from backend.runtime.adaptive.energy_cost_optimizer import EnergyCostOptimizerEngine
+from backend.runtime.adaptive.execution_episodes import ExecutionEpisodesEngine
+from backend.runtime.adaptive.fault_diagnostics import AutonomousFaultDiagnosticsEngine
+from backend.runtime.adaptive.policy_engine import HardwareConstraints, PolicyEngine
+from backend.runtime.adaptive.predictive_autoscaler import PredictiveAutoscalerEngine
+from backend.runtime.adaptive.runtime_analytics import RuntimeAnalyticsSuite
+from backend.runtime.adaptive.runtime_decision_engine import RuntimeDecisionEngine
+from backend.runtime.adaptive.runtime_knowledge_base import RuntimeKnowledgeBaseEngine
+from backend.runtime.adaptive.runtime_simulator import RuntimeSimulatorEngine
+from backend.runtime.adaptive.workload_fingerprints import WorkloadFingerprintsEngine
 
 
 def test_policy_engine_objectives_and_constraints():

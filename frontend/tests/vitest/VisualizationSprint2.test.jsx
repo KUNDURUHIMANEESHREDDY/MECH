@@ -1,9 +1,11 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { Gpt2NeuronExplorerPanel } from '../../src/components/panels/Gpt2NeuronExplorerPanel';
 
-import { describe, it } from 'vitest';
-
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+describe('VisualizationSprint2', () => {
+  it('renders Gpt2NeuronExplorerPanel with neuron activation visualizations', () => {
+    render(<Gpt2NeuronExplorerPanel />);
+    expect(screen.getByText(/Probe Sequence/i)).toBeInTheDocument();
+  });
 });

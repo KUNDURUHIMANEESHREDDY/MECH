@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ChevronRight, ChevronDown, Folder, FileText, Brain, Layers, Flame, Zap, Cpu, Activity, Code, BarChart, BookOpen, FlaskConical, Search, FolderTree } from 'lucide-react';
+import React, { useState, useRef, useCallback } from 'react';
+import { ChevronRight, ChevronDown, Folder, FileText, Brain, Layers, Flame, Zap, Cpu, Activity, Code, BarChart, BookOpen, FlaskConical, Search, FolderTree, MessageSquare, GitBranch, Shield } from 'lucide-react';
 import { useWorkspaceStore } from '../../shared/stores/workspace';
 import { useUIStore } from '../../shared/stores/ui';
 import { Resource, ResourceKind } from '../../shared/types';
@@ -15,102 +15,146 @@ interface NavTreeItem {
 
 const RESOURCE_TREE: NavTreeItem[] = [
   {
+    id: 'group_workspace',
+    label: 'Workspace',
+    kind: 'workspace',
+    icon: <Folder size={15} />,
+    children: [
+      { id: 'active_investigation', label: 'Overview (Active Investigation)', kind: 'workspace', icon: <Brain size={14} />, navKey: 'active_investigation' },
+      { id: 'models', label: 'Models', kind: 'model', icon: <Cpu size={14} />, navKey: 'models' },
+      { id: 'datasets', label: 'Datasets & Probes', kind: 'dataset', icon: <Folder size={14} />, navKey: 'dataset_viewer' },
+      { id: 'hypotheses', label: 'Hypotheses', kind: 'session', icon: <FlaskConical size={14} />, navKey: 'hypothesis_lab' },
+      { id: 'mechanisms', label: 'Mechanisms', kind: 'circuit', icon: <Layers size={14} />, navKey: 'mechanism_builder' },
+      { id: 'evidence_graph', label: 'Evidence Graph', kind: 'circuit', icon: <Activity size={14} />, navKey: 'evidence_graph' },
+      { id: 'report_mode', label: 'Research Artifacts & Reports', kind: 'paper', icon: <BookOpen size={14} />, navKey: 'report_mode' },
+    ],
+  },
+  {
     id: 'group_models',
-    label: 'Models & Architectures',
+    label: 'Model',
     kind: 'model',
     icon: <Brain size={15} />,
     children: [
-      { id: 'gpt2', label: 'GPT-2 Live', kind: 'model', icon: <Cpu size={14} />, navKey: 'gpt2' },
-      { id: 'explorer', label: 'Model Explorer', kind: 'model', icon: <Search size={14} />, navKey: 'explorer' },
+      { id: 'model_explorer', label: 'Model Explorer', kind: 'model', icon: <Search size={14} />, navKey: 'model_explorer' },
       { id: 'transformer', label: 'Transformer Visualizer', kind: 'model', icon: <Layers size={14} />, navKey: 'transformer' },
-      { id: 'neuralexplorer', label: 'Neural Explorer', kind: 'neuron', icon: <Zap size={14} />, navKey: 'neuralexplorer' },
+      { id: 'attention_heatmap', label: 'Attention Lab', kind: 'model', icon: <Flame size={14} />, navKey: 'attention_heatmap' },
+      { id: 'neuron_panel', label: 'Neuron & MLP Explorer', kind: 'neuron', icon: <Zap size={14} />, navKey: 'neuron_panel' },
+      { id: 'sae_feature', label: 'SAE Feature Latents', kind: 'model', icon: <Layers size={14} />, navKey: 'sae_feature' },
+      { id: 'circuit_explorer', label: 'Circuit Explorer', kind: 'circuit', icon: <Activity size={14} />, navKey: 'circuit_explorer' },
     ],
   },
   {
     id: 'group_analysis',
-    label: 'Mechanistic Analysis',
+    label: 'Analysis',
     kind: 'circuit',
     icon: <Flame size={15} />,
     children: [
-      { id: 'circuitexplorer', label: 'Circuit Explorer', kind: 'circuit', icon: <Activity size={14} />, navKey: 'circuitexplorer' },
-      { id: 'knowledgegraph', label: 'Knowledge Graph', kind: 'circuit', icon: <Folder size={14} />, navKey: 'knowledgegraph' },
-      { id: 'debugger', label: 'Debugger', kind: 'neuron', icon: <Code size={14} />, navKey: 'debugger' },
-      { id: 'benchmark', label: 'Benchmark', kind: 'experiment', icon: <BarChart size={14} />, navKey: 'benchmark' },
-      { id: 'benchmarksuite', label: 'Benchmark Suite', kind: 'experiment', icon: <BarChart size={14} />, navKey: 'benchmarksuite' },
-      { id: 'experiments', label: 'Experiments', kind: 'experiment', icon: <FlaskConical size={14} />, navKey: 'experiments' },
-      { id: 'reasoning', label: 'Reasoning', kind: 'session', icon: <FileText size={14} />, navKey: 'reasoning' },
-      { id: 'evidencefusion', label: 'Evidence Fusion', kind: 'session', icon: <FileText size={14} />, navKey: 'evidencefusion' },
-      { id: 'analytics', label: 'Analytics', kind: 'session', icon: <BarChart size={14} />, navKey: 'analytics' },
-      { id: 'health', label: 'Health', kind: 'session', icon: <Activity size={14} />, navKey: 'health' },
-      { id: 'campaigns', label: 'Campaigns', kind: 'session', icon: <FlaskConical size={14} />, navKey: 'campaigns' },
+      { id: 'logit_lens', label: 'Logit Lens & Trajectory', kind: 'model', icon: <Search size={14} />, navKey: 'logit_lens' },
+      { id: 'probing_lab', label: 'Probing Lab', kind: 'dataset', icon: <Folder size={14} />, navKey: 'dataset_viewer' },
+      { id: 'attribution_dla', label: 'Attribution & DLA', kind: 'model', icon: <BarChart size={14} />, navKey: 'sae_feature' },
+      { id: 'causal_tracing', label: 'Causal Tracing', kind: 'experiment', icon: <Activity size={14} />, navKey: 'intervention_lab' },
     ],
   },
   {
-    id: 'group_workspace',
-    label: 'Workspace & Assets',
-    kind: 'workspace',
-    icon: <Folder size={15} />,
+    id: 'group_research',
+    label: 'Research',
+    kind: 'session',
+    icon: <FlaskConical size={15} />,
     children: [
-      { id: 'workspace', label: 'Workspace', kind: 'workspace', icon: <Folder size={14} />, navKey: 'workspace' },
-      { id: 'models', label: 'Models', kind: 'model', icon: <Brain size={14} />, navKey: 'models' },
-      { id: 'prompts', label: 'Prompts', kind: 'prompt', icon: <FileText size={14} />, navKey: 'prompts' },
-      { id: 'build', label: 'Build', kind: 'workspace', icon: <Code size={14} />, navKey: 'build' },
-      { id: 'sessions', label: 'Sessions', kind: 'session', icon: <FileText size={14} />, navKey: 'sessions' },
-      { id: 'reports', label: 'Reports', kind: 'paper', icon: <BookOpen size={14} />, navKey: 'reports' },
-      { id: 'plugins', label: 'Plugins', kind: 'workspace', icon: <Layers size={14} />, navKey: 'plugins' },
-      { id: 'notebook', label: 'Research Notebook', kind: 'note', icon: <FileText size={14} />, navKey: 'notebook' },
-      { id: 'labnotebook', label: 'Lab Notebook', kind: 'note', icon: <FileText size={14} />, navKey: 'labnotebook' },
-      { id: 'reproduction', label: 'Paper Reproduction', kind: 'paper', icon: <BookOpen size={14} />, navKey: 'reproduction' },
-      { id: 'settings', label: 'Settings', kind: 'workspace', icon: <Folder size={14} />, navKey: 'settings' },
-      { id: 'logging', label: 'Logging', kind: 'session', icon: <Activity size={14} />, navKey: 'logging' },
+      { id: 'experiment_builder', label: 'Experiment Builder', kind: 'experiment', icon: <FlaskConical size={14} />, navKey: 'experiment_builder' },
+      { id: 'experiment_monitor', label: 'Experiment Monitor', kind: 'experiment', icon: <Activity size={14} />, navKey: 'experiment_monitor' },
+      { id: 'evidence_explorer', label: 'Evidence Explorer', kind: 'evidence', icon: <Search size={14} />, navKey: 'evidence_explorer' },
+      { id: 'research_graph', label: 'Research Graph', kind: 'research', icon: <GitBranch size={14} />, navKey: 'research_graph' },
+      { id: 'research_notebook', label: 'Research Notebook', kind: 'research', icon: <FileText size={14} />, navKey: 'research_notebook' },
+      { id: 'hypothesis_lab', label: 'Hypothesis Lab', kind: 'session', icon: <FlaskConical size={14} />, navKey: 'hypothesis_lab' },
+      { id: 'intervention_lab', label: 'Causal Intervention Lab', kind: 'experiment', icon: <Zap size={14} />, navKey: 'intervention_lab' },
+      { id: 'evidence_graph_res', label: 'Evidence Graph & Provenance', kind: 'circuit', icon: <Activity size={14} />, navKey: 'evidence_graph' },
+      { id: 'mechanism_builder_res', label: 'Mechanism Builder', kind: 'circuit', icon: <Layers size={14} />, navKey: 'mechanism_builder' },
+      { id: 'notebook', label: 'Research Notebook', kind: 'note', icon: <FileText size={14} />, navKey: 'experiment_notebook' },
+      { id: 'health', label: 'Reproducibility & Validation', kind: 'session', icon: <Activity size={14} />, navKey: 'health' },
+      { id: 'ui_adversarial_tester', label: 'UI Adversarial Tester', kind: 'session', icon: <Shield size={14} />, navKey: 'ui_adversarial_tester' },
+      { id: 'acceptance_test_verifier', label: 'Acceptance Test Verifier', kind: 'session', icon: <Activity size={14} />, navKey: 'acceptance_test_verifier' },
+    ],
+  },
+  {
+    id: 'group_system',
+    label: 'System',
+    kind: 'workspace',
+    icon: <Cpu size={15} />,
+    children: [
+      { id: 'compute_center', label: 'Compute Center & Jobs', kind: 'workspace', icon: <Cpu size={14} />, navKey: 'compute_center' },
+      { id: 'real_time_dag', label: 'Storage & Telemetry DAG', kind: 'workspace', icon: <Activity size={14} />, navKey: 'real_time_dag' },
+      { id: 'logging', label: 'Execution Logs', kind: 'session', icon: <Activity size={14} />, navKey: 'logging' },
       { id: 'projects', label: 'Projects', kind: 'workspace', icon: <Folder size={14} />, navKey: 'projects' },
-      { id: 'recent', label: 'Recent Files', kind: 'session', icon: <FileText size={14} />, navKey: 'recent' },
+      { id: 'settings', label: 'Configuration & Settings', kind: 'workspace', icon: <Folder size={14} />, navKey: 'settings' },
     ],
   },
 ];
 
 export const FeaturesDrawer: React.FC = () => {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    group_workspace: true,
     group_models: true,
     group_analysis: true,
-    group_workspace: true,
+    group_research: true,
+    group_system: true,
   });
 
   const { openResource } = useWorkspaceStore();
   const setCrumb = useUIStore((s) => s.setCrumb);
   const open = useUIStore((s) => !s.sidebarCollapsed);
 
-  if (!open) return null;
+  const doubleClickTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const handleDoubleClick = (item: NavTreeItem) => {
+  const handleDoubleClick = useCallback((item: NavTreeItem) => {
+    const existingTimer = doubleClickTimerRef.current.get(item.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      doubleClickTimerRef.current.delete(item.id);
+    }
+
     const res: Resource = {
       id: item.id,
       kind: item.kind,
       label: item.label,
     };
     openResource(res, item.navKey);
-  };
+  }, [openResource]);
 
-  const handleNavClick = (item: NavTreeItem) => {
+  const handleNavClick = useCallback((item: NavTreeItem) => {
     if (item.navKey) {
       window.location.hash = `#${item.navKey}`;
     }
     if (item.label) {
       setCrumb(item.label);
     }
+
     if (item.navKey) {
-      const res: Resource = {
-        id: item.id,
-        kind: item.kind,
-        label: item.label,
-      };
-      openResource(res, item.navKey);
+      const existingTimer = doubleClickTimerRef.current.get(item.id);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        doubleClickTimerRef.current.delete(item.id);
+      }
+
+      const timer = setTimeout(() => {
+        doubleClickTimerRef.current.delete(item.id);
+        const res: Resource = {
+          id: item.id,
+          kind: item.kind,
+          label: item.label,
+        };
+        openResource(res, item.navKey);
+      }, 200);
+
+      doubleClickTimerRef.current.set(item.id, timer);
     }
-  };
+  }, [openResource, setCrumb]);
+
+  if (!open) return null;
 
   return (
     <aside className="shell-navigator" data-testid="features-drawer" style={drawerStyle}>
@@ -169,7 +213,7 @@ const drawerStyle: React.CSSProperties = {
   flexDirection: 'column',
   userSelect: 'none',
   fontSize: '12px',
-  zIndex: 20,
+  zIndex: 30,
 };
 
 const headerStyle: React.CSSProperties = {

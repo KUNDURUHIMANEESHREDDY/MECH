@@ -1,0 +1,8 @@
+{"seq": "The cat sat on the mat the dog", "repeated": "cat", "target": " sat", "template_id": "T1", "control_type": "name_swap"}
+{"seq": "Alice Bob walked together Charlie Dave", "repeated": "Alice", "target": " Bob", "template_id": "T2", "control_type": "name_swap"}
+{"seq": "The doctor said alpha beta gamma delta", "repeated": "alpha", "target": " beta", "template_id": "T3", "control_type": "name_swap"}
+{"seq": "red blue green yellow black white", "repeated": "red", "target": " blue", "template_id": "T4", "control_type": "name_swap"}
+{"seq": "one two three four five six", "repeated": "one", "target": " two", "template_id": "T5", "control_type": "name_swap"}
+{"seq": "Mary John walked to school Alice Bob", "repeated": "Mary", "target": " John", "template_id": "T6", "control_type": "name_swap"}
+{"seq": "north south east west left right", "repeated": "north", "target": " south", "template_id": "T7", "control_type": "name_swap"}
+{"seq": "The president said hello world goodbye earth", "repeated": "hello", "target": " world", "template_id": "T8", "control_type": "name_swap"}

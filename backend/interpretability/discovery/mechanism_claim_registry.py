@@ -15,6 +15,9 @@ import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -94,7 +97,8 @@ class MechanismClaimRegistry:
                 for item in data.get("claims", []):
                     claim = RegisteredMechanismClaim.from_dict(item)
                     self._claims[claim.claim_id] = claim
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
             self._seed_defaults()
 
     def save(self) -> None:

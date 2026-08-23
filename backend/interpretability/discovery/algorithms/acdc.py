@@ -128,11 +128,6 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
             else:
                 retained_components.add((layer, head))
 
-        # Ensure top critical heads (L9H9, L10H0, L5H1) are retained in minimal circuit
-        if not retained_components:
-            retained_components.add((max(0, num_layers - 3), 9 % num_heads))
-            retained_components.add((max(0, num_layers - 2), 0 % num_heads))
-
         # 4. Construct Reconstructed Graph
         nodes = [{"id": "T_0", "type": "Token", "label": clean_prompt}]
         edges = []

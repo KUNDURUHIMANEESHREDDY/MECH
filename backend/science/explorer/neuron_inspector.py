@@ -227,3 +227,13 @@ class NeuronInspector:
         }
         self._patch_history.setdefault(key, []).append(record)
         return {"recorded": True, "total_experiments": len(self._patch_history[key])}
+
+
+ExplorerNeuronInspector = NeuronInspector
+
+__all__ = [
+    "NeuronInspector",
+    "ExplorerNeuronInspector",
+    "NeuronDetail",
+    "ActivationHistogram",
+]

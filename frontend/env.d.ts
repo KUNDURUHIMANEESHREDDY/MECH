@@ -1,5 +1,13 @@
 /// <reference types="vite/client" />
 
+/** Extended import.meta.env for MECH Platform. */
+interface ImportMetaEnv {
+  readonly VITE_BACKEND_URL?: string;
+  readonly VITE_API_KEY?: string;
+  readonly VITE_DEV_BACKEND_URL?: string;
+  readonly [key: string]: string | undefined;
+}
+
 /* ---- Typed bridge surfaces matching the REAL Electron preload (electron/preload.js) ---- */
 
 /** Data + settings + build/log surface — exposed as window.appApi. */

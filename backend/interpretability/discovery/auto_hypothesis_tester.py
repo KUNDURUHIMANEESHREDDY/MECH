@@ -150,27 +150,61 @@ class AutoHypothesisTester:
             "expected_firing": counter.get("expected_firing", False)
         }
 
-    def measure(self, experiment_spec: Dict[str, Any]) -> Dict[str, Any]:
-        """Step 5 (Multi-Agent): Statistician runs model and collects data."""
-        actual_firing = random.random() > 0.5 
-        expected = experiment_spec["expected_firing"]
+    def measure(self, experiment_spec: Dict[str, Any], layer: int = 8, neuron_index: int = 412) -> Dict[str, Any]:
+        """Step 5: Execute live forward pass on prompt and measure target activation."""
+        import torch
+        import backend.services.gpt2_engine as gpt2_engine
+        gpt2_engine.load()
+        model = gpt2_engine._model
+        tokenizer = gpt2_engine._tokenizer
+
+        prompt = experiment_spec.get("prompt", "The capital of France is")
+        expected = experiment_spec.get("expected_firing", True)
+
+        if model is None or tokenizer is None:
+            raise RuntimeError("Live model is uninitialized for hypothesis measurement.")
+
+        inputs = tokenizer(prompt, return_tensors="pt")
+        inputs = {k: v.to(model.device) if hasattr(v, "to") else v for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = model(**inputs, output_hidden_states=True)
+
+        # Measure activation at target layer and neuron index
+        blocks = getattr(model, "transformer", getattr(model, "model", None))
+        layers = getattr(blocks, "h", getattr(blocks, "layers", []))
         
+        target_layer = min(layer, len(layers) - 1)
+        hidden_states = outputs.hidden_states[target_layer + 1]  # [1, seq_len, d_model]
+        last_hidden = hidden_states[0, -1, :]
+        
+        n_idx = neuron_index % last_hidden.shape[-1]
+        act_val = float(last_hidden[n_idx].item())
+        
+        # Empirical threshold: active if > 0.0 or above mean
+        actual_firing = bool(act_val > 0.1)
+
         if actual_firing == expected:
             return {
-                "type": "supportive", 
-                "metric": "activation_match", 
-                "score": 0.9, 
-                "prompt": experiment_spec["prompt"],
-                "desc": f"Expected firing={expected}, actual={actual_firing}."
+                "type": "supportive",
+                "metric": "live_activation_match",
+                "score": round(abs(act_val), 3),
+                "activation": round(act_val, 4),
+                "prompt": prompt,
+                "provenance": "LIVE_PYTORCH",
+                "desc": f"Expected firing={expected}, actual firing={actual_firing} (activation={act_val:.4f}).",
             }
         else:
             return {
-                "type": "falsifying", 
-                "metric": "activation_mismatch", 
-                "score": -0.8, 
-                "prompt": experiment_spec["prompt"],
-                "desc": f"Expected firing={expected}, actual={actual_firing}. Counterexample worked."
+                "type": "falsifying",
+                "metric": "live_activation_mismatch",
+                "score": round(-abs(act_val), 3),
+                "activation": round(act_val, 4),
+                "prompt": prompt,
+                "provenance": "LIVE_PYTORCH",
+                "desc": f"Expected firing={expected}, actual firing={actual_firing} (activation={act_val:.4f}). Falsified by live measurement.",
             }
+
 
     def review(self, hypothesis: Hypothesis, critique: str, exp_spec: Dict[str, Any], result: Dict[str, Any], trace: ReasoningTrace) -> Evidence:
         """Step 6 (Multi-Agent): Reviewer looks at all evidence and decides."""

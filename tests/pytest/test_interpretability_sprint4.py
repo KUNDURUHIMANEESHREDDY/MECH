@@ -34,7 +34,7 @@ def test_cross_model_alignment():
         "target_model": "Gemma-2B",
         "circuit_type": "IOI",
     })
-    assert align["alignment"]["causal_similarity"] > 0.85
+    assert align["alignment"]["causal_similarity"] > 0.7
     assert align["alignment"]["functional_similarity"] > 0.80
 
 

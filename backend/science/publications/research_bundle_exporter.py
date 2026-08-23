@@ -10,9 +10,12 @@ class ResearchBundleExporter:
     Packages everything needed for an independent researcher to reproduce the results.
     """
     def __init__(self, experiment_id: str, results: Dict[str, Any], output_dir: str = "backend/science/publications/bundles"):
-        self.experiment_id = experiment_id
+        # Prevent path traversal: keep only the last path component of the id.
+        safe_id = os.path.basename(str(experiment_id).strip().rstrip(os.sep)) or "experiment"
+        safe_id = safe_id.replace("..", "_").replace("/", "_").replace("\\", "_")
+        self.experiment_id = safe_id
         self.results = results
-        self.bundle_dir = os.path.join(output_dir, experiment_id)
+        self.bundle_dir = os.path.join(output_dir, safe_id)
         os.makedirs(self.bundle_dir, exist_ok=True)
 
     def export_bundle(self) -> str:

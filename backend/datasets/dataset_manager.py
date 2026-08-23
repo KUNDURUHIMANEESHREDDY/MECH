@@ -12,14 +12,27 @@ Upgraded to include:
 
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
 import json
+import logging
 import os
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+
+logger = logging.getLogger("MECH.datasets.dataset_manager")
+
+SIGNATURE_ALGORITHM = "Ed25519"
 
 
 @dataclass
@@ -121,66 +134,404 @@ class DatasetManager:
         try:
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event) + "\n")
-        except Exception: pass
+        except (OSError, TypeError, ValueError) as exc:
+            logger.debug("Failed to write dataset audit log: %s", exc)
 
     def trigger_revalidation(self, dataset_id: str):
         """Marks downstream research as stale when a dataset changes."""
         self.log_audit_event(dataset_id, "IMPACT", "SYSTEM", "Dataset changed. Downstream results marked for revalidation.")
         # In a real system, this would update validation_history.db entries for pass -> stale
 
-    def sign_dataset(self, dataset_id: str, private_key: str = "mock_private_key") -> str:
-        """Asymmetric digital signature for dataset metadata."""
+    # ------------------------------------------------------------------
+    # Cryptographic provenance (Ed25519)
+    # ------------------------------------------------------------------
+
+    @property
+    def _signing_key_dir(self) -> str:
+        return os.path.join(self.data_dir, "keys")
+
+    def _canonical_signing_payload(self, dataset_id: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Deterministic payload binding the dataset identity to its content hash."""
+        return {
+            "algorithm": SIGNATURE_ALGORITHM,
+            "bundle_hash": meta["hashes"]["bundle_hash"],
+            "dataset_id": dataset_id,
+            "version": meta["version"],
+        }
+
+    @staticmethod
+    def _canonical_bytes(payload: Dict[str, Any]) -> bytes:
+        return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    def _load_private_key(self, private_key_pem: Optional[str]) -> Ed25519PrivateKey:
+        if private_key_pem is not None:
+            key = serialization.load_pem_private_key(
+                private_key_pem.encode("utf-8") if isinstance(private_key_pem, str) else private_key_pem,
+                password=None,
+            )
+            if not isinstance(key, Ed25519PrivateKey):
+                raise ValueError("Dataset signing requires an Ed25519 private key.")
+            return key
+
+        env_key = os.environ.get("MECH_DATASET_SIGNING_KEY")
+        if env_key:
+            key = serialization.load_pem_private_key(env_key.encode("utf-8"), password=None)
+            if not isinstance(key, Ed25519PrivateKey):
+                raise ValueError("MECH_DATASET_SIGNING_KEY must contain an Ed25519 private key.")
+            return key
+
+        key_path = os.path.join(self._signing_key_dir, "dataset_signing_key.pem")
+        if os.path.exists(key_path):
+            with open(key_path, "rb") as f:
+                key = serialization.load_pem_private_key(f.read(), password=None)
+            if not isinstance(key, Ed25519PrivateKey):
+                raise ValueError(f"Signing key at {key_path} is not an Ed25519 private key.")
+            return key
+
+        raise ValueError(
+            "No Ed25519 signing key available. Provide private_key_pem, set MECH_DATASET_SIGNING_KEY, "
+            f"or place a signing key at {key_path}. Refusing to sign datasets with an unauthenticated key."
+        )
+
+    def _load_public_key(self, public_key_pem: Optional[str]) -> Optional[Ed25519PublicKey]:
+        if public_key_pem is not None:
+            key = serialization.load_pem_public_key(
+                public_key_pem.encode("utf-8") if isinstance(public_key_pem, str) else public_key_pem
+            )
+            if not isinstance(key, Ed25519PublicKey):
+                raise ValueError("Dataset verification requires an Ed25519 public key.")
+            return key
+
+        env_key = os.environ.get("MECH_DATASET_VERIFY_KEY")
+        if env_key:
+            key = serialization.load_pem_public_key(env_key.encode("utf-8"))
+            if not isinstance(key, Ed25519PublicKey):
+                raise ValueError("MECH_DATASET_VERIFY_KEY must contain an Ed25519 public key.")
+            return key
+
+        pub_path = os.path.join(self._signing_key_dir, "dataset_signing_key.pub")
+        if os.path.exists(pub_path):
+            with open(pub_path, "rb") as f:
+                key = serialization.load_pem_public_key(f.read())
+            if not isinstance(key, Ed25519PublicKey):
+                raise ValueError(f"Verification key at {pub_path} is not an Ed25519 public key.")
+            return key
+
+        return None
+
+    @staticmethod
+    def _public_key_fingerprint(public_key: Ed25519PublicKey) -> str:
+        raw = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        return hashlib.sha256(raw).hexdigest()[:16]
+
+    def generate_signing_keypair(self) -> Tuple[str, str]:
+        """Generates a new Ed25519 keypair and persists it under ``<data_dir>/keys``.
+
+        Returns:
+            (private_key_pem, public_key_pem) as strings.
+        """
+        private_key = Ed25519PrivateKey.generate()
+        priv_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+        pub_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        os.makedirs(self._signing_key_dir, exist_ok=True)
+        key_path = os.path.join(self._signing_key_dir, "dataset_signing_key.pem")
+        pub_path = os.path.join(self._signing_key_dir, "dataset_signing_key.pub")
+        with open(key_path, "w", encoding="utf-8") as f:
+            f.write(priv_pem)
+        with open(pub_path, "w", encoding="utf-8") as f:
+            f.write(pub_pem)
+        try:
+            os.chmod(key_path, 0o600)
+        except OSError:
+            pass
+        logger.info("Generated new Ed25519 dataset signing keypair at %s", self._signing_key_dir)
+        return priv_pem, pub_pem
+
+    def sign_dataset(self, dataset_id: str, private_key_pem: Optional[str] = None) -> str:
+        """Signs the canonical dataset identity with Ed25519.
+
+        The signature binds ``dataset_id``, ``version``, and the bundle content hash.
+        A real asymmetric key is mandatory; there is no default or mock key.
+
+        Returns:
+            Base64-encoded Ed25519 signature (also stored in the manifest).
+        """
         meta = self._manifest.get(dataset_id)
-        if not meta: raise ValueError(f"Dataset {dataset_id} not found.")
+        if not meta:
+            raise ValueError(f"Dataset {dataset_id} not found.")
 
-        # Canonical string for signing
-        payload = f"{dataset_id}:{meta['version']}:{meta['hashes']['bundle_hash']}"
-        # Simulating Ed25519 signing
-        signature = hashlib.sha256(f"{payload}:{private_key}".encode()).hexdigest()
-        meta["signature"] = signature
-        return signature
+        private_key = self._load_private_key(private_key_pem)
+        public_key = private_key.public_key()
 
-    def verify_signature(self, dataset_id: str, public_key: str = "mock_public_key") -> bool:
-        """Verifies dataset authenticity."""
+        payload = self._canonical_signing_payload(dataset_id, meta)
+        signature = private_key.sign(self._canonical_bytes(payload))
+
+        sig_b64 = base64.b64encode(signature).decode("ascii")
+        meta["signature"] = sig_b64
+        meta["signature_algorithm"] = SIGNATURE_ALGORITHM
+        meta["signed_payload"] = payload
+        meta["signer_public_key_fingerprint"] = self._public_key_fingerprint(public_key)
+        meta["signed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return sig_b64
+
+    def verify_signature(self, dataset_id: str, public_key_pem: Optional[str] = None) -> bool:
+        """Verifies the Ed25519 signature over the dataset's *current* identity.
+
+        Fails closed: missing signature, legacy/mock signatures, unknown algorithm,
+        tampered version/bundle_hash, wrong key, or unavailable verification key
+        all return ``False``.
+        """
         meta = self._manifest.get(dataset_id)
-        if not meta or "signature" not in meta: return False
+        if not meta:
+            return False
 
-        payload = f"{dataset_id}:{meta['version']}:{meta['hashes']['bundle_hash']}"
-        expected = hashlib.sha256(f"{payload}:mock_private_key".encode()).hexdigest()
-        return meta["signature"] == expected
+        sig_b64 = meta.get("signature")
+        if (
+            not isinstance(sig_b64, str)
+            or meta.get("signature_algorithm") != SIGNATURE_ALGORITHM
+            or not isinstance(meta.get("signed_payload"), dict)
+        ):
+            return False
+
+        public_key = self._load_public_key(public_key_pem)
+        if public_key is None:
+            logger.warning(
+                "No Ed25519 public key available to verify dataset %s; failing closed.", dataset_id
+            )
+            return False
+
+        # Verify against the CURRENT manifest values so any tampering with
+        # version or bundle_hash invalidates a previously valid signature.
+        current_payload = self._canonical_signing_payload(dataset_id, meta)
+        recorded_payload = meta["signed_payload"]
+        if recorded_payload != current_payload:
+            return False
+
+        try:
+            signature = base64.b64decode(sig_b64, validate=True)
+            public_key.verify(signature, self._canonical_bytes(current_payload))
+        except (InvalidSignature, ValueError, TypeError):
+            return False
+        return True
+
+    @staticmethod
+    def get_builtin_dataset(dataset_name: str) -> Dict[str, Any]:
+        """Returns standard built-in mechanistic interpretability benchmark datasets."""
+        name = dataset_name.lower().replace("-", "_")
+        if name in ("ioi", "indirect_object_identification", "ioi_canonical_100"):
+            prompts = [
+                {
+                    "clean": "When Mary and John went to the store, John gave a drink to",
+                    "corrupted": "When Mary and John went to the store, Mary gave a drink to",
+                    "target": " Mary",
+                    "distractor": " John",
+                    "metadata": {"task": "ioi", "template": "ABBA", "split": "validation"},
+                },
+                {
+                    "clean": "When Alice and Bob visited the library, Bob handed a book to",
+                    "corrupted": "When Alice and Bob visited the library, Alice handed a book to",
+                    "target": " Alice",
+                    "distractor": " Bob",
+                    "metadata": {"task": "ioi", "template": "ABBA", "split": "validation"},
+                },
+                {
+                    "clean": "Then Sarah and David drove to school, David gave a pen to",
+                    "corrupted": "Then Sarah and David drove to school, Sarah gave a pen to",
+                    "target": " Sarah",
+                    "distractor": " David",
+                    "metadata": {"task": "ioi", "template": "ABBA", "split": "train"},
+                },
+                {
+                    "clean": "After Michael and Emma went to lunch, Emma gave a gift to",
+                    "corrupted": "After Michael and Emma went to lunch, Michael gave a gift to",
+                    "target": " Michael",
+                    "distractor": " Emma",
+                    "metadata": {"task": "ioi", "template": "BABA", "split": "test"},
+                },
+                {
+                    "clean": "When James and Oliver entered the room, Oliver gave a key to",
+                    "corrupted": "When James and Oliver entered the room, James gave a key to",
+                    "target": " James",
+                    "distractor": " Oliver",
+                    "metadata": {"task": "ioi", "template": "ABBA", "split": "train"},
+                },
+            ]
+            return {
+                "dataset_id": "ioi",
+                "version": "1.0.0",
+                "citation": "Wang et al., 2022 (Interpretability in the Wild: A Circuit for Indirect Object Identification in GPT-2 small)",
+                "checksum": "sha256:builtin_ioi_v1",
+                "prompts": prompts,
+            }
+        elif name in ("factual", "facts", "knowledge", "capitals"):
+            prompts = [
+                {
+                    "clean": "The capital of France is",
+                    "corrupted": "The capital of Germany is",
+                    "target": " Paris",
+                    "distractor": " Berlin",
+                    "metadata": {"task": "factual", "relation": "capital", "split": "validation"},
+                },
+                {
+                    "clean": "The Eiffel Tower is located in the city of",
+                    "corrupted": "The Colosseum is located in the city of",
+                    "target": " Paris",
+                    "distractor": " Rome",
+                    "metadata": {"task": "factual", "relation": "landmark_city", "split": "validation"},
+                },
+                {
+                    "clean": "The capital of Germany is",
+                    "corrupted": "The capital of Italy is",
+                    "target": " Berlin",
+                    "distractor": " Rome",
+                    "metadata": {"task": "factual", "relation": "capital", "split": "train"},
+                },
+                {
+                    "clean": "The official language of Japan is",
+                    "corrupted": "The official language of Spain is",
+                    "target": " Japanese",
+                    "distractor": " Spanish",
+                    "metadata": {"task": "factual", "relation": "language", "split": "test"},
+                },
+                {
+                    "clean": "The capital of Italy is",
+                    "corrupted": "The capital of Spain is",
+                    "target": " Rome",
+                    "distractor": " Madrid",
+                    "metadata": {"task": "factual", "relation": "capital", "split": "train"},
+                },
+            ]
+            return {
+                "dataset_id": "factual",
+                "version": "1.0.0",
+                "citation": "Meng et al., 2022 (Locating and Editing Factual Associations in GPT)",
+                "checksum": "sha256:builtin_factual_v1",
+                "prompts": prompts,
+            }
+        elif name in ("greater_than", "greaterthan", "numerical"):
+            prompts = [
+                {
+                    "clean": "The war lasted from the year 1732 to the year 17",
+                    "corrupted": "The war lasted from the year 1932 to the year 19",
+                    "target": "35",
+                    "distractor": "20",
+                    "metadata": {"task": "greater_than", "split": "validation"},
+                },
+                {
+                    "clean": "The conference ran from the year 1845 to the year 18",
+                    "corrupted": "The conference ran from the year 1945 to the year 19",
+                    "target": "50",
+                    "distractor": "30",
+                    "metadata": {"task": "greater_than", "split": "train"},
+                },
+            ]
+            return {
+                "dataset_id": "greater_than",
+                "version": "1.0.0",
+                "citation": "Hanna et al., 2023 (How does GPT-2 compute greater-than?)",
+                "checksum": "sha256:builtin_greater_than_v1",
+                "prompts": prompts,
+            }
+        elif name in ("induction", "copy"):
+            prompts = [
+                {
+                    "clean": " cat dog apple banana cat dog apple",
+                    "corrupted": " cat dog apple banana lion tiger apple",
+                    "target": " banana",
+                    "distractor": " dog",
+                    "metadata": {"task": "induction", "split": "validation"},
+                },
+                {
+                    "clean": " alpha beta gamma delta alpha beta gamma",
+                    "corrupted": " alpha beta gamma delta one two gamma",
+                    "target": " delta",
+                    "distractor": " beta",
+                    "metadata": {"task": "induction", "split": "train"},
+                },
+            ]
+            return {
+                "dataset_id": "induction",
+                "version": "1.0.0",
+                "citation": "Olsson et al., 2022 (In-context Learning and Induction Heads)",
+                "checksum": "sha256:builtin_induction_v1",
+                "prompts": prompts,
+            }
+        raise ValueError(f"Unknown built-in dataset: '{dataset_name}'. Available: ioi, factual, greater_than, induction")
+
+    def list_datasets(self) -> List[Dict[str, Any]]:
+        """List all available datasets (both built-in and on-disk)."""
+        registered = []
+        # Add built-ins
+        for name in ("ioi", "factual", "greater_than", "induction"):
+            data = self.get_builtin_dataset(name)
+            registered.append({
+                "dataset_id": data["dataset_id"],
+                "version": data["version"],
+                "citation": data["citation"],
+                "num_prompts": len(data["prompts"]),
+                "is_builtin": True,
+            })
+        # Add on-disk
+        for k, v in self._manifest.items():
+            if k not in ("ioi", "factual", "greater_than", "induction"):
+                registered.append({
+                    "dataset_id": k,
+                    "version": v.get("version", "1.0.0"),
+                    "citation": v.get("provenance", {}).get("paper_doi", "On-disk dataset"),
+                    "num_prompts": v.get("num_samples", 0),
+                    "is_builtin": False,
+                })
+        return registered
 
     def load(self, dataset_id: str) -> List[Dict[str, Any]]:
-        """Loads a Golden Dataset with Triple-SHA integrity verification."""
-        if dataset_id not in self._manifest:
-            raise ValueError(f"Dataset '{dataset_id}' not found in golden_manifest.json")
-
-        meta = self._manifest[dataset_id]
+        """Loads a Golden Dataset with Triple-SHA integrity verification, or falls back to built-ins."""
+        # Check if on-disk dataset exists
         dataset_path = os.path.join(self.data_dir, dataset_id, "dataset.json")
+        if os.path.exists(dataset_path):
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                raw_content = f.read()
+                data = json.loads(raw_content)
 
-        if not os.path.exists(dataset_path):
-            raise FileNotFoundError(f"Dataset file missing: {dataset_path}")
+            if dataset_id in self._manifest:
+                meta = self._manifest[dataset_id]
+                bundle_hash = self._compute_sha256(raw_content)
+                expected_bundle = meta.get("hashes", {}).get("bundle_hash", "").replace("sha256:", "")
 
-        with open(dataset_path, "r", encoding="utf-8") as f:
-            raw_content = f.read()
-            data = json.loads(raw_content)
+                prompts_str = json.dumps(data["prompts"], sort_keys=True)
+                prompt_hash = self._compute_sha256(prompts_str)
+                expected_prompt = meta.get("hashes", {}).get("prompt_hash", "").replace("sha256:", "")
 
-        # 1. Bundle Hash Verification
-        bundle_hash = self._compute_sha256(raw_content)
-        expected_bundle = meta["hashes"]["bundle_hash"].replace("sha256:", "")
+                if expected_bundle and expected_bundle != "d41d8cd98f00b204e9800998ecf8427e" and bundle_hash != expected_bundle:
+                    if not os.environ.get("MECH_BYPASS_HASH_CHECK"):
+                        raise ValueError(f"CRITICAL: Dataset Bundle SHA Mismatch for {dataset_id}")
 
-        # 2. Prompt Hash Verification (Hash of the 'prompts' field)
-        prompts_str = json.dumps(data["prompts"], sort_keys=True)
-        prompt_hash = self._compute_sha256(prompts_str)
-        expected_prompt = meta["hashes"]["prompt_hash"].replace("sha256:", "")
+            self.validate_schema(data)
+            self._datasets[dataset_id] = data
+            return data["prompts"]
 
-        # Strict Verification (Mocked check for hashes that aren't placeholders)
-        if expected_bundle != "d41d8cd98f00b204e9800998ecf8427e" and bundle_hash != expected_bundle:
-             if not os.environ.get("MECH_BYPASS_HASH_CHECK"):
-                raise ValueError(f"CRITICAL: Dataset Bundle SHA Mismatch for {dataset_id}")
+        # Check built-ins
+        try:
+            builtin_data = self.get_builtin_dataset(dataset_id)
+            self._datasets[dataset_id] = builtin_data
+            return builtin_data["prompts"]
+        except ValueError:
+            pass
 
-        self.validate_schema(data)
-        self._datasets[dataset_id] = data
-        return data["prompts"]
+        if dataset_id not in self._manifest:
+            raise ValueError(f"Dataset '{dataset_id}' not found in golden_manifest.json or built-in datasets.")
+
+        raise FileNotFoundError(f"Dataset file missing: {dataset_path}")
 
     def compute_fingerprint(self, dataset_id: str, prompts: List[Dict[str, Any]], tokenizer: Any = None) -> Dict[str, str]:
         """Exhaustive fingerprint: Prompt, Token, Bundle, and Environment."""
@@ -223,8 +574,8 @@ class DatasetManager:
         prov = meta.get("provenance", {})
         metadata_score = 1.0 if prov.get("paper_doi") and prov.get("license") else 0.7
 
-        # 4. Signature
-        sig_score = 1.0 if meta.get("signature") else 0.0
+        # 4. Signature (must be a real Ed25519 signature, not legacy mock residue)
+        sig_score = 1.0 if meta.get("signature_algorithm") == SIGNATURE_ALGORITHM and meta.get("signature") else 0.0
 
         # 5. Compatibility (Mocked)
         comp_score = 0.98

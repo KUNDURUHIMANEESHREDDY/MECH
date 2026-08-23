@@ -127,12 +127,24 @@ export function BenchmarkRunner({ cases, maxNewTokens = 10, title = 'Benchmark' 
           {running ? <Loader2 size={13} className="spin" /> : <Play size={13} />}
           {running && current ? `Running: ${current}…` : `Run ${cases.length} cases`}
         </button>
-        {!model.loaded && <span style={{ fontSize: 11, color: colors.bodyMuted }}>Load a model first (GPT-2 Live panel)</span>}
+        {model.loaded ? (
+          <span style={{ fontSize: 11, background: '#e6f4ea', color: '#137333', padding: '3px 8px', borderRadius: 4, fontWeight: 600 }}>
+            ● Live Model Internals (PyTorch / GPU)
+          </span>
+        ) : (
+          <span style={{ fontSize: 11, background: '#fef7e0', color: '#b06000', padding: '3px 8px', borderRadius: 4, fontWeight: 600 }}>
+            ○ Framework Mode (Load model in GPT-2 panel for live weights)
+          </span>
+        )}
         {results.length > 0 && (
           <span style={{ fontSize: 12, color: colors.bodyMuted }}>
             avg <b style={{ color: colors.ink }}>{avgLatency} ms</b> · {avgTps} tok/s
           </span>
         )}
+      </div>
+
+      <div style={{ fontSize: 11, color: colors.bodyMuted, background: colors.canvas, padding: '8px 12px', borderRadius: 6, border: `1px solid ${colors.hairline}` }}>
+        <b>Scientific Integrity Notice:</b> Live benchmarks run on loaded GPU/CPU PyTorch weights. Offline or stubbed runs validate the software framework and scheduling harness, not real model internals.
       </div>
 
       {results.length === 0 ? (

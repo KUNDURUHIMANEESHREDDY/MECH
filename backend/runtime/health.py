@@ -17,6 +17,9 @@ from .activation_cache import cache
 from .model_manager import _loaded_name
 from .event_bus import bus
 from .hook_framework import HOOK_TYPES
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 def get_health() -> dict:
@@ -64,8 +67,8 @@ def get_health() -> dict:
     try:
         from .session_manager import session_manager
         health["runtime"]["active_sessions"] = session_manager.count()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Swallowed exception: %s", exc)
 
     if torch.cuda.is_available():
         health["gpu"] = {
@@ -92,5 +95,6 @@ def _estimate_gpu_util() -> float:
     """Return a rough GPU utilization estimate."""
     try:
         return round(torch.cuda.utilization(), 1)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Swallowed exception: %s", exc)
         return 0.0

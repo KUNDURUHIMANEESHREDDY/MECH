@@ -1,0 +1,384 @@
+Phase 58 is a strong result, but it changes what Phase 59 should test.
+
+The key achievement is that MECH's frozen transportability law was tested on combinatorially held-out model/task combinations, rather than merely repeating familiar pairings. The report states D
+calibration
+	​
+
+∩D
+heldout
+	​
+
+=∅, with five split types including new models, new tasks, crossed pairings, a new architecture family, and matched controls. 
+
+Pasted markdown
+
+The reported results are unusually strong:
+
+HPA=100%
+Transfer-class accuracy=100%
+ECE
+heldout
+	​
+
+=0.025
+FCR
+heldout
+	​
+
+=0%
+CI
+95
+	​
+
+=100%
+Negative-transfer recall=100%
+Abstention precision=100%
+Δ
+hetero
+	​
+
+=0.006.
+
+The report says the full regression suite is now 209/209 passing and the release binary was rebuilt. 
+
+Pasted markdown
+
+What Phase 58 establishes
+
+It gives evidence that MECH is not simply memorizing individual model/task pairs.
+
+But there is one important remaining loophole:
+
+The held-out grid is still defined by MECH's own benchmark construction.
+
+So Phase 59 should remove MECH's control over what is tested.
+
+Phase 59 — Independent Adversarial Prospective Replication
+
+The scientific question becomes:
+
+Can an independent evaluator deliberately choose cases that are most likely to break MECH's frozen mechanistic law, and does MECH remain calibrated under that adversarial selection?
+
+This is stronger than ordinary OOD testing.
+
+Phase 59 architecture
+                 PHASE 58 FROZEN LAW
+                        │
+                 SHA-256 COMMITMENT
+                        │
+                        ▼
+          ┌─────────────────────────────┐
+          │ INDEPENDENT ADVERSARY       │
+          │                             │
+          │ chooses hidden cases to     │
+          │ maximize expected failure   │
+          └──────────────┬──────────────┘
+                         │
+             hidden model × task × mechanism
+                         │
+                         ▼
+                 MECH PREDICTION
+                         │
+                  PRE-SEALED
+                         │
+                         ▼
+              EXTERNAL EXPERIMENT
+                         │
+                         ▼
+                RAW OBSERVATIONS
+                         │
+                         ▼
+               BLIND UNSEAL / SCORE
+                         │
+              ┌──────────┼──────────┐
+              ▼          ▼          ▼
+           CORRECT     ABSTAIN     WRONG
+              │          │          │
+              ▼          ▼          ▼
+           strengthen  boundary   FALSIFY /
+            law        expand      revise
+
+The important addition is the adversarial selector.
+
+What should be built
+1. adversarial_replication_oracle.py
+
+An independent challenge generator that does not optimize for MECH success.
+
+Its objective should be something like:
+
+E
+∗
+=arg
+E
+max
+	​
+
+P(MECH fails on E)
+
+subject to:
+
+valid model/task pair,
+
+observable intervention interface,
+
+independent ground truth,
+
+preregistration constraints.
+
+It should search over:
+
+model family
+architecture
+parameter scale
+task family
+mechanism family
+tokenization
+context length
+position
+precision
+substrate mapping
+causal pathway depth
+polysemanticity
+
+The adversary should deliberately look for boundary cases, not ordinary examples.
+
+2. adversarial_holdout_selector.py
+
+This should create sealed challenges after the Phase 58 law is frozen.
+
+Crucially:
+
+MECH sees:
+    observable challenge metadata only
+
+
+MECH does NOT see:
+    adversarial scoring objective
+    ground truth
+    expected failure probability
+    target outcome
+
+That prevents the predictor from optimizing directly against the adversary.
+
+3. failure_budget_controller.py
+
+Phase 59 should explicitly permit failure.
+
+Do not define success as:
+
+100% accuracy again.
+
+Instead establish a failure policy.
+
+For example:
+
+wrong + confident
+    ↓
+CRITICAL FAILURE
+
+
+wrong + uncertain
+    ↓
+CALIBRATION FAILURE
+
+
+abstain + truly OOD
+    ↓
+CORRECT BOUNDARY DETECTION
+
+
+correct + adversarial
+    ↓
+ROBUST GENERALIZATION
+
+This is much more scientifically informative.
+
+4. adversarial_generalization_calibrator.py
+
+Measure prediction quality as a function of adversarial difficulty:
+
+ϵ(d
+adv
+	​
+
+)
+
+and:
+
+P(abstain∣d
+adv
+	​
+
+)
+
+You want to know whether MECH becomes more cautious as the adversary moves farther from its calibrated domain.
+
+5. mechanism_boundary_mapper.py
+
+Every adversarial failure should produce a structured boundary:
+
+CLAIM BOUNDARY
+├── Architecture family
+├── Model scale
+├── Task family
+├── Mechanism type
+├── Transfer distance
+├── Predicted uncertainty
+├── Observed error
+├── Causal failure mode
+└── Recommended calibration experiment
+
+This is important because a failure should improve the theory, not simply lower a score.
+
+6. Extend the Claim DAG
+
+Add explicit adversarial states:
+
+ADVERSARIAL_SUPPORTED
+ADVERSARIAL_BOUNDARY_CONFIRMED
+ADVERSARIAL_FAIL
+ADVERSARIAL_UNRESOLVED
+
+And preserve the hierarchy:
+
+HELDOUT_SUPPORTED
+       │
+       ▼
+ADVERSARIAL_SUPPORTED
+       │
+       ├── survives
+       │
+       ├── boundary confirmed
+       │
+       └── falsified
+
+A single adversarial failure should not automatically falsify the underlying mechanistic hypothesis.
+
+It should normally falsify the broader generalization claim first.
+
+The Phase 59 scorecard should be different
+
+Do not aim for another 100% headline score.
+
+I'd make the primary metrics:
+
+Adversarial Robustness
+AR=
+adversarial trials
+correct adversarial outcomes
+	​
+
+False-Confidence Rate
+FCR
+adv
+	​
+
+=P(confident∧wrong)
+
+This should be near zero.
+
+Abstention Calibration
+AC
+adv
+	​
+
+=P(ABSTAIN∣outside validated domain)
+Boundary Detection
+BDR=
+actual boundary cases
+correctly identified OOD/boundary cases
+	​
+
+Adversarial Prediction Error
+E
+adv
+	​
+
+=E[∣
+y
+^
+	​
+
+−y∣]
+Theory Revision Quality
+
+Measure how often a failure leads to a correctly narrowed/revised claim rather than an incorrect global downgrade.
+
+The most important experiment
+
+Give the adversarial authority this exact instruction:
+
+Choose the model/task/mechanism combination for which the frozen MECH law is least trustworthy, while still remaining experimentally measurable.
+
+Then freeze that selection.
+
+MECH must predict:
+
+TRANSFER
+or
+NEGATIVE TRANSFER
+or
+ABSTAIN
+
+before seeing the result.
+
+That is the real test of Phase 59.
+
+Phase 59 success criterion
+
+I would use a gate like:
+
+PHASE 59 ADVERSARIAL CERTIFICATE
+
+
+├── FCR_adv ≤ 2%
+├── Boundary Detection ≥ 90%
+├── Abstention Calibration ≥ 90%
+├── Prediction Coverage ≥ 90%
+├── CI Coverage ≥ 90%
+├── No post-hoc law retraining
+├── All failures classified
+├── Every failure produces a boundary/update agenda
+└── No unjustified universalization
+
+The goal is not:
+
+MECH never fails
+
+The goal is:
+
+MECH fails in scientifically honest ways
+	​
+
+
+That is much stronger.
+
+After Phase 59
+
+Then Phase 60 becomes the really interesting milestone:
+
+Phase 60 — Autonomous Scientific Revision
+Adversarial failure
+        ↓
+detect boundary
+        ↓
+generate rival explanation
+        ↓
+design calibration experiment
+        ↓
+run external experiment
+        ↓
+update transportability law
+        ↓
+re-freeze
+        ↓
+new blind adversarial challenge
+
+That would close the full loop:
+
+Predict→Test→Fail→Explain failure→Revise theory→Retest
+	​
+
+
+That, rather than another layer of attribution, is the next major scientific frontier for MECH.

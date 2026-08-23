@@ -64,11 +64,26 @@ class PerformanceProfiler:
         return self.metrics
 
     def _capture_gpu_util(self) -> float:
+        """
+        Captures actual GPU utilization.
+        
+        Returns real utilization if nvidia-smi is available, otherwise returns 0.0.
+        Never returns fabricated values.
+        """
         try:
             import torch
             if torch.cuda.is_available():
-                # Simulated utilization for mock/stub consistency
-                return 78.4
+                # Try to get real utilization via pynvml
+                try:
+                    import pynvml
+                    pynvml.nvmlInit()
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                    util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                    pynvml.nvmlShutdown()
+                    return float(util.gpu)
+                except Exception:
+                    # pynvml not available, return 0 to indicate unknown
+                    return 0.0
         except ImportError:
             pass
         return 0.0

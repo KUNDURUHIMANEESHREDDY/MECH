@@ -1,0 +1,7 @@
+{"seq": "The capital of France is", "target": " Paris", "distractor": " London", "template_id": "FR_T1"}
+{"seq": "The capital of Germany is", "target": " Berlin", "distractor": " Munich", "template_id": "DE_T1"}
+{"seq": "The capital of Japan is", "target": " Tokyo", "distractor": " Osaka", "template_id": "JP_T1"}
+{"seq": "The capital of Italy is", "target": " Rome", "distractor": " Milan", "template_id": "IT_T1"}
+{"seq": "The capital of Spain is", "target": " Madrid", "distractor": " Barcelona", "template_id": "ES_T1"}
+{"seq": "The Eiffel Tower is located in", "target": " Paris", "distractor": " Rome", "template_id": "FR_T2"}
+{"seq": "The inventor of the telephone was", "target": " Bell", "distractor": " Edison", "template_id": "INV_T1"}

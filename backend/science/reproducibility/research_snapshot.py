@@ -13,6 +13,9 @@ import subprocess
 import datetime
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -62,7 +65,8 @@ class ResearchSnapshotEngine:
         try:
             import importlib.metadata
             return importlib.metadata.version(name)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
             return "not-installed"
 
     def _get_git_info(self) -> Dict[str, Any]:
@@ -71,7 +75,8 @@ class ResearchSnapshotEngine:
             branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode().strip()
             dirty = len(subprocess.check_output(["git", "status", "--porcelain"]).decode().strip()) > 0
             return {"sha": sha, "branch": branch, "dirty": dirty}
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Swallowed exception: %s", exc)
             return {"sha": "unknown", "branch": "unknown", "dirty": True}
 
     def capture(self, seed: Optional[int] = None) -> ResearchSnapshot:

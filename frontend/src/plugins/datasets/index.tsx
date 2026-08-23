@@ -79,8 +79,33 @@ const DATASETS: DatasetEntry[] = [
 const DatasetViewerBody: FC<PanelContext> = () => {
   const { infer, state } = useModel();
   const workspace = useWorkspaceStore();
+  const [datasets, setDatasets] = useState<DatasetEntry[]>(DATASETS);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    void (async () => {
+      try {
+        const { api } = await import('../../services/api');
+        const res = await api.getSessionProbes();
+        if (res?.probes?.length) {
+          const categorized: Record<string, string[]> = {};
+          for (const p of res.probes) {
+            if (!categorized[p.category]) categorized[p.category] = [];
+            categorized[p.category].push(p.clean_prompt);
+          }
+          setDatasets((prev) =>
+            prev.map((ds) => {
+              if (categorized[ds.id] && categorized[ds.id].length > 0) {
+                return { ...ds, prompts: categorized[ds.id], shots: categorized[ds.id].length };
+              }
+              return ds;
+            })
+          );
+        }
+      } catch { }
+    })();
+  }, []);
 
   const runPrompt = async (datasetId: string, prompt: string) => {
     setRunningId(datasetId);
@@ -113,7 +138,7 @@ const DatasetViewerBody: FC<PanelContext> = () => {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {DATASETS.map((ds) => (
+        {datasets.map((ds) => (
           <div key={ds.id} style={{ border: `1px solid ${colors.border}`, borderRadius: 8, padding: 12, backgroundColor: colors.surfaceTile1 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>{ds.name}</span>

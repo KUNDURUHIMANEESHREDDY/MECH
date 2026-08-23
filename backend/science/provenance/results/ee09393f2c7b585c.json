@@ -1,0 +1,123 @@
+{
+  "experiment_id": "ee09393f2c7b585c",
+  "experiment_type": "induction_head",
+  "timestamp_utc": "2026-08-17T00:00:00Z",
+  "mech_version": "2.0.0",
+  "device": "cpu",
+  "precision": "float32",
+  "library_versions": {
+    "torch": "2.13.0+cpu",
+    "transformer_lens": "unknown",
+    "sae_lens": "6.49.1",
+    "bertviz": "unknown",
+    "circuitsvis": "1.43.3",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "python": "3.13.15"
+  },
+  "model_id": "gpt2",
+  "model_weights_sha256": "2410268f35942812",
+  "tokenizer_hash": "855ec41a9d90094e",
+  "sae_id": null,
+  "sae_weights_sha256": null,
+  "prompt_dataset_hash": "82c4ac0e27779b1c7b4002939fd3d6982d12c1f962045e44b2fe2ae539bbc5b0",
+  "prompts_used": [
+    "The cat sat on the mat the cat",
+    "Alice Bob walked together Alice Bob",
+    "The doctor said alpha beta alpha beta",
+    "red blue green yellow red blue",
+    "one two three four one two",
+    "Mary John walked to school Mary John",
+    "north south east west north south",
+    "The president said hello world hello world"
+  ],
+  "random_seeds": [
+    42
+  ],
+  "intervention_specification": {
+    "layer": 5,
+    "head": 5,
+    "ablation": "zero"
+  },
+  "baseline_measurements": {
+    "mech_mean_score": 0.4974,
+    "tl_mean_score": 0.4974
+  },
+  "raw_effect_measurements": [
+    0.797,
+    0.8769,
+    0.1938,
+    0.189,
+    0.1146,
+    0.5906,
+    0.2537,
+    0.9637
+  ],
+  "control_distribution": {
+    "n_controls": 8,
+    "raw_values": [
+      0.3929,
+      0.1134,
+      0.0039,
+      0.0401,
+      0.0009,
+      0.2504,
+      0.0016,
+      0.8456
+    ],
+    "mean": 0.2061,
+    "std": 0.275404,
+    "median": 0.07675,
+    "percentile_95": 0.687155,
+    "percentile_99": 0.813911
+  },
+  "replication_measurements": [
+    {
+      "template": "T1",
+      "mech": 0.797
+    },
+    {
+      "template": "T2",
+      "mech": 0.8769
+    },
+    {
+      "template": "T3",
+      "mech": 0.1938
+    },
+    {
+      "template": "T4",
+      "mech": 0.189
+    },
+    {
+      "template": "T5",
+      "mech": 0.1146
+    },
+    {
+      "template": "T6",
+      "mech": 0.5906
+    },
+    {
+      "template": "T7",
+      "mech": 0.2537
+    },
+    {
+      "template": "T8",
+      "mech": 0.9637
+    }
+  ],
+  "bootstrap_statistics": {
+    "n_bootstrap": 200,
+    "effect_size": 0.497413,
+    "ci_lower": 0.286612,
+    "ci_upper": 0.727062,
+    "ci_width": 0.44045
+  },
+  "spearman_rho": null,
+  "spearman_p_value": null,
+  "pearson_r": null,
+  "dla_approximation_quality": null,
+  "evidence_level": "SUPPORTED",
+  "falsification_status": "SUPPORTED",
+  "is_reproducible": true,
+  "statistical_caveat": "Induction benchmark L5H5: MECH mean=0.4974 95%CI=[0.2866,0.7271]. TL mean=0.4974. Control 95th=0.6872. Dataset SHA-256=82c4ac0e2777..."
+}

@@ -1,0 +1,100 @@
+{
+  "experiment_id": "2cd725fd0204e2ba",
+  "experiment_type": "sae_feature",
+  "timestamp_utc": "2026-08-17T00:00:00Z",
+  "mech_version": "2.0.0",
+  "device": "cpu",
+  "precision": "float32",
+  "library_versions": {
+    "torch": "2.13.0+cpu",
+    "transformer_lens": "unknown",
+    "sae_lens": "6.49.1",
+    "bertviz": "unknown",
+    "circuitsvis": "1.43.3",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "python": "3.13.15"
+  },
+  "model_id": "gpt2-small",
+  "model_weights_sha256": "sae_benchmark_run",
+  "tokenizer_hash": "sae_tok_hash",
+  "sae_id": "gpt2-small_L8_f42",
+  "sae_weights_sha256": "sae_wdec_hash",
+  "prompt_dataset_hash": "b60d82eeb6d4a8008a857ec03fe45a11b0c3d130fdc524da8b4377fb374b96f5",
+  "prompts_used": [
+    "The Eiffel Tower is located in",
+    "The capital of France is",
+    "The Louvre museum is in",
+    "The capital of Germany is",
+    "The inventor of the telephone was",
+    "The speed of light is",
+    "Paris Hilton is a celebrity from",
+    "The Paris Agreement was signed in",
+    "France's capital city is",
+    "The city of France known as the City of Light is"
+  ],
+  "random_seeds": [
+    42
+  ],
+  "intervention_specification": {
+    "feature_idx": 42,
+    "alpha": 2.0,
+    "label": "Paris/geography"
+  },
+  "baseline_measurements": {
+    "mean_positive_selectivity": 0.0561,
+    "mean_orthogonal_selectivity": 0.0338,
+    "zero_alpha_selectivity": 0.0
+  },
+  "raw_effect_measurements": [
+    0.0242,
+    0.0863,
+    0.0577
+  ],
+  "control_distribution": {
+    "n_controls": 3,
+    "raw_values": [
+      0.0446,
+      0.0345,
+      0.0222
+    ],
+    "mean": 0.033767,
+    "std": 0.009159,
+    "median": 0.0345,
+    "percentile_95": 0.04359,
+    "percentile_99": 0.044398
+  },
+  "replication_measurements": [
+    {
+      "paraphrase": "France's capital city is",
+      "selectivity": 0.0732
+    },
+    {
+      "paraphrase": "The city of France known as the City of Light is",
+      "selectivity": 0.0578
+    },
+    {
+      "ood": "Paris Hilton is a celebrity from",
+      "selectivity": 0.0382
+    },
+    {
+      "ood": "The Paris Agreement was signed in",
+      "selectivity": 0.0574
+    }
+  ],
+  "bootstrap_statistics": {
+    "n_bootstrap": 200,
+    "effect_size": 0.056067,
+    "ci_lower": 0.0242,
+    "ci_upper": 0.076767,
+    "ci_width": 0.052567
+  },
+  "spearman_rho": null,
+  "spearman_p_value": null,
+  "pearson_r": null,
+  "dla_approximation_quality": null,
+  "evidence_level": "SUPPORTED",
+  "falsification_status": "SUPPORTED",
+  "is_reproducible": true,
+  "statistical_caveat": "SAE feature 42 (Paris/geography): positive selectivity mean=0.0561, orthogonal selectivity mean=0.0338, zero-alpha baseline=0.0000. MSI is selectivity evidence only. Does not imply monosemanticity."
+}

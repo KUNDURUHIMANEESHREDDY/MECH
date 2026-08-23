@@ -2,6 +2,7 @@
 fastapi>=0.104.0
 uvicorn>=0.24.0
 pydantic>=2.0.0
+pydantic-settings>=2.0.0
 sqlalchemy>=2.0.0
 
 # Scientific Computing
@@ -15,10 +16,15 @@ pandas>=2.0.0
 torch>=2.0.0
 transformers>=4.30.0
 transformer-lens>=2.0.0
+bertviz>=1.4.0
+sae-lens>=6.49.0
+circuitsvis>=1.43.0
 
 # Utilities
 psutil>=5.9.0
 httpx>=0.24.0
+redis>=5.0.0
+jsonschema>=4.17.0
 
 # Testing
 pytest>=7.4.0

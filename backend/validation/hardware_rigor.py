@@ -1,8 +1,11 @@
+import logging
 import platform
 import psutil
 import subprocess
 import os
 from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger("MECH.validation.hardware_rigor")
 
 class HardwarePassport:
     """
@@ -39,10 +42,12 @@ class HardwarePassport:
                 try:
                     smi = subprocess.check_output(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader,nounits"]).decode().strip()
                     info["driver"] = smi
-                except: pass
-        except ImportError:
-            pass
-        return info
+                except subprocess.CalledProcessError as exc:
+                    logger.debug("nvidia-smi unavailable: %s", exc)
+            return info
+        except ImportError as exc:
+            logger.debug("torch unavailable: %s", exc)
+            return info
 
     @staticmethod
     def _get_lib_versions() -> Dict[str, Any]:
@@ -56,8 +61,8 @@ class HardwarePassport:
                     try:
                         from importlib.metadata import version as _pkg_version
                         version = _pkg_version(lib)
-                    except Exception:
-                        version = "unknown"
+                    except Exception as exc:
+                        logger.debug("Could not resolve package version via importlib.metadata: %s", exc)
                 libs[lib] = version
             except ImportError:
                 libs[lib] = "not_installed"
@@ -70,7 +75,8 @@ class HardwarePassport:
             state["git_sha"] = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
             dirty = subprocess.check_output(["git", "status", "--porcelain"]).decode().strip()
             state["is_dirty"] = len(dirty) > 0
-        except: pass
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+            logger.debug("Could not get git state: %s", exc)
         return state
 
 

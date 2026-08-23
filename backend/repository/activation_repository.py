@@ -11,8 +11,10 @@ import datetime as _dt
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
-import torch
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    import torch
 
 
 @dataclass

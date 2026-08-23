@@ -1,9 +1,17 @@
-/**
- * @deprecated Legacy tests removed. The canvas shell uses panels from src/plugins/.
- */
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { ExperimentsView } from '../../src/components/ExperimentsView';
+import { ExperimentNotebook } from '../../src/components/ExperimentNotebook';
 
-import { describe, it } from 'vitest';
+describe('Sprint3Platform', () => {
+  it('renders ExperimentsView with active experiment runners', () => {
+    render(<ExperimentsView />);
+    expect(screen.getByText('Experiments')).toBeInTheDocument();
+  });
 
-describe.skip('Legacy deprecated test', () => {
-  it('retired', () => {});
+  it('renders ExperimentNotebook component', () => {
+    render(<ExperimentNotebook />);
+    expect(screen.getByText('Experiment Notebook')).toBeInTheDocument();
+  });
 });
