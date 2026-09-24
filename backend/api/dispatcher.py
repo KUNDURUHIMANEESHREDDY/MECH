@@ -543,6 +543,33 @@ def gpt2_patch_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"status": "error", "error": "torch/transformers not available"}
 
 
+@router.post("/gpt2/layer_activations")
+def gpt2_layer_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
+    engine = get_engine()
+    if engine and engine.is_available():
+        try:
+            return engine.layer_activations(
+                layer=int(payload.get("layer", 0)),
+                prompt=payload.get("prompt") or "The capital of France is",
+            )
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)[:300]}
+    return {"status": "error", "error": "torch/transformers not available"}
+
+
+@router.post("/gpt2/logit_lens_all")
+def gpt2_logit_lens_all(payload: Dict[str, Any]) -> Dict[str, Any]:
+    engine = get_engine()
+    if engine and engine.is_available():
+        try:
+            return engine.logit_lens_all(
+                prompt=payload.get("prompt") or "The capital of France is",
+            )
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)[:300]}
+    return {"status": "error", "error": "torch/transformers not available"}
+
+
 # ---------------------------------------------------------------------------
 # Research Society v2 — autonomous runs + SSE
 # Mounted under /api (see main.py include_router prefix), so live paths are:

@@ -2,16 +2,27 @@ import React from 'react';
 
 interface TokenPanelProps {
   tokens: string[];
+  tokenIds: number[];
   selectedTokenIdx: number | null;
   onSelectToken: (idx: number) => void;
+  residNorms?: number[] | null;
 }
 
-export const TokenPanel: React.FC<TokenPanelProps> = ({ tokens, selectedTokenIdx, onSelectToken }) => {
+export const TokenPanel: React.FC<TokenPanelProps> = ({
+  tokens,
+  tokenIds,
+  selectedTokenIdx,
+  onSelectToken,
+  residNorms,
+}) => {
   if (!tokens || tokens.length === 0) {
     return <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No token data available.</div>;
   }
 
   const activeIdx = selectedTokenIdx ?? 0;
+  const norm = residNorms && residNorms[activeIdx] !== undefined
+    ? residNorms[activeIdx].toFixed(2)
+    : '—';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -38,7 +49,9 @@ export const TokenPanel: React.FC<TokenPanelProps> = ({ tokens, selectedTokenIdx
 
       <div style={{ background: 'var(--bg-elev-2)', padding: 10, borderRadius: 6, fontSize: 12 }}>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Selected Token: "{tokens[activeIdx]}" (Index {activeIdx})</div>
-        <div style={{ color: 'var(--text-muted)' }}>Embedding Norm: 14.82 | Residual Delta: 2.14 | Next Token Logit: 18.9</div>
+        <div style={{ color: 'var(--text-muted)' }}>
+          Token ID: {tokenIds[activeIdx] ?? '—'} · Position {activeIdx + 1}/{tokens.length} · Residual L2 (selected layer): {norm}
+        </div>
       </div>
     </div>
   );

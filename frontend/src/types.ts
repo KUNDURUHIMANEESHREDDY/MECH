@@ -63,3 +63,36 @@ export interface PanelState {
   hoveredToken: number | null;
   error: string | null;
 }
+
+/* ---------- Layer tensor DTOs (full per-token resid_post / mlp_post) ---------- */
+
+export interface LayerTensorStats {
+  resid_l2: number;
+  mlp_mean: number;
+  mlp_sparsity: number;
+}
+
+export interface LayerTensors {
+  status: string;
+  layer: number;
+  prompt: string;
+  tokens: string[];
+  d_model: number;
+  d_mlp: number;
+  resid_post: number[][];
+  mlp_post: number[][];
+  stats: LayerTensorStats;
+}
+
+export interface LogitLensLayer {
+  layer: number;
+  top_token: string;
+  top_k_tokens: Array<{ token: string; prob: number }>;
+}
+
+export interface LogitLensAll {
+  status: string;
+  method: string;
+  prompt: string;
+  layers: LogitLensLayer[];
+}

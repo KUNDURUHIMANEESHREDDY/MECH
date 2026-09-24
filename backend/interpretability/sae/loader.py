@@ -134,6 +134,10 @@ class SAELoader:
             "d_in": sae.config.d_in,
             "d_sae": sae.config.d_sae,
             "status": "loaded",
+            # Honest: HuggingFaceProvider.load builds the config only —
+            # no weight tensors are downloaded or verified.
+            "weights_loaded": False,
+            "note": "config-only load; SAE weights are not fetched",
             "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
             "sae_id": sae.id
         }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useModel } from './hooks/useModel';
+import { useLayerTensors } from './hooks/useLayerTensors';
 import { AttentionHeatmap } from './components/visualizations/panels/AttentionHeatmap';
 import { ActivationHeatmap } from './components/visualizations/panels/ActivationHeatmap';
 import { TokenViewer } from './components/visualizations/panels/TokenViewer';
@@ -140,6 +141,44 @@ export default function App() {
   const data = model.result;
   const layer = data?.layers[panel.selectedLayer];
   const head = layer?.heads[panel.selectedHead];
+  const { tensors: layerTensors, loading: tensorsLoading } = useLayerTensors(
+    data ? prompt : null,
+    panel.selectedLayer,
+  );
+
+  /** Per-token spectra for the top-16 bar neurons, from live mlp_post. */
+  const neuronSpectra = React.useMemo(() => {
+    if (!layerTensors || !head) return head?.neurons.map(() => null) ?? [];
+    return head.neurons.map(n => {
+      const col = layerTensors.mlp_post.map(row => row[n.index] ?? 0);
+      return col.length > 0 ? col : null;
+    });
+  }, [layerTensors, head]);
+
+  /** Per-token residual L2 norms for the selected layer. */
+  const residNorms = React.useMemo(() => {
+    if (!layerTensors) return null;
+    return layerTensors.resid_post.map(row =>
+      Math.sqrt(row.reduce((s, v) => s + v * v, 0)));
+  }, [layerTensors]);
+
+  /** Mean row-entropy of the selected head's live attention matrix. */
+  const headEntropy = React.useMemo(() => {
+    if (!head) return null;
+    const rows = head.attentionMatrix;
+    if (!rows.length) return null;
+    let sum = 0;
+    let count = 0;
+    for (const row of rows) {
+      const tot = row.reduce((s, v) => s + v, 0) || 1;
+      for (const v of row) {
+        const q = v / tot;
+        if (q > 0) sum -= q * Math.log(q);
+      }
+      count++;
+    }
+    return count ? sum / count : null;
+  }, [head]);
   const umapPoints = React.useMemo(
     () => (data ? buildNeuronPoints(data.layers, data.tokens.map(t => t.text)) : []),
     [data],
@@ -349,8 +388,8 @@ export default function App() {
                           activations={head.neurons.map(n => n.activation)}
                           neuronIndex={panel.selectedNeuron}
                           onSelectNeuron={n => setPanel(s => ({ ...s, selectedNeuron: n }))}
-                          tokens={data.tokens.map(t => t.text)}
-                          neuronTokenActivations={head.neurons.map(n => n.tokenActivations ?? null)}
+                          tokens={layerTensors?.tokens ?? data.tokens.map(t => t.text)}
+                          neuronTokenActivations={neuronSpectra}
                         />
                       ) : <div className="hint">Select a layer and head</div>,
                       neuron_panel: (
@@ -377,19 +416,26 @@ export default function App() {
                       token_inspector: (
                         <TokenPanel
                           tokens={data.tokens.map(t => t.text)}
+                          tokenIds={data.tokens.map(t => t.id)}
                           selectedTokenIdx={appState.selection.selectedTokenIdx}
                           onSelectToken={idx => setAppState(prev => ({ selection: { ...prev.selection, selectedTokenIdx: idx } }))}
+                          residNorms={residNorms}
                         />
                       ),
                       layer_inspector: (
                         <LayerPanel
                           layerIdx={panel.selectedLayer}
                           numHeads={data.layers[panel.selectedLayer]?.heads.length ?? 12}
+                          residL2={layerTensors?.stats.resid_l2 ?? null}
+                          mlpMean={layerTensors?.stats.mlp_mean ?? null}
+                          mlpSparsity={layerTensors?.stats.mlp_sparsity ?? null}
+                          headEntropy={headEntropy}
+                          loading={tensorsLoading}
                         />
                       ),
                       prediction_inspector: (
                         <PredictionPanel
-                          tokens={data.tokens.map(t => t.text)}
+                          prompt={prompt}
                         />
                       ),
                       society: <SocietyPanel />,

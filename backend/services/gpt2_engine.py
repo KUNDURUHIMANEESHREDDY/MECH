@@ -1143,6 +1143,61 @@ def _ensure_prompt(prompt: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def layer_activations(layer: int, prompt: str) -> Dict[str, Any]:
+    """Full per-token tensors for one layer: resid_post and mlp_post.
+
+    resid_post = block output (hidden[layer+1], all positions);
+    mlp_post   = post-GELU MLP activations (all positions).
+    Values rounded to 4dp for JSON transport.
+    """
+    err = _ensure_prompt(prompt)
+    if err:
+        return err
+    layer = max(0, min(_n_layers() - 1, int(layer)))
+    try:
+        import numpy as _np
+
+        resid = _np.asarray(_cache["hidden"][layer + 1], dtype=_np.float64)
+        mlp_t = _cache["mlp_post"][layer]
+        mlp = mlp_t.detach().cpu().numpy().astype(_np.float64)
+        resid_list = [[round(float(v), 4) for v in row] for row in resid]
+        mlp_list = [[round(float(v), 4) for v in row] for row in mlp]
+        flat = mlp.reshape(-1)
+        return {
+            "status": "ok",
+            "layer": layer,
+            "prompt": prompt,
+            "tokens": _cache["str_tokens"],
+            "d_model": _d_model(),
+            "d_mlp": _d_mlp(),
+            "resid_post": resid_list,
+            "mlp_post": mlp_list,
+            "stats": {
+                "resid_l2": round(float((resid ** 2).sum() ** 0.5), 4),
+                "mlp_mean": round(float(flat.mean()), 6),
+                "mlp_sparsity": round(float((abs(flat) < 1e-3).mean()), 4),
+            },
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)[:300]}
+
+
+def logit_lens_all(prompt: str, top_k: int = 3) -> Dict[str, Any]:
+    """LogitLens top-k for every layer in a single cached forward."""
+    err = _ensure_prompt(prompt)
+    if err:
+        return err
+    layers = []
+    for li in range(_n_layers()):
+        r = logit_lens(li, prompt, top_k=top_k)
+        if r.get("status") != "ok":
+            return r
+        layers.append({"layer": li, "top_token": r["top_token"],
+                       "top_k_tokens": r["top_k_tokens"]})
+    return {"status": "ok", "method": "LogitLens", "prompt": prompt,
+            "layers": layers}
+
+
 def ablate_layer(layer: int, prompt: str,
                  pos_token: str = " Paris",
                  neg_token: str = " London") -> Dict[str, Any]:
