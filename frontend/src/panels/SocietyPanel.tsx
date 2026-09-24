@@ -46,7 +46,7 @@ let attachedRunId: string | null = null;
 
 export const SocietyPanel: React.FC = () => {
   const [state, setState] = useSocietyStore();
-  const { goal, phase, runId, events, steps, summary, reportMd, error } = state;
+  const { goal, phase, runId, events, steps, summary, reportMd, gate, error } = state;
   const unsubRef = useRef<(() => void) | null>(null);
   const pollRef = useRef<number | null>(null);
 
@@ -70,6 +70,7 @@ export const SocietyPanel: React.FC = () => {
     });
     const md = (pub.report as Record<string, any> | undefined)?.markdown;
     setState({ reportMd: typeof md === 'string' ? md.slice(0, 1200) : '' });
+    setState({ gate: (pub.gate ?? null) as Record<string, any> | null });
     setState({ phase: result.status === 'completed' ? 'done' : 'failed' });
   };
 
@@ -111,7 +112,7 @@ export const SocietyPanel: React.FC = () => {
     const g = goal.trim();
     if (!g || societyStore.getState().phase === 'running') return;
     stopStreams();
-    setState({ events: [], steps: [], summary: '', reportMd: '', error: '', phase: 'running' });
+    setState({ events: [], steps: [], summary: '', reportMd: '', gate: null, error: '', phase: 'running' });
     try {
       const started = await startSocietyRun(g);
       setState({ runId: started.runId });
@@ -181,6 +182,36 @@ export const SocietyPanel: React.FC = () => {
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 11, color: 'var(--text-dim)' }}>
             {reportMd}
           </pre>
+        </div>
+      )}
+
+      {gate && (
+        <div style={{ background: 'var(--bg-elev-2)', padding: 10, borderRadius: 6 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Validation Gate (0.85)</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                background: gate.passed ? 'var(--green)' : 'var(--red)',
+                color: '#fff',
+                padding: '2px 10px',
+                borderRadius: 20,
+                fontWeight: 700,
+                fontSize: 11,
+              }}
+            >
+              {gate.passed ? 'PASSED' : 'FAILED'}
+            </span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+              fidelity {gate.value ?? '?'}% · confidence {(gate.confidence ?? 0).toFixed(2)} · validated{' '}
+              {gate.validated ? 'yes' : 'no'}
+            </span>
+          </div>
+          {!gate.passed && (
+            <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 6 }}>
+              Failing metrics are listed in the reproducibility report — minimality is unmeasured until a
+              redundancy ablation exists, which caps overall fidelity by design.
+            </div>
+          )}
         </div>
       )}
 

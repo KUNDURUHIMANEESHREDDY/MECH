@@ -116,6 +116,19 @@ check("trace has 7 nodes", len(trace) == 7, f"nodes={len(trace)}")
 check("trace ops real", all(t.get("status") not in ("error", "unavailable")
                             for t in trace),
       str([(t.get("node"), t.get("status")) for t in trace])[:160])
+pub = (result or {}).get("publication", {})
+gate = pub.get("gate", {})
+check("gate present", isinstance(gate, dict) and "passed" in gate,
+      str(gate)[:160])
+check("gate threshold 0.85", gate.get("threshold") == 0.85,
+      str(gate.get("threshold")))
+check("gate fidelity numeric",
+      isinstance(gate.get("value"), (int, float)),
+      str(gate.get("value")))
+check("reproducibility report present",
+      isinstance(pub.get("reproducibility"), dict)
+      and "report" in pub.get("reproducibility", {}),
+      str(list((pub.get("reproducibility") or {}).keys()))[:120])
 events = (result or {}).get("events", st.get("events", []) if isinstance(st, dict) else [])
 check("research events emitted", len(events) >= 5, f"events={len(events)}")
 

@@ -111,6 +111,14 @@ class ResearchSocietyV2:
     def _failed(res: Dict[str, Any]) -> bool:
         return res.get("status") in ("error", "unavailable", "failed")
 
+    @staticmethod
+    def _confidence_of(vres: Any) -> float:
+        try:
+            return float((vres.get("confidence") or {})
+                         .get("confidence_score", 0.0))
+        except Exception:
+            return 0.0
+
     # -- main loop ------------------------------------------------------
     def _emit(self, events: List[Dict[str, Any]], on_event: Any,
               event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,9 +170,29 @@ class ResearchSocietyV2:
             campaign_id=f"camp_{abs(hash(goal)) % 10000:04d}",
             successful=successful, failed=failed,
             planner_decisions=[n["id"] for n in nodes])
-        ctx["reflection"] = reflection
+        # Closed validation loop: live reproduction vs published baselines.
+        # Runs in a thread (torch forwards) so the event loop stays free.
+        paper_id = workflow.get("pipeline", "ioi")
+        repro = await asyncio.to_thread(self.critic.reproduce, paper_id)
+        ctx["reproducibility"] = repro
+        valid_step = next((t for t in trace if t.get("node") == "validate"),
+                          {})
+        vres = valid_step.get("result", {}) if isinstance(valid_step, dict) \
+            else {}
+        confident = self.critic.is_confident(
+            vres if isinstance(vres, dict) else {})
+        gate = dict(repro.get("gate", {})) if isinstance(repro, dict) else {}
+        gate.update({
+            "confidence": self._confidence_of(vres),
+            "validated": bool(vres.get("validated", False))
+            if isinstance(vres, dict) else False,
+            "passed": bool(gate.get("passed", False)) and confident,
+        })
+        ctx["gate"] = gate
         self._emit(events, on_event, "CircuitValidated",
-                   {"successful": successful, "failed": failed})
+                   {"successful": successful, "failed": failed,
+                    "gate_passed": gate["passed"],
+                    "fidelity_pct": gate.get("value")})
 
         needs_replan = bool(failed) and self.replans < MAX_REPLANS
         if needs_replan and not any(t["node"] == "validate" and not self._failed(t)
@@ -177,7 +205,9 @@ class ResearchSocietyV2:
 
         publication = self.scribe.publish(goal=goal, trace=trace,
                                           reflection=reflection,
-                                          run_id=run_id)
+                                          run_id=run_id,
+                                          reproducibility=repro,
+                                          gate=gate)
         self._emit(events, on_event, "PublicationGenerated",
                    {"experiment_id": publication.get("experiment_id")})
         self._emit(events, on_event, "ResearchFinished",

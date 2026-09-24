@@ -19,6 +19,7 @@ export interface SocietyState {
   steps: SocietyTraceStep[];
   summary: string;
   reportMd: string;
+  gate: Record<string, any> | null;
   error: string;
 }
 
@@ -30,6 +31,7 @@ const DEFAULT_SOCIETY_STATE: SocietyState = {
   steps: [],
   summary: '',
   reportMd: '',
+  gate: null,
   error: '',
 };
 

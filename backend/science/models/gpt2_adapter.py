@@ -205,26 +205,30 @@ class GPT2Adapter(ModelAdapter):
             original_logit = float(orig_top.values[0])
             top_token_before = self._tokenizer.decode([orig_top.indices[0]])
 
-            # GPT-2 Attention head output patching (hooking 'attn.c_proj' or internal 'attn')
-            # For simplicity, we hook the entire attention block output and mask the specific head
-            def head_patch_hook(module, input, output):
-                # GPT-2 output shape: [batch, seq, d_model]
+            # GPT-2 Attention head output patching via attn.c_proj pre-hook.
+            # (A post-hook on `attn` cannot work: its output is a tuple and
+            # mutating it neither applies nor returns correctly.)
+            def head_patch_hook(module, inp):
+                # Merged-head input shape: [batch, seq, d_model]
                 # Head dimension: d_model / num_heads
                 d_head = self.spec.d_model // self.spec.num_heads
                 start = head_index * d_head
                 end = (head_index + 1) * d_head
-
+                x = inp[0]
+                if x.shape[-1] < end:
+                    return inp
+                x = x.clone()
                 if patch_vector is not None:
                     # Inject specific vector (e.g. mean ablation vector)
-                    v = torch.tensor(patch_vector, device=output.device, dtype=output.dtype)
-                    output[0, -1, start:end] = v
+                    v = torch.tensor(patch_vector, device=x.device, dtype=x.dtype)
+                    x[0, -1, start:end] = v
                 else:
                     # Zero ablation
-                    output[0, -1, start:end] = 0.0
-                return output
+                    x[..., start:end] = 0.0
+                return (x,) + tuple(inp[1:])
 
-            layer_module = self._model.transformer.h[layer].attn
-            handle = layer_module.register_forward_hook(head_patch_hook)
+            layer_module = self._model.transformer.h[layer].attn.c_proj
+            handle = layer_module.register_forward_pre_hook(head_patch_hook)
 
             try:
                 with torch.no_grad():
@@ -269,20 +273,25 @@ class GPT2Adapter(ModelAdapter):
             d_head = self.spec.d_model // self.spec.num_heads
 
             def make_mask_hook(layer_idx):
-                def mask_hook(module, input, output):
-                    # output shape: [batch, seq, d_model]
+                def mask_hook(module, inp):
+                    # Merged-head c_proj input shape: [batch, seq, d_model].
+                    # Pre-hook replaces the input so the patched tensor flows
+                    # through (a post-hook on `attn` sees a tuple output).
+                    x = inp[0]
+                    x = x.clone()
                     for h_idx in range(self.spec.num_heads):
                         if (layer_idx, h_idx) not in active_heads:
                             start = h_idx * d_head
                             end = (h_idx + 1) * d_head
-                            output[0, :, start:end] = 0.0
-                    return output
+                            if x.shape[-1] >= end:
+                                x[:, :, start:end] = 0.0
+                    return (x,) + tuple(inp[1:])
                 return mask_hook
 
             # Register hooks for all attention layers
             for i in range(self.spec.num_layers):
-                layer_module = self._model.transformer.h[i].attn
-                handles.append(layer_module.register_forward_hook(make_mask_hook(i)))
+                layer_module = self._model.transformer.h[i].attn.c_proj
+                handles.append(layer_module.register_forward_pre_hook(make_mask_hook(i)))
 
             try:
                 # Also optionally ablate MLPs if they aren't in the "circuit"

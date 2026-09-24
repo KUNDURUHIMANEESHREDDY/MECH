@@ -70,9 +70,12 @@ class Scribe:
 
     def publish(self, goal: str, trace: List[Dict[str, Any]],
                 reflection: Dict[str, Any],
-                run_id: str = "") -> Dict[str, Any]:
-        """Assemble the final deliverable: report + evidence + reflection,
-        then write discoveries back to the persistent knowledge graph."""
+                run_id: str = "",
+                reproducibility: Optional[Dict[str, Any]] = None,
+                gate: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Assemble the final deliverable: report + evidence + reflection +
+        reproducibility report + gate verdict, then write discoveries back
+        to the persistent knowledge graph."""
         exp_id = f"exp_{abs(hash(goal)) % 10000:04d}"
         rep = self.report(experiment_id=exp_id,
                           title=f"Mechanistic Report: {goal[:60]}")
@@ -87,6 +90,8 @@ class Scribe:
             "report": rep.get("result", rep),
             "evidence_graph": ev.get("result", ev),
             "reflection": reflection,
+            "reproducibility": reproducibility or {},
+            "gate": gate or {},
             "published_at": _dt.datetime.utcnow().isoformat() + "Z",
         }
         publication["knowledge_writeback"] = self.write_back(
@@ -197,6 +202,18 @@ class Scribe:
                            {"experiment_id": publication.get("experiment_id",
                                                              "")})
             add_edge(exp, pub, EdgeType.SUPPORTS)
+            gate = publication.get("gate", {})
+            if isinstance(gate, dict) and gate:
+                ev = add_node(
+                    f"ev_{run_id}_gate", NodeType.EVIDENCE,
+                    f"gate {'PASSED' if gate.get('passed') else 'FAILED'} "
+                    f"@ {gate.get('value', 0)}%",
+                    {"passed": bool(gate.get("passed", False)),
+                     "threshold_pct": gate.get("threshold", 0.85) * 100
+                     if isinstance(gate.get("threshold"), (int, float))
+                     else gate.get("threshold"),
+                     "fidelity_pct": gate.get("value")})
+                add_edge(exp, ev, EdgeType.VALIDATED_BY)
         except Exception as exc:
             return {"stored": stored, "error": str(exc)[:300]}
         return {"stored": stored}

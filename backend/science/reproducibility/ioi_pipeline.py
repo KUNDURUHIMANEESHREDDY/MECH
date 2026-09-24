@@ -184,6 +184,7 @@ class IOIReproductionPipeline:
 
         return {
             "pipeline": "IOIReproductionPipeline-HighFidelity",
+            "mock_mode": self.adapter.spec.mock_mode,
             "observed_metrics": observed_metrics,
             "reproducibility_report": report,
             "raw_traces": raw_traces,
