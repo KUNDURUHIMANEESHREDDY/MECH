@@ -17,9 +17,14 @@ def test_runtime_orchestration_submit():
 
 def test_experiment_lifecycle_history():
     dispatcher = build_dispatcher()
+    dispatcher["runtime/scheduler/queue_submit"]({
+        "experiment_id": "exp_hist_1",
+        "priority": 5,
+    })
     events = dispatcher["runtime/orchestration/events"]({})
     assert len(events) >= 1
-    assert events[0]["state"] == "Completed"
+    assert events[-1]["type"] == "experiment.queued"
+    assert events[-1]["payload"]["experiment_id"] == "exp_hist_1"
 
 
 def test_cloud_runtime_providers():

@@ -23,10 +23,14 @@ def test_logit_lens_and_tuned_lens():
     logit = dispatcher["interpretability/projections/logit_lens"]({"prompt": "France is", "layer": 11})
     assert logit["method"] == "LogitLens"
     assert "top_token" in logit
+    assert len(logit["top_k_tokens"]) >= 1
 
     tuned = dispatcher["interpretability/projections/tuned_lens"]({"prompt": "France is", "layer": 11})
     assert tuned["method"] == "TunedLens"
-    assert tuned["affine_translation_applied"] is True
+    # Honest: no trained per-layer translators ship with this repo, so the
+    # tuned-lens route returns the raw LogitLens projection and says so.
+    assert tuned["affine_translation_applied"] is False
+    assert "no trained translator" in tuned.get("note", "")
 
 
 def test_attention_head_ranking():
@@ -42,6 +46,12 @@ def test_activation_and_feature_search():
     acts = dispatcher["interpretability/search/activations"]({"threshold": 1.0})
     assert isinstance(acts, list)
 
-    feats = dispatcher["interpretability/features/search"]({"query": "Indirect Object"})
-    assert len(feats) >= 1
-    assert feats[0]["feature_id"] == 1402
+    # Federated search over real stores (KG labels, repo tokens, SAE dict).
+    feats = dispatcher["interpretability/features/search"]({"query": "France"})
+    assert isinstance(feats, list)
+    assert all("source" in f for f in feats)
+
+    # Direct SAE inspection still resolves the canonical demo feature.
+    insp = dispatcher["interpretability/features/inspect"]({"feature_id": 1402})
+    assert insp["feature_id"] == 1402
+    assert len(insp["dataset_examples"]) >= 1

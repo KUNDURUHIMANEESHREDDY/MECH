@@ -937,15 +937,22 @@ def patch_head(layer: int, head: int, pos_token: str, neg_token: str) -> Dict[st
         logits = out.logits[0, -1]
         return _token_logit(pos_token, logits) - _token_logit(neg_token, logits)
 
-    def zero_head_hook(module, inp, out):
+    def zero_head_hook(module, inp):
+        # Pre-hook (NOT post-hook): replacing c_proj's input re-routes the
+        # computation through the patched tensor. The old post-hook mutated
+        # the already-computed output's input in place and returned `out`
+        # unchanged, so every patch measured delta == 0.0 (no-op).
         x = inp[0]
         sl = slice(head * head_dim, (head + 1) * head_dim)
         if x.shape[-1] >= sl.stop:
+            x = x.clone()
             x[..., sl] = 0.0
-        return out
+            return (x,) + tuple(inp[1:])
+        return inp
 
     clean_ld = round(logit_diff(), 4)
-    hook = _model.transformer.h[layer].attn.c_proj.register_forward_hook(zero_head_hook)
+    hook = _model.transformer.h[layer].attn.c_proj.register_forward_pre_hook(
+        zero_head_hook)
     try:
         patched_ld = round(logit_diff(), 4)
     finally:
@@ -1123,4 +1130,92 @@ def infer(prompt: str, model_name: str) -> Dict[str, Any]:
         "n_layers": _n_layers(),
         "d_mlp": _d_mlp(),
         "d_model": _d_model(),
+    }
+
+
+def _ensure_prompt(prompt: str) -> Optional[Dict[str, Any]]:
+    """Load the model and populate _cache for prompt (no-op if cached)."""
+    err = _ensure_loaded()
+    if err:
+        return err
+    if not _cache or _cache.get("prompt") != prompt:
+        _forward(prompt)
+    return None
+
+
+def ablate_layer(layer: int, prompt: str,
+                 pos_token: str = " Paris",
+                 neg_token: str = " London") -> Dict[str, Any]:
+    """Leave-one-layer-out causal intervention.
+
+    Zeroes transformer block `layer`'s output and measures the change in the
+    (pos_token − neg_token) logit difference. True causal tracing: every
+    number comes from live forward passes, nothing hardcoded.
+    """
+    err = _ensure_prompt(prompt)
+    if err:
+        return err
+    layer = max(0, min(_n_layers() - 1, int(layer)))
+    clean_ld = _token_logit(pos_token, _cache["logits"]) \
+        - _token_logit(neg_token, _cache["logits"])
+
+    def zero_block(module: Any, inp: Any, out: Any) -> Any:
+        if isinstance(out, tuple):
+            return (torch.zeros_like(out[0]),) + tuple(out[1:])
+        return torch.zeros_like(out)
+
+    hook = _model.transformer.h[layer].register_forward_hook(zero_block)
+    try:
+        inputs = _tokenizer(prompt, return_tensors="pt")
+        device = next(_model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        with torch.no_grad():
+            out = _model(**inputs)
+        ablated = out.logits[0, -1].detach().cpu()
+    finally:
+        hook.remove()
+    patched_ld = _token_logit(pos_token, ablated) \
+        - _token_logit(neg_token, ablated)
+    delta = round(patched_ld - clean_ld, 4)
+    return {
+        "status": "ok",
+        "layer": layer,
+        "clean_ld": round(clean_ld, 4),
+        "patched_ld": round(patched_ld, 4),
+        "delta": delta,
+        "direction": "hurts" if delta < 0 else "helps",
+    }
+
+
+def logit_lens(layer: int, prompt: str, top_k: int = 5) -> Dict[str, Any]:
+    """Raw LogitLens projection: unembed hidden state at `layer`.
+
+    Projects hidden[layer] (last token) through ln_f + the tied unembedding
+    matrix from a single cached forward pass. No trained translators —
+    callers needing a tuned lens must supply probe weights.
+    """
+    err = _ensure_prompt(prompt)
+    if err:
+        return err
+    layer = max(0, min(_n_layers() - 1, int(layer)))
+    device = next(_model.parameters()).device
+    h = torch.from_numpy(_cache["hidden"][layer + 1][-1]).float().to(device)
+    with torch.no_grad():
+        normed = _model.transformer.ln_f(h)
+        logits = normed @ _model.transformer.wte.weight.T
+    logits = logits.detach().cpu()
+    probs = torch.softmax(logits, dim=-1)
+    k = max(1, min(int(top_k), probs.numel()))
+    topk = torch.topk(probs, k)
+    toks = [
+        {"token": _decode(int(i)), "prob": round(float(probs[i]), 6)}
+        for i in topk.indices
+    ]
+    return {
+        "status": "ok",
+        "method": "LogitLens",
+        "layer": layer,
+        "prompt": prompt,
+        "top_token": toks[0]["token"] if toks else "",
+        "top_k_tokens": toks,
     }

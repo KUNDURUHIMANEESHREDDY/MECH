@@ -17,6 +17,7 @@ def test_lens_comparison_workflow():
     tuned_res = dispatcher["interpretability/projections/tuned_lens"]({"prompt": prompt, "layer": 10})
     assert tuned_res["method"] == "TunedLens"
 
-    # 3. Verify projection comparison
+    # 3. Verify projection comparison: without trained translators both
+    # routes project through the same unembedding, so top tokens agree.
     assert logit_res["layer"] == tuned_res["layer"]
-    assert tuned_res["prediction_confidence"] >= logit_res["top_k_tokens"][0]["probability"]
+    assert tuned_res["top_token"] == logit_res["top_token"]

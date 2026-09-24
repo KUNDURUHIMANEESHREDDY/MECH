@@ -8,9 +8,11 @@ def test_circuit_discovery():
         "prompt": "The capital of France is",
         "target_token": " Paris",
     })
-    assert circ["circuit_score"] == 0.945
+    # Real IOI-pipeline measurements: faithfulness score, nominated heads.
+    assert 0.5 < circ["circuit_score"] <= 1.0
     assert len(circ["nodes"]) >= 4
     assert len(circ["edges"]) >= 3
+    assert "L10H7" in circ["nodes"]
 
 
 def test_causal_tracing():
@@ -29,15 +31,19 @@ def test_attribution_patching():
         "clean_prompt": "John gave a book to Mary",
         "corrupted_prompt": "John gave a book to John",
     })
-    assert attr["method"] == "Gradient"
+    # Activation patching over IOI-nominated heads: ranked by |delta|.
+    assert attr["method"] == "ActivationPatching"
     assert len(attr["top_attributed_nodes"]) >= 3
+    assert attr["attribution_score"] > 0
 
 
 def test_automated_feature_labeling():
     dispatcher = build_dispatcher()
     lbl = dispatcher["interpretability/features/label"]({"feature_id": 1402, "provider": "LocalModel"})
     assert lbl["feature_id"] == 1402
-    assert lbl["confidence_score"] == 0.94
+    assert "1402" in lbl["label"]
+    assert len(lbl["evidence_prompts"]) >= 1
+    assert 0.0 < lbl["confidence_score"] <= 1.0
 
 
 def test_polysemanticity_detection():

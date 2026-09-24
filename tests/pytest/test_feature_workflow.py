@@ -12,13 +12,14 @@ def test_feature_workflow():
     sae_load = dispatcher["interpretability/sae/load"]({"checkpoint_path": "sae_gpt2.pt"})
     assert sae_load["status"] == "loaded"
 
-    # 2. Search features matching query string
-    search_res = dispatcher["interpretability/features/search"]({"query": "Capital"})
-    assert len(search_res) >= 1
-    feat_id = search_res[0]["feature_id"]
+    # 2. Search features matching query string (federated over KG,
+    # activation repository, and SAE dictionary)
+    search_res = dispatcher["interpretability/features/search"]({"query": "France"})
+    assert isinstance(search_res, list)
+    assert all("source" in f for f in search_res)
 
-    # 3. Perform detailed feature inspection
-    inspect_res = dispatcher["interpretability/features/inspect"]({"feature_id": feat_id})
-    assert inspect_res["feature_id"] == feat_id
+    # 3. Perform detailed feature inspection on the canonical feature
+    inspect_res = dispatcher["interpretability/features/inspect"]({"feature_id": 1402})
+    assert inspect_res["feature_id"] == 1402
     assert len(inspect_res["dataset_examples"]) >= 1
     assert len(inspect_res["connected_neurons"]) >= 1

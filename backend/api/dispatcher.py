@@ -144,12 +144,24 @@ def research_catalog(item_type: str = "all") -> Dict[str, Any]:
 @router.post("/benchmarks/run")
 def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
     name = payload.get("benchmark_name", "IOI")
-    return {
-        "status": "completed",
-        "benchmark_name": name,
-        "score": 0.87,
-        "pass_rate": 0.92,
-    }
+    try:
+        from backend.validation.benchmark_runner import (
+            MechanisticBenchmarkRunner,
+        )
+        res = MechanisticBenchmarkRunner().run_benchmark(f"bench_{name}")
+        score = float(res.get("accuracy", 0.0))
+        return {
+            "status": "completed",
+            "benchmark_name": name,
+            "score": round(score, 4),
+            "pass_rate": round(float(res.get("robustness_score", score)), 4),
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "benchmark_name": name,
+            "error": str(exc)[:300],
+        }
 
 
 @router.get("/experiments")
