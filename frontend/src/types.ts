@@ -27,6 +27,8 @@ export interface InferenceResponse {
   neuron_activations: NeuronActivation[];
   gpu_util: number;
   memory_util: number;
+  provenance?: string;
+  provenance_note?: string;
 }
 
 export interface ModelInfo {

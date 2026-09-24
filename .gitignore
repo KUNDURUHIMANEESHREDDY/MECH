@@ -13,6 +13,7 @@ frontend/*.tsbuildinfo
 .pytest-tmp/
 .pytest_cache/
 frontend/node_modules/.vitest/
+frontend/test-results/
 test-results/.last-run.json
 
 # Local env

@@ -18,10 +18,14 @@ app = FastAPI(
     description="Mechanistic Interpretability Research Platform"
 )
 
-# Allow frontend (Vite)
+# Allow frontend (Vite). Extra dev origins via MECH_CORS_ORIGINS (comma-separated).
+import os as _os
+
+_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173", "null", "file://"]
+_CORS_ORIGINS += [o.strip() for o in _os.environ.get("MECH_CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "null", "file://"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

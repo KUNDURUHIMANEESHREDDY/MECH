@@ -101,7 +101,11 @@ def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
     model_name = payload.get("model_name", "gpt2-small")
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.infer(prompt, model_name)
+        res = engine.infer(prompt, model_name)
+        if isinstance(res, dict):
+            # Provenance marker: live weights (never silently fake).
+            res.setdefault("provenance", "live")
+        return res
     prompt_tokens = [t.strip() for t in prompt.split() if t.strip()]
     if not prompt_tokens:
         prompt_tokens = ["Hello"]
@@ -112,6 +116,9 @@ def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
     matrix = [[round(min(1.0, 0.5 + 0.05 * (i + j)), 3) for j in range(n)] for i in range(n)]
     return {
         "model_name": model_name,
+        "provenance": "seeded",
+        "provenance_note": "torch/transformers unavailable: deterministic "
+                           "seeded stand-ins, not model measurements",
         "tokens": tokens,
         "generated_text": " ".join(t["text"] for t in tokens),
         "attention_maps": [
@@ -294,13 +301,21 @@ def _seed(text: str) -> int:
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
 
 
+def _mark(res: Any, provenance: str) -> Any:
+    """Stamp a response with its data provenance (live vs seeded)."""
+    if isinstance(res, dict):
+        res.setdefault("provenance", provenance)
+    return res
+
+
 @router.post("/gpt2/load")
 def gpt2_load(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.load()
+        return _mark(engine.load(), "live")
     return {
         "status": "loaded",
+        "provenance": "seeded",
         "model_name": "gpt2-small",
         "n_layers": 12,
         "n_heads": 12,
@@ -356,7 +371,7 @@ def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
     prompt = payload.get("prompt") or _random_prompt()
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.run_prompt(prompt)
+        return _mark(engine.run_prompt(prompt), "live")
     str_tokens = [t for t in prompt.replace(",", " ,").replace(".", " .").split() if t]
     seed = _seed(prompt)
     rng = random.Random(seed)
@@ -367,6 +382,7 @@ def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
     top16 = [{"token": t, "logit": round(v, 4)} for t, v in ranked[:16]]
     return {
         "status": "ok",
+        "provenance": "seeded",
         "prompt": prompt,
         "str_tokens": str_tokens,
         "top5": top5,
@@ -379,11 +395,12 @@ def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
 def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.activations(int(payload.get("layer", 0)))
+        return _mark(engine.activations(int(payload.get("layer", 0))), "live")
     layer = max(0, min(11, int(payload.get("layer", 0))))
     seq = int(payload.get("seq_len", 12))
     return {
         "status": "ok",
+        "provenance": "seeded",
         "layer": layer,
         "resid_shape": [seq, 768],
         "attn_shape": [12, seq, seq],
@@ -395,7 +412,7 @@ def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
 def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.attention_head(int(payload.get("layer", 0)), int(payload.get("head", 0)))
+        return _mark(engine.attention_head(int(payload.get("layer", 0)), int(payload.get("head", 0))), "live")
     layer = int(payload.get("layer", 0)) % 12
     head = int(payload.get("head", 0)) % 12
     tokens = payload.get("tokens") or _random_token_sequence()
@@ -408,7 +425,7 @@ def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
         total = sum(matrix[i])
         if total > 0:
             matrix[i] = [round(v / total, 4) for v in matrix[i]]
-    return {"status": "ok", "layer": layer, "head": head, "matrix": matrix, "str_tokens": tokens}
+    return {"status": "ok", "provenance": "seeded", "layer": layer, "head": head, "matrix": matrix, "str_tokens": tokens}
 
 
 @router.post("/gpt2/patch_head")
@@ -416,12 +433,12 @@ def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
 def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.patch_head(
+        return _mark(engine.patch_head(
             int(payload.get("layer", 9)),
             int(payload.get("head", 9)),
             payload.get("pos_token", "Paris"),
             payload.get("neg_token", "London"),
-        )
+        ), "live")
     layer = int(payload.get("layer", 9)) % 12
     head = int(payload.get("head", 9)) % 12
     pos_token = payload.get("pos_token", "Paris")
@@ -432,6 +449,7 @@ def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     delta = round(patched_ld - clean_ld, 4)
     return {
         "status": "ok",
+        "provenance": "seeded",
         "layer": layer,
         "head": head,
         "clean_ld": clean_ld,
@@ -447,12 +465,13 @@ def gpt2_ioi(payload: Dict[str, Any]) -> Dict[str, Any]:
     subj_name = payload.get("subj_name") or random.choice([n for n in NAMES if n != io_name])
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.ioi(io_name, subj_name)
+        return _mark(engine.ioi(io_name, subj_name), "live")
     rng = random.Random(_seed(f"{io_name}:{subj_name}"))
     clean_prompt = f"When {subj_name} and {io_name} went to the store, {subj_name} gave a bottle to"
     corrupted_prompt = f"When {subj_name} and {io_name} went to the store, {io_name} gave a bottle to"
     return {
         "status": "ok",
+        "provenance": "seeded",
         "io_name": io_name,
         "subj_name": subj_name,
         "clean_prompt": clean_prompt,
@@ -568,6 +587,72 @@ def gpt2_logit_lens_all(payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as exc:
             return {"status": "error", "error": str(exc)[:300]}
     return {"status": "error", "error": "torch/transformers not available"}
+
+
+@router.get("/circuits")
+def list_circuits() -> Dict[str, Any]:
+    try:
+        from backend.science.explorer.circuit_explorer import CircuitExplorer
+        return {"circuits": CircuitExplorer().list_circuits()}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)[:300]}
+
+
+@router.get("/circuits/{circuit_id}")
+def get_circuit(circuit_id: str) -> Dict[str, Any]:
+    try:
+        from backend.science.explorer.circuit_explorer import CircuitExplorer
+        res = CircuitExplorer().get_circuit(circuit_id=circuit_id)
+        if res is None:
+            return {"status": "error",
+                    "error": f"unknown circuit_id '{circuit_id}'"}
+        return res if isinstance(res, dict) else {"status": "ok",
+                                                 "circuit": res}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)[:300]}
+
+
+@router.get("/figures/attention")
+def figure_attention(prompt: str = "The capital of France is",
+                     layer: int = 10, head: int = 7):
+    """Publication-ready attention heatmap PNG from live weights."""
+    from fastapi.responses import Response
+    engine = get_engine()
+    if not (engine and engine.is_available()):
+        return {"status": "error",
+                "error": "torch/transformers not available"}
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        # Prime the cache for the requested prompt, then read the head.
+        engine.run_prompt(prompt)
+        res = engine.attention_head(int(layer) % 12, int(head) % 12)
+        matrix = res.get("matrix") or []
+        tokens = res.get("str_tokens") or []
+        if not matrix:
+            return {"status": "error", "error": "empty attention matrix"}
+        import io
+        fig, ax = plt.subplots(
+            figsize=(max(4.0, len(tokens) * 0.9), max(3.2, len(tokens) * 0.7)))
+        im = ax.imshow(matrix, cmap="viridis", aspect="auto")
+        ax.set_xticks(range(len(tokens)))
+        ax.set_yticks(range(len(tokens)))
+        ax.set_xticklabels(tokens, rotation=45, ha="right", fontsize=8)
+        ax.set_yticklabels(tokens, fontsize=8)
+        ax.set_title(f"GPT-2 L{int(layer) % 12}H{int(head) % 12}: {prompt[:48]}",
+                     fontsize=9)
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=150)
+        plt.close(fig)
+        buf.seek(0)
+        return Response(content=buf.read(), media_type="image/png",
+                        headers={"Content-Disposition":
+                                 f"inline; filename=attn_L{layer}_H{head}.png"})
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)[:300]}
 
 
 # ---------------------------------------------------------------------------

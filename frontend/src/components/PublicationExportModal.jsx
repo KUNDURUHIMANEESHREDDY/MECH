@@ -11,9 +11,11 @@ export default function PublicationExportModal({ isOpen, onClose, figureData }) 
 
   const handleExport = () => {
     const title = figureData?.title || "High-Fidelity Automated Reproduction of IOI Circuit";
+    const abstractNote = figureData?.abstract
+      || "Empirical replication notes are attached to the exported figures below.";
     let content = "", filename = "";
     if (format === "LaTeX") {
-      content = `\\documentclass{article}\n\\usepackage{amsmath,graphicx,booktabs}\n\n\\title{${title}}\n\\author{Autonomous Interpretability Platform Agent}\n\\date{\\today}\n\n\\begin{document}\n\\maketitle\n\n\\begin{abstract}\nWe present an automated empirical replication of indirect object identification, recovering 97.2% logit difference across GPT-2, Gemma, and Llama.\n\\end{abstract}\n\n\\section{Introduction}\nRigorous automated replication using Attribution, ACDC, Causal Scrubbing, and Feature Universality.\n\n\\end{document}`;
+      content = `\\documentclass{article}\n\\usepackage{amsmath,graphicx,booktabs}\n\n\\title{${title}}\n\\author{Autonomous Interpretability Platform Agent}\n\\date{\\today}\n\n\\begin{document}\n\\maketitle\n\n\\begin{abstract}\n${abstractNote}\n\\end{abstract}\n\n\\section{Introduction}\nRigorous automated replication using Attribution, ACDC, Causal Scrubbing, and Feature Universality.\n\n\\end{document}`;
       filename = "paper.tex";
     } else if (format === "Markdown") {
       content = `# ${title}\n\n**Authors:** Autonomous Interpretability Agent  \n**Category:** ${paperCategory}  \n\n## Abstract\nWe present an automated empirical replication...`;

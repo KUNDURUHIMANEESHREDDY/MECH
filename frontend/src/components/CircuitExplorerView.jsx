@@ -1,8 +1,65 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { colors } from '../design/tokens/colors';
 
+const API_BASE = 'http://localhost:8000/api';
+
+async function getJSON(path) {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
+  return res.json();
+}
+
 export default function CircuitExplorerView({ api }) {
-  const [selectedCircuit, setSelectedCircuit] = useState('ioi_circuit');
+  const [circuits, setCircuits] = useState([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    getJSON('/circuits')
+      .then(data => {
+        if (!live) return;
+        const list = Array.isArray(data) ? data : data.circuits ?? [];
+        setCircuits(list);
+        if (list.length > 0) setSelectedId(list[0].circuit_id);
+        setLoading(false);
+      })
+      .catch(e => {
+        if (live) {
+          setError(e instanceof Error ? e.message : String(e));
+          setLoading(false);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetail(null);
+      return;
+    }
+    let live = true;
+    setDetail(null);
+    getJSON(`/circuits/${encodeURIComponent(selectedId)}`)
+      .then(data => {
+        if (live) setDetail(data);
+      })
+      .catch(() => {
+        if (live) setDetail(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [selectedId]);
+
+  const nodes = detail?.nodes ?? [];
+  const heads = nodes.filter(n => n.node_type === 'attention_head');
+  const others = nodes.filter(n => n.node_type !== 'attention_head');
+  const score = detail ? detail.faithfulness ?? null : null;
 
   return (
     <div className="explorer-page">
@@ -11,75 +68,101 @@ export default function CircuitExplorerView({ api }) {
         <p className="hint">Hierarchical exploration of mechanistic circuits.</p>
       </div>
 
-      <div className="explorer-split">
-        <div className="explorer-panel">
-          <h2>Circuit Selection</h2>
+      {loading && <p className="hint">Loading circuits from the backend…</p>}
+      {error && (
+        <p className="hint" style={{ color: 'var(--danger, #ef4444)' }}>
+          Cannot reach the circuit registry: {error}. Start the backend first.
+        </p>
+      )}
 
-          <select
-            value={selectedCircuit}
-            onChange={e => setSelectedCircuit(e.target.value)}
-            className="input-text"
-            style={{ marginBottom: 24 }}
-          >
-            <option value="ioi_circuit">Indirect Object Identification (IOI)</option>
-            <option value="induction_circuit">Induction Heads</option>
-            <option value="greater_than_circuit">Greater-Than Circuit</option>
-          </select>
+      {!loading && !error && circuits.length === 0 && (
+        <p className="hint">No circuits registered.</p>
+      )}
 
-          <div className="evidence-block" style={{ borderLeftColor: colors.primary }}>
-            <div className="evidence-label">Evidence</div>
-            <p className="evidence-text">
-              Path patching shows Name Mover Heads (L9H9, L10H0) directly write to the IO token logits.
-            </p>
+      {!loading && !error && circuits.length > 0 && (
+        <div className="explorer-split">
+          <div className="explorer-panel">
+            <h2>Circuit Selection</h2>
+
+            <select
+              value={selectedId}
+              onChange={e => setSelectedId(e.target.value)}
+              className="input-text"
+              style={{ marginBottom: 24 }}
+            >
+              {circuits.map(c => (
+                <option key={c.circuit_id} value={c.circuit_id}>
+                  {c.name ?? c.circuit_id}
+                </option>
+              ))}
+            </select>
+
+            {detail && (
+              <>
+                <div className="evidence-block" style={{ borderLeftColor: colors.primary }}>
+                  <div className="evidence-label">Evidence</div>
+                  <p className="evidence-text">{detail.description ?? '—'}</p>
+                </div>
+
+                <div className="evidence-block" style={{ borderLeftColor: colors.warning }}>
+                  <div className="evidence-label">Faithfulness</div>
+                  <div className="confidence-bar">
+                    <div className="confidence-track">
+                      <div
+                        className="confidence-fill"
+                        style={{
+                          width: `${Math.round((score ?? 0) * 100)}%`,
+                          background: colors.warning,
+                        }}
+                      />
+                    </div>
+                    <span className="confidence-value">
+                      {score === null ? '—' : `${Math.round(score * 100)}%`}
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
-          <div className="evidence-block" style={{ borderLeftColor: colors.warning }}>
-            <div className="evidence-label">Confidence</div>
-            <div className="confidence-bar">
-              <div className="confidence-track">
-                <div className="confidence-fill" style={{ width: '95%', background: colors.warning }} />
+          <div className="explorer-panel" style={{ flex: 2 }}>
+            <h2>Members & Components</h2>
+
+            {!detail && <p className="hint">Select a circuit to inspect its members.</p>}
+
+            {detail && (
+              <div className="component-list">
+                <div className="component-card">
+                  <div className="component-header">
+                    <h3 style={{ color: colors.bodyMuted }}>Attention Heads</h3>
+                  </div>
+                  <div className="component-tags">
+                    {heads.length === 0 && <span className="hint">None listed</span>}
+                    {heads.map(h => (
+                      <span className="chip" key={h.node_id} title={h.description ?? ''}>
+                        {h.label}
+                        {h.importance_score !== undefined ? ` (${h.importance_score})` : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="component-card">
+                  <h3 style={{ color: colors.ink, margin: '0 0 12px 0' }}>Other Components</h3>
+                  <div className="component-tags">
+                    {others.length === 0 && <span className="hint">None listed</span>}
+                    {others.map(n => (
+                      <span className="chip" key={n.node_id} title={n.description ?? ''}>
+                        {n.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <span className="confidence-value">95%</span>
-            </div>
+            )}
           </div>
         </div>
-
-        <div className="explorer-panel" style={{ flex: 2 }}>
-          <h2>Members & Components</h2>
-
-          <div className="component-list">
-            <div className="component-card">
-              <div className="component-header">
-                <h3 style={{ color: colors.bodyMuted }}>Attention Heads</h3>
-                <span className="component-tag">Name Movers</span>
-              </div>
-              <div className="component-tags">
-                <span className="chip">L9H9</span>
-                <span className="chip">L10H0</span>
-              </div>
-            </div>
-
-            <div className="component-card">
-              <h3 style={{ color: colors.ink, margin: '0 0 12px 0' }}>Key MLP Neurons</h3>
-              <div className="component-tags">
-                <span className="chip">L8N1204</span>
-              </div>
-            </div>
-
-            <div className="component-card">
-              <h3 style={{ color: colors.primary, margin: '0 0 12px 0' }}>SAE Features</h3>
-              <div className="component-tags">
-                <span className="chip" style={{ borderLeft: `2px solid ${colors.primary}` }}>Feature 451 (Syntax)</span>
-              </div>
-            </div>
-
-            <div className="action-row">
-              <button className="btn explorer-action-btn">Patch Activation</button>
-              <button className="btn explorer-action-btn">Cross-model Alignment</button>
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

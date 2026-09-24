@@ -182,6 +182,18 @@ export const SocietyPanel: React.FC = () => {
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 11, color: 'var(--text-dim)' }}>
             {reportMd}
           </pre>
+          {(() => {
+            const patch = steps.find(s => s.node === 'patch' && s.status === 'ok');
+            if (!patch || patch.layer === undefined || patch.head === undefined) return null;
+            const href = `http://localhost:8000/api/figures/attention?prompt=${encodeURIComponent(goal)}&layer=${patch.layer}&head=${patch.head}`;
+            return (
+              <div style={{ marginTop: 8 }}>
+                <a href={href} target="_blank" rel="noreferrer" className="btn" style={{ textDecoration: 'none' }}>
+                  Export attention figure L{String(patch.layer)}H{String(patch.head)} (PNG)
+                </a>
+              </div>
+            );
+          })()}
         </div>
       )}
 

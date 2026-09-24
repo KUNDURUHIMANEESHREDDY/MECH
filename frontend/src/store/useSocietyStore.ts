@@ -9,6 +9,8 @@ export interface SocietyTraceStep {
   status: string;
   error?: string;
   reason?: string;
+  layer?: number;
+  head?: number;
 }
 
 export interface SocietyState {

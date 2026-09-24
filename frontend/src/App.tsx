@@ -16,6 +16,7 @@ import { TokenPanel } from './panels/TokenPanel';
 import { LayerPanel } from './panels/LayerPanel';
 import { PredictionPanel } from './panels/PredictionPanel';
 import { SocietyPanel } from './panels/SocietyPanel';
+import { ProvenanceBanner } from './components/ProvenanceBanner';
 import { useAppStore } from './store/useAppStore';
 import { PanelState } from './types';
 import Sidebar from './components/Sidebar';
@@ -482,6 +483,10 @@ export default function App() {
           onToggleActivity={() => setActivityCollapsed(!activityCollapsed)}
         />
         <div className="content">
+          <ProvenanceBanner
+            kind={model.error ? 'offline' : data?.provenance === 'seeded' ? 'seeded' : null}
+            note={data?.provenanceNote}
+          />
           <CommandPalette
             onLoadModel={handleLoadModel}
             onRunPrompt={handleRun}

@@ -21,6 +21,8 @@ export interface ProcessedResult {
   layers: LayerData[];
   gpuUtil: number;
   memoryUtil: number;
+  provenance: string;
+  provenanceNote?: string;
 }
 
 const initialState: ModelState = {
@@ -86,6 +88,8 @@ export function useModel() {
         layers,
         gpuUtil: raw.gpu_util,
         memoryUtil: raw.memory_util,
+        provenance: raw.provenance ?? 'unknown',
+        provenanceNote: raw.provenance_note,
       };
 
       if (!disposedRef.current) {
