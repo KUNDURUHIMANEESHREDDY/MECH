@@ -5,6 +5,10 @@ Uses decorator-based route registration for maintainability and extensibility.
 This is the legacy JSON-RPC style dispatcher restored for compatibility with the
 pre-consolidation test suite (``tests/pytest``). The active HTTP API lives in
 ``api.dispatcher`` (FastAPI); this module provides ``build_dispatcher()``.
+
+DEPRECATED — frozen except for deprecation markers and import consolidation
+(see LEGACY_DISPATCHER_AUDIT). No new routes. New code targets
+``backend/api/dispatcher.py`` (Society v2) and ``backend/agents/``.
 """
 
 from __future__ import annotations
@@ -22,19 +26,17 @@ from backend.core.evidence_graph import TraceableEvidenceGraph
 from backend.core.experiment_templates import ExperimentTemplatesSystem
 from backend.core.provenance_viewer import ProvenanceViewerEngine
 from backend.core.unified_registry import UnifiedRegistry
-try:
-    from backend.science.workflows.mechanistic_workflow import UnifiedMechanisticWorkflowEngine
-except ImportError:
-    from backend.mech_platform.workflow.engine import WorkflowEngine as UnifiedMechanisticWorkflowEngine
+# Single survivor (was try/except over backend.science.workflows, which does
+# not exist in this tree): the mech_platform workflow engine.
+from backend.mech_platform.workflow.engine import WorkflowEngine as UnifiedMechanisticWorkflowEngine
 from backend.core.workflow_dsl import DeclarativeWorkflowEngine
 from backend.interpretability.discovery.cross_model_circuits import CrossModelCircuitsEngine
 from backend.interpretability.discovery.discovery_engine import DiscoveryEngine
 from backend.interpretability.discovery.feature_genealogy import FeatureGenealogyEngine
 from backend.research_platform.autonomous.ai_scientist_engine import AIScientistEngine
-try:
-    from backend.science.research_society.society import ResearchSociety
-except ImportError:
-    from backend.agents.research_society import ResearchSociety
+# Single survivor (was try/except over backend.science.research_society, which
+# does not exist in this tree): the agents-package ResearchSociety.
+from backend.agents.research_society import ResearchSociety
 from backend.research_platform.meta.campaign_embeddings import CampaignEmbeddingsEngine
 from backend.research_platform.meta.experience_replay import ResearchExperienceReplay
 from backend.research_platform.meta.literature_learning_pipeline import LiteratureLearningPipeline
@@ -568,7 +570,10 @@ def _handle_v36_run_suite(p: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "status": "success",
         "report": report.to_dict(),
-        "artifact_dir": artifact_dir
+        "artifact_dir": artifact_dir,
+        # DEPRECATED alias — canonical route: runtime/orchestration/benchmark_run
+        "deprecated": True,
+        "canonical": "runtime/orchestration/benchmark_run",
     }
 
 
@@ -583,7 +588,11 @@ def _handle_v36_run_single(p: Dict[str, Any]) -> Dict[str, Any]:
         family=model_family,
         mode=ExecutionMode(mode_str)
     )
-    return result.to_dict()
+    out = result.to_dict()
+    # DEPRECATED alias — canonical route: runtime/orchestration/benchmark_run
+    out["deprecated"] = True
+    out["canonical"] = "runtime/orchestration/benchmark_run"
+    return out
 
 
 @route("api/v36/benchmarks/latest")
@@ -593,7 +602,10 @@ def _handle_v36_latest(p: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "run_id": "run_latest_mock",
         "timestamp": "2026-07-28T17:00:00Z",
-        "overall_fidelity": 94.2
+        "overall_fidelity": 94.2,
+        # DEPRECATED alias — canonical route: runtime/orchestration/benchmark_run
+        "deprecated": True,
+        "canonical": "runtime/orchestration/benchmark_run",
     }
 
 

@@ -125,6 +125,7 @@ export default function Topbar({
       <div style={{ display: 'flex', alignItems: 'center', gap: spacing[2] }}>
         {/* Status Indicator */}
         <div
+          data-testid="python-status"
           style={{
             display: 'flex',
             alignItems: 'center',
