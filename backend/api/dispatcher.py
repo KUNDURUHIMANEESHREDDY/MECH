@@ -611,6 +611,7 @@ def _society_worker(run_id: str, goal: str, model_name: str) -> None:
         result = society.run_blocking(
             goal, model_name=model_name,
             on_event=lambda ev: _society_push(run_id, ev),
+            run_id=run_id,
         )
         status = result.get("status", "completed")
     except Exception as exc:
@@ -621,6 +622,14 @@ def _society_worker(run_id: str, goal: str, model_name: str) -> None:
         with _society_lock:
             run["result"] = result
             run["status"] = status
+    # Durable per-run evidence record (survives restarts).
+    try:
+        from backend.core.evidence_graph import save_run_record
+        save_run_record(run_id, {"run_id": run_id, "goal": goal,
+                                 "model_name": model_name,
+                                 "status": status, "result": result})
+    except Exception:
+        pass
     try:
         run["queue"].put(("done", None), block=False)
     except Exception:
@@ -662,16 +671,31 @@ def society_run(payload: Dict[str, Any]) -> Dict[str, Any]:
             "stream": f"/api/society/stream?runId={run_id}"}
 
 
+@router.get("/society/runs")
+def society_run_list() -> Dict[str, Any]:
+    """Persisted per-run evidence records (durable across restarts)."""
+    try:
+        from backend.core.evidence_graph import list_run_records
+        return {"runs": list_run_records()}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)[:300]}
+
+
 @router.get("/society/runs/{run_id}")
 def society_run_status(run_id: str) -> Dict[str, Any]:
     run = _society_runs.get(run_id)
-    if run is None:
+    if run is not None:
+        with _society_lock:
+            events = list(run["events"])
+            return {"run_id": run_id, "status": run["status"],
+                    "goal": run["goal"], "events": events,
+                    "result": run["result"]}
+    # Fall back to the persisted record (post-restart reads).
+    try:
+        from backend.core.evidence_graph import load_run_record
+        return load_run_record(run_id)
+    except Exception:
         return {"status": "error", "error": f"unknown runId '{run_id}'"}
-    with _society_lock:
-        events = list(run["events"])
-        return {"run_id": run_id, "status": run["status"],
-                "goal": run["goal"], "events": events,
-                "result": run["result"]}
 
 
 def _society_json_default(obj: Any) -> Any:

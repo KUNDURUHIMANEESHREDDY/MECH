@@ -126,7 +126,8 @@ class ResearchSocietyV2:
 
     async def run(self, goal: str,
                   model_name: str = "gpt2",
-                  on_event: Any = None) -> Dict[str, Any]:
+                  on_event: Any = None,
+                  run_id: str = "") -> Dict[str, Any]:
         events: List[Dict[str, Any]] = []
         self._emit(events, on_event, "ResearchStarted", {"goal": goal})
         workflow = self.planner.plan(goal)
@@ -175,7 +176,8 @@ class ResearchSocietyV2:
                        {"replan": self.replans, "failed": failed})
 
         publication = self.scribe.publish(goal=goal, trace=trace,
-                                          reflection=reflection)
+                                          reflection=reflection,
+                                          run_id=run_id)
         self._emit(events, on_event, "PublicationGenerated",
                    {"experiment_id": publication.get("experiment_id")})
         self._emit(events, on_event, "ResearchFinished",
@@ -192,10 +194,11 @@ class ResearchSocietyV2:
 
     def run_blocking(self, goal: str,
                      model_name: str = "gpt2",
-                     on_event: Any = None) -> Dict[str, Any]:
+                     on_event: Any = None,
+                     run_id: str = "") -> Dict[str, Any]:
         """Sync entry point for FastAPI handlers (dispatcher POST /society/run)."""
         return asyncio.run(self.run(goal, model_name=model_name,
-                                    on_event=on_event))
+                                    on_event=on_event, run_id=run_id))
 
 
 # Backwards-compatible alias: legacy_dispatcher imports ResearchSociety.
