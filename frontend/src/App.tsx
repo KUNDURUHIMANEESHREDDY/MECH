@@ -14,6 +14,7 @@ import { DockManager } from './layout/DockManager';
 import { TokenPanel } from './panels/TokenPanel';
 import { LayerPanel } from './panels/LayerPanel';
 import { PredictionPanel } from './panels/PredictionPanel';
+import { SocietyPanel } from './panels/SocietyPanel';
 import { useAppStore } from './store/useAppStore';
 import { PanelState } from './types';
 import Sidebar from './components/Sidebar';
@@ -254,13 +255,23 @@ export default function App() {
             {model.availableModels.length === 0 && model.error ? (
               <div className="error-text">Cannot reach runtime at localhost:8000. Start the backend first.</div>
             ) : (
-              <div className="model-selector">
-                {model.availableModels.map(name => (
-                  <button key={name} onClick={() => handleLoadModel(name)} className="btn model-load-btn">
-                    Load {name}
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="model-selector">
+                  {model.availableModels.map(name => (
+                    <button key={name} onClick={() => handleLoadModel(name)} className="btn model-load-btn">
+                      Load {name}
+                    </button>
+                  ))}
+                </div>
+                <div className="dock-panel">
+                  <div className="dock-panel-header">
+                    <span>Society Runs</span>
+                  </div>
+                  <div className="dock-panel-body">
+                    <SocietyPanel />
+                  </div>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -290,9 +301,19 @@ export default function App() {
             </div>
 
             {!data ? (
-              <div className="inference-empty">
-                {model.running ? 'Running inference...' : 'Enter a prompt and click Run'}
-              </div>
+              <>
+                <div className="inference-empty">
+                  {model.running ? 'Running inference...' : 'Enter a prompt and click Run'}
+                </div>
+                <div className="dock-panel">
+                  <div className="dock-panel-header">
+                    <span>Society Runs</span>
+                  </div>
+                  <div className="dock-panel-body">
+                    <SocietyPanel />
+                  </div>
+                </div>
+              </>
             ) : (
               <div className="inference-body">
                 <div className="layer-sidebar-wrapper">
@@ -371,6 +392,7 @@ export default function App() {
                           tokens={data.tokens.map(t => t.text)}
                         />
                       ),
+                      society: <SocietyPanel />,
                     }}
                   </DockManager>
                 </div>

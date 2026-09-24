@@ -1,8 +1,15 @@
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from typing import Dict, Any, List
+import asyncio
 import hashlib
+import json
 import os
+import queue
 import random
+import threading
+import time
+import uuid
 from pathlib import Path
 
 # Real GPT-2 inference engine (torch + transformers) is imported lazily so the
@@ -233,7 +240,9 @@ def list_runtime_engines() -> Dict[str, Any]:
 def list_agents() -> Dict[str, Any]:
     return {
         "agents": [
-            "ResearchSociety", "AIScientist", "PeerReviewPanel",
+            "ResearchSociety", "ResearchSocietyV2", "Planner", "Executor",
+            "Inspector", "Discoverer", "Critic", "Scribe",
+            "AIScientist", "PeerReviewPanel",
             "ResearchAgent", "ResearchCritic"
         ],
         "llm_backends": ["openai", "ollama"]
@@ -520,6 +529,184 @@ def gpt2_patch_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
             prompt=payload.get("prompt"),
         )
     return {"status": "error", "error": "torch/transformers not available"}
+
+
+# ---------------------------------------------------------------------------
+# Research Society v2 — autonomous runs + SSE
+# Mounted under /api (see main.py include_router prefix), so live paths are:
+#   POST /api/society/run              {goal, model_name?} -> {runId, status}
+#   GET  /api/society/stream?runId=... -> text/event-stream (live trace)
+#   GET  /api/society/runs/{runId}     -> polling fallback (status + result)
+# NOTE: docs/API_v1.md sketches /api/v1/... but no runtime_api module exists
+# live — Society ships on this active dispatcher, not the frozen doc.
+# Long GPU work runs in a daemon thread; the event loop is never blocked.
+# ---------------------------------------------------------------------------
+
+_society_runs: Dict[str, Dict[str, Any]] = {}
+_society_lock = threading.Lock()
+_SOCIETY_MAX_RUNS = 50
+
+
+def _society_get():  # type: ignore[no-untyped-def]
+    from backend.agents.society import ResearchSocietyV2
+    return ResearchSocietyV2()
+
+
+def _society_push(run_id: str, event: Dict[str, Any]) -> None:
+    run = _society_runs.get(run_id)
+    if run is None:
+        return
+    with _society_lock:
+        run["events"].append(event)
+        if len(run["events"]) > 1000:
+            run["events"] = run["events"][-1000:]
+    try:
+        run["queue"].put(("event", event), block=False)
+    except queue.Full:
+        pass
+
+
+def _society_worker(run_id: str, goal: str, model_name: str) -> None:
+    try:
+        society = _society_get()
+        result = society.run_blocking(
+            goal, model_name=model_name,
+            on_event=lambda ev: _society_push(run_id, ev),
+        )
+        status = result.get("status", "completed")
+    except Exception as exc:
+        result = {"status": "error", "error": str(exc)[:500]}
+        status = "error"
+    run = _society_runs.get(run_id)
+    if run is not None:
+        with _society_lock:
+            run["result"] = result
+            run["status"] = status
+    try:
+        run["queue"].put(("done", None), block=False)
+    except Exception:
+        pass
+
+
+@router.post("/society/run")
+def society_run(payload: Dict[str, Any]) -> Dict[str, Any]:
+    goal = str((payload or {}).get("goal", "")).strip()
+    if not goal:
+        return {"status": "error", "error": "goal required"}
+    model_name = str((payload or {}).get("model_name", "gpt2"))
+    run_id = "r" + uuid.uuid4().hex[:12]
+    run: Dict[str, Any] = {
+        "run_id": run_id,
+        "goal": goal,
+        "model_name": model_name,
+        "status": "running",
+        "events": [],
+        "result": None,
+        "queue": queue.Queue(maxsize=1000),
+        "created": time.time(),
+    }
+    with _society_lock:
+        _society_runs[run_id] = run
+        # Prune oldest finished runs so long-lived desktop sessions stay lean.
+        if len(_society_runs) > _SOCIETY_MAX_RUNS:
+            finished = sorted(
+                ((rid, r) for rid, r in _society_runs.items()
+                 if r.get("status") != "running"),
+                key=lambda kv: kv[1].get("created", 0),
+            )
+            for rid, _ in finished[: len(_society_runs) - _SOCIETY_MAX_RUNS]:
+                _society_runs.pop(rid, None)
+    worker = threading.Thread(
+        target=_society_worker, args=(run_id, goal, model_name), daemon=True)
+    worker.start()
+    return {"runId": run_id, "status": "started",
+            "stream": f"/api/society/stream?runId={run_id}"}
+
+
+@router.get("/society/runs/{run_id}")
+def society_run_status(run_id: str) -> Dict[str, Any]:
+    run = _society_runs.get(run_id)
+    if run is None:
+        return {"status": "error", "error": f"unknown runId '{run_id}'"}
+    with _society_lock:
+        events = list(run["events"])
+        return {"run_id": run_id, "status": run["status"],
+                "goal": run["goal"], "events": events,
+                "result": run["result"]}
+
+
+def _society_json_default(obj: Any) -> Any:
+    # Mirror FastAPI's jsonable_encoder for the JS-unfriendly types the
+    # engines leak (sets, tuples, datetimes): coerce, never raise mid-stream.
+    if isinstance(obj, (set, frozenset)):
+        try:
+            return sorted(obj, key=repr)
+        except Exception:
+            return list(obj)
+    if isinstance(obj, tuple):
+        return list(obj)
+    if hasattr(obj, "isoformat"):
+        try:
+            return obj.isoformat()
+        except Exception:
+            pass
+    if hasattr(obj, "to_dict"):
+        try:
+            return obj.to_dict()
+        except Exception:
+            pass
+    return str(obj)
+
+
+def _society_dumps(obj: Any) -> str:
+    return json.dumps(obj, default=_society_json_default)
+
+
+def _society_sse_frame(event: Dict[str, Any]) -> str:
+    return f"data: {_society_dumps(event)}\n\n"
+
+
+@router.get("/society/stream")
+def society_stream(runId: str):  # type: ignore[no-untyped-def]
+    run = _society_runs.get(runId)
+
+    def gen():  # type: ignore[no-untyped-def]
+        if run is None:
+            yield ("event: error\n"
+                   f"data: {json.dumps({'error': f'unknown runId {runId!r}'})}\n\n")
+            yield "event: done\ndata: {}\n\n"
+            return
+        # Replay anything emitted before the client connected.
+        with _society_lock:
+            replay = list(run["events"])
+            finished = run["status"] != "running" and run["queue"].empty()
+        for ev in replay:
+            yield _society_sse_frame(ev)
+        if finished:
+            with _society_lock:
+                result = run["result"]
+            yield f"event: done\ndata: {_society_dumps(result or {})}\n\n"
+            return
+        # Live tail: block on the queue, heartbeat every 15s.
+        while True:
+            try:
+                kind, payload = run["queue"].get(timeout=15)
+            except queue.Empty:
+                yield ": beat\n\n"
+                with _society_lock:
+                    if run["status"] != "running" and run["queue"].empty():
+                        break
+                continue
+            if kind == "done":
+                with _society_lock:
+                    result = run["result"]
+                yield f"event: done\ndata: {_society_dumps(result or {})}\n\n"
+                return
+            yield _society_sse_frame(payload)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
 
 
 from .legacy_dispatcher import build_dispatcher  # noqa: E402

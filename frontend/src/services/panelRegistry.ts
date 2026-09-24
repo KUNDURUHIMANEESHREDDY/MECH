@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { Brain, Flame, Layers, Search, Telescope, Type, Zap } from 'lucide-react';
+import { Brain, Flame, Layers, Search, Telescope, Type, Workflow, Zap } from 'lucide-react';
 
 export interface PanelDefinition {
   id: string;
@@ -82,4 +82,12 @@ panelRegistry.register({
   icon: Search,
   defaultDock: 'bottom',
   commands: ['toggle_token_inspector', 'inspect_token'],
+});
+
+panelRegistry.register({
+  id: 'society',
+  title: 'Society Runs',
+  icon: Workflow,
+  defaultDock: 'center',
+  commands: ['toggle_society', 'run_society'],
 });
