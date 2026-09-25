@@ -115,9 +115,9 @@
             <div><dt>Benchmark</dt><dd>{{ lastResult.benchmarkName || selectedBenchmark || 'Unavailable' }}</dd></div>
             <div><dt>Score</dt><dd>{{ formatValue(lastResult.score) }}</dd></div>
             <div><dt>Pass rate</dt><dd>{{ formatValue(lastResult.passRate) }}</dd></div>
-            <div><dt>Provenance</dt><dd>Not supplied by response</dd></div>
+            <div><dt>Provenance</dt><dd>{{ lastResult.provenance || 'Not supplied' }}</dd></div>
           </dl>
-          <p v-if="lastResult.error" class="result-error">{{ lastResult.error }}</p>
+          <p v-if="lastResult.error || lastResult.reason" class="result-error">{{ lastResult.error || lastResult.reason }}</p>
         </div>
         <div v-else class="result-empty">
           <span class="state-mark" aria-hidden="true">—</span>
@@ -160,7 +160,7 @@ type SourceTone = 'online' | 'offline' | 'loading' | 'partial';
 type ResultTone = 'success' | 'error' | 'neutral';
 type JsonRecord = Record<string, unknown>;
 type SessionRun = { key: string; name: string; detail: string; time: string; tone: ResultTone };
-type NormalizedResult = { status: string; benchmarkName: string; score: unknown; passRate: unknown; error: string };
+type NormalizedResult = { status: string; benchmarkName: string; score: unknown; passRate: unknown; provenance: string; error: string; reason: string };
 
 const catalog = ref<string[]>([]);
 const selectedBenchmark = ref('');
@@ -181,7 +181,16 @@ function nowLabel(): string { return new Date().toLocaleTimeString([], { hour: '
 function normalizeResult(value: unknown, benchmark: string): NormalizedResult {
   const record = isRecord(value) ? value : {};
   const status = text(record.status, 'response received');
-  return { status, benchmarkName: text(record.benchmark_name, benchmark), score: record.score, passRate: record.pass_rate, error: text(record.error) };
+  const reason = text(record.reason);
+  return {
+    status,
+    benchmarkName: text(record.benchmark_name, benchmark),
+    score: record.score,
+    passRate: record.pass_rate,
+    provenance: text(record.provenance, 'unavailable'),
+    error: text(record.error),
+    reason,
+  };
 }
 function resultToneFor(status: string, error: string): ResultTone {
   const normalized = status.toLowerCase();
@@ -221,7 +230,7 @@ async function runSelectedBenchmark(): Promise<void> {
     const result = normalizeResult(await api.runBenchmark(name), name);
     lastResult.value = result;
     const tone = resultToneFor(result.status, result.error);
-    sessionRuns.value.unshift({ key: `${name}-${Date.now()}`, name, detail: result.error || `${result.status} · score ${formatValue(result.score)}`, time: nowLabel(), tone });
+    sessionRuns.value.unshift({ key: `${name}-${Date.now()}`, name, detail: result.error || result.reason || `${result.status} · score ${formatValue(result.score)}`, time: nowLabel(), tone });
   } catch (error) {
     errorMessage.value = messageOf(error);
     offline.value = isOffline(errorMessage.value);

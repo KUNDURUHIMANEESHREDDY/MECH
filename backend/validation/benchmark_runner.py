@@ -1,4 +1,9 @@
-"""Mechanistic Benchmark Runner."""
+"""Mechanistic Benchmark Runner.
+
+The desktop currently has no connected live benchmark executor.  This module
+must fail closed rather than returning a plausible score: a benchmark result
+is scientific evidence only when a real executor returns measured fields.
+"""
 
 from __future__ import annotations
 
@@ -6,13 +11,12 @@ from typing import Any, Dict
 
 
 class MechanisticBenchmarkRunner:
-    """Executes mechanistic benchmark suites evaluating discovery robustness."""
+    """Report benchmark execution availability without fabricating results."""
 
     def run_benchmark(self, benchmark_id: str = "bench_default") -> Dict[str, Any]:
         return {
             "benchmark_id": benchmark_id,
-            "accuracy": 0.945,
-            "robustness_score": 0.92,
-            "eval_samples": 500,
-            "status": "Passed",
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "reason": "No live benchmark executor is connected.",
         }

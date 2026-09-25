@@ -150,23 +150,46 @@ def research_catalog(item_type: str = "all") -> Dict[str, Any]:
 
 @router.post("/benchmarks/run")
 def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
-    name = payload.get("benchmark_name", "IOI")
+    name = str(payload.get("benchmark_name", "IOI"))
     try:
         from backend.validation.benchmark_runner import (
             MechanisticBenchmarkRunner,
         )
         res = MechanisticBenchmarkRunner().run_benchmark(f"bench_{name}")
-        score = float(res.get("accuracy", 0.0))
+        status = str(res.get("status", "unavailable")).lower()
+        provenance = str(res.get("provenance", "unavailable")).lower()
+        if status not in {"completed", "passed"} or provenance != "live":
+            return {
+                "status": status if status in {"unavailable", "error"} else "unavailable",
+                "benchmark_name": name,
+                "provenance": provenance if provenance in {"unavailable", "seeded", "reference"} else "unavailable",
+                "reason": str(res.get("reason") or "Live benchmark execution is unavailable."),
+            }
+
+        try:
+            score = float(res["accuracy"])
+            pass_rate = float(res.get("robustness_score", score))
+        except (KeyError, TypeError, ValueError):
+            return {
+                "status": "unavailable",
+                "benchmark_name": name,
+                "provenance": "unavailable",
+                "reason": "The live executor did not return numeric score fields.",
+            }
+
         return {
             "status": "completed",
             "benchmark_name": name,
+            "provenance": "live",
             "score": round(score, 4),
-            "pass_rate": round(float(res.get("robustness_score", score)), 4),
+            "pass_rate": round(pass_rate, 4),
+            "eval_samples": res.get("eval_samples"),
         }
     except Exception as exc:
         return {
             "status": "error",
             "benchmark_name": name,
+            "provenance": "unavailable",
             "error": str(exc)[:300],
         }
 
