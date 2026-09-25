@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MECH — Chat-first Studio Demo</title>
+  <link rel="stylesheet" href="./demo.css" />
+  <style>
+    .chat-shell { display: grid; min-height: calc(100vh - 30px); grid-template-rows: 58px minmax(0, 1fr); background: var(--surface); }
+    .chat-topbar { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 16px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .research-select { justify-self: center; display: flex; min-height: 34px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--muted); font-size: 12px; }
+    .chat-layout { display: grid; min-height: 0; grid-template-columns: minmax(520px, 1fr) 330px; }
+    .chat-layout.artifacts-hidden { grid-template-columns: minmax(0, 1fr) 0; }
+    .chat-layout.artifacts-hidden .artifact-rail { display: none; }
+    .conversation { position: relative; min-width: 0; overflow-y: auto; padding: 36px 24px 150px; }
+    .conversation-inner { width: min(780px, 100%); margin: 0 auto; }
+    .conversation-intro { padding: 8px 0 28px; }
+    .conversation-intro h1 { margin-top: 8px; font-size: 30px; letter-spacing: -.045em; }
+    .conversation-intro p { max-width: 620px; margin-top: 7px; color: var(--muted); }
+    .message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; margin: 0 0 28px; }
+    .avatar { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface-2); color: var(--muted); font: 700 10px/1 var(--font-mono); }
+    .avatar.agent { border-color: #c8d8f7; background: var(--accent-soft); color: var(--accent); }
+    .message-body { min-width: 0; }
+    .message-meta { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; }
+    .message-meta strong { font-size: 12px; }
+    .message-body p { max-width: 70ch; color: #354256; line-height: 1.65; }
+    .message-body ul { margin: 10px 0 0; padding-left: 20px; color: #354256; }
+    .message-body li { margin: 5px 0; }
+    .tool-call { margin-top: 13px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }
+    .tool-call-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; border-bottom: 1px solid var(--line); }
+    .tool-call-body { padding: 11px; }
+    .tool-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .tool-row:last-child { border-bottom: 0; }
+    .inline-artifact { display: grid; grid-template-columns: 120px 1fr; gap: 14px; margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); cursor: pointer; }
+    .mini-chart { height: 78px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); }
+    .inline-artifact h3 { font-size: 12px; }
+    .inline-artifact p { margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .gate-line { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+    .composer-wrap { position: sticky; z-index: 10; bottom: 0; margin: -118px auto 0; padding: 18px 24px 24px; border-top: 1px solid var(--surface); background: var(--surface); }
+    .composer { width: min(780px, 100%); margin: 0 auto; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+    .composer textarea { display: block; width: 100%; min-height: 74px; resize: none; border: 0; padding: 13px 14px 6px; background: transparent; }
+    .composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 9px; border-top: 1px solid var(--surface-3); }
+    .composer-tools { display: flex; gap: 6px; }
+    .artifact-rail { min-width: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--surface-2); }
+    .artifact-head { position: sticky; z-index: 2; top: 0; display: flex; min-height: 44px; align-items: center; justify-content: space-between; padding: 0 13px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .artifact-body { padding: 13px; }
+    .artifact-section { margin-bottom: 20px; }
+    .artifact-section h2 { margin-bottom: 8px; color: var(--muted); font: 650 10px/1 var(--font-mono); text-transform: uppercase; }
+    .artifact-card { display: grid; width: 100%; grid-template-columns: 34px 1fr auto; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; text-align: left; }
+    .artifact-card:hover { border-color: var(--line-strong); }
+    .artifact-card + .artifact-card { margin-top: 7px; }
+    .artifact-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font: 700 9px/1 var(--font-mono); }
+    .artifact-card strong { display: block; font-size: 11px; }
+    .artifact-card span { color: var(--muted); font-size: 10px; }
+    .source-line { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
+    .source-line:last-child { border-bottom: 0; }
+    .preview-backdrop { position: fixed; z-index: 80; inset: 30px 0 0; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(24,34,48,.2); }
+    .preview-backdrop.open { display: flex; }
+    .preview-modal { width: min(780px, 100%); max-height: 86vh; overflow: auto; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+    .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+    .preview-body { padding: 22px; }
+    .preview-chart { height: 260px; margin: 18px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
+    @media (max-width: 940px) {
+      .chat-layout { grid-template-columns: 1fr; }
+      .artifact-rail { display: none; }
+    }
+    @media (max-width: 680px) {
+      .chat-topbar { grid-template-columns: 1fr auto; }
+      .research-select { display: none; }
+      .conversation { padding: 26px 14px 140px; }
+      .composer-wrap { padding: 14px; }
+      .message { grid-template-columns: 28px minmax(0, 1fr); gap: 9px; }
+      .avatar { width: 28px; height: 28px; }
+      .inline-artifact { grid-template-columns: 1fr; }
+      .preview-chart { height: 190px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-ribbon"><strong>WHITE GUI STUDY 02</strong><span>Chat-first studio · illustrative conversation · production UI unchanged</span></div>
+  <main class="chat-shell">
+    <header class="chat-topbar">
+      <a class="brand" href="./index.html"><span class="brand-mark">M</span><span class="brand-name">MECH</span></a>
+      <button class="research-select" type="button"><span class="status-dot live"></span><span>IOI name-mover circuit</span><span class="faint">⌄</span></button>
+      <div class="topbar-actions"><button class="demo-button" type="button" id="toggle-artifacts">Artifacts</button><button class="demo-button primary" type="button" id="new-research">New research</button></div>
+    </header>
+
+    <div class="chat-layout">
+      <section class="conversation" id="conversation" aria-label="Research conversation">
+        <div class="conversation-inner">
+          <div class="conversation-intro"><div class="kicker">Research thread</div><h1>What moves the indirect-object name?</h1><p>The conversation is the workspace. Tools, evidence, figures, and reports appear as inspectable artifacts instead of separate dashboard pages.</p></div>
+
+          <article class="message"><div class="avatar">You</div><div class="message-body"><div class="message-meta"><strong>You</strong><span class="faint mono">10:40</span></div><p>Run the IOI prompt on GPT-2 Small, inspect the strongest attention-head candidates, and tell me whether the explanation is ready to publish.</p></div></article>
+
+          <article class="message"><div class="avatar agent">M</div><div class="message-body"><div class="message-meta"><strong>MECH Research Society</strong><span class="tag live">sample trace</span></div><p>I ran the selected prompt, preserved the forward-pass tensors, and compared the result with the published IOI baseline. Two direct positive candidates remain plausible.</p><div class="tool-call"><div class="tool-call-head"><strong>Tools used</strong><span class="mono faint">4 steps · illustrative</span></div><div class="tool-call-body"><div class="tool-row"><span>Run GPT-2 prompt</span><span class="tag live">complete</span></div><div class="tool-row"><span>Capture layer 9 residual tensor</span><span class="tag live">stored</span></div><div class="tool-row"><span>Path-patch candidate heads</span><span class="tag live">complete</span></div><div class="tool-row"><span>Reproduce published baseline</span><span class="tag live">matched</span></div></div></div><div class="inline-artifact" data-preview="candidates"><div class="mini-chart" style="position:relative"><span style="position:absolute;left:10px;right:10px;top:38px;height:2px;background:var(--accent)"></span><span style="position:absolute;left:25px;top:22px;width:9px;height:9px;border-radius:50%;background:var(--accent)"></span><span style="position:absolute;right:22px;top:34px;width:9px;height:9px;border-radius:50%;background:var(--green)"></span></div><div><div class="kicker">Open artifact</div><h3>Candidate-head comparison</h3><p>Three candidates, linked interventions, and the current evidence status.</p></div></div><p style="margin-top:13px">The explanation is <strong>not yet publishable</strong>. Fidelity and confidence reproduction pass, but minimality remains unavailable because redundancy ablation has not been implemented.</p><div class="gate-line"><span class="tag warn">Gate pending</span><span class="muted">0.83 confidence · 0.85 required</span></div></div></article>
+
+          <article class="message"><div class="avatar">You</div><div class="message-body"><div class="message-meta"><strong>You</strong><span class="faint mono">10:42</span></div><p>Queue the missing check and keep the report attached to this thread.</p></div></article>
+
+          <article class="message"><div class="avatar agent">M</div><div class="message-body"><div class="message-meta"><strong>MECH Research Society</strong><span class="tag info">queued</span></div><p>Redundancy ablation is queued. The report, evidence graph, and validation gate will remain linked to run <span class="mono">MECH-024</span>.</p></div></article>
+        </div>
+        <div class="composer-wrap"><form class="composer" id="composer"><label for="prompt" class="kicker" style="display:block;padding:11px 14px 0">Ask the research society</label><textarea id="prompt" placeholder="Ask about a model, circuit, experiment, or piece of evidence"></textarea><div class="composer-actions"><div class="composer-tools"><button class="text-button" type="button">＋ Attach evidence</button><button class="text-button" type="button">◎ Choose model</button></div><button class="demo-button primary" type="submit">Send</button></div></form></div>
+      </section>
+
+      <aside class="artifact-rail" id="artifact-rail" aria-label="Conversation artifacts">
+        <div class="artifact-head"><strong>Artifacts</strong><span class="tag">5</span></div>
+        <div class="artifact-body">
+          <div class="artifact-section"><h2>Created in this thread</h2><button class="artifact-card" type="button" data-preview="candidates"><span class="artifact-icon">CMP</span><span><strong>Candidate comparison</strong><span>3 attention heads</span></span><span class="faint">→</span></button><button class="artifact-card" type="button" data-preview="tensor"><span class="artifact-icon">NPY</span><span><strong>Layer 9 tensor</strong><span>8 × 768 float32</span></span><span class="faint">→</span></button><button class="artifact-card" type="button" data-preview="report"><span class="artifact-icon">RPT</span><span><strong>Validation report</strong><span>Gate pending</span></span><span class="faint">→</span></button></div>
+          <div class="artifact-section"><h2>Live context</h2><div class="source-line"><span>Model</span><strong>GPT-2 Small</strong></div><div class="source-line"><span>Run</span><strong class="mono">MECH-024</strong></div><div class="source-line"><span>Provenance</span><span class="tag live">live sample</span></div><div class="source-line"><span>Evidence records</span><strong>6</strong></div></div>
+          <div class="artifact-section"><h2>Suggested next actions</h2><button class="demo-button" type="button" style="width:100%;margin-bottom:7px">Inspect layer 9</button><button class="demo-button" type="button" style="width:100%;margin-bottom:7px">Open evidence graph</button><button class="demo-button soft" type="button" style="width:100%">Queue redundancy ablation</button></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <div class="preview-backdrop" id="preview-backdrop"><div class="preview-modal" role="dialog" aria-modal="true" aria-label="Artifact preview"><div class="preview-head"><div><div class="kicker">Artifact preview</div><strong id="preview-title">Candidate comparison</strong></div><button class="icon-button" type="button" id="preview-close" aria-label="Close preview">×</button></div><div class="preview-body"><div class="kicker">Illustrative data</div><h2 id="preview-heading" style="margin-top:7px;font-size:24px;letter-spacing:-.035em">Candidate-head comparison</h2><p class="muted" id="preview-description" style="margin-top:7px">The live workbench would show the linked interventions and source records here without leaving the research conversation.</p><div class="preview-chart" id="preview-chart"></div><div class="tag warn">Sample artifact · not a live MECH measurement</div></div></div></div>
+
+  <script>
+    const conversation = document.getElementById('conversation');
+    const form = document.getElementById('composer');
+    const prompt = document.getElementById('prompt');
+    form.addEventListener('submit', event => { event.preventDefault(); const value = prompt.value.trim(); if (!value) return; const article = document.createElement('article'); article.className = 'message'; article.innerHTML = `<div class="avatar">You</div><div class="message-body"><div class="message-meta"><strong>You</strong><span class="tag">now</span></div><p></p></div>`; article.querySelector('p').textContent = value; conversation.querySelector('.conversation-inner').appendChild(article); prompt.value = ''; conversation.scrollTop = conversation.scrollHeight; });
+    const preview = document.getElementById('preview-backdrop');
+    const previews = {
+      candidates: ['Candidate comparison', 'Candidate-head comparison', 'The live workbench would show linked interventions and source records here.'],
+      tensor: ['Layer 9 tensor', 'Final-position residual tensor', 'A native tensor viewer would support layer, position, dimension, and provenance inspection.'],
+      report: ['Validation report', 'IOI validation gate', 'The report keeps passing evidence and unresolved validation requirements visibly separate.']
+    };
+    document.querySelectorAll('[data-preview]').forEach(item => item.addEventListener('click', () => { const key = item.dataset.preview; const data = previews[key]; document.getElementById('preview-title').textContent = data[0]; document.getElementById('preview-heading').textContent = data[1]; document.getElementById('preview-description').textContent = data[2]; document.getElementById('preview-chart').innerHTML = key === 'tensor' ? '<div style="display:grid;grid-template-columns:repeat(16,1fr);gap:4px;padding:20px">' + Array.from({length:96},(_,i)=>`<span style="aspect-ratio:1;border-radius:2px;background:rgba(37,99,235,${.08+(i%17)/24})"></span>`).join('') + '</div>' : '<div style="padding:20px"><div style="display:grid;grid-template-columns:130px 1fr 55px;gap:10px;align-items:center;margin:12px 0"><span class="mono">L9H9</span><span style="height:8px;border-radius:8px;background:var(--accent);width:95%"></span><strong class="mono">0.95</strong></div><div style="display:grid;grid-template-columns:130px 1fr 55px;gap:10px;align-items:center;margin:12px 0"><span class="mono">L10H0</span><span style="height:8px;border-radius:8px;background:var(--green);width:88%"></span><strong class="mono">0.93</strong></div><div style="display:grid;grid-template-columns:130px 1fr 55px;gap:10px;align-items:center;margin:12px 0"><span class="mono">L9H6</span><span style="height:8px;border-radius:8px;background:var(--amber);width:62%"></span><strong class="mono">0.71</strong></div></div>'; preview.classList.add('open'); }));
+    document.getElementById('preview-close').addEventListener('click', () => preview.classList.remove('open'));
+    preview.addEventListener('click', event => { if (event.target === preview) preview.classList.remove('open'); });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') preview.classList.remove('open'); });
+    document.getElementById('toggle-artifacts').addEventListener('click', event => { const hidden = document.querySelector('.chat-layout').classList.toggle('artifacts-hidden'); event.currentTarget.textContent = hidden ? 'Show artifacts' : 'Artifacts'; });
+    document.getElementById('new-research').addEventListener('click', () => { prompt.value = 'Start a new mechanistic interpretability investigation'; prompt.focus(); });
+  </script>
+</body>
+</html>
