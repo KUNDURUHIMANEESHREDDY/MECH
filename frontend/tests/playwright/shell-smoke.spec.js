@@ -1,6 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
-// Labels must match App.tsx PAGES (source of the Topbar breadcrumb).
+// Canonical Desktop OS route labels. The hash IDs remain compatible with
+// the previous Vue shell and its deep links.
 const NAV_PAGES = [
   ['explorer', 'Model Explorer'],
   ['gpt2', 'GPT-2 Live'],
@@ -38,70 +39,64 @@ const HASH_ONLY_PAGES = [
   ['transformerExplorer', 'Transformer Explorer'],
 ];
 
-// The renderer runs standalone in these e2e tests (no Python backend at
-// localhost:8000), so listModels() rejects and ErrorUI overlays the app.
-// The rejection is async relative to page.goto (and the dev-mode StrictMode
-// double-mount fires listModels twice), so the overlay can appear, disappear,
-// and REAPPEAR at any point — including mid-sweep — and intercept clicks.
-// Dismiss it repeatedly until it stays gone.
-async function dismissError(page) {
-  const dismiss = page.locator('button.error-dismiss-btn');
-  for (let i = 0; i < 5; i++) {
-    if (await dismiss.count() === 0) break;
-    await dismiss.first().click();
+async function openDirectory(page) {
+  const directory = page.getByTestId('window-directory');
+  if (!(await directory.isVisible())) {
+    await page.getByTestId('directory-toggle').click();
   }
-  await expect(dismiss).toHaveCount(0);
+  await expect(directory).toBeVisible();
 }
 
-test('shell renders sidebar nav items', async ({ page }) => {
+test('Desktop OS directory exposes legacy navigation items', async ({ page }) => {
   await page.goto('/');
-  await dismissError(page);
-  for (const [key] of NAV_PAGES.slice(0, 10)) {
+  await openDirectory(page);
+  for (const [key] of NAV_PAGES) {
     await expect(page.getByTestId(`nav-${key}`)).toBeVisible();
   }
 });
 
-test('each nav page renders and updates breadcrumb + hash', async ({ page }) => {
+test('directory navigation opens a titled Desktop OS window and updates the hash', async ({ page }) => {
   await page.goto('/');
-  await dismissError(page);
   for (const [key, label] of NAV_PAGES) {
+    await openDirectory(page);
     const item = page.getByTestId(`nav-${key}`);
     await item.scrollIntoViewIfNeeded();
-    // The ErrorUI overlay can reappear mid-sweep and swallow the click
-    // (see dismissError). Retry: dismiss, click, and only accept once the
-    // hash actually changed.
-    await expect(async () => {
-      await dismissError(page);
-      await item.click({ force: true });
-      await expect(page).toHaveURL(new RegExp(`#${key}$`), { timeout: 2000 });
-    }).toPass({ timeout: 15_000 });
-    await dismissError(page);
-    await expect(page.locator('header').getByText(label, { exact: true })).toBeVisible();
+    await item.click();
+    await expect(page).toHaveURL(new RegExp(`#${key}$`));
+    await expect(page.getByTestId(`window-${key}`)).toBeVisible();
+    await expect(page.getByTestId(`window-${key}`).locator('.window-title')).toHaveText(label);
   }
 });
 
-test('hash-only pages render when opened by URL', async ({ page }) => {
+test('hash-only pages open without a model gate', async ({ page }) => {
   for (const [key, label] of HASH_ONLY_PAGES) {
     await page.goto(`/#${key}`);
-    await dismissError(page);
-    await expect(page.locator('header').getByText(label, { exact: true })).toBeVisible();
+    await expect(page.getByTestId(`window-${key}`)).toBeVisible();
+    await expect(page.getByTestId(`window-${key}`).locator('.window-title')).toHaveText(label);
   }
 });
 
-test('activity bar collapses and expands via its toggle button', async ({ page }) => {
-  await page.goto('/');
-  await dismissError(page);
-  const collapsed = page.locator('div.app.activity-collapsed');
-  await expect(collapsed).toHaveCount(0);
-  const toggle = page.locator('header button[title*="activity bar"]').first();
-  await expect(toggle).toBeVisible();
-  await toggle.click();
-  await expect(collapsed).toHaveCount(1, { timeout: 2000 });
-  await page.locator('header button[title*="activity bar"]').first().click();
-  await expect(collapsed).toHaveCount(0, { timeout: 2000 });
+test('Desktop OS window controls tile, minimize and close tools', async ({ page }) => {
+  await page.goto('/#explorer');
+  await page.getByRole('button', { name: 'Society' }).click();
+  await expect(page.getByTestId('window-society')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Tile windows' }).click();
+  await expect(page.getByTestId('window-explorer')).toBeVisible();
+  await expect(page.getByTestId('window-society')).toBeVisible();
+
+  await page.getByTestId('window-society').getByRole('button', { name: 'Minimize window' }).click();
+  await expect(page.getByTestId('window-society')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Society' }).click();
+  await expect(page.getByTestId('window-society')).toBeVisible();
+  await page.getByTestId('window-society').getByRole('button', { name: 'Close window' }).click();
+  await expect(page.getByTestId('window-society')).toHaveCount(0);
 });
 
-test('topbar shows python status testid', async ({ page }) => {
+test('desktop status exposes Python/runtime state', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByTestId('python-status')).toBeVisible();
+  const status = page.getByTestId('python-status');
+  await expect(status).toBeVisible();
+  await expect(status).toContainText(/Connecting|Connected|Offline/);
 });

@@ -1,207 +1,298 @@
 <template>
-  <div class="flex h-screen bg-[var(--bg)] text-[var(--ink)] font-sans overflow-hidden app"
-    :class="{'activity-collapsed': activityCollapsed}">
-    <ActivityBar
-      :active="activePage"
-      :collapsed="activityCollapsed"
-      @select="setActivePage"
-      @toggle="activityCollapsed = !activityCollapsed"
-      @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
+  <div class="mech-desktop" data-testid="desktop-shell">
+    <DesktopMenuBar
+      :model-status="modelStatus"
+      :model-name="modelName"
+      @open-route="openRoute"
+      @tile="tileWindows"
+      @reset="resetWindows"
+      @toggle-directory="directoryOpen = !directoryOpen"
     />
-    <Sidebar
-      :active="activePage"
-      :collapsed="sidebarCollapsed"
-      @select="setActivePage"
-      @toggle="sidebarCollapsed = !sidebarCollapsed"
-    />
-    <div class="flex-1 flex flex-col min-w-0">
-      <Topbar
-        :crumb="pageLabels[activePage]?.label ?? 'MECH'"
-        :python-status="pythonStatus"
-        :collapsed="activityCollapsed"
-        @toggle-cmd-palette="showCmdPalette = !showCmdPalette"
-        @toggle-activity="activityCollapsed = !activityCollapsed"
-      />
-      <div class="flex-1 overflow-auto p-4">
-        <template v-if="modelLoaded">
-          <component
-            :is="currentPageComponent"
-            :key="activePage"
-            v-bind="currentPageProps"
-          />
-        </template>
-        <div v-else class="flex flex-col items-center justify-center h-full gap-4">
-          <div class="text-[var(--ink-muted)] text-sm">Choose a model to load</div>
-          <div class="flex gap-2 flex-wrap justify-center">
-            <button
-              v-for="name in availableModels"
-              :key="name"
-              @click="loadModel(name)"
-              class="px-4 py-2 rounded-lg border-none bg-transparent text-[var(--text)] text-sm font-medium hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              Load {{ name }}
-            </button>
-          </div>
+
+    <section
+      ref="desktopElement"
+      class="desktop-workspace"
+      aria-label="MECH desktop workspace"
+      @pointerdown="handleWorkspacePointer"
+    >
+      <div v-if="visibleWindows.length === 0 && !unknownRoute" class="desktop-empty">
+        <div>
+          <span class="desktop-empty__mark" aria-hidden="true">M</span>
+          <strong>No tools are open</strong>
+          <p>Open a tool from the window menu or restore the default desktop layout.</p>
         </div>
       </div>
-    </div>
-    <StatusBar :model-name="modelName" />
+
+      <div v-if="unknownRoute" class="not-found-window" role="alert">
+        <div>
+          <div class="desktop-kicker">Unknown window</div>
+          <strong>No MECH tool matches “{{ unknownRoute }}”</strong>
+          <p>The route was not registered. Choose a tool from the window menu or return to Model Explorer.</p>
+          <button class="desktop-button primary" type="button" @click="openRoute('explorer')">Open Model Explorer</button>
+        </div>
+      </div>
+
+      <ToolWindow
+        v-for="desktopWindow in visibleWindows"
+        :key="desktopWindow.id"
+        :id="desktopWindow.id"
+        :title="routeTitle(desktopWindow.routeId)"
+        :active="desktopWindow.id === activeWindowId"
+        :minimized="desktopWindow.minimized"
+        :maximized="desktopWindow.maximized"
+        :z-index="desktopWindow.zIndex"
+        :x="desktopWindow.x"
+        :y="desktopWindow.y"
+        :width="desktopWindow.width"
+        :height="desktopWindow.height"
+        @focus="focusRoute(desktopWindow.id)"
+        @close="closeWindow(desktopWindow.id)"
+        @minimize="minimizeWindow(desktopWindow.id)"
+        @maximize="toggleMaximize(desktopWindow.id)"
+        @geometry-change="geometry => updateGeometry(desktopWindow.id, geometry)"
+      >
+        <div class="desktop-route-content">
+          <div
+            v-if="modelStatus === 'offline'"
+            class="desktop-provenance"
+            data-kind="offline"
+            role="status"
+          >
+            <span>Backend offline — local tools remain available.</span>
+            <span class="mono">localhost:8000</span>
+          </div>
+          <div v-else-if="modelStatus === 'connecting'" class="desktop-provenance" role="status">
+            <span>Connecting to the MECH runtime…</span>
+            <span class="mono">checking /api/models</span>
+          </div>
+
+          <div v-if="loadErrors[desktopWindow.routeId]" class="route-error" role="alert">
+            <div>
+              <strong>This tool could not be loaded.</strong>
+              <p>{{ loadErrors[desktopWindow.routeId] }}</p>
+            </div>
+          </div>
+          <Suspense v-else>
+            <component :is="componentFor(desktopWindow.routeId)" />
+            <template #fallback>
+              <div class="route-loading" role="status">
+                <div>
+                  <div class="route-loading__bar" aria-hidden="true"></div>
+                  <strong>Loading {{ routeTitle(desktopWindow.routeId) }}</strong>
+                  <p>Preparing the tool window without blocking the desktop.</p>
+                </div>
+              </div>
+            </template>
+          </Suspense>
+        </div>
+      </ToolWindow>
+
+      <WindowDirectory
+        :open="directoryOpen"
+        :active-route-id="activeWindowId"
+        @close="directoryOpen = false"
+        @open-route="openFromDirectory"
+      />
+    </section>
+
+    <DesktopStatusBar
+      :model-status="modelStatus"
+      :model-name="modelName"
+      :active-window-title="activeWindowTitle"
+      :open-window-count="openWindowCount"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, shallowRef } from 'vue';
-import { useAppStore } from './store/app';
+import {
+  computed,
+  defineAsyncComponent,
+  markRaw,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+} from 'vue';
+import { useDesktopStore } from './stores/desktop';
+import { getRouteById } from './desktop/routeRegistry';
 import { api } from './services/api';
-import Sidebar from './components/Sidebar.vue';
-import Topbar from './components/Topbar.vue';
-import ActivityBar from './components/ActivityBar.vue';
-import StatusBar from './components/StatusBar.vue';
+import DesktopMenuBar from './components/desktop/DesktopMenuBar.vue';
+import DesktopStatusBar from './components/desktop/DesktopStatusBar.vue';
+import ToolWindow from './components/desktop/ToolWindow.vue';
+import WindowDirectory from './components/desktop/WindowDirectory.vue';
 
-const store = useAppStore();
+type RuntimeStatus = 'connecting' | 'connected' | 'offline';
+type Bounds = { width: number; height: number };
+type Geometry = { x: number; y: number; width: number; height: number };
 
-const activePage = computed({
-  get: () => store.activePage,
-  set: (v: string) => store.setActivePage(v),
+const store = useDesktopStore();
+const desktopElement = ref<HTMLElement | null>(null);
+const directoryOpen = ref(false);
+const unknownRoute = ref('');
+const modelStatus = ref<RuntimeStatus>('connecting');
+const modelName = ref('No model selected');
+const desktopBounds = ref<Bounds>({ width: 1200, height: 760 });
+const loadErrors = reactive<Record<string, string>>({});
+const componentCache = new Map<string, ReturnType<typeof defineAsyncComponent>>();
+let resizeObserver: ResizeObserver | null = null;
+
+const activeWindowId = computed(() => store.activeWindowId);
+const visibleWindows = computed(() =>
+  Object.values(store.windows)
+    .filter(window => !window.closed)
+    .sort((left, right) => left.zIndex - right.zIndex),
+);
+const openWindowCount = computed(() => visibleWindows.value.filter(window => !window.minimized).length);
+const activeWindowTitle = computed(() => {
+  const active = store.windows[activeWindowId.value];
+  return active && !active.closed ? routeTitle(active.routeId) : 'No active tool';
 });
-const sidebarCollapsed = computed({
-  get: () => store.sidebarCollapsed,
-  set: (v: boolean) => store.set({ sidebarCollapsed: v }),
-});
-const activityCollapsed = computed({
-  get: () => store.activityCollapsed,
-  set: (v: boolean) => store.set({ activityCollapsed: v }),
-});
 
-const showCmdPalette = ref(false);
-const modelLoaded = ref(false);
-const modelName = ref('gpt2');
-const availableModels = ref<string[]>([]);
-const pythonStatus = ref<'connected' | 'offline' | 'connecting'>('connecting');
-
-const PAGE_COMPONENTS: Record<string, () => Promise<{ default: any }>> = {};
-
-const currentPageComponent = shallowRef<any>(null);
-const currentPageProps = ref<Record<string, unknown>>({});
-
-const pageLabels: Record<string, { label: string }> = {
-  explorer: { label: 'Model Explorer' },
-  gpt2: { label: 'GPT-2 Live' },
-  gpt2explorer: { label: 'GPT-2 Neuron Explorer' },
-  transformer: { label: 'Transformer Visualizer' },
-  transformerExplorer: { label: 'Transformer Explorer' },
-  workspace: { label: 'Workspace' },
-  models: { label: 'Models' },
-  prompts: { label: 'Prompts' },
-  debugger: { label: 'Debugger' },
-  experiments: { label: 'Experiments' },
-  sessions: { label: 'Sessions' },
-  reports: { label: 'Reports' },
-  settings: { label: 'Settings' },
-  logging: { label: 'Logging' },
-  build: { label: 'Build' },
-  neuralexplorer: { label: 'Neural Explorer' },
-  benchmark: { label: 'Benchmark' },
-  benchmarksuite: { label: 'Benchmark Suite' },
-  knowledgegraph: { label: 'Knowledge Graph' },
-  circuitexplorer: { label: 'Circuit Explorer' },
-  reasoning: { label: 'Reasoning' },
-  evidencefusion: { label: 'Evidence Fusion' },
-  campaigns: { label: 'Campaigns' },
-  analytics: { label: 'Analytics' },
-  health: { label: 'Health' },
-  plugins: { label: 'Plugins' },
-  notebook: { label: 'Research Notebook' },
-  labnotebook: { label: 'Lab Notebook' },
-  reproduction: { label: 'Paper Reproduction' },
-  projects: { label: 'Projects' },
-  recent: { label: 'Recent Files' },
-};
-
-function setActivePage(page: string) {
-  store.setActivePage(page);
-  if (typeof window !== 'undefined' && window.location.hash.slice(1) !== page) {
-    window.location.hash = page;
-  }
+function routeTitle(routeId: string): string {
+  return getRouteById(routeId)?.label ?? routeId;
 }
 
-async function loadModel(name: string) {
+function componentFor(routeId: string) {
+  const cached = componentCache.get(routeId);
+  if (cached) return cached;
+
+  const route = getRouteById(routeId);
+  if (!route) {
+    loadErrors[routeId] = `No loader is registered for “${routeId}”.`;
+    return defineAsyncComponent(() => Promise.resolve({ template: '<div></div>' }));
+  }
+
+  const component = markRaw(defineAsyncComponent({
+    loader: async () => {
+      const module = await route.load();
+      return module.default;
+    },
+    onError(error) {
+      loadErrors[routeId] = error instanceof Error ? error.message : String(error);
+    },
+  }));
+  componentCache.set(routeId, component);
+  return component;
+}
+
+function currentBounds(): Bounds {
+  const rect = desktopElement.value?.getBoundingClientRect();
+  return rect
+    ? { width: Math.max(320, rect.width), height: Math.max(240, rect.height) }
+    : desktopBounds.value;
+}
+
+function setHash(routeId: string) {
+  if (typeof window === 'undefined') return;
+  const next = `#${routeId}`;
+  if (window.location.hash !== next) window.location.hash = routeId;
+}
+
+function openRoute(routeId: string, updateHash = true) {
+  const route = getRouteById(routeId);
+  if (!route) {
+    unknownRoute.value = routeId;
+    if (updateHash) setHash(routeId);
+    return;
+  }
+
+  unknownRoute.value = '';
+  directoryOpen.value = false;
+  store.openWindow(routeId);
+  if (updateHash) setHash(routeId);
+}
+
+function openFromDirectory(routeId: string) {
+  openRoute(routeId);
+}
+
+function focusRoute(routeId: string) {
+  if (!store.windows[routeId] || store.windows[routeId].closed) return;
+  store.focusWindow(routeId);
+  setHash(routeId);
+}
+
+function closeWindow(routeId: string) {
+  store.closeWindow(routeId);
+  const active = store.windows[activeWindowId.value];
+  if (active && !active.closed) setHash(active.routeId);
+  else if (window.location.hash === `#${routeId}`) history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+
+function minimizeWindow(routeId: string) {
+  store.minimizeWindow(routeId);
+  const active = store.windows[activeWindowId.value];
+  if (active && !active.closed) setHash(active.routeId);
+}
+
+function toggleMaximize(routeId: string) {
+  store.toggleMaximize(routeId, currentBounds());
+}
+
+function updateGeometry(routeId: string, geometry: Geometry) {
+  store.setGeometry(routeId, geometry, currentBounds());
+}
+
+function tileWindows() {
+  store.tileWindows(currentBounds(), 14);
+}
+
+function resetWindows() {
+  const currentRoute = routeFromHash() || 'explorer';
+  store.resetWindows();
+  openRoute(getRouteById(currentRoute) ? currentRoute : 'explorer', false);
+}
+
+function handleWorkspacePointer(event: PointerEvent) {
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('.desktop-tool-window') || target?.closest('.window-directory')) return;
+  const active = store.windows[activeWindowId.value];
+  if (active && !active.closed) store.focusWindow(activeWindowId.value);
+}
+
+function routeFromHash(): string {
+  return window.location.hash.replace(/^#/, '').trim();
+}
+
+function handleHashChange() {
+  const routeId = routeFromHash() || 'explorer';
+  openRoute(routeId, false);
+  nextTick(() => focusRoute(store.activeWindowId));
+}
+
+async function refreshRuntimeStatus() {
+  modelStatus.value = 'connecting';
   try {
-    pythonStatus.value = 'connecting';
-    await api.loadModel(name);
-    modelLoaded.value = true;
-    modelName.value = name;
-    pythonStatus.value = 'connected';
-  } catch {
-    pythonStatus.value = 'offline';
-  }
-}
-
-async function loadPageComponent(page: string) {
-  const map: Record<string, () => Promise<{ default: any }>> = {
-    explorer: () => import('./components/ModelExplorerView.vue'),
-    gpt2: () => import('./components/Gpt2View.vue'),
-    neuralexplorer: () => import('./components/NeuralExplorerView.vue'),
-    transformerExplorer: () => import('./components/visualizations/TransformerExplorer.vue'),
-    settings: () => import('./components/Settings.vue'),
-    experiments: () => import('./components/ExperimentsView.vue'),
-    sessions: () => import('./components/SessionsView.vue'),
-    reports: () => import('./components/ReportsView.vue'),
-    models: () => import('./components/ModelsView.vue'),
-    prompts: () => import('./components/PromptsView.vue'),
-    debugger: () => import('./components/DebuggerView.vue'),
-    benchmark: () => import('./components/BenchmarkDashboard.vue'),
-    benchmarksuite: () => import('./components/BenchmarkSuiteView.vue'),
-    knowledgegraph: () => import('./components/KnowledgeGraphView.vue'),
-    circuitexplorer: () => import('./components/CircuitExplorerView.vue'),
-    reasoning: () => import('./components/ReasoningTraceView.vue'),
-    evidencefusion: () => import('./components/EvidenceFusionView.vue'),
-    campaigns: () => import('./components/CampaignWorkspaceView.vue'),
-    analytics: () => import('./components/ResearchAnalyticsView.vue'),
-    health: () => import('./components/ScientificHealthView.vue'),
-    plugins: () => import('./components/PluginSDKView.vue'),
-    notebook: () => import('./components/ResearchNotebook.vue'),
-    labnotebook: () => import('./components/ExperimentNotebook.vue'),
-    reproduction: () => import('./components/PaperReproductionView.vue'),
-    projects: () => import('./components/Projects.vue'),
-    recent: () => import('./components/RecentFiles.vue'),
-    logging: () => import('./components/Logging.vue'),
-    build: () => import('./components/BuildLog.vue'),
-    workspace: () => import('./components/CampaignWorkspaceView.vue'),
-     transformer: () => import('./components/TransformerVisualizer.vue'),
-     gpt2explorer: () => import('./components/Gpt2View.vue'),
-   };
-  const loader = map[page];
-  if (loader) {
-    try {
-      const mod = await loader();
-      currentPageComponent.value = mod.default;
-    } catch {
-      currentPageComponent.value = null;
+    const result = await api.listModels();
+    modelStatus.value = 'connected';
+    if (Array.isArray(result.models) && result.models.length > 0 && modelName.value === 'No model selected') {
+      modelName.value = `${result.models.length} models available`;
     }
-  } else {
-    currentPageComponent.value = null;
+  } catch {
+    modelStatus.value = 'offline';
   }
 }
 
-watch(activePage, (p) => loadPageComponent(p), { immediate: true });
+onMounted(() => {
+  const initialRoute = routeFromHash() || 'explorer';
+  openRoute(initialRoute, false);
 
-onMounted(async () => {
-  const hash = window.location.hash.slice(1);
-  if (hash && pageLabels[hash]) {
-    store.setActivePage(hash);
-  }
-  window.addEventListener('hashchange', () => {
-    const next = window.location.hash.slice(1);
-    if (next && pageLabels[next]) store.setActivePage(next);
-  });
+  window.addEventListener('hashchange', handleHashChange);
+  refreshRuntimeStatus();
 
-  try {
-    const res = await api.listModels();
-    availableModels.value = res.models ?? [];
-    pythonStatus.value = 'connected';
-  } catch {
-    pythonStatus.value = 'offline';
+  if (desktopElement.value && 'ResizeObserver' in window) {
+    resizeObserver = new ResizeObserver(entries => {
+      const rect = entries[0]?.contentRect;
+      if (rect) desktopBounds.value = { width: rect.width, height: rect.height };
+    });
+    resizeObserver.observe(desktopElement.value);
   }
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', handleHashChange);
+  resizeObserver?.disconnect();
 });
 </script>
