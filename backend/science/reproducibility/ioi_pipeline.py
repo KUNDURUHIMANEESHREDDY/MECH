@@ -3,7 +3,7 @@
 Reproduces Wang et al. 2022.
 Methodology (Refined):
 1. ABC vs ABB prompt templates (Proper causal corruption)
-2. Head-level patching on canonical Name Mover Heads (L9H6, L9H9, L10H0, L10H7)
+2. Head-level patching using explicitly labeled reference coordinates only in mock mode
 3. Full metadata traces (Logit distribution before/after)
 """
 
@@ -20,6 +20,20 @@ from .reproducibility_report import ReproducibilityReportEngine
 # ABB: When Alice and Bob went... Alice gave -> Bob (Incorrect/Corrupted)
 # ABC: When Alice and Bob went... Charlie gave -> ... (Control)
 _NAMES = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank"]
+
+# Reference-only fixtures. These are published-paper examples, not results
+# discovered by this pipeline, and must never be treated as live evidence.
+REFERENCE_ONLY_DISCOVERED_HEADS = (
+    "L9H6", "L9H9", "L10H0", "L10H7", "L7H3", "L8H6",
+    "L5H1", "L5H5", "L0H1", "L0H10",
+)
+REFERENCE_ONLY_DISCOVERED_EDGES = (
+    ("L0H1", "L5H1"),
+    ("L5H1", "L7H3"),
+    ("L7H3", "L9H9"),
+)
+REFERENCE_ONLY_FAITHFULNESS = 0.880
+REFERENCE_ONLY_PATCH_HEAD = (9, 9)
 
 def _make_high_fidelity_ioi_prompts(n: int = 100, seed: int = 42) -> List[Dict[str, str]]:
     rng = random.Random(seed)
@@ -49,8 +63,8 @@ class IOIReproductionPipeline:
     """End-to-end IOI circuit reproduction pipeline (High Fidelity)."""
 
     PAPER_ID = "ioi"
-    # Canonical Name Mover Heads from Wang et al. 2022
-    NAME_MOVER_HEADS = [(9, 6), (9, 9), (10, 0), (10, 7)]
+    # Published reference coordinates only; never a discovered live circuit.
+    REFERENCE_NAME_MOVER_HEADS = ((9, 6), (9, 9), (10, 0), (10, 7))
 
     def __init__(self, mock_mode: bool = True) -> None:
         self.adapter = GPT2Adapter(variant="small", mock_mode=mock_mode)
@@ -93,7 +107,34 @@ class IOIReproductionPipeline:
                              if p["indirect_object"] in t.get("token", "")), None)
             s_token = next((t for t in clean_top
                             if p["subject"] in t.get("token", "")), None)
-            if not self.adapter.spec.mock_mode and (io_token is None or s_token is None):
+            if io_token is None or s_token is None:
+                return {
+                    "pipeline": "IOIReproductionPipeline-HighFidelity",
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "mock_mode": self.adapter.spec.mock_mode,
+                    "validation_eligible": False,
+                    "publication_eligible": False,
+                    "reason": (
+                        "Required IOI comparison tokens were not returned; "
+                        "no random or synthetic logit fallback was generated."
+                    ),
+                    "reference_only_discovery": {
+                        "provenance": "reference",
+                        "eligible": False,
+                        "heads": list(REFERENCE_ONLY_DISCOVERED_HEADS),
+                        "edges": [list(edge) for edge in REFERENCE_ONLY_DISCOVERED_EDGES],
+                    },
+                }
+            io_logit = float(io_token["logit"])
+            s_logit = float(s_token["logit"])
+            clean_diff = io_logit - s_logit
+
+            # 2. Corrupted Run (Baseline for patching)
+            # In real ACDC, we patch clean activations into a corrupted run
+            
+            # 3. Head-Level Patching
+            if not self.adapter.spec.mock_mode:
                 return {
                     "pipeline": "IOIReproductionPipeline-HighFidelity",
                     "status": "unavailable",
@@ -102,34 +143,30 @@ class IOIReproductionPipeline:
                     "validation_eligible": False,
                     "publication_eligible": False,
                     "reason": (
-                        "Live IOI logits did not contain both required comparison "
-                        "tokens; no fallback logit was generated."
+                        "No measured patch head is connected; the reference "
+                        "coordinate was not used for a live run."
                     ),
+                    "reference_only_discovery": {
+                        "provenance": "reference",
+                        "eligible": False,
+                        "heads": list(REFERENCE_ONLY_DISCOVERED_HEADS),
+                        "edges": [list(edge) for edge in REFERENCE_ONLY_DISCOVERED_EDGES],
+                    },
                 }
-            io_logit = float(io_token["logit"]) if io_token else 0.0
-            s_logit = float(s_token["logit"]) if s_token else 0.0
-            clean_diff = io_logit - s_logit
-            if self.adapter.spec.mock_mode and io_logit == 0:
-                clean_diff = random.uniform(2.0, 3.5)
-
-            # 2. Corrupted Run (Baseline for patching)
-            # In real ACDC, we patch clean activations into a corrupted run
-            
-            # 3. Head-Level Patching
-            # For this audit, we patch L9H9 (proxy for the ensemble)
+            # Reference-only coordinate for the mock audit; not a discovered head.
+            patch_layer, patch_head = REFERENCE_ONLY_PATCH_HEAD
             patch_res = self.adapter.patch_head_output(
                 prompt=p["text"],
-                layer=9,
-                head_index=9
+                layer=patch_layer,
+                head_index=patch_head,
             )
 
             if abs(patch_res.delta) > 0.01:
                 patch_success_count += 1
 
             # Faithfulness calculation (Refined: how much of the logit diff is recovered)
-            # In mock mode, we force alignment with published 0.880
             if self.adapter.spec.mock_mode:
-                f_score = 0.880 + random.uniform(-0.01, 0.01)
+                f_score = REFERENCE_ONLY_FAITHFULNESS
             else:
                 f_score = 1.0 - (abs(patch_res.delta) / max(abs(clean_diff), 0.1))
 
@@ -138,28 +175,52 @@ class IOIReproductionPipeline:
             raw_traces.append({
                 "prompt": p["text"],
                 "target": p["target"],
+                "provenance": "synthetic" if self.adapter.spec.mock_mode else "live",
+                "logit_source": "mock_model" if self.adapter.spec.mock_mode else "model_logits",
                 "io_logit": io_logit,
                 "s_logit": s_logit,
                 "logit_diff_before": clean_diff,
                 "patch_delta": patch_res.delta,
                 "faithfulness": round(f_score, 4),
-                "patch_success": abs(patch_res.delta) > 0.01
+                "synthetic_fields": ([
+                    "io_logit",
+                    "s_logit",
+                    "logit_diff_before",
+                    "patch_delta",
+                    "faithfulness",
+                    "patch_success",
+                ] if self.adapter.spec.mock_mode else []),
+                "patch_success": abs(patch_res.delta) > 0.01,
             })
 
         avg_faithfulness = sum(faithfulness_scores) / n_prompts
         patch_success_rate = (patch_success_count / n_prompts) * 100.0
 
         # Step 4 — Discovery Algorithm Evaluation (Level 1, 2, 3)
-        # 4a. Run ACDC search (Mocked component list in mock_mode)
         if self.adapter.spec.mock_mode:
-            # Deterministic reference output, explicitly non-live.
-            discovered_heads = ["L9H6", "L9H9", "L10H0", "L10H7", "L7H3", "L8H6", "L5H1", "L5H5", "L0H1", "L0H10"]
-            discovered_edges = {("L0H1", "L5H1"), ("L5H1", "L7H3"), ("L7H3", "L9H9")}
+            # Reference fixture only; it is not an ACDC result and cannot be
+            # promoted to validation or publication.
+            discovered_heads = list(REFERENCE_ONLY_DISCOVERED_HEADS)
+            discovered_edges = set(REFERENCE_ONLY_DISCOVERED_EDGES)
+            discovery_provenance = "reference"
+            synthetic_fields = [
+                "circuit_faithfulness",
+                "patch_success_rate",
+                "functional_recovery",
+                "full_logit_diff",
+                "ablated_logit_diff",
+                "isolated_logit_diff",
+                "faithfulness",
+                "discovered_nodes",
+                "discovered_edges",
+            ]
         else:
-            # A real ACDC executor has not been connected.  Do not substitute
+            # A real ACDC executor has not been connected. Do not substitute
             # the paper's canonical head list for a measured discovery.
             discovered_heads = []
             discovered_edges = set()
+            discovery_provenance = "unavailable"
+            synthetic_fields = []
 
         if not self.adapter.spec.mock_mode and not discovered_heads:
             return {
@@ -169,7 +230,18 @@ class IOIReproductionPipeline:
                 "mock_mode": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
-                "reason": "Live ACDC discovery is not connected; no reference head list was used.",
+                "discovery_provenance": discovery_provenance,
+                "synthetic_fields": synthetic_fields,
+                "reason": (
+                    "Live ACDC discovery is not connected; no reference head "
+                    "or edge list was used as a result."
+                ),
+                "reference_only_discovery": {
+                    "provenance": "reference",
+                    "eligible": False,
+                    "heads": list(REFERENCE_ONLY_DISCOVERED_HEADS),
+                    "edges": [list(edge) for edge in REFERENCE_ONLY_DISCOVERED_EDGES],
+                },
             }
 
         # 4b. Measure Functional Recovery on Isolated Circuit
@@ -196,7 +268,9 @@ class IOIReproductionPipeline:
             "ablated_logit_diff": ablated_logit,
             "isolated_logit_diff": iso_logit,
             "discovered_nodes": set(discovered_heads),
-            "discovered_edges": discovered_edges
+            "discovered_edges": discovered_edges,
+            "discovery_provenance": discovery_provenance,
+            "synthetic_fields": synthetic_fields,
         }
 
         failure_diagnostics = self.diagnose_failure(observed_metrics)
@@ -208,7 +282,12 @@ class IOIReproductionPipeline:
             dataset_manifest_id=manifest.manifest_id,
             observed_metrics=observed_metrics,
             explanation_of_diffs=[
-                "Head-level patching used on L9H9.",
+                (
+                    f"Head-level patching used the reference-only coordinate "
+                    f"L{patch_layer}H{patch_head}."
+                    if self.adapter.spec.mock_mode else
+                    f"Head-level patching used L{patch_layer}H{patch_head}."
+                ),
                 f"Patch success rate: {patch_success_rate:.1f}%"
             ] + failure_diagnostics,
         )
@@ -217,9 +296,23 @@ class IOIReproductionPipeline:
             "pipeline": "IOIReproductionPipeline-HighFidelity",
             "status": "completed",
             "provenance": "synthetic" if self.adapter.spec.mock_mode else "live",
+            "provenance_note": (
+                "Mock/reference fields are not live measurements and are not "
+                "eligible for validation or publication."
+                if self.adapter.spec.mock_mode else
+                "Observed from the connected model run."
+            ),
             "validation_eligible": not self.adapter.spec.mock_mode,
             "publication_eligible": not self.adapter.spec.mock_mode,
             "mock_mode": self.adapter.spec.mock_mode,
+            "discovery_provenance": discovery_provenance,
+            "synthetic_fields": synthetic_fields,
+            "reference_only_discovery": ({
+                "provenance": "reference",
+                "eligible": False,
+                "heads": list(REFERENCE_ONLY_DISCOVERED_HEADS),
+                "edges": [list(edge) for edge in REFERENCE_ONLY_DISCOVERED_EDGES],
+            } if self.adapter.spec.mock_mode else None),
             "observed_metrics": observed_metrics,
             "reproducibility_report": report,
             "raw_traces": raw_traces,
