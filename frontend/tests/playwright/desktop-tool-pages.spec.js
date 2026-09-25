@@ -23,3 +23,26 @@ test('model and research tools remain reachable without the old global gate', as
   await expect(page.getByTestId('window-workspace')).toBeVisible();
   await expect(page.getByTestId('window-workspace')).toContainText(/Research workspace|Workspace/i);
 });
+
+test('remaining legacy tools expose real surfaces instead of placeholders', async ({ page }) => {
+  await page.route('**/api/**', route => route.abort());
+  const routes = [
+    ['models', 'Models', /model records|no models|unavailable/i],
+    ['prompts', 'Prompts', /local prompt drafts|unavailable|no prompts/i],
+    ['debugger', 'Debugger', /diagnos|unavailable|offline/i],
+    ['experiments', 'Experiments', /experiment records|unavailable|offline/i],
+    ['sessions', 'Sessions', /session records|unavailable|offline/i],
+    ['plugins', 'Plugins', /plugin catalog|appapi|unavailable/i],
+    ['notebook', 'Research Notebook', /research notes|local-only|unavailable/i],
+    ['labnotebook', 'Lab Notebook', /lab notes|local-only|unavailable/i],
+    ['transformer', 'Transformer Visualizer', /architecture|offline|unavailable/i],
+  ];
+
+  for (const [id, heading, marker] of routes) {
+    await page.goto(`/#${id}`);
+    const window = page.getByTestId(`window-${id}`);
+    await expect(window).toBeVisible();
+    await expect(window.locator('.tool-window__body').getByRole('heading', { name: heading, exact: true })).toBeVisible();
+    await expect(window.locator('.tool-window__body')).toContainText(marker);
+  }
+});
