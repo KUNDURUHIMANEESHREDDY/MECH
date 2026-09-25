@@ -32,4 +32,7 @@ class CrossModelCircuitsEngine:
         )
         res = dto.to_dict()
         res["alignment"] = alignment
+        res["alignment_field_provenance"] = {
+            key: "reference" for key in alignment
+        }
         return res

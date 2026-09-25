@@ -87,7 +87,7 @@
               <code>{{ detail.circuit_id }}</code>
             </div>
             <span class="source-badge source-badge--compact" :class="`source-badge--${detailTone}`">
-              {{ detailTone === 'live' ? 'Live payload' : 'Reference record' }}
+              {{ detailTone === 'live' ? 'Live payload' : detailTone === 'reference' ? 'Reference record' : 'Unavailable record' }}
             </span>
           </header>
 
@@ -111,6 +111,10 @@
               <dd>{{ detail.node_count ?? '—' }} / {{ detail.edge_count ?? '—' }}</dd>
             </div>
           </dl>
+          <p class="provenance-note">
+            <strong>Field provenance</strong>
+            <span>{{ formatFieldProvenance(detail.field_provenance) }}</span>
+          </p>
 
           <section class="member-section" aria-labelledby="attention-members-title">
             <div class="section-heading">
@@ -175,6 +179,8 @@ interface CircuitSummary {
   minimality?: number;
   node_count?: number;
   edge_count?: number;
+  provenance?: string;
+  field_provenance?: Record<string, string>;
 }
 
 interface CircuitNode {
@@ -219,7 +225,12 @@ const sourceLabel = computed(() => {
   if (offline.value) return 'Offline / unavailable';
   return 'Reference registry';
 });
-const detailTone = computed<Provenance>(() => detail.value?.provenance === 'live' ? 'live' : 'reference');
+const detailTone = computed<Provenance>(() => {
+  const label = detail.value?.provenance?.toLowerCase();
+  if (label === 'live') return 'live';
+  if (label === 'reference') return 'reference';
+  return 'unavailable';
+});
 const heads = computed(() => (detail.value?.nodes ?? []).filter(node => node.node_type === 'attention_head'));
 const others = computed(() => (detail.value?.nodes ?? []).filter(node => node.node_type !== 'attention_head'));
 
@@ -229,6 +240,16 @@ function isRecord(value: unknown): value is JsonRecord {
 
 function text(value: unknown): string {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';
+}
+
+function fieldProvenanceOf(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, text(item) || 'unavailable']));
+}
+
+function formatFieldProvenance(value: Record<string, string> | undefined): string {
+  const entries = Object.entries(value ?? {});
+  return entries.length ? entries.map(([key, item]) => `${key}: ${item}`).join(' · ') : 'Unavailable';
 }
 
 function errorOf(error: unknown): string {
@@ -260,6 +281,8 @@ function normalizeSummary(value: unknown): CircuitSummary | null {
     minimality: typeof value.minimality === 'number' ? value.minimality : undefined,
     node_count: typeof value.node_count === 'number' ? value.node_count : undefined,
     edge_count: typeof value.edge_count === 'number' ? value.edge_count : undefined,
+    provenance: text(value.provenance) || undefined,
+    field_provenance: fieldProvenanceOf(value.field_provenance),
   };
 }
 
@@ -286,7 +309,8 @@ function normalizeDetail(value: unknown, fallback: CircuitSummary): CircuitDetai
     minimality: typeof value.minimality === 'number' ? value.minimality : fallback.minimality,
     node_count: typeof value.node_count === 'number' ? value.node_count : nodes.length,
     edge_count: typeof value.edge_count === 'number' ? value.edge_count : undefined,
-    provenance: text(value.provenance) || undefined,
+    provenance: text(value.provenance) || fallback.provenance,
+    field_provenance: fieldProvenanceOf(value.field_provenance ?? fallback.field_provenance),
     nodes,
   };
 }
@@ -407,6 +431,7 @@ onMounted(async () => {
 .source-badge--offline { border-color: #efc2c7; background: var(--danger-soft); color: var(--danger); }
 .source-badge--loading { border-color: #c9d8f6; background: var(--accent-soft); color: var(--primary); }
 .source-badge--reference { border-color: #ecd79c; background: var(--warning-soft); color: var(--warning); }
+.source-badge--unavailable { border-color: #efc2c7; background: var(--danger-soft); color: var(--danger); }
 .source-badge--compact { min-height: 22px; }
 .count-badge { min-width: 28px; justify-content: center; }
 
@@ -469,6 +494,8 @@ onMounted(async () => {
 .detail-header code,
 .detail-footer code { color: var(--text-muted); font: 10px/1.3 var(--font-mono); }
 .detail-description { margin: 16px 0; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
+.provenance-note { display: flex; gap: 6px; margin: 10px 0; color: var(--text-muted); font-size: 10px; line-height: 1.45; }
+.provenance-note strong { color: var(--text); font: 700 9px/1.2 var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 20px; }
 .metric-grid > div { padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
 .metric-grid dt { color: var(--text-muted); font: 10px/1.2 var(--font-mono); text-transform: uppercase; }

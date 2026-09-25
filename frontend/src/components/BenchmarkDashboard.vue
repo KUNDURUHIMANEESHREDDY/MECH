@@ -115,7 +115,8 @@
             <div><dt>Benchmark</dt><dd>{{ lastResult.benchmarkName || selectedBenchmark || 'Unavailable' }}</dd></div>
             <div><dt>Score</dt><dd>{{ formatValue(lastResult.score) }}</dd></div>
             <div><dt>Pass rate</dt><dd>{{ formatValue(lastResult.passRate) }}</dd></div>
-            <div><dt>Provenance</dt><dd>{{ lastResult.provenance || 'Not supplied' }}</dd></div>
+            <div><dt>Provenance</dt><dd>{{ lastResult.provenance || 'Unavailable' }}</dd></div>
+            <div><dt>Field provenance</dt><dd>{{ formatFieldProvenance(lastResult.fieldProvenance) }}</dd></div>
           </dl>
           <p v-if="lastResult.error || lastResult.reason" class="result-error">{{ lastResult.error || lastResult.reason }}</p>
         </div>
@@ -160,7 +161,7 @@ type SourceTone = 'online' | 'offline' | 'loading' | 'partial';
 type ResultTone = 'success' | 'error' | 'neutral';
 type JsonRecord = Record<string, unknown>;
 type SessionRun = { key: string; name: string; detail: string; time: string; tone: ResultTone };
-type NormalizedResult = { status: string; benchmarkName: string; score: unknown; passRate: unknown; provenance: string; error: string; reason: string };
+type NormalizedResult = { status: string; benchmarkName: string; score: unknown; passRate: unknown; provenance: string; fieldProvenance: Record<string, string>; error: string; reason: string };
 
 const catalog = ref<string[]>([]);
 const selectedBenchmark = ref('');
@@ -178,6 +179,16 @@ function isOffline(message: string): boolean { return /offline|failed to fetch|n
 function formatValue(value: unknown): string { return value === undefined || value === null || value === '' ? 'Unavailable' : typeof value === 'number' ? String(value) : text(value); }
 function nowLabel(): string { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 
+function fieldProvenanceOf(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, text(item, 'unavailable')]));
+}
+
+function formatFieldProvenance(value: Record<string, string>): string {
+  const entries = Object.entries(value);
+  return entries.length ? entries.map(([key, item]) => `${key}: ${item}`).join(' · ') : 'Unavailable';
+}
+
 function normalizeResult(value: unknown, benchmark: string): NormalizedResult {
   const record = isRecord(value) ? value : {};
   const status = text(record.status, 'response received');
@@ -188,6 +199,7 @@ function normalizeResult(value: unknown, benchmark: string): NormalizedResult {
     score: record.score,
     passRate: record.pass_rate,
     provenance: text(record.provenance, 'unavailable'),
+    fieldProvenance: fieldProvenanceOf(record.field_provenance),
     error: text(record.error),
     reason,
   };

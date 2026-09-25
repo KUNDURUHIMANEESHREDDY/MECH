@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from backend.agents.evidence_policy import field_map
+
 from .benchmark_runner import MechanisticBenchmarkRunner
 from .confidence_engine import ScientificConfidenceEngine
 from .peer_review import AutomatedPeerReviewer
@@ -34,6 +36,10 @@ class ScientificValidationEngine:
             "discovery_id": discovery_id,
             "status": "unavailable",
             "provenance": "unavailable",
+            "field_provenance": field_map(
+                ("discovery_id", "status", "validated", "reason"),
+                "unavailable",
+            ),
             "validation_eligible": False,
             "publication_eligible": False,
             "validated": False,

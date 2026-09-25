@@ -84,6 +84,7 @@
             <span>{{ models.length }} {{ models.length === 1 ? 'model' : 'models' }} returned by <code>/api/models</code></span>
             <span v-if="catalogProvenance === 'reference'">Catalog metadata only; loading a model is required for model data.</span>
             <span v-else-if="catalogProvenance === 'seeded'">The backend marked this response as seeded.</span>
+            <span v-if="formatFieldProvenance(catalogFieldProvenance) !== 'Unavailable'">Field provenance: {{ formatFieldProvenance(catalogFieldProvenance) }}</span>
           </div>
 
           <ul class="model-list" aria-label="Available models">
@@ -141,6 +142,7 @@
               </span>
             </div>
             <div v-else class="loaded-model loaded-model--empty">No model is loaded in this view.</div>
+            <p v-if="formatFieldProvenance(modelFieldProvenance) !== 'Unavailable'" class="field-help">Field provenance: {{ formatFieldProvenance(modelFieldProvenance) }}</p>
           </div>
           <p v-if="modelLoadError" class="inline-error" role="alert">{{ modelLoadError }}</p>
           <p v-else-if="modelLoadNote" class="field-help">{{ modelLoadNote }}</p>
@@ -214,6 +216,7 @@
             Results are shown only when the backend returns them. A seeded response is labeled and is not presented as a live measurement.
           </p>
           <p v-if="promptResult" class="provenance-note">{{ promptProvenanceNote }}</p>
+          <p v-if="promptResult && formatFieldProvenance(promptFieldProvenance) !== 'Unavailable'" class="provenance-note">Field provenance: {{ formatFieldProvenance(promptFieldProvenance) }}</p>
           <p v-if="promptError" id="model-explorer-prompt-error" class="inline-error" role="alert">
             {{ promptError }}
           </p>
@@ -751,10 +754,12 @@ const models = ref<string[]>([]);
 const selectedModel = ref('');
 const loadedModel = ref('');
 const modelProvenance = ref<Provenance>('unavailable');
+const modelFieldProvenance = ref<Record<string, string>>({});
 const modelLoadNote = ref('');
 const modelLoadError = ref('');
 const modelLoadState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle');
 const catalogProvenance = ref<Provenance>('unavailable');
+const catalogFieldProvenance = ref<Record<string, string>>({});
 const catalogError = ref('');
 const catalogLoading = ref(false);
 const runtimeState = ref<RuntimeState>('checking');
@@ -901,6 +906,16 @@ function provenanceFrom(value: unknown, fallback: Provenance = 'unavailable'): P
   return fallback;
 }
 
+function fieldProvenanceOf(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, asText(item) ?? 'unavailable']));
+}
+
+function formatFieldProvenance(value: Record<string, string> | undefined): string {
+  const entries = Object.entries(value ?? {});
+  return entries.length ? entries.map(([key, item]) => `${key}: ${item}`).join(' · ') : 'Unavailable';
+}
+
 function provenanceTitle(provenance: Provenance): string {
   switch (provenance) {
     case 'live': return 'Backend reported live model data.';
@@ -1042,6 +1057,7 @@ const nextTokenResult = computed(() => extractNextToken(promptResult.value, prom
 const nextToken = computed(() => nextTokenResult.value?.token ?? '');
 const nextTokenSource = computed(() => nextTokenResult.value?.source ?? '');
 const promptProvenanceNote = computed(() => provenanceTitle(promptProvenance.value));
+const promptFieldProvenance = computed(() => fieldProvenanceOf(promptResult.value?.field_provenance));
 const displayActivationProvenance = computed<Provenance>(() => (
   activationDetail.value ? activationProvenance.value : layerActivationProvenance.value
 ));
@@ -1305,6 +1321,7 @@ function resetPromptDependentState(): void {
 function resetModelDependentState(): void {
   loadedModel.value = '';
   modelProvenance.value = 'unavailable';
+  modelFieldProvenance.value = {};
   modelLoadState.value = 'idle';
   modelLoadNote.value = '';
   modelLoadError.value = '';
@@ -1341,10 +1358,12 @@ async function loadCatalog(): Promise<void> {
   }
   catalogLoading.value = true;
   catalogError.value = '';
+  catalogFieldProvenance.value = {};
   try {
     const response = requireResponse(await api.listModels(), 'Model registry');
     models.value = extractModels(response);
     catalogProvenance.value = provenanceFrom(response, 'reference');
+    catalogFieldProvenance.value = fieldProvenanceOf(response.field_provenance);
     runtimeState.value = 'online';
     const requestedModel = props.modelName?.trim();
     if (!selectedModel.value && requestedModel && models.value.includes(requestedModel)) {
@@ -1387,6 +1406,7 @@ async function loadSelectedModel(): Promise<void> {
     );
     loadedModel.value = firstText(response, ['model_name', 'model', 'name']) ?? model;
     modelProvenance.value = provenanceFrom(response, 'reference');
+    modelFieldProvenance.value = fieldProvenanceOf(response.field_provenance);
     modelLoadState.value = 'loaded';
     modelLoadNote.value = firstText(response, ['provenance_note', 'note']) ?? (modelProvenance.value === 'reference'
       ? 'The backend acknowledged the load without a live provenance marker.'

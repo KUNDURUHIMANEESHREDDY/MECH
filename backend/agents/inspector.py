@@ -32,13 +32,34 @@ class Inspector:
         try:
             engine = self._engine()
         except Exception as exc:
-            return {"status": "unavailable", "reason": str(exc)[:300]}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": {"status": "unavailable", "reason": "unavailable"},
+                "reason": str(exc)[:300],
+            }
         if not engine.is_available():
-            return {"status": "unavailable",
-                    "reason": "torch/transformers not installed"}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": {"status": "unavailable", "reason": "unavailable"},
+                "reason": "torch/transformers not installed",
+            }
         try:
             res = getattr(engine, name)(*args)
-            return res if isinstance(res, dict) else {"status": "ok", "result": res}
+            if isinstance(res, dict):
+                res.setdefault("provenance", "live")
+                res.setdefault("field_provenance", {
+                    str(key): "live" for key in res
+                    if key not in {"provenance", "field_provenance"}
+                })
+                return res
+            return {
+                "status": "ok",
+                "provenance": "live",
+                "field_provenance": {"status": "live", "result": "live"},
+                "result": res,
+            }
         except Exception as exc:
             return {"status": "error", "op": name, "error": str(exc)[:500]}
 
@@ -61,8 +82,13 @@ class Inspector:
                 )
                 insp = NeuronInspector().inspect(
                     layer=layer, neuron_index=neuron_index, activations=None)
-                return {"status": "ok", "source": "NeuronInspector",
-                        "result": insp}
+                return {
+                    "status": "ok",
+                    "provenance": "unavailable",
+                    "field_provenance": {"status": "unavailable", "result": "unavailable"},
+                    "source": "NeuronInspector",
+                    "result": insp,
+                }
             except Exception as exc:
                 out.setdefault("fallback_error", str(exc)[:300])
         return out
@@ -77,8 +103,13 @@ class Inspector:
                 )
                 insp = AttentionInspector().inspect(
                     layer=layer, head=head, tokens=tokens or [])
-                return {"status": "ok", "source": "AttentionInspector",
-                        "result": insp}
+                return {
+                    "status": "ok",
+                    "provenance": "unavailable",
+                    "field_provenance": {"status": "unavailable", "result": "unavailable"},
+                    "source": "AttentionInspector",
+                    "result": insp,
+                }
             except Exception as exc:
                 out.setdefault("fallback_error", str(exc)[:300])
         return out

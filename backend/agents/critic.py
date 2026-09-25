@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from .evidence_policy import (
     blocked_reason,
     discovery_is_live,
+    field_map,
     provenance_of,
     reproduction_is_live,
     validation_is_live,
@@ -49,6 +50,9 @@ class Critic:
             return {
                 "status": "unavailable",
                 "provenance": provenance_of(discovery_result),
+                "field_provenance": field_map(
+                    ("status", "validated", "reason"), provenance_of(discovery_result)
+                ),
                 "validated": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
@@ -64,6 +68,9 @@ class Critic:
                 return {
                     "status": "unavailable",
                     "provenance": provenance_of(res),
+                    "field_provenance": field_map(
+                        ("status", "validated", "reason"), provenance_of(res)
+                    ),
                     "validated": False,
                     "validation_eligible": False,
                     "publication_eligible": False,
@@ -72,12 +79,19 @@ class Critic:
             return {
                 "status": "completed",
                 "provenance": "live",
+                "field_provenance": field_map(
+                    ("status", "validated", "result", "confidence", "peer_review"),
+                    "live",
+                ),
                 "result": res,
             }
         except Exception as exc:
             return {
                 "status": "error",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "validated", "error"), "unavailable"
+                ),
                 "validated": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
@@ -109,6 +123,10 @@ class Critic:
             return {
                 "status": "unavailable",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "observed_metrics", "report", "gate", "reason"),
+                    "unavailable",
+                ),
                 "publication_eligible": False,
                 "reason": f"live reproduction for '{paper_id}' "
                           "not implemented (ioi only)",
@@ -119,6 +137,10 @@ class Critic:
                 return {
                     "status": "unavailable",
                     "provenance": "unavailable",
+                    "field_provenance": field_map(
+                        ("status", "observed_metrics", "report", "gate", "reason"),
+                        "unavailable",
+                    ),
                     "publication_eligible": False,
                     "reason": "torch/transformers not installed",
                 }
@@ -134,6 +156,10 @@ class Critic:
                 return {
                     "status": "unavailable",
                     "provenance": provenance_of(run),
+                    "field_provenance": field_map(
+                        ("status", "observed_metrics", "report", "gate", "reason"),
+                        provenance_of(run),
+                    ),
                     "publication_eligible": False,
                     "reason": "The reproduction pipeline did not return explicit live evidence.",
                 }
@@ -149,6 +175,10 @@ class Critic:
                 return {
                     "status": "unavailable",
                     "provenance": "live",
+                    "field_provenance": field_map(
+                        ("status", "observed_metrics", "report", "gate", "reason"),
+                        "unavailable",
+                    ),
                     "publication_eligible": False,
                     "reason": f"Live reproduction metrics are incomplete: {exc}",
                 }
@@ -192,6 +222,10 @@ class Critic:
             return {
                 "status": "completed",
                 "provenance": "live",
+                "field_provenance": field_map(
+                    ("status", "paper_id", "n_prompts", "observed_metrics", "report", "gate"),
+                    "live",
+                ),
                 "paper_id": paper_id,
                 "n_prompts": n_prompts,
                 "mock_mode": False,
@@ -204,6 +238,10 @@ class Critic:
             return {
                 "status": "error",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "observed_metrics", "report", "gate", "error"),
+                    "unavailable",
+                ),
                 "publication_eligible": False,
                 "error": str(exc)[:500],
             }
@@ -211,17 +249,16 @@ class Critic:
     def reflect(self, campaign_id: str,
                 successful: List[str], failed: List[str],
                 planner_decisions: List[str]) -> Dict[str, Any]:
-        try:
-            from backend.research_platform.meta.self_reflection_engine import (
-                SelfReflectionEngine,
-            )
-            res = SelfReflectionEngine().generate_reflection_report(
-                campaign_id=campaign_id,
-                successful_hypotheses=successful,
-                failed_hypotheses=failed,
-                compute_used_gb_hours=0.0,
-                planner_decisions=planner_decisions,
-            )
-            return {"status": "completed", "result": res}
-        except Exception as exc:
-            return {"status": "error", "error": str(exc)[:500]}
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": field_map(
+                ("status", "campaign_id", "successful", "failed", "result"),
+                "unavailable",
+            ),
+            "campaign_id": campaign_id,
+            "successful": successful,
+            "failed": failed,
+            "planner_decisions": planner_decisions,
+            "reason": "No live reflection executor is connected.",
+        }

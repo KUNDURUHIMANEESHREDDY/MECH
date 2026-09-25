@@ -97,6 +97,7 @@
       <span>Run <code>{{ runId }}</code></span>
       <span v-if="runStatus"> · Backend status: {{ runStatus }}</span>
       <span v-else-if="phase === 'done' || phase === 'failed'"> · Backend status unavailable</span>
+      <span> · Provenance: {{ runProvenance }}</span>
       <span v-if="runSummary"> · {{ runSummary }}</span>
     </p>
 
@@ -123,6 +124,7 @@
               <span>{{ step.agent ?? 'Agent unavailable' }}</span>
             </div>
             <span class="society__step-status">{{ step.status ?? 'Status unavailable' }}</span>
+            <span v-if="step.provenance" class="society__step-detail">Provenance: {{ step.provenance }}</span>
             <span v-if="step.error || step.reason" class="society__step-detail">
               {{ step.error ?? step.reason }}
             </span>
@@ -165,6 +167,7 @@
     <section class="society__card" aria-labelledby="society-report-title" :aria-busy="isActive">
       <header class="society__card-header">
         <h3 id="society-report-title">Mechanistic report</h3>
+        <span v-if="publicationFieldProvenance" class="society__provenance-note">Field provenance: {{ publicationFieldProvenance }}</span>
         <a
           v-if="figureUrl && figurePatch"
           class="society__inline-link"
@@ -260,6 +263,8 @@ interface TraceStep {
   status?: string;
   reason?: string;
   error?: string;
+  provenance?: string;
+  fieldProvenance?: Record<string, string>;
   layer?: number;
   head?: number;
 }
@@ -274,6 +279,7 @@ const phase = ref<Phase>('idle');
 const runId = ref<string | null>(null);
 const runGoal = ref('');
 const runStatus = ref<string | null>(null);
+const runProvenance = ref('unavailable');
 const events = ref<SocietyEvent[]>([]);
 const steps = ref<TraceStep[]>([]);
 const reportMarkdown = ref<string | null>(null);
@@ -313,6 +319,13 @@ function asNumber(value: unknown): number | undefined {
 function asIndex(value: unknown): number | undefined {
   const parsed = asNumber(value);
   return parsed !== undefined && Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function fieldProvenanceLabel(value: unknown): string {
+  if (!isRecord(value)) return '';
+  return Object.entries(value)
+    .map(([key, item]) => `${key}: ${asText(item) ?? 'unavailable'}`)
+    .join(' · ');
 }
 
 function errorText(error: unknown): string {
@@ -401,12 +414,21 @@ function normalizeTrace(value: unknown): TraceStep[] {
     if (!isRecord(item)) continue;
     const node = asText(item.node);
     if (!node) continue;
+    const fieldProvenance = isRecord(item.field_provenance)
+      ? Object.fromEntries(
+          Object.entries(item.field_provenance).map(
+            ([key, value]) => [key, asText(value) ?? 'unavailable'],
+          ),
+        )
+      : {};
     normalized.push({
       node,
       agent: asText(item.agent),
       status: asText(item.status),
       reason: asText(item.reason),
       error: asText(item.error),
+      provenance: asText(item.provenance) ?? fieldProvenance.provenance,
+      fieldProvenance,
       layer: asIndex(item.layer),
       head: asIndex(item.head),
     });
@@ -440,6 +462,7 @@ function applyDone(id: string, rawResult: unknown): void {
   runId.value = id;
   runGoal.value = asText(rawResult.goal) ?? runGoal.value;
   runStatus.value = asText(rawResult.status) ?? null;
+  runProvenance.value = asText(rawResult.provenance) ?? 'unavailable';
   steps.value = normalizeTrace(rawResult.trace);
   mergeEvents(rawResult.events);
   publication.value = isRecord(rawResult.publication) ? rawResult.publication : null;
@@ -559,6 +582,7 @@ async function handleRun(): Promise<void> {
   runId.value = null;
   runGoal.value = submittedGoal;
   runStatus.value = null;
+  runProvenance.value = 'unavailable';
   events.value = [];
   steps.value = [];
   reportMarkdown.value = null;
@@ -661,6 +685,10 @@ const statusDetail = computed(() => {
     default: return `Backend status is unknown until a request reaches ${SOCIETY_BASE}.`;
   }
 });
+
+const publicationFieldProvenance = computed(() => (
+  fieldProvenanceLabel(publication.value?.field_provenance)
+));
 
 const publicationBlockReason = computed(() => (
   publication.value?.status === 'blocked'
@@ -786,6 +814,7 @@ onBeforeUnmount(() => {
 
 .society__intro,
 .society__help,
+.society__provenance-note,
 .society__empty {
   color: var(--text-muted);
 }

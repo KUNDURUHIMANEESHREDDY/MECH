@@ -27,4 +27,7 @@ class FeatureGenealogyEngine:
         )
         res = dto.to_dict()
         res["genealogy"] = genealogy
+        res["genealogy_field_provenance"] = {
+            key: "reference" for key in genealogy
+        }
         return res

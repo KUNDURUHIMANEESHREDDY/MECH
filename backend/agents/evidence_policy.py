@@ -45,6 +45,12 @@ def _opted_in(payload: Any) -> bool:
             and record.get("publication_eligible") is True)
 
 
+def field_map(fields: Iterable[str], provenance: str) -> Dict[str, str]:
+    """Create an explicit field-to-provenance map for a payload boundary."""
+    label = str(provenance or "unavailable")
+    return {str(field): label for field in fields}
+
+
 def discovery_is_live(payload: Any) -> bool:
     """Whether a discovery result may enter validation and publication."""
     return (_is_completed(payload)

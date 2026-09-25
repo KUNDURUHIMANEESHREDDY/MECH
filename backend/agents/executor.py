@@ -82,14 +82,35 @@ class Executor:
         try:
             engine = self._engine()
         except Exception as exc:
-            return {"status": "unavailable", "reason": f"gpt2_engine import failed: {exc}"}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": {"status": "unavailable", "reason": "unavailable"},
+                "reason": f"gpt2_engine import failed: {exc}",
+            }
         if not engine.is_available():
-            return {"status": "unavailable",
-                    "reason": "torch/transformers not installed — seeded fallback in use"}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": {"status": "unavailable", "reason": "unavailable"},
+                "reason": "torch/transformers not installed — seeded fallback in use",
+            }
         try:
             fn = getattr(engine, name)
             res = await asyncio.to_thread(fn, *args, **kwargs)
-            return res if isinstance(res, dict) else {"status": "ok", "result": res}
+            if isinstance(res, dict):
+                res.setdefault("provenance", "live")
+                res.setdefault("field_provenance", {
+                    str(key): "live" for key in res
+                    if key not in {"provenance", "field_provenance"}
+                })
+                return res
+            return {
+                "status": "ok",
+                "provenance": "live",
+                "field_provenance": {"status": "live", "result": "live"},
+                "result": res,
+            }
         except Exception as exc:
             return {"status": "error", "op": name, "error": str(exc)[:500]}
 

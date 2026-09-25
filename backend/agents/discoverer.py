@@ -33,6 +33,7 @@ class Discoverer:
             from .evidence_policy import (
                 blocked_reason,
                 discovery_is_live,
+                field_map,
                 provenance_of,
             )
             from backend.interpretability.discovery.discovery_engine import (
@@ -47,6 +48,10 @@ class Discoverer:
                 return {
                     "status": "unavailable",
                     "provenance": provenance_of(res),
+                    "field_provenance": field_map(
+                        ("status", "discovery_id", "reason", "result"),
+                        provenance_of(res),
+                    ),
                     "validation_eligible": False,
                     "publication_eligible": False,
                     "discovery_id": res.get("discovery_id", ""),
@@ -55,12 +60,18 @@ class Discoverer:
             return {
                 "status": "completed",
                 "provenance": "live",
+                "field_provenance": field_map(
+                    ("status", "result", "discovery_id"), "live"
+                ),
                 "result": res,
             }
         except Exception as exc:
             return {
                 "status": "error",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "error", "result"), "unavailable"
+                ),
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "error": str(exc)[:500],

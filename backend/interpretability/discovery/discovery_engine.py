@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from backend.agents.evidence_policy import field_map
+
 from ..semantics.auto_circuit_namer import AutoCircuitNamerEngine
 from .auto_hypothesis_tester import AutomaticHypothesisTesterEngine
 from .automated_regression_suite import AutomatedRegressionSuite
@@ -89,6 +91,10 @@ class DiscoveryEngine:
             "discovery_id": disc_id,
             "status": "unavailable",
             "provenance": "synthetic",
+            "field_provenance": field_map(
+                ("discovery_id", "status", "reason", "lifecycle"),
+                "unavailable",
+            ),
             "validation_eligible": False,
             "publication_eligible": False,
             "reason": (
@@ -103,6 +109,10 @@ class DiscoveryEngine:
             "status": "active",
             "live_discovery_available": False,
             "scientific_evidence_status": "unavailable",
+            "field_provenance": field_map(
+                ("status", "discoveries_count", "mechanisms_count", "registered_algorithms"),
+                "unavailable",
+            ),
             "discoveries_count": len(self.discoveries),
             "mechanisms_count": len(self.mechanism_registry.list_mechanisms()),
             "registered_algorithms": self.algorithm_registry.list_algorithms(),

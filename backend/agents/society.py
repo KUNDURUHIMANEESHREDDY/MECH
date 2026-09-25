@@ -26,6 +26,7 @@ from typing import Any, Dict, List
 from .evidence_policy import (
     blocked_reason,
     discovery_is_live,
+    field_map,
     provenance_of,
     validation_is_live,
 )
@@ -60,6 +61,15 @@ def _event(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:  # invalid type should never kill a run
         return {"event_type": event_type, "payload": payload,
                 "error": str(exc)[:200]}
+
+
+def _response_field_provenance(response: Dict[str, Any]) -> Dict[str, str]:
+    existing = response.get("field_provenance")
+    if isinstance(existing, dict):
+        return {str(key): str(value) for key, value in existing.items()}
+    result = response.get("result")
+    label = provenance_of(result if isinstance(result, dict) else response)
+    return field_map(("status", "result", "reason", "error"), label)
 
 
 class ResearchSocietyV2:
@@ -148,6 +158,10 @@ class ResearchSocietyV2:
         events: List[Dict[str, Any]] = []
         self._emit(events, on_event, "ResearchStarted", {"goal": goal})
         workflow = self.planner.plan(goal)
+        workflow["provenance"] = "reference"
+        workflow["field_provenance"] = field_map(
+            ("goal", "pipeline", "states", "nodes"), "reference"
+        )
         nodes = list(workflow.get("nodes", []))[:MAX_STEPS]
         self._emit(events, on_event, "ExperimentQueued",
                    {"plan": [n["id"] for n in nodes]})
@@ -158,6 +172,7 @@ class ResearchSocietyV2:
         for node in nodes:
             res = await self._run_node(node, ctx)
             step = {"node": node["id"], "agent": self.dispatch(node), **res}
+            step["field_provenance"] = _response_field_provenance(res)
             trace.append(step)
             ctx["trace"] = trace
             if node["id"] == "discover":
@@ -205,6 +220,10 @@ class ResearchSocietyV2:
             repro = {
                 "status": "blocked",
                 "provenance": provenance_of(discovery_result),
+                "field_provenance": field_map(
+                    ("status", "reason", "observed_metrics", "report", "gate"),
+                    provenance_of(discovery_result),
+                ),
                 "publication_eligible": False,
                 "reason": blocked_reason(discovery_result, "Discovery"),
             }
@@ -225,6 +244,10 @@ class ResearchSocietyV2:
                           else "unavailable",
                 "provenance": "live" if repro.get("provenance") == "live"
                               else "unavailable",
+                "field_provenance": field_map(
+                    ("status", "threshold", "value", "passed", "confidence", "validated"),
+                    "live" if repro.get("provenance") == "live" else "unavailable",
+                ),
                 "confidence": self._confidence_of(vres),
                 "validated": bool(vres.get("validated", False)),
                 "passed": bool(gate.get("passed", False))
@@ -234,6 +257,9 @@ class ResearchSocietyV2:
             gate = {
                 "status": "blocked",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "validated", "passed", "reason"), "unavailable"
+                ),
                 "validated": False,
                 "passed": False,
                 "reason": blocked_reason(discovery_result, "Discovery"),
@@ -284,6 +310,14 @@ class ResearchSocietyV2:
         return {
             "status": status,
             "provenance": publication.get("provenance", "unavailable"),
+            "field_provenance": {
+                "workflow": workflow.get("provenance", "reference"),
+                "trace": "live" if status == "completed" else "unavailable",
+                "reflection": reflection.get("provenance", "unavailable"),
+                "reproducibility": repro.get("provenance", "unavailable"),
+                "gate": gate.get("provenance", "unavailable"),
+                "publication": publication.get("provenance", "unavailable"),
+            },
             "validation_eligible": bool(publication.get("validation_eligible", False)),
             "publication_eligible": bool(publication.get("publication_eligible", False)),
             "goal": goal,

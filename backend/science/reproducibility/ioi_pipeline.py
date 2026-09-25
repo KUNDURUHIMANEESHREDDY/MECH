@@ -35,6 +35,11 @@ REFERENCE_ONLY_DISCOVERED_EDGES = (
 REFERENCE_ONLY_FAITHFULNESS = 0.880
 REFERENCE_ONLY_PATCH_HEAD = (9, 9)
 
+
+def _field_map(fields, provenance: str):
+    return {str(field): provenance for field in fields}
+
+
 def _make_high_fidelity_ioi_prompts(n: int = 100, seed: int = 42) -> List[Dict[str, str]]:
     rng = random.Random(seed)
     prompts = []
@@ -112,6 +117,10 @@ class IOIReproductionPipeline:
                     "pipeline": "IOIReproductionPipeline-HighFidelity",
                     "status": "unavailable",
                     "provenance": "unavailable",
+                    "field_provenance": _field_map(
+                        ("status", "observed_metrics", "raw_traces", "report", "reason"),
+                        "unavailable",
+                    ),
                     "mock_mode": self.adapter.spec.mock_mode,
                     "validation_eligible": False,
                     "publication_eligible": False,
@@ -139,6 +148,10 @@ class IOIReproductionPipeline:
                     "pipeline": "IOIReproductionPipeline-HighFidelity",
                     "status": "unavailable",
                     "provenance": "unavailable",
+                    "field_provenance": _field_map(
+                        ("status", "observed_metrics", "raw_traces", "report", "reason"),
+                        "unavailable",
+                    ),
                     "mock_mode": False,
                     "validation_eligible": False,
                     "publication_eligible": False,
@@ -227,6 +240,10 @@ class IOIReproductionPipeline:
                 "pipeline": "IOIReproductionPipeline-HighFidelity",
                 "status": "unavailable",
                 "provenance": "unavailable",
+                "field_provenance": _field_map(
+                    ("status", "observed_metrics", "raw_traces", "report", "discovery_provenance"),
+                    "unavailable",
+                ),
                 "mock_mode": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
@@ -271,6 +288,12 @@ class IOIReproductionPipeline:
             "discovered_edges": discovered_edges,
             "discovery_provenance": discovery_provenance,
             "synthetic_fields": synthetic_fields,
+            "field_provenance": _field_map(
+                ("circuit_faithfulness", "patch_success_rate", "functional_recovery",
+                 "full_logit_diff", "ablated_logit_diff", "isolated_logit_diff",
+                 "discovered_nodes", "discovered_edges"),
+                "synthetic" if self.adapter.spec.mock_mode else "live",
+            ),
         }
 
         failure_diagnostics = self.diagnose_failure(observed_metrics)
@@ -296,6 +319,11 @@ class IOIReproductionPipeline:
             "pipeline": "IOIReproductionPipeline-HighFidelity",
             "status": "completed",
             "provenance": "synthetic" if self.adapter.spec.mock_mode else "live",
+            "field_provenance": _field_map(
+                ("status", "observed_metrics", "raw_traces", "reproducibility_report",
+                 "manifest_id", "discovery_provenance"),
+                "synthetic" if self.adapter.spec.mock_mode else "live",
+            ),
             "provenance_note": (
                 "Mock/reference fields are not live measurements and are not "
                 "eligible for validation or publication."

@@ -36,7 +36,7 @@
     <section class="metric-strip" aria-label="Report source observations">
       <div class="metric-tile">
         <span class="metric-tile__value">{{ liveReports.length }}</span>
-        <span class="metric-tile__label">Live report payloads</span>
+        <span class="metric-tile__label">Report payloads</span>
       </div>
       <div class="metric-tile">
         <span class="metric-tile__value">{{ runCount }}</span>
@@ -89,7 +89,7 @@
               <span class="report-row__body">
                 <strong>{{ report.title }}</strong>
                 <span>{{ report.goal || 'Goal not returned' }}</span>
-                <span class="report-row__meta"><code>{{ report.runId }}</code> · {{ report.status || 'status unavailable' }}</span>
+                <span class="report-row__meta"><code>{{ report.runId }}</code> · {{ report.status || 'status unavailable' }} · {{ report.provenance || 'unavailable' }}</span>
               </span>
               <time v-if="report.generatedAt" :datetime="report.generatedAt">{{ formatDate(report.generatedAt) }}</time>
             </button>
@@ -122,6 +122,14 @@
             <div>
               <dt>Run status</dt>
               <dd>{{ selectedReport.status || 'Unavailable' }}</dd>
+            </div>
+            <div>
+              <dt>Provenance</dt>
+              <dd>{{ selectedReport.provenance || 'Unavailable' }}</dd>
+            </div>
+            <div>
+              <dt>Field provenance</dt>
+              <dd>{{ formatFieldProvenance(selectedReport.fieldProvenance) }}</dd>
             </div>
             <div>
               <dt>Generated</dt>
@@ -185,6 +193,8 @@ interface ReportEntry {
   title: string;
   goal: string;
   status: string;
+  provenance: string;
+  fieldProvenance: Record<string, string>;
   generatedAt: string;
   markdown: string;
 }
@@ -230,6 +240,16 @@ async function request<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function fieldProvenanceOf(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, text(item, 'unavailable')]));
+}
+
+function formatFieldProvenance(value: Record<string, string>): string {
+  const entries = Object.entries(value);
+  return entries.length ? entries.map(([key, item]) => `${key}: ${item}`).join(' · ') : 'Unavailable';
+}
+
 function reportPayload(value: unknown): { markdown: string; title: string; generatedAt: string } {
   if (typeof value === 'string') return { markdown: value, title: '', generatedAt: '' };
   if (!isRecord(value)) return { markdown: '', title: '', generatedAt: '' };
@@ -259,6 +279,8 @@ function normalizeReport(run: { id: string; goal: string; status: string; create
     title: payload.title || `Mechanistic report · ${run.goal || run.id}`,
     goal: text(result.goal, run.goal),
     status: text(raw.status, text(result.status, run.status)),
+    provenance: text(publication?.provenance, text(result.provenance, 'unavailable')),
+    fieldProvenance: fieldProvenanceOf(publication?.field_provenance ?? result.field_provenance),
     generatedAt: payload.generatedAt || run.created,
     markdown: payload.markdown,
   };

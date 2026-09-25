@@ -123,7 +123,8 @@
           <dl class="result-row__metrics">
             <div><dt>Score</dt><dd>{{ formatValue(result.score) }}</dd></div>
             <div><dt>Pass rate</dt><dd>{{ formatValue(result.passRate) }}</dd></div>
-            <div><dt>Provenance</dt><dd>{{ result.provenance || 'Not supplied' }}</dd></div>
+            <div><dt>Provenance</dt><dd>{{ result.provenance || 'Unavailable' }}</dd></div>
+            <div><dt>Field provenance</dt><dd>{{ formatFieldProvenance(result.fieldProvenance) }}</dd></div>
           </dl>
           <p v-if="result.error || result.reason" class="result-row__error">{{ result.error || result.reason }}</p>
         </article>
@@ -145,7 +146,7 @@ import { api } from '../services/api';
 type SourceTone = 'online' | 'offline' | 'loading' | 'partial';
 type ResultTone = 'success' | 'error' | 'neutral';
 type JsonRecord = Record<string, unknown>;
-type SuiteResult = { key: string; name: string; status: string; score: unknown; passRate: unknown; provenance: string; error: string; reason: string; tone: ResultTone };
+type SuiteResult = { key: string; name: string; status: string; score: unknown; passRate: unknown; provenance: string; fieldProvenance: Record<string, string>; error: string; reason: string; tone: ResultTone };
 
 const catalog = ref<string[]>([]);
 const selectedBenchmarks = ref<string[]>([]);
@@ -162,6 +163,14 @@ function text(value: unknown, fallback = ''): string { return typeof value === '
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 function isOffline(message: string): boolean { return /offline|failed to fetch|network|load|connection|timeout/i.test(message); }
 function formatValue(value: unknown): string { return value === undefined || value === null || value === '' ? 'Unavailable' : typeof value === 'number' ? String(value) : text(value); }
+function fieldProvenanceOf(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, text(item, 'unavailable')]));
+}
+function formatFieldProvenance(value: Record<string, string>): string {
+  const entries = Object.entries(value);
+  return entries.length ? entries.map(([key, item]) => `${key}: ${item}`).join(' · ') : 'Unavailable';
+}
 function resultTone(status: string, error: string): ResultTone { const normalized = status.toLowerCase(); if (normalized === 'unavailable') return 'neutral'; if (['completed', 'complete', 'ok', 'success', 'passed'].includes(normalized)) return 'success'; if (['error', 'failed', 'failure'].includes(normalized) || error) return 'error'; return 'neutral'; }
 
 const sourceTone = computed<SourceTone>(() => loadingCatalog.value ? 'loading' : offline.value ? 'offline' : errorMessage.value ? 'partial' : 'online');
@@ -206,11 +215,12 @@ async function runSuite(): Promise<void> {
       const reason = text(record.reason);
       const error = text(record.error);
       const provenance = text(record.provenance, 'unavailable');
-      results.value.push({ key: `${name}-${Date.now()}-${Math.random()}`, name, status, score: record.score, passRate: record.pass_rate, provenance, error, reason, tone: resultTone(status, error || reason) });
+      const fieldProvenance = fieldProvenanceOf(record.field_provenance);
+      results.value.push({ key: `${name}-${Date.now()}-${Math.random()}`, name, status, score: record.score, passRate: record.pass_rate, provenance, fieldProvenance, error, reason, tone: resultTone(status, error || reason) });
     } catch (error) {
       const message = messageOf(error);
       offline.value = isOffline(message);
-      results.value.push({ key: `${name}-${Date.now()}-${Math.random()}`, name, status: 'request failed', score: undefined, passRate: undefined, provenance: 'unavailable', error: message, reason: '', tone: 'error' });
+      results.value.push({ key: `${name}-${Date.now()}-${Math.random()}`, name, status: 'request failed', score: undefined, passRate: undefined, provenance: 'unavailable', fieldProvenance: {}, error: message, reason: '', tone: 'error' });
       errorMessage.value = `${name}: ${message}`;
     }
   }

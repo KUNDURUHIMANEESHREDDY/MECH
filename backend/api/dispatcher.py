@@ -66,12 +66,16 @@ def api_status() -> Dict[str, Any]:
 
 @router.get("/models")
 def list_models() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
     return {
         "models": [
             "gpt2-small", "gpt2-medium", "gemma-2b",
             "llama-3-8b", "qwen-7b", "pythia-1b",
             "mistral-7b", "distilgpt2"
-        ]
+        ],
+        "provenance": "reference",
+        "field_provenance": field_map(("models",), "reference"),
     }
 
 
@@ -81,7 +85,16 @@ def load_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return engine.load()
-    return {"status": "loaded", "model_name": name}
+    return {
+        "status": "loaded",
+        "model_name": name,
+        "provenance": "unavailable",
+        "field_provenance": {
+            "status": "unavailable",
+            "model_name": "unavailable",
+        },
+        "reason": "The model registry is reference-only; no live model was loaded.",
+    }
 
 
 @router.get("/models/{name}")
@@ -92,6 +105,14 @@ def get_model_info(name: str) -> Dict[str, Any]:
         "hidden_size": 768,
         "vocab_size": 50257,
         "num_heads": 12,
+        "provenance": "reference",
+        "field_provenance": {
+            "model_name": "reference",
+            "layers": "reference",
+            "hidden_size": "reference",
+            "vocab_size": "reference",
+            "num_heads": "reference",
+        },
     }
 
 
@@ -105,6 +126,13 @@ def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(res, dict):
             # Provenance marker: live weights (never silently fake).
             res.setdefault("provenance", "live")
+            res.setdefault("field_provenance", {
+                "model_name": "live",
+                "tokens": "live",
+                "generated_text": "live",
+                "attention_maps": "live",
+                "neuron_activations": "live",
+            })
         return res
     prompt_tokens = [t.strip() for t in prompt.split() if t.strip()]
     if not prompt_tokens:
@@ -117,6 +145,15 @@ def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "model_name": model_name,
         "provenance": "seeded",
+        "field_provenance": {
+            "model_name": "seeded",
+            "tokens": "seeded",
+            "generated_text": "seeded",
+            "attention_maps": "seeded",
+            "neuron_activations": "seeded",
+            "gpu_util": "seeded",
+            "memory_util": "seeded",
+        },
         "provenance_note": "torch/transformers unavailable: deterministic "
                            "seeded stand-ins, not model measurements",
         "tokens": tokens,
@@ -138,8 +175,12 @@ def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/benchmarks")
 def list_benchmarks() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
     return {
-        "benchmarks": ["IOI", "Induction", "SAE", "ACDC", "PathPatching"]
+        "benchmarks": ["IOI", "Induction", "SAE", "ACDC", "PathPatching"],
+        "provenance": "reference",
+        "field_provenance": field_map(("benchmarks",), "reference"),
     }
 
 
@@ -150,6 +191,8 @@ def research_catalog(item_type: str = "all") -> Dict[str, Any]:
 
 @router.post("/benchmarks/run")
 def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
     name = str(payload.get("benchmark_name", "IOI"))
     try:
         from backend.validation.benchmark_runner import (
@@ -163,6 +206,10 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "status": status if status in {"unavailable", "error"} else "unavailable",
                 "benchmark_name": name,
                 "provenance": provenance if provenance in {"unavailable", "seeded", "reference"} else "unavailable",
+                "field_provenance": field_map(
+                    ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
+                    provenance if provenance in {"unavailable", "seeded", "reference"} else "unavailable",
+                ),
                 "reason": str(res.get("reason") or "Live benchmark execution is unavailable."),
             }
 
@@ -174,6 +221,10 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "unavailable",
                 "benchmark_name": name,
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
+                    "unavailable",
+                ),
                 "reason": "The live executor did not return numeric score fields.",
             }
 
@@ -181,6 +232,10 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
             "status": "completed",
             "benchmark_name": name,
             "provenance": "live",
+            "field_provenance": field_map(
+                ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
+                "live",
+            ),
             "score": round(score, 4),
             "pass_rate": round(pass_rate, 4),
             "eval_samples": res.get("eval_samples"),
@@ -190,6 +245,10 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
             "status": "error",
             "benchmark_name": name,
             "provenance": "unavailable",
+            "field_provenance": field_map(
+                ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
+                "unavailable",
+            ),
             "error": str(exc)[:300],
         }
 
@@ -234,6 +293,8 @@ def delete_session(item_id: str) -> Dict[str, Any]:
 
 @router.get("/discoveries")
 def list_discoveries() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
     return {
         "discoveries": [
             "InductionCircuitDiscovery",
@@ -247,7 +308,9 @@ def list_discoveries() -> Dict[str, Any]:
             "CrossFamilySAEAlignment",
             "SuppressionCircuitDiscovery",
             "TrainingDynamicsDiscovery"
-        ]
+        ],
+        "provenance": "reference",
+        "field_provenance": field_map(("discoveries",), "reference"),
     }
 
 
@@ -325,9 +388,15 @@ def _seed(text: str) -> int:
 
 
 def _mark(res: Any, provenance: str) -> Any:
-    """Stamp a response with its data provenance (live vs seeded)."""
+    """Stamp a response and each top-level returned field with provenance."""
     if isinstance(res, dict):
         res.setdefault("provenance", provenance)
+        if not isinstance(res.get("field_provenance"), dict):
+            res["field_provenance"] = {
+                str(key): provenance
+                for key in res
+                if key not in {"provenance", "field_provenance"}
+            }
     return res
 
 
@@ -339,6 +408,15 @@ def gpt2_load(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "status": "loaded",
         "provenance": "seeded",
+        "field_provenance": {
+            "status": "seeded",
+            "model_name": "seeded",
+            "n_layers": "seeded",
+            "n_heads": "seeded",
+            "d_model": "seeded",
+            "d_mlp": "seeded",
+            "device": "seeded",
+        },
         "model_name": "gpt2-small",
         "n_layers": 12,
         "n_heads": 12,
@@ -403,15 +481,14 @@ def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
     ranked.sort(key=lambda kv: -kv[1])
     top5 = [{"token": t, "logit": round(v, 4)} for t, v in ranked[:5]]
     top16 = [{"token": t, "logit": round(v, 4)} for t, v in ranked[:16]]
-    return {
+    return _mark({
         "status": "ok",
-        "provenance": "seeded",
         "prompt": prompt,
         "str_tokens": str_tokens,
         "top5": top5,
         "top16": top16,
         "next_token": ranked[0][0],
-    }
+    }, "seeded")
 
 
 @router.post("/gpt2/activations")
@@ -421,14 +498,13 @@ def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
         return _mark(engine.activations(int(payload.get("layer", 0))), "live")
     layer = max(0, min(11, int(payload.get("layer", 0))))
     seq = int(payload.get("seq_len", 12))
-    return {
+    return _mark({
         "status": "ok",
-        "provenance": "seeded",
         "layer": layer,
         "resid_shape": [seq, 768],
         "attn_shape": [12, seq, seq],
         "mlp_shape": [seq, 3072],
-    }
+    }, "seeded")
 
 
 @router.post("/gpt2/attention_head")
@@ -448,7 +524,8 @@ def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
         total = sum(matrix[i])
         if total > 0:
             matrix[i] = [round(v / total, 4) for v in matrix[i]]
-    return {"status": "ok", "provenance": "seeded", "layer": layer, "head": head, "matrix": matrix, "str_tokens": tokens}
+    return _mark({"status": "ok", "layer": layer, "head": head,
+                  "matrix": matrix, "str_tokens": tokens}, "seeded")
 
 
 @router.post("/gpt2/patch_head")
@@ -470,16 +547,15 @@ def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     clean_ld = round(rng.uniform(1.5, 3.5), 4)
     patched_ld = round(rng.uniform(-1.2, 0.9), 4)
     delta = round(patched_ld - clean_ld, 4)
-    return {
+    return _mark({
         "status": "ok",
-        "provenance": "seeded",
         "layer": layer,
         "head": head,
         "clean_ld": clean_ld,
         "patched_ld": patched_ld,
         "delta": delta,
         "direction": "hurts" if delta < 0 else "helps",
-    }
+    }, "seeded")
 
 
 @router.post("/gpt2/ioi")
@@ -492,9 +568,8 @@ def gpt2_ioi(payload: Dict[str, Any]) -> Dict[str, Any]:
     rng = random.Random(_seed(f"{io_name}:{subj_name}"))
     clean_prompt = f"When {subj_name} and {io_name} went to the store, {subj_name} gave a bottle to"
     corrupted_prompt = f"When {subj_name} and {io_name} went to the store, {io_name} gave a bottle to"
-    return {
+    return _mark({
         "status": "ok",
-        "provenance": "seeded",
         "io_name": io_name,
         "subj_name": subj_name,
         "clean_prompt": clean_prompt,
@@ -505,7 +580,7 @@ def gpt2_ioi(payload: Dict[str, Any]) -> Dict[str, Any]:
         "corrupted_top1": subj_name,
         "corrupted_ld": round(rng.uniform(-4.0, -2.0), 4),
         "corrupted_pass": True,
-    }
+    }, "seeded")
 
 
 # ---------------------------------------------------------------------------
@@ -516,11 +591,11 @@ def gpt2_ioi(payload: Dict[str, Any]) -> Dict[str, Any]:
 def gpt2_architecture(payload: Dict[str, Any] = None) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.architecture()
-    return {
-        "status": "error",
+        return _mark(engine.architecture(), "live")
+    return _mark({
+        "status": "unavailable",
         "error": "torch/transformers not available — cannot load real GPT-2",
-    }
+    }, "unavailable")
 
 
 @router.post("/gpt2/layer")
@@ -528,15 +603,16 @@ def gpt2_layer(payload: Dict[str, Any]) -> Dict[str, Any]:
     layer = int(payload.get("layer", 0))
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.layer_detail(layer)
-    return {"status": "error", "error": "torch/transformers not available"}
+        return _mark(engine.layer_detail(layer), "live")
+    return _mark({"status": "unavailable",
+                  "error": "torch/transformers not available"}, "unavailable")
 
 
 @router.post("/gpt2/neurons")
 def gpt2_neurons(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.list_neurons(
+        return _mark(engine.list_neurons(
             layer=int(payload.get("layer", 0)),
             component=str(payload.get("component", "mlp")),
             page=int(payload.get("page", 0)),
@@ -544,45 +620,49 @@ def gpt2_neurons(payload: Dict[str, Any]) -> Dict[str, Any]:
             sort_by=str(payload.get("sort_by", "index")),
             order=str(payload.get("order", "asc")),
             q=str(payload.get("q", "")),
-        )
-    return {"status": "error", "error": "torch/transformers not available"}
+        ), "live")
+    return _mark({"status": "unavailable",
+                  "error": "torch/transformers not available"}, "unavailable")
 
 
 @router.post("/gpt2/neuron")
 def gpt2_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.neuron_detail(
+        return _mark(engine.neuron_detail(
             layer=int(payload.get("layer", 0)),
             neuron_index=int(payload.get("neuron_index", 0)),
             component=str(payload.get("component", "mlp")),
             top_k_weights=int(payload.get("top_k_weights", 16)),
-        )
-    return {"status": "error", "error": "torch/transformers not available"}
+        ), "live")
+    return _mark({"status": "unavailable",
+                  "error": "torch/transformers not available"}, "unavailable")
 
 
 @router.post("/gpt2/head")
 def gpt2_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.head_detail(
+        return _mark(engine.head_detail(
             layer=int(payload.get("layer", 0)),
             head=int(payload.get("head", 0)),
-        )
-    return {"status": "error", "error": "torch/transformers not available"}
+        ), "live")
+    return _mark({"status": "unavailable",
+                  "error": "torch/transformers not available"}, "unavailable")
 
 
 @router.post("/gpt2/patch_neuron")
 def gpt2_patch_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.patch_neuron(
+        return _mark(engine.patch_neuron(
             layer=int(payload.get("layer", 0)),
             neuron_index=int(payload.get("neuron_index", 0)),
             patch_value=float(payload.get("patch_value", 0.0)),
             prompt=payload.get("prompt"),
-        )
-    return {"status": "error", "error": "torch/transformers not available"}
+        ), "live")
+    return _mark({"status": "unavailable",
+                  "error": "torch/transformers not available"}, "unavailable")
 
 
 @router.post("/gpt2/layer_activations")
@@ -590,13 +670,14 @@ def gpt2_layer_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         try:
-            return engine.layer_activations(
+            return _mark(engine.layer_activations(
                 layer=int(payload.get("layer", 0)),
                 prompt=payload.get("prompt") or "The capital of France is",
-            )
+            ), "live")
         except Exception as exc:
-            return {"status": "error", "error": str(exc)[:300]}
-    return {"status": "error", "error": "torch/transformers not available"}
+            return _mark({"status": "error", "error": str(exc)[:300]}, "unavailable")
+    return _mark({"status": "unavailable",
+                  "error": "torch/transformers not available"}, "unavailable")
 
 
 @router.post("/gpt2/logit_lens_all")
@@ -604,21 +685,31 @@ def gpt2_logit_lens_all(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         try:
-            return engine.logit_lens_all(
+            return _mark(engine.logit_lens_all(
                 prompt=payload.get("prompt") or "The capital of France is",
-            )
+            ), "live")
         except Exception as exc:
-            return {"status": "error", "error": str(exc)[:300]}
-    return {"status": "error", "error": "torch/transformers not available"}
+            return _mark({"status": "error", "error": str(exc)[:300]}, "unavailable")
+    return _mark({"status": "unavailable",
+                  "error": "torch/transformers not available"}, "unavailable")
 
 
 @router.get("/circuits")
 def list_circuits() -> Dict[str, Any]:
     try:
         from backend.science.explorer.circuit_explorer import CircuitExplorer
-        return {"circuits": CircuitExplorer().list_circuits()}
+        return {
+            "circuits": CircuitExplorer().list_circuits(),
+            "provenance": "reference",
+            "field_provenance": {"circuits": "reference"},
+        }
     except Exception as exc:
-        return {"status": "error", "error": str(exc)[:300]}
+        return {
+            "status": "error",
+            "provenance": "unavailable",
+            "field_provenance": {"circuits": "unavailable"},
+            "error": str(exc)[:300],
+        }
 
 
 @router.get("/circuits/{circuit_id}")
@@ -627,12 +718,27 @@ def get_circuit(circuit_id: str) -> Dict[str, Any]:
         from backend.science.explorer.circuit_explorer import CircuitExplorer
         res = CircuitExplorer().get_circuit(circuit_id=circuit_id)
         if res is None:
-            return {"status": "error",
-                    "error": f"unknown circuit_id '{circuit_id}'"}
-        return res if isinstance(res, dict) else {"status": "ok",
-                                                 "circuit": res}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": {"circuit": "unavailable"},
+                "error": f"unknown circuit_id '{circuit_id}'",
+            }
+        if isinstance(res, dict):
+            return res
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": {"circuit": "unavailable"},
+            "error": "Circuit registry returned an unreadable record.",
+        }
     except Exception as exc:
-        return {"status": "error", "error": str(exc)[:300]}
+        return {
+            "status": "error",
+            "provenance": "unavailable",
+            "field_provenance": {"circuit": "unavailable"},
+            "error": str(exc)[:300],
+        }
 
 
 @router.get("/figures/attention")

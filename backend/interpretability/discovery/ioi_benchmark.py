@@ -16,4 +16,13 @@ class IOIBenchmarkSuite:
             "average_logit_diff": 3.84,
             "num_prompts": 1000,
             "status": "Passed",
+            "provenance": "reference",
+            "field_provenance": {
+                "benchmark_name": "reference",
+                "model_name": "reference",
+                "ioi_accuracy": "reference",
+                "average_logit_diff": "reference",
+                "num_prompts": "reference",
+                "status": "reference",
+            },
         }

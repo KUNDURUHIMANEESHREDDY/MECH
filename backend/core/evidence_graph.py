@@ -169,7 +169,22 @@ class TraceableEvidenceGraph:
             if _step_allows_evidence(step):
                 for key, value in _iter_evidence(step):
                     ev_id = f"{node_id}_ev_{key.replace('.', '_')}"
-                    graph.add_node(ev_id, "Evidence", f"{key} = {value}")
+                    evidence_provenance = "live"
+                    result = step.get("result")
+                    if isinstance(result, dict):
+                        evidence_provenance = str(
+                            result.get("provenance", evidence_provenance)
+                        ).lower()
+                    graph.add_node(
+                        ev_id,
+                        "Evidence",
+                        f"{key} = {value}",
+                        {
+                            "value": value,
+                            "provenance": evidence_provenance,
+                            "field_provenance": {"value": evidence_provenance},
+                        },
+                    )
                     graph.add_edge(node_id, ev_id, "yields")
             prev = node_id
         return graph

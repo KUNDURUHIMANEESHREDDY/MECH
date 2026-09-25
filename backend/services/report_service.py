@@ -35,6 +35,13 @@ class ReportService:
             "experiment_id": experiment_id,
             "title": title,
             "provenance": provenance,
+            "field_provenance": {
+                "experiment_id": provenance,
+                "title": provenance,
+                "markdown": provenance,
+                "html": provenance,
+                "generated_at": provenance,
+            },
             "markdown": markdown,
             "html": html,
             "generated_at": now,

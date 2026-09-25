@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from backend.agents.evidence_policy import field_map
+
 
 class MechanisticBenchmarkRunner:
     """Report benchmark execution availability without fabricating results."""
@@ -18,5 +20,8 @@ class MechanisticBenchmarkRunner:
             "benchmark_id": benchmark_id,
             "status": "unavailable",
             "provenance": "unavailable",
+            "field_provenance": field_map(
+                ("benchmark_id", "status", "reason"), "unavailable"
+            ),
             "reason": "No live benchmark executor is connected.",
         }

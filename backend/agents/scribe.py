@@ -18,7 +18,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any, Dict, List, Optional
 
-from .evidence_policy import publication_block_reason
+from .evidence_policy import field_map, publication_block_reason
 
 
 def _first_score(result: Any, keys: Any) -> float:
@@ -52,6 +52,9 @@ class Scribe:
             return {
                 "status": "blocked",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "result", "reason"), "unavailable"
+                ),
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "reason": "A run trace is required; reference/demo graphs cannot be published.",
@@ -61,6 +64,9 @@ class Scribe:
             return {
                 "status": "blocked",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "result", "reason"), "unavailable"
+                ),
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "reason": reason,
@@ -69,8 +75,12 @@ class Scribe:
             from backend.core.evidence_graph import TraceableEvidenceGraph
             graph = TraceableEvidenceGraph.from_run(
                 run_id or "run_unknown", goal, trace)
-            return {"status": "completed", "provenance": "live",
-                    "result": graph.to_dict()}
+            return {
+                "status": "completed",
+                "provenance": "live",
+                "field_provenance": field_map(("status", "result"), "live"),
+                "result": graph.to_dict(),
+            }
         except Exception as exc:
             return {"status": "error", "provenance": "unavailable",
                     "error": str(exc)[:500]}
@@ -82,8 +92,12 @@ class Scribe:
             res = ReportService().generate_report(
                 experiment_id=experiment_id, title=title,
                 provenance=provenance)
-            return {"status": "completed", "provenance": provenance,
-                    "result": res}
+            return {
+                "status": "completed",
+                "provenance": provenance,
+                "field_provenance": field_map(("status", "result"), provenance),
+                "result": res,
+            }
         except Exception as exc:
             return {"status": "error", "provenance": "unavailable",
                     "error": str(exc)[:500]}
@@ -99,6 +113,9 @@ class Scribe:
             return {
                 "status": "blocked",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "result", "reason"), "unavailable"
+                ),
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "goal": goal,
@@ -115,6 +132,9 @@ class Scribe:
             return {
                 "status": "blocked",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "result", "reason"), "unavailable"
+                ),
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "goal": goal,
@@ -126,6 +146,11 @@ class Scribe:
         publication = {
             "status": "completed",
             "provenance": "live",
+            "field_provenance": field_map(
+                ("status", "report", "evidence_graph", "reflection",
+                 "reproducibility", "gate", "knowledge_writeback"),
+                "live",
+            ),
             "validation_eligible": True,
             "publication_eligible": True,
             "goal": goal,
@@ -140,6 +165,11 @@ class Scribe:
         }
         publication["knowledge_writeback"] = self.write_back(
             run_id or exp_id, goal, trace, reflection, publication)
+        writeback = publication["knowledge_writeback"]
+        publication["field_provenance"]["knowledge_writeback"] = (
+            writeback.get("provenance", "unavailable")
+            if isinstance(writeback, dict) else "unavailable"
+        )
         return publication
 
     def write_back(self, run_id: str, goal: str,
@@ -157,6 +187,9 @@ class Scribe:
                 "stored": [],
                 "status": "blocked",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "stored", "reason"), "unavailable"
+                ),
                 "reason": "Knowledge write-back requires a completed live publication.",
             }
         publication_repro = (publication.get("reproducibility")
@@ -174,6 +207,9 @@ class Scribe:
                 "stored": [],
                 "status": "blocked",
                 "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "stored", "reason"), "unavailable"
+                ),
                 "reason": reason,
             }
 
@@ -284,5 +320,16 @@ class Scribe:
                      "fidelity_pct": gate.get("value")})
                 add_edge(exp, ev, EdgeType.VALIDATED_BY)
         except Exception as exc:
-            return {"stored": stored, "error": str(exc)[:300]}
-        return {"stored": stored}
+            return {
+                "stored": stored,
+                "status": "error",
+                "provenance": "unavailable",
+                "field_provenance": field_map(("status", "stored", "error"), "unavailable"),
+                "error": str(exc)[:300],
+            }
+        return {
+            "stored": stored,
+            "status": "completed",
+            "provenance": "live",
+            "field_provenance": field_map(("status", "stored"), "live"),
+        }

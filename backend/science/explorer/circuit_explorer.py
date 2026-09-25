@@ -83,6 +83,10 @@ _CIRCUITS: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _reference_fields(*fields: str) -> Dict[str, str]:
+    return {field: "reference" for field in fields}
+
+
 class CircuitExplorer:
     """Circuit-centric exploration starting from circuit → components → tokens."""
 
@@ -99,6 +103,11 @@ class CircuitExplorer:
                 "minimality": c["minimality"],
                 "node_count": len(c["nodes"]),
                 "edge_count": len(c["edges"]),
+                "provenance": "reference",
+                "field_provenance": _reference_fields(
+                    "circuit_id", "name", "paper", "arxiv_id", "description",
+                    "faithfulness", "completeness", "minimality", "node_count", "edge_count",
+                ),
             }
             for cid, c in _CIRCUITS.items()
         ]
@@ -134,7 +143,14 @@ class CircuitExplorer:
             completeness=c["completeness"],
             minimality=c["minimality"],
         )
-        return asdict(graph)
+        result = asdict(graph)
+        result["provenance"] = "reference"
+        result["field_provenance"] = _reference_fields(
+            "circuit_id", "circuit_name", "paper_reference", "arxiv_id",
+            "model_id", "description", "nodes", "edges", "faithfulness",
+            "completeness", "minimality",
+        )
+        return result
 
     def get_component_detail(self, circuit_id: str, node_id: str) -> Dict[str, Any]:
         """Navigate from circuit → component with links to other circuits/neurons."""
@@ -156,4 +172,10 @@ class CircuitExplorer:
                 cid for cid, c in _CIRCUITS.items()
                 if cid != circuit_id and any(n[0] == node_id for n in c.get("nodes", []))
             ],
+            "provenance": "reference",
+            "field_provenance": _reference_fields(
+                "node_id", "circuit_id", "node_type", "label", "layer", "index",
+                "importance_score", "description", "navigate_to_neuron",
+                "other_circuits_containing_this_node",
+            ),
         }
