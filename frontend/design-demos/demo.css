@@ -238,6 +238,7 @@ code,
   background: var(--surface-2);
   color: var(--muted);
   font: 600 11px/1 var(--font-mono);
+  white-space: nowrap;
 }
 
 .tag.live {

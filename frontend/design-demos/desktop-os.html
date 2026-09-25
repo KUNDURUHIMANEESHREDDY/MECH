@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MECH — White Desktop OS Demo</title>
+  <link rel="stylesheet" href="./demo.css" />
+  <style>
+    .os-shell { min-height: calc(100vh - 30px); background: var(--bg); }
+    .os-menubar { display: flex; min-height: 38px; align-items: center; gap: 5px; padding: 4px 10px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .os-app-name { min-width: 92px; padding-left: 4px; font-size: 12px; font-weight: 750; }
+    .menu-action { min-height: 28px; padding: 0 9px; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
+    .menu-action:hover { background: var(--surface-3); color: var(--text); }
+    .menu-separator { width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
+    .menubar-spacer { flex: 1; }
+    .desktop-wrap { position: relative; height: calc(100vh - 96px); min-height: 720px; overflow: auto; }
+    .desktop { position: relative; min-width: 1060px; min-height: 720px; overflow: hidden; background: var(--surface-2); }
+    .desktop::before { position: absolute; inset: 0; background: transparent; content: ""; pointer-events: none; }
+    .desktop-intro { position: absolute; top: 18px; left: 22px; z-index: 0; color: var(--faint); font: 500 9px/1 var(--font-mono); }
+    .tool-window { position: absolute; z-index: 2; display: flex; min-width: 280px; min-height: 190px; flex-direction: column; left: var(--x); top: var(--y); width: var(--w); height: var(--h); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); box-shadow: 0 10px 26px rgba(24,34,48,.09); }
+    .tool-window.active { z-index: 5; border-color: var(--accent); box-shadow: 0 12px 30px rgba(24,34,48,.12), 0 0 0 1px var(--accent); }
+    .tool-window[hidden] { display: none; }
+    .window-bar { display: grid; min-height: 38px; flex: 0 0 auto; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 0 7px 0 10px; border-bottom: 1px solid var(--line); background: var(--surface-2); cursor: grab; touch-action: none; user-select: none; }
+    .tool-window.active .window-bar { background: var(--accent-soft); }
+    .window-bar.dragging { cursor: grabbing; }
+    .window-glyph { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--accent); font: 750 8px/1 var(--font-mono); }
+    .window-title { min-width: 0; font-size: 11px; font-weight: 750; }
+    .window-title span { margin-left: 6px; color: var(--muted); font: 500 9px/1 var(--font-mono); }
+    .window-controls { display: flex; align-items: center; gap: 3px; }
+    .window-control { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+    .window-control:hover { background: var(--surface-3); color: var(--text); }
+    .window-body { min-height: 0; flex: 1; overflow: auto; padding: 13px; }
+    .window-section + .window-section { margin-top: 16px; }
+    .window-section h2 { margin-bottom: 7px; color: var(--muted); font: 700 9px/1 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
+    .window-section p { color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .prompt-field { width: 100%; min-height: 88px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--surface-2); font: 11px/1.55 var(--font-mono); }
+    .field-row { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 8px; margin-top: 9px; }
+    .field-label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 9px; }
+    .field-input { width: 100%; min-height: 32px; border: 1px solid var(--line); border-radius: 5px; padding: 0 8px; background: var(--surface); font-size: 10px; }
+    .run-result { margin-top: 10px; color: var(--muted); font: 10px/1.5 var(--font-mono); }
+    .evidence-list { display: grid; gap: 6px; }
+    .evidence-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
+    .evidence-icon { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--accent); font: 700 8px/1 var(--font-mono); }
+    .evidence-row strong { display: block; font-size: 10px; }
+    .evidence-row span { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .evidence-inspect { min-height: 27px; padding: 0 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--muted); cursor: pointer; font: 650 9px/1 var(--font-mono); }
+    .evidence-inspect[aria-pressed="true"] { border-color: #c8d8f7; background: var(--accent-soft); color: #214da3; }
+    .gate-meter { height: 7px; margin-top: 9px; overflow: hidden; border-radius: 7px; background: var(--surface-3); }
+    .gate-meter span { display: block; width: 83%; height: 100%; border-radius: inherit; background: var(--amber); }
+    .report-title { font-size: 16px; letter-spacing: -.02em; }
+    .report-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+    .fact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--line); }
+    .fact { padding: 9px; background: var(--surface); }
+    .fact span { display: block; color: var(--muted); font-size: 9px; }
+    .fact strong { display: block; margin-top: 3px; font: 650 11px/1.3 var(--font-mono); }
+    .window-terminal { height: 100%; min-height: 210px; margin: -13px; padding: 12px 13px; background: var(--surface); color: var(--text); font: 10px/1.65 var(--font-mono); }
+    .terminal-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .terminal-muted { color: var(--muted); }
+    .terminal-prompt { display: flex; gap: 7px; margin-top: 8px; }
+    .terminal-prompt span { color: var(--accent); }
+    .terminal-prompt input { min-width: 0; flex: 1; border: 0; padding: 0; background: transparent; color: var(--text); font: inherit; }
+    .resize-handle { position: absolute; z-index: 3; right: 2px; bottom: 2px; width: 17px; height: 17px; border-right: 2px solid var(--line-strong); border-bottom: 2px solid var(--line-strong); cursor: nwse-resize; touch-action: none; }
+    .window-help { position: absolute; right: 18px; bottom: 12px; z-index: 1; color: var(--faint); font: 9px/1.4 var(--font-mono); text-align: right; }
+    .os-statusbar { display: flex; min-height: 28px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; border-top: 1px solid var(--line); background: var(--surface); color: var(--muted); font: 500 9px/1 var(--font-mono); }
+    .status-group { display: flex; align-items: center; gap: 12px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    @media (max-width: 900px) {
+      .desktop-wrap { height: auto; min-height: 0; overflow: visible; }
+      .desktop { display: grid; min-width: 0; min-height: 0; gap: 12px; padding: 12px; overflow: visible; }
+      .desktop::before, .desktop-intro, .window-help { display: none; }
+      .tool-window { position: relative; left: auto !important; top: auto !important; width: auto !important; height: auto !important; min-height: 250px; }
+      .window-body { min-height: 210px; }
+      .resize-handle { display: none; }
+      .os-menubar { overflow-x: auto; }
+      .menubar-spacer, .menu-separator { display: none; }
+    }
+    @media (max-width: 560px) {
+      .os-app-name { min-width: 0; }
+      .menu-action { white-space: nowrap; }
+      .os-statusbar { align-items: flex-start; flex-direction: column; padding: 8px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-ribbon"><strong>WHITE GUI STUDY 06 · SAMPLE DATA</strong><span>Desktop OS · illustrative tools and measurements · production UI unchanged</span></div>
+  <main class="os-shell">
+    <nav class="os-menubar" aria-label="Desktop window menu">
+      <span class="os-app-name">MECH Desktop</span>
+      <button class="menu-action" type="button" data-open="prompt">Prompt</button>
+      <button class="menu-action" type="button" data-open="evidence">Evidence</button>
+      <button class="menu-action" type="button" data-open="report">Report</button>
+      <button class="menu-action" type="button" data-open="terminal">Terminal</button>
+      <span class="menu-separator" aria-hidden="true"></span>
+      <button class="menu-action" id="tile-windows" type="button">Tile windows</button>
+      <button class="menu-action" id="reset-windows" type="button">Reset layout</button>
+      <span class="menubar-spacer"></span>
+      <span class="tag info">4 sample tools</span>
+    </nav>
+
+    <div class="desktop-wrap" id="desktop-wrap">
+      <section class="desktop" id="desktop" aria-label="MECH desktop workspace">
+        <span class="desktop-intro">white workspace / local prototype / no backend</span>
+        <p class="sr-only" id="window-help">Use arrow keys to move the focused window. Hold Shift and use arrow keys to resize it. Open a closed window from the menu.</p>
+
+        <article class="tool-window active" data-tool="prompt" style="--x: 28px; --y: 42px; --w: 430px; --h: 300px;" aria-labelledby="prompt-title">
+          <header class="window-bar" tabindex="0" aria-label="Prompt window title bar" aria-describedby="window-help"><span class="window-glyph">TXT</span><strong class="window-title" id="prompt-title">Prompt <span>MECH-024</span></strong><div class="window-controls"><button class="window-control" type="button" data-maximize aria-label="Maximize prompt window">□</button><button class="window-control" type="button" data-close aria-label="Close prompt window">×</button></div></header>
+          <div class="window-body">
+            <section class="window-section"><h2>Evaluation prompt · sample</h2><label class="sr-only" for="prompt-text">Sample IOI evaluation prompt</label><textarea class="prompt-field" id="prompt-text">When Mary and John went to the store, John gave a drink to</textarea><div class="field-row"><label><span class="field-label">Model · sample catalog</span><select class="field-input" id="prompt-model"><option>gpt2-small</option><option>gemma-2-2b</option></select></label><button class="demo-button primary" id="run-prompt" type="button">Run sample</button></div><p class="run-result" id="prompt-result" aria-live="polite">Ready · final position 7 · sample prompt</p></section>
+          </div>
+          <span class="resize-handle" aria-hidden="true"></span>
+        </article>
+
+        <article class="tool-window" data-tool="evidence" style="--x: 486px; --y: 74px; --w: 400px; --h: 326px;" aria-labelledby="evidence-title">
+          <header class="window-bar" tabindex="0" aria-label="Evidence window title bar" aria-describedby="window-help"><span class="window-glyph">EVD</span><strong class="window-title" id="evidence-title">Evidence <span>6 records</span></strong><div class="window-controls"><button class="window-control" type="button" data-maximize aria-label="Maximize evidence window">□</button><button class="window-control" type="button" data-close aria-label="Close evidence window">×</button></div></header>
+          <div class="window-body">
+            <section class="window-section"><h2>Linked records · sample evidence</h2><div class="evidence-list">
+              <div class="evidence-row"><span class="evidence-icon">NPY</span><span><strong>Layer 9 residual tensor</strong><span>8 × 768 float32 · sample</span></span><button class="evidence-inspect" type="button" aria-pressed="false">Inspect</button></div>
+              <div class="evidence-row"><span class="evidence-icon">ACT</span><span><strong>Path patch · L9H9</strong><span>0.91 fidelity · sample</span></span><button class="evidence-inspect" type="button" aria-pressed="false">Inspect</button></div>
+              <div class="evidence-row"><span class="evidence-icon">BIB</span><span><strong>Wang et al. 2022</strong><span>published reference</span></span><button class="evidence-inspect" type="button" aria-pressed="false">Inspect</button></div>
+            </div></section>
+          </div>
+          <span class="resize-handle" aria-hidden="true"></span>
+        </article>
+
+        <article class="tool-window" data-tool="report" style="--x: 914px; --y: 38px; --w: 470px; --h: 370px;" aria-labelledby="report-title">
+          <header class="window-bar" tabindex="0" aria-label="Report window title bar" aria-describedby="window-help"><span class="window-glyph">RPT</span><strong class="window-title" id="report-title">Validation Report <span>pending</span></strong><div class="window-controls"><button class="window-control" type="button" data-maximize aria-label="Maximize report window">□</button><button class="window-control" type="button" data-close aria-label="Close report window">×</button></div></header>
+          <div class="window-body">
+            <section class="window-section"><div class="kicker">Sample report</div><h3 class="report-title">IOI name-mover circuit</h3><div class="report-meta"><span class="tag warn">gate pending</span><span class="tag">0.83 sample confidence</span></div></section>
+            <section class="window-section"><dl class="fact-grid"><div class="fact"><span>Fidelity</span><strong>0.86 sample</strong></div><div class="fact"><span>Reproduction</span><strong>passed</strong></div><div class="fact"><span>Minimality</span><strong>unavailable</strong></div><div class="fact"><span>Evidence</span><strong>6 sample</strong></div></dl><div class="gate-meter" aria-label="Sample confidence 83 percent" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="83"><span></span></div></section>
+            <section class="window-section"><p>Redundancy evidence is still required before this illustrative report can pass its publication gate.</p></section>
+          </div>
+          <span class="resize-handle" aria-hidden="true"></span>
+        </article>
+
+        <article class="tool-window" data-tool="terminal" style="--x: 172px; --y: 372px; --w: 650px; --h: 286px;" aria-labelledby="terminal-title">
+          <header class="window-bar" tabindex="0" aria-label="Terminal window title bar" aria-describedby="window-help"><span class="window-glyph">CMD</span><strong class="window-title" id="terminal-title">Terminal <span>sample workspace</span></strong><div class="window-controls"><button class="window-control" type="button" data-maximize aria-label="Maximize terminal window">□</button><button class="window-control" type="button" data-close aria-label="Close terminal window">×</button></div></header>
+          <div class="window-terminal" id="terminal-output" role="log" aria-label="Sample terminal output">
+            <div class="terminal-line">[sample] runtime ready · 4 tools open</div>
+            <div class="terminal-line terminal-muted">[sample] MECH-024 · step 4/7 · 6 evidence records</div>
+            <div class="terminal-line terminal-muted">[sample] validation gate pending · confidence 0.83</div>
+            <form class="terminal-prompt" id="mini-terminal-form"><span aria-hidden="true">$</span><span class="sr-only">Sample terminal command</span><input id="mini-terminal-input" aria-label="Sample terminal command" autocomplete="off" placeholder="type status" /></form>
+          </div>
+          <span class="resize-handle" aria-hidden="true"></span>
+        </article>
+        <p class="window-help">Pointer: drag title / resize corner<br />Keyboard: focus title, then arrows / Shift + arrows</p>
+      </section>
+    </div>
+    <footer class="os-statusbar"><div class="status-group"><span id="focus-status">Focused: Prompt</span><span id="open-count">4 windows open</span></div><div class="status-group"><span>sample workspace</span><span>local only</span></div></footer>
+  </main>
+
+  <script>
+    const desktop = document.getElementById('desktop');
+    const windows = [...document.querySelectorAll('.tool-window')];
+    const openCount = document.getElementById('open-count');
+    const focusStatus = document.getElementById('focus-status');
+    const defaults = { prompt: ['28px', '42px', '430px', '300px'], evidence: ['486px', '74px', '400px', '326px'], report: ['914px', '38px', '470px', '370px'], terminal: ['172px', '372px', '650px', '286px'] };
+    let zIndex = 5;
+
+    function isCompact() { return window.matchMedia('(max-width: 900px)').matches; }
+    function updateStatus() {
+      openCount.textContent = windows.filter(item => !item.hidden).length + ' windows open';
+    }
+    function activate(item, focusTitle = false) {
+      windows.forEach(win => win.classList.toggle('active', win === item));
+      item.style.zIndex = ++zIndex;
+      focusStatus.textContent = 'Focused: ' + item.querySelector('.window-title').firstChild.textContent.trim();
+      if (focusTitle) item.querySelector('.window-bar').focus();
+    }
+    function setGeometry(item, x, y, width, height) {
+      const bounds = desktop.getBoundingClientRect();
+      const maxX = Math.max(0, bounds.width - item.offsetWidth);
+      const maxY = Math.max(0, bounds.height - item.offsetHeight);
+      item.style.setProperty('--x', Math.max(0, Math.min(x, maxX)) + 'px');
+      item.style.setProperty('--y', Math.max(0, Math.min(y, maxY)) + 'px');
+      item.style.setProperty('--w', Math.max(280, Math.min(width, bounds.width)) + 'px');
+      item.style.setProperty('--h', Math.max(190, Math.min(height, bounds.height)) + 'px');
+    }
+    function beginDrag(event) {
+      if (isCompact() || event.button !== 0 || event.target.closest('button')) return;
+      const item = event.currentTarget.closest('.tool-window');
+      activate(item);
+      const bar = event.currentTarget;
+      const bounds = desktop.getBoundingClientRect();
+      const offsetX = event.clientX - item.getBoundingClientRect().left;
+      const offsetY = event.clientY - item.getBoundingClientRect().top;
+      bar.setPointerCapture(event.pointerId);
+      bar.classList.add('dragging');
+      function move(moveEvent) {
+        setGeometry(item, moveEvent.clientX - bounds.left - offsetX, moveEvent.clientY - bounds.top - offsetY, item.offsetWidth, item.offsetHeight);
+      }
+      function end() {
+        bar.classList.remove('dragging');
+        bar.removeEventListener('pointermove', move);
+        bar.removeEventListener('pointerup', end);
+        bar.removeEventListener('pointercancel', end);
+      }
+      bar.addEventListener('pointermove', move);
+      bar.addEventListener('pointerup', end);
+      bar.addEventListener('pointercancel', end);
+      event.preventDefault();
+    }
+    function beginResize(event) {
+      if (isCompact() || event.button !== 0) return;
+      const handle = event.currentTarget;
+      const item = handle.closest('.tool-window');
+      activate(item);
+      const bounds = desktop.getBoundingClientRect();
+      const rect = item.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startWidth = item.offsetWidth;
+      const startHeight = item.offsetHeight;
+      handle.setPointerCapture(event.pointerId);
+      function move(moveEvent) {
+        setGeometry(item, rect.left - bounds.left, rect.top - bounds.top, startWidth + moveEvent.clientX - startX, startHeight + moveEvent.clientY - startY);
+      }
+      function end() {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+      }
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+      event.preventDefault();
+    }
+    function toggleMaximize(item) {
+      activate(item);
+      if (item.dataset.maximized === 'true') {
+        const saved = item.dataset.saved.split(',');
+        setGeometry(item, parseInt(saved[0]), parseInt(saved[1]), parseInt(saved[2]), parseInt(saved[3]));
+        item.dataset.maximized = 'false';
+      } else {
+        item.dataset.saved = [item.offsetLeft, item.offsetTop, item.offsetWidth, item.offsetHeight].join(',');
+        setGeometry(item, 8, 8, desktop.clientWidth - 16, desktop.clientHeight - 16);
+        item.dataset.maximized = 'true';
+      }
+    }
+    function openTool(key) {
+      const item = document.querySelector('[data-tool="' + key + '"]');
+      item.hidden = false;
+      activate(item, true);
+      updateStatus();
+    }
+
+    windows.forEach(item => {
+      item.addEventListener('pointerdown', () => activate(item));
+      item.querySelector('.window-bar').addEventListener('pointerdown', beginDrag);
+      item.querySelector('.window-bar').addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        const amount = event.shiftKey ? 24 : 12;
+        const dx = event.key === 'ArrowLeft' ? -amount : event.key === 'ArrowRight' ? amount : 0;
+        const dy = event.key === 'ArrowUp' ? -amount : event.key === 'ArrowDown' ? amount : 0;
+        setGeometry(item, item.offsetLeft + (event.shiftKey ? 0 : dx), item.offsetTop + (event.shiftKey ? 0 : dy), item.offsetWidth + (event.shiftKey ? dx : 0), item.offsetHeight + (event.shiftKey ? dy : 0));
+      });
+      item.querySelector('.resize-handle').addEventListener('pointerdown', beginResize);
+      item.querySelector('[data-close]').addEventListener('click', () => { item.hidden = true; updateStatus(); });
+      item.querySelector('[data-maximize]').addEventListener('click', () => toggleMaximize(item));
+    });
+    document.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click', () => openTool(button.dataset.open)));
+    document.getElementById('tile-windows').addEventListener('click', () => {
+      if (isCompact()) return;
+      const gap = 14;
+      const width = (desktop.clientWidth - gap * 3) / 2;
+      const height = (desktop.clientHeight - gap * 3) / 2;
+      ['prompt', 'evidence', 'report', 'terminal'].forEach((key, index) => {
+        const item = document.querySelector('[data-tool="' + key + '"]');
+        item.hidden = false;
+        item.dataset.maximized = 'false';
+        setGeometry(item, gap + (index % 2) * (width + gap), gap + Math.floor(index / 2) * (height + gap), width, height);
+      });
+      updateStatus();
+    });
+    document.getElementById('reset-windows').addEventListener('click', () => {
+      Object.entries(defaults).forEach(([key, values]) => {
+        const item = document.querySelector('[data-tool="' + key + '"]');
+        item.hidden = false;
+        item.dataset.maximized = 'false';
+        values.forEach((value, index) => item.style.setProperty(['--x', '--y', '--w', '--h'][index], value));
+      });
+      updateStatus();
+    });
+    document.getElementById('run-prompt').addEventListener('click', () => {
+      const result = document.getElementById('prompt-result');
+      result.textContent = 'Queued · ' + document.getElementById('prompt-model').value + ' · sample run only';
+      const output = document.getElementById('terminal-output');
+      const form = document.getElementById('mini-terminal-form');
+      const line = document.createElement('div');
+      line.className = 'terminal-line';
+      line.textContent = '[sample] prompt queued · ' + document.getElementById('prompt-model').value;
+      output.insertBefore(line, form);
+    });
+    document.querySelectorAll('.evidence-inspect').forEach(button => button.addEventListener('click', () => {
+      const selected = button.getAttribute('aria-pressed') === 'true';
+      document.querySelectorAll('.evidence-inspect').forEach(item => item.setAttribute('aria-pressed', 'false'));
+      button.setAttribute('aria-pressed', selected ? 'false' : 'true');
+      button.textContent = selected ? 'Inspect' : 'Selected';
+    }));
+    document.getElementById('mini-terminal-form').addEventListener('submit', event => {
+      event.preventDefault();
+      const input = document.getElementById('mini-terminal-input');
+      const output = document.getElementById('terminal-output');
+      const command = input.value.trim();
+      if (!command) return;
+      const line = document.createElement('div');
+      line.className = 'terminal-line';
+      line.textContent = '$ ' + command + '\n[sample] command accepted · no backend execution';
+      output.insertBefore(line, document.getElementById('mini-terminal-form'));
+      input.value = '';
+    });
+    updateStatus();
+  </script>
+</body>
+</html>

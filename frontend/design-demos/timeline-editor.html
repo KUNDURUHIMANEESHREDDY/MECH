@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MECH — Timeline Editor Demo</title>
+  <link rel="stylesheet" href="./demo.css" />
+  <style>
+    .timeline-shell { display: grid; min-height: calc(100vh - 30px); grid-template-rows: 58px auto minmax(0, 1fr) 30px; background: var(--surface); }
+    .timeline-header { display: grid; min-height: 58px; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .project-heading { min-width: 0; }
+    .project-heading strong { display: block; font-size: 13px; }
+    .project-heading span { display: block; overflow: hidden; margin-top: 2px; color: var(--muted); font: 500 10px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+    .playback-toolbar { display: grid; min-height: 84px; grid-template-columns: auto minmax(240px, 1fr) auto; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .transport { display: flex; align-items: center; gap: 6px; }
+    .transport .demo-button { min-width: 38px; padding: 0 10px; }
+    .transport .play-button { min-width: 84px; }
+    .scrubber-wrap { display: grid; min-width: 0; grid-template-columns: 52px minmax(0, 1fr) 62px; align-items: center; gap: 10px; }
+    .scrubber-wrap label { color: var(--muted); font: 600 9px/1 var(--font-mono); text-transform: uppercase; }
+    .scrubber-wrap output { color: var(--text); font: 650 10px/1 var(--font-mono); text-align: right; }
+    .scrubber { width: 100%; height: 28px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .playback-options { display: flex; align-items: center; gap: 8px; }
+    .playback-options label { color: var(--muted); font-size: 10px; }
+    .playback-options select { min-height: 34px; border: 1px solid var(--line); border-radius: 5px; padding: 0 26px 0 9px; background: var(--surface); font-size: 11px; }
+    .key-hint { color: var(--faint); font: 500 9px/1 var(--font-mono); }
+    .editor-workspace { display: grid; min-height: 620px; grid-template-columns: minmax(0, 1fr) 300px; }
+    .editor-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: minmax(400px, 1fr) 188px; }
+    .viewport-panel { display: grid; min-width: 0; min-height: 0; grid-template-rows: 46px minmax(0, 1fr); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .viewport-header { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 13px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .viewport-title { min-width: 0; }
+    .viewport-title strong { display: block; font-size: 11px; }
+    .viewport-title span { display: block; overflow: hidden; margin-top: 2px; color: var(--muted); font: 500 9px/1 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+    .trace-summary { display: flex; flex: 0 0 auto; gap: 5px; }
+    .trace-chip { display: inline-flex; min-height: 24px; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--muted); font: 600 9px/1 var(--font-mono); }
+    .trace-chip::before { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); content: ""; }
+    .trace-chip.attention::before { background: var(--amber); }
+    .trace-chip.residual::before { background: var(--green); }
+    .trace-chip.intervention::before { background: var(--accent); }
+    .visualization-scroll { min-width: 0; min-height: 0; overflow: auto; background: var(--surface); }
+    .visualization { position: relative; min-width: 800px; min-height: 480px; overflow: hidden; background: var(--surface); }
+    .grid-line { position: absolute; z-index: 0; background: var(--surface-3); }
+    .grid-line.vertical { top: 0; bottom: 32px; width: 1px; }
+    .grid-line.horizontal { right: 0; left: 0; height: 1px; }
+    .axis-label { position: absolute; z-index: 2; bottom: 12px; color: var(--faint); font: 500 8px/1 var(--font-mono); }
+    .axis-label.y { left: 12px; }
+    .axis-label.x { transform: translateX(-50%); }
+    .axis-caption { position: absolute; z-index: 2; top: 12px; left: 14px; color: var(--muted); font: 600 8px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+    .trace-layer { position: absolute; z-index: 2; inset: 0; }
+    .trace-layer[hidden] { display: none; }
+    .trace-edge { position: absolute; height: 2px; transform-origin: 0 50%; }
+    .trace-edge.attention { background: var(--amber); opacity: .72; }
+    .trace-edge.residual { background: var(--green); opacity: .68; }
+    .trace-edge.intervention { height: 3px; background: var(--accent); }
+    .trace-node { position: absolute; display: grid; min-width: 82px; min-height: 42px; place-items: center; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--text); font: 650 9px/1.25 var(--font-mono); text-align: center; }
+    .trace-node span { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; font-weight: 500; }
+    .trace-node.attention { border-color: #ecd79c; background: var(--amber-soft); color: var(--amber); }
+    .trace-node.residual { border-color: #b9dfd3; background: var(--green-soft); color: var(--green); }
+    .trace-node.intervention { border-color: #bcd0f4; background: var(--accent-soft); color: #214da3; }
+    .trace-node.event-marker { min-width: 18px; min-height: 18px; padding: 0; border-radius: 50%; background: var(--surface); }
+    .trace-node.event-marker::after { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); content: ""; }
+    .trace-node.event-marker.attention::after { background: var(--amber); }
+    .trace-node.event-marker.residual::after { background: var(--green); }
+    .trace-node.event-marker.intervention::after { background: var(--accent); }
+    .trace-node.event-marker.is-current { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .trace-node.event-marker.is-selected { outline: 2px solid var(--text); outline-offset: 3px; }
+    .playhead { position: absolute; z-index: 6; top: 30px; bottom: 32px; left: 0; width: 2px; transform: translateX(-1px); background: var(--accent); pointer-events: none; }
+    .playhead::before { position: absolute; top: 0; left: 50%; width: 10px; height: 10px; transform: translateX(-50%); background: var(--accent); content: ""; clip-path: polygon(50% 100%, 0 0, 100% 0); }
+    .playhead::after { position: absolute; right: 6px; bottom: 0; left: 6px; height: 4px; border-radius: 2px 2px 0 0; background: var(--accent); content: ""; }
+    .playhead-time { position: absolute; z-index: 7; top: 38px; left: 0; transform: translateX(-50%); padding: 4px 6px; border: 1px solid #c8d8f7; border-radius: 4px; background: var(--surface); color: #214da3; font: 650 8px/1 var(--font-mono); pointer-events: none; }
+    .focus-readout { position: absolute; z-index: 5; right: 14px; bottom: 48px; width: 210px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .focus-readout strong { display: block; font-size: 10px; }
+    .focus-readout p { margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .focus-readout .mono { margin-top: 7px; color: #214da3; }
+    .timeline-panel { min-width: 0; overflow: hidden; background: var(--surface); }
+    .timeline-head { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .timeline-head strong { font-size: 11px; }
+    .timeline-head span { color: var(--muted); font: 500 9px/1 var(--font-mono); }
+    .timeline-body { display: grid; height: calc(100% - 38px); min-height: 148px; grid-template-columns: 82px minmax(0, 1fr); }
+    .lane-labels { position: relative; border-right: 1px solid var(--line); background: var(--surface-2); }
+    .lane-label { position: absolute; right: 9px; color: var(--muted); font: 650 8px/1 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; transform: translateY(-50%); }
+    .lane-label.one { top: 35%; }
+    .lane-label.two { top: 72%; }
+    .timeline-scroll { min-width: 0; overflow-x: auto; overflow-y: hidden; }
+    .timeline-canvas { position: relative; min-width: 800px; height: 100%; min-height: 148px; }
+    .time-tick { position: absolute; top: 0; bottom: 20px; width: 1px; background: var(--surface-3); }
+    .time-tick-label { position: absolute; top: 6px; color: var(--faint); font: 500 8px/1 var(--font-mono); transform: translateX(-50%); }
+    .lane-rule { position: absolute; right: 0; left: 0; height: 1px; background: var(--surface-3); }
+    .timeline-events { position: absolute; inset: 22px 0 20px; margin: 0; padding: 0; list-style: none; }
+    .timeline-event { position: absolute; transform: translateX(-50%); }
+    .timeline-event.event { top: 24%; }
+    .timeline-event.intervention { top: 62%; }
+    .event-button { display: grid; min-width: 116px; grid-template-rows: 12px auto; justify-items: center; gap: 4px; padding: 3px 6px 5px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; text-align: center; }
+    .event-button:hover { border-color: var(--line); background: var(--surface-2); }
+    .event-button[aria-pressed="true"] { border-color: #c8d8f7; background: var(--accent-soft); color: #214da3; }
+    .event-pin { width: 10px; height: 10px; border: 2px solid var(--surface); border-radius: 50%; background: var(--faint); box-shadow: 0 0 0 1px var(--line-strong); }
+    .timeline-event.event .event-pin { background: var(--amber); }
+    .timeline-event.intervention .event-pin { background: var(--accent); }
+    .event-button.is-current .event-pin { box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 4px var(--accent); }
+    .event-button strong { max-width: 112px; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .event-button span { color: var(--muted); font: 500 8px/1 var(--font-mono); }
+    .inspector { min-width: 0; overflow-y: auto; background: var(--surface-2); }
+    .inspector-head { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+    .inspector-head strong { font-size: 11px; }
+    .inspector-body { padding: 13px; }
+    .inspector-section { padding-bottom: 15px; }
+    .inspector-section + .inspector-section { padding-top: 15px; border-top: 1px solid var(--line); }
+    .inspector-kicker { margin-bottom: 6px; color: var(--muted); font: 650 9px/1 var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
+    .event-title { font-size: 15px; letter-spacing: -0.02em; }
+    .event-description { margin-top: 6px; color: var(--muted); font-size: 10px; }
+    .event-properties { margin-top: 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .event-property { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; padding: 7px 8px; border-bottom: 1px solid var(--surface-3); font-size: 9px; }
+    .event-property:last-child { border-bottom: 0; }
+    .event-property dt { color: var(--muted); }
+    .event-property dd { margin: 0; overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+    .event-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+    .event-nav .demo-button { padding: 0 7px; font-size: 10px; }
+    .trace-control { display: flex; min-height: 40px; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+    .trace-control:last-of-type { border-bottom: 0; }
+    .trace-control-copy { display: flex; min-width: 0; align-items: center; gap: 8px; }
+    .trace-swatch { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--faint); }
+    .trace-swatch.attention { background: var(--amber); }
+    .trace-swatch.residual { background: var(--green); }
+    .trace-swatch.intervention { background: var(--accent); }
+    .trace-control strong { display: block; font-size: 10px; }
+    .trace-control small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; }
+    .trace-control input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--accent); }
+    .legend-note { margin-top: 9px; color: var(--muted); font-size: 9px; }
+    .inspector-actions { display: grid; gap: 6px; }
+    .statusbar { display: flex; min-height: 30px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; border-top: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: 500 9px/1 var(--font-mono); }
+    .status-left, .status-right { display: flex; align-items: center; gap: 14px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; margin: -1px; padding: 0; border: 0; clip: rect(0 0 0 0); white-space: nowrap; }
+    @media (max-width: 980px) {
+      .timeline-shell { min-height: 0; grid-template-rows: 58px auto auto 30px; }
+      .editor-workspace { grid-template-columns: 1fr; }
+      .editor-main { min-height: 700px; grid-template-rows: 510px 190px; }
+      .inspector { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+      .inspector-head { grid-column: 1 / -1; }
+      .inspector-body { display: contents; }
+      .inspector-section { padding: 13px; }
+      .inspector-section + .inspector-section { padding-top: 13px; border-top: 0; border-left: 1px solid var(--line); }
+    }
+    @media (max-width: 720px) {
+      .timeline-header { grid-template-columns: 1fr auto; padding: 10px 12px; }
+      .timeline-header .brand-name { display: none; }
+      .timeline-header .tag { display: none; }
+      .playback-toolbar { grid-template-columns: 1fr auto; gap: 9px; padding: 10px 12px; }
+      .scrubber-wrap { grid-column: 1 / -1; grid-row: 2; }
+      .key-hint { display: none; }
+      .editor-main { min-height: 660px; grid-template-rows: 470px 190px; }
+      .viewport-header { align-items: flex-start; padding-top: 9px; }
+      .trace-summary { display: none; }
+      .inspector { grid-template-columns: 1fr; }
+      .inspector-section + .inspector-section { border-top: 1px solid var(--line); border-left: 0; }
+      .status-right { display: none; }
+    }
+    @media (max-width: 480px) {
+      .playback-toolbar { grid-template-columns: 1fr; }
+      .transport { justify-content: center; }
+      .playback-options { justify-content: center; }
+      .scrubber-wrap { grid-column: 1; grid-row: auto; }
+      .timeline-body { grid-template-columns: 66px minmax(0, 1fr); }
+      .focus-readout { right: 10px; width: 190px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-ribbon"><strong>PROTOTYPE · SAMPLE TIMELINE</strong><span>Illustrative intervention trace · not a live mechanistic result</span></div>
+  <main class="timeline-shell">
+    <header class="timeline-header">
+      <a class="brand" href="./index.html" aria-label="MECH design demos home"><span class="brand-mark" aria-hidden="true">M</span><span class="brand-name">MECH</span></a>
+      <div class="project-heading"><strong>IOI intervention timeline</strong><span>sample-run / mech-024 / head-l9h9</span></div>
+      <div class="topbar-actions"><span class="tag info">sample trace</span><button class="demo-button" type="button" id="reset-view">Reset view</button></div>
+    </header>
+
+    <section class="playback-toolbar" aria-label="Timeline playback controls">
+      <div class="transport">
+        <button class="icon-button" type="button" id="previous-event" aria-label="Previous event">←</button>
+        <button class="demo-button primary play-button" type="button" id="play-toggle" aria-label="Play timeline">▶ Play</button>
+        <button class="icon-button" type="button" id="next-event" aria-label="Next event">→</button>
+      </div>
+      <div class="scrubber-wrap"><label for="timeline-scrubber">Scrub</label><input class="scrubber" id="timeline-scrubber" type="range" min="0" max="100" value="0" step="0.1" aria-describedby="playback-help" /><output id="playback-time" for="timeline-scrubber">0.0 ms</output></div>
+      <div class="playback-options"><label for="playback-speed">Speed</label><select id="playback-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><span class="key-hint" id="playback-help">Space play / pause</span></div>
+    </section>
+
+    <section class="editor-workspace" aria-label="Timeline visualization workspace">
+      <div class="editor-main">
+        <section class="viewport-panel" aria-labelledby="viewport-heading">
+          <header class="viewport-header"><div class="viewport-title"><strong id="viewport-heading">Computation viewport</strong><span id="phase-readout">Phase: prompt ingestion</span></div><div class="trace-summary" aria-label="Visible trace summary"><span class="trace-chip attention" id="summary-attention">Attention</span><span class="trace-chip residual" id="summary-residual">Residual</span><span class="trace-chip intervention" id="summary-intervention">Interventions</span></div></header>
+          <div class="visualization-scroll">
+            <div class="visualization" id="visualization" role="img" aria-label="Illustrative mechanistic computation graph with attention, residual, and intervention traces" aria-describedby="focus-summary">
+              <span class="grid-line vertical" style="left:10%"></span><span class="grid-line vertical" style="left:20%"></span><span class="grid-line vertical" style="left:30%"></span><span class="grid-line vertical" style="left:40%"></span><span class="grid-line vertical" style="left:50%"></span><span class="grid-line vertical" style="left:60%"></span><span class="grid-line vertical" style="left:70%"></span><span class="grid-line vertical" style="left:80%"></span><span class="grid-line vertical" style="left:90%"></span>
+              <span class="grid-line horizontal" style="top:18%"></span><span class="grid-line horizontal" style="top:36%"></span><span class="grid-line horizontal" style="top:54%"></span><span class="grid-line horizontal" style="top:72%"></span>
+              <span class="axis-caption">Sample computation graph</span>
+              <span class="axis-label y">position / layer</span>
+              <span class="axis-label x" style="left:5%">0 ms</span><span class="axis-label x" style="left:25%">30 ms</span><span class="axis-label x" style="left:50%">60 ms</span><span class="axis-label x" style="left:75%">90 ms</span><span class="axis-label x" style="left:95%">120 ms</span>
+
+              <div class="trace-layer" data-trace-layer="attention" aria-hidden="true">
+                <span class="trace-edge attention" style="left:17%;top:31%;width:145px;transform:rotate(18deg)"></span><span class="trace-edge attention" style="left:35%;top:38%;width:168px;transform:rotate(-14deg)"></span><span class="trace-edge attention" style="left:52%;top:35%;width:150px;transform:rotate(22deg)"></span><span class="trace-edge attention" style="left:65%;top:44%;width:125px;transform:rotate(-30deg)"></span>
+                <span class="trace-node attention" style="left:8%;top:25%">L5H1<span>subject token</span></span><span class="trace-node attention" style="left:28%;top:37%">L9H6<span>syntax path</span></span><span class="trace-node attention" style="left:48%;top:31%">L9H9<span>name mover</span></span><span class="trace-node attention" style="left:72%;top:43%">L10H0<span>output route</span></span>
+                <span class="trace-node event-marker attention" data-marker="tokens-resolved" style="left:25%;top:45%"></span><span class="trace-node event-marker attention" data-marker="head-l5h1" style="left:42%;top:39%"></span><span class="trace-node event-marker attention" data-marker="head-l9h9" style="left:59%;top:34%"></span><span class="trace-node event-marker attention" data-marker="name-routed" style="left:84%;top:49%"></span>
+              </div>
+
+              <div class="trace-layer" data-trace-layer="residual" aria-hidden="true">
+                <span class="trace-edge residual" style="left:8%;top:66%;width:180px"></span><span class="trace-edge residual" style="left:27%;top:66%;width:170px"></span><span class="trace-edge residual" style="left:46%;top:66%;width:170px"></span><span class="trace-edge residual" style="left:63%;top:66%;width:170px"></span>
+                <span class="trace-node residual" style="left:5%;top:61%">embed<span>tokens</span></span><span class="trace-node residual" style="left:25%;top:61%">resid 5<span>subject</span></span><span class="trace-node residual" style="left:45%;top:61%">resid 9<span>name</span></span><span class="trace-node residual" style="left:65%;top:61%">resid 10<span>output</span></span><span class="trace-node residual" style="left:84%;top:61%">logits<span>Mary</span></span>
+                <span class="trace-node event-marker residual" data-marker="prompt-loaded" style="left:3%;top:68%"></span><span class="trace-node event-marker residual" data-marker="output-written" style="left:92%;top:68%"></span>
+              </div>
+
+              <div class="trace-layer" data-trace-layer="intervention" aria-hidden="true">
+                <span class="trace-edge intervention" style="left:39%;top:55%;width:126px;transform:rotate(20deg)"></span><span class="trace-edge intervention" style="left:59%;top:51%;width:118px;transform:rotate(-18deg)"></span>
+                <span class="trace-node intervention" style="left:33%;top:49%">PATCH A<span>L9H9 residual</span></span><span class="trace-node intervention" style="left:58%;top:45%">PATCH B<span>subject vector</span></span>
+                <span class="trace-node event-marker intervention" data-marker="residual-patch" style="left:50%;top:54%"></span>
+              </div>
+
+              <div class="playhead" id="playhead"><span class="playhead-time" id="playhead-time">0.0 ms</span></div>
+              <aside class="focus-readout" id="focus-summary"><strong id="focus-title">Prompt loaded</strong><p id="focus-description">The sample trace begins with token ingestion.</p><div class="mono" id="focus-code">EVENT / 00</div></aside>
+            </div>
+          </div>
+        </section>
+
+        <section class="timeline-panel" aria-labelledby="timeline-heading">
+          <header class="timeline-head"><strong id="timeline-heading">Event & intervention chronology</strong><span id="event-count">7 events · 120 ms</span></header>
+          <div class="timeline-body">
+            <div class="lane-labels" aria-hidden="true"><span class="lane-label one">Events</span><span class="lane-label two">Interventions</span></div>
+            <div class="timeline-scroll">
+              <div class="timeline-canvas" id="timeline-canvas">
+                <span class="time-tick" style="left:5%"></span><span class="time-tick" style="left:25%"></span><span class="time-tick" style="left:50%"></span><span class="time-tick" style="left:75%"></span><span class="time-tick" style="left:95%"></span>
+                <span class="time-tick-label" style="left:5%">0</span><span class="time-tick-label" style="left:25%">30</span><span class="time-tick-label" style="left:50%">60</span><span class="time-tick-label" style="left:75%">90</span><span class="time-tick-label" style="left:95%">120 ms</span>
+                <span class="lane-rule" style="top:44%"></span><span class="lane-rule" style="top:82%"></span>
+                <ol class="timeline-events" id="timeline-events" aria-label="Chronological trace events"></ol>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <aside class="inspector" aria-labelledby="inspector-title">
+        <header class="inspector-head"><strong id="inspector-title">Context inspector</strong><span class="tag" id="event-kind">event</span></header>
+        <div class="inspector-body">
+          <section class="inspector-section" aria-labelledby="selected-event-title">
+            <div class="inspector-kicker">Selected moment</div><h2 class="event-title" id="selected-event-title">Prompt loaded</h2><p class="event-description" id="selected-event-description">The sample trace begins with token ingestion.</p>
+            <dl class="event-properties"><div class="event-property"><dt>Time</dt><dd id="selected-time">0.0 ms</dd></div><div class="event-property"><dt>Component</dt><dd id="selected-component">Tokenizer</dd></div><div class="event-property"><dt>Trace</dt><dd id="selected-trace">Input</dd></div><div class="event-property"><dt>Record</dt><dd>SAMPLE-024</dd></div></dl>
+            <div class="event-nav"><button class="demo-button" type="button" id="inspector-previous">← Previous</button><button class="demo-button" type="button" id="inspector-next">Next →</button></div>
+          </section>
+          <section class="inspector-section" aria-labelledby="traces-title">
+            <div class="inspector-kicker" id="traces-title">Visible traces</div>
+            <label class="trace-control" for="toggle-attention"><span class="trace-control-copy"><span class="trace-swatch attention" aria-hidden="true"></span><span><strong>Attention</strong><small>candidate head routes</small></span></span><input id="toggle-attention" type="checkbox" checked data-trace-toggle="attention" /></label>
+            <label class="trace-control" for="toggle-residual"><span class="trace-control-copy"><span class="trace-swatch residual" aria-hidden="true"></span><span><strong>Residual stream</strong><small>token representations</small></span></span><input id="toggle-residual" type="checkbox" checked data-trace-toggle="residual" /></label>
+            <label class="trace-control" for="toggle-intervention"><span class="trace-control-copy"><span class="trace-swatch intervention" aria-hidden="true"></span><span><strong>Interventions</strong><small>sample patched edges</small></span></span><input id="toggle-intervention" type="checkbox" checked data-trace-toggle="intervention" /></label>
+            <p class="legend-note">Toggles remove the corresponding trace from the computation viewport. The chronology remains available below.</p>
+          </section>
+          <section class="inspector-section inspector-actions"><button class="demo-button" type="button" id="focus-selected">Focus selected event</button><button class="demo-button" type="button" id="restore-traces">Show all traces</button></section>
+        </div>
+      </aside>
+    </section>
+
+    <footer class="statusbar"><div class="status-left"><span id="playback-status">Paused at 0.0 ms</span><span>3 traces visible</span><span>sample timeline</span></div><div class="status-right"><span>Keyboard: Space</span><span>120 ms span</span></div></footer>
+  </main>
+  <div class="sr-only" id="live-status" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    const events = [
+      { id: 'prompt-loaded', progress: 0, time: 0, name: 'Prompt loaded', type: 'event', trace: 'Input', component: 'Tokenizer', markerTrace: 'residual', description: 'The sample trace begins with token ingestion and records the final completion position.' },
+      { id: 'tokens-resolved', progress: 14, time: 16.8, name: 'Tokens resolved', type: 'event', trace: 'Attention', component: 'L5H1', markerTrace: 'attention', description: 'The illustrative subject token and repeated name token enter the candidate attention route.' },
+      { id: 'head-l5h1', progress: 28, time: 33.6, name: 'L5H1 attends', type: 'event', trace: 'Attention', component: 'L5H1', markerTrace: 'attention', description: 'An illustrative attention connection carries the subject-token representation forward.' },
+      { id: 'head-l9h9', progress: 45, time: 54, name: 'L9H9 selected', type: 'intervention', trace: 'Intervention', component: 'L9H9', markerTrace: 'attention', description: 'The selected sample intervention targets the name-mover candidate at layer 9.' },
+      { id: 'residual-patch', progress: 58, time: 69.6, name: 'Residual patched', type: 'intervention', trace: 'Intervention', component: 'Resid L9', markerTrace: 'intervention', description: 'A sample replacement vector is introduced at the layer 9 residual position.' },
+      { id: 'name-routed', progress: 76, time: 91.2, name: 'Name routed', type: 'event', trace: 'Attention', component: 'L10H0', markerTrace: 'attention', description: 'The illustrative output route carries the candidate name representation toward the logits.' },
+      { id: 'output-written', progress: 92, time: 110.4, name: 'Output written', type: 'event', trace: 'Residual', component: 'Logits', markerTrace: 'residual', description: 'The sample trace closes when the final-token output record is written.' }
+    ];
+
+    const state = { progress: 0, selectedId: 'prompt-loaded', currentId: 'prompt-loaded', playing: false, speed: 1, frame: 0, lastFrame: 0 };
+    const scrubber = document.getElementById('timeline-scrubber');
+    const playToggle = document.getElementById('play-toggle');
+    const playbackStatus = document.getElementById('playback-status');
+    const phaseReadout = document.getElementById('phase-readout');
+    const timelineEvents = document.getElementById('timeline-events');
+    const visualization = document.getElementById('visualization');
+
+    function renderTimeline() {
+      timelineEvents.innerHTML = events.map(event => `
+        <li class="timeline-event ${event.type}" style="left:${5 + event.progress * .9}%">
+          <button class="event-button ${event.id === state.currentId ? 'is-current' : ''}" type="button" data-event="${event.id}" aria-pressed="${event.id === state.selectedId}" aria-label="${event.name}, ${event.type}, ${event.time.toFixed(1)} milliseconds">
+            <span class="event-pin" aria-hidden="true"></span><strong>${event.name}</strong><span>${event.time.toFixed(1)} ms</span>
+          </button>
+        </li>`).join('');
+      timelineEvents.querySelectorAll('[data-event]').forEach(button => button.addEventListener('click', () => selectEvent(button.dataset.event)));
+    }
+
+    function nearestEvent(progress) {
+      return events.reduce((nearest, event) => event.progress <= progress + .001 ? event : nearest, events[0]);
+    }
+
+    function phaseFor(event) {
+      if (event.progress < 20) return 'Prompt ingestion';
+      if (event.progress < 40) return 'Attention routing';
+      if (event.progress < 60) return 'Candidate intervention';
+      if (event.progress < 82) return 'Residual propagation';
+      return 'Output evaluation';
+    }
+
+    function updateCurrentClasses() {
+      timelineEvents.querySelectorAll('[data-event]').forEach(button => button.classList.toggle('is-current', button.dataset.event === state.currentId));
+      document.querySelectorAll('[data-marker]').forEach(marker => marker.classList.toggle('is-current', marker.dataset.marker === state.currentId));
+    }
+
+    function setProgress(value, announce) {
+      state.progress = Math.min(100, Math.max(0, Number(value)));
+      state.currentId = nearestEvent(state.progress).id;
+      scrubber.value = state.progress;
+      const milliseconds = state.progress * 1.2;
+      document.getElementById('playback-time').textContent = `${milliseconds.toFixed(1)} ms`;
+      document.getElementById('playhead-time').textContent = `${milliseconds.toFixed(1)} ms`;
+      document.getElementById('playhead').style.left = `${5 + state.progress * .9}%`;
+      document.getElementById('playhead-time').style.left = `${5 + state.progress * .9}%`;
+      playbackStatus.textContent = `${state.playing ? 'Playing' : 'Paused'} at ${milliseconds.toFixed(1)} ms`;
+      const currentEvent = events.find(event => event.id === state.currentId);
+      phaseReadout.textContent = `Phase: ${phaseFor(currentEvent)}`;
+      visualization.setAttribute('aria-label', `Illustrative computation graph at ${milliseconds.toFixed(1)} milliseconds. Current phase: ${phaseFor(currentEvent)}.`);
+      updateCurrentClasses();
+      if (announce) document.getElementById('live-status').textContent = `${phaseFor(currentEvent)} at ${milliseconds.toFixed(1)} milliseconds.`;
+    }
+
+    function updateInspector(event) {
+      document.getElementById('event-kind').textContent = event.type;
+      document.getElementById('selected-event-title').textContent = event.name;
+      document.getElementById('selected-event-description').textContent = event.description;
+      document.getElementById('selected-time').textContent = `${event.time.toFixed(1)} ms`;
+      document.getElementById('selected-component').textContent = event.component;
+      document.getElementById('selected-trace').textContent = event.trace;
+      document.getElementById('focus-title').textContent = event.name;
+      document.getElementById('focus-description').textContent = event.description;
+      document.getElementById('focus-code').textContent = `${event.type.toUpperCase()} / ${event.time.toFixed(1)} MS`;
+    }
+
+    function selectEvent(id) {
+      const event = events.find(item => item.id === id);
+      if (!event) return;
+      state.selectedId = id;
+      timelineEvents.querySelectorAll('[data-event]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.event === id)));
+      document.querySelectorAll('[data-marker]').forEach(marker => marker.classList.toggle('is-selected', marker.dataset.marker === id));
+      updateInspector(event);
+      setProgress(event.progress, true);
+    }
+
+    function setPlaying(playing) {
+      state.playing = playing;
+      playToggle.textContent = playing ? 'Ⅱ Pause' : '▶ Play';
+      playToggle.setAttribute('aria-label', playing ? 'Pause timeline' : 'Play timeline');
+      if (playing) {
+        if (state.progress >= 100) setProgress(0, false);
+        state.lastFrame = performance.now();
+        state.frame = requestAnimationFrame(advance);
+      } else {
+        cancelAnimationFrame(state.frame);
+        playbackStatus.textContent = `Paused at ${(state.progress * 1.2).toFixed(1)} ms`;
+      }
+    }
+
+    function advance(timestamp) {
+      if (!state.playing) return;
+      const delta = Math.min(100, timestamp - state.lastFrame);
+      state.lastFrame = timestamp;
+      setProgress(state.progress + delta * .009 * state.speed, false);
+      if (state.progress >= 100) setPlaying(false);
+      else state.frame = requestAnimationFrame(advance);
+    }
+
+    function moveEvent(direction) {
+      const currentIndex = events.findIndex(event => event.id === state.selectedId);
+      const nextIndex = Math.min(events.length - 1, Math.max(0, currentIndex + direction));
+      if (nextIndex !== currentIndex) {
+        setPlaying(false);
+        selectEvent(events[nextIndex].id);
+      }
+    }
+
+    function updateTraceSummary() {
+      const visible = document.querySelectorAll('[data-trace-toggle]:checked').length;
+      document.getElementById('event-count').textContent = `${events.length} events · 120 ms`;
+      document.querySelector('.status-left span:nth-child(2)').textContent = `${visible} trace${visible === 1 ? '' : 's'} visible`;
+      document.getElementById('live-status').textContent = `${visible} traces visible in the computation viewport.`;
+    }
+
+    playToggle.addEventListener('click', () => setPlaying(!state.playing));
+    scrubber.addEventListener('input', event => { setPlaying(false); setProgress(event.target.value, true); });
+    document.getElementById('playback-speed').addEventListener('change', event => { state.speed = Number(event.target.value); });
+    document.getElementById('previous-event').addEventListener('click', () => moveEvent(-1));
+    document.getElementById('next-event').addEventListener('click', () => moveEvent(1));
+    document.getElementById('inspector-previous').addEventListener('click', () => moveEvent(-1));
+    document.getElementById('inspector-next').addEventListener('click', () => moveEvent(1));
+
+    document.querySelectorAll('[data-trace-toggle]').forEach(toggle => toggle.addEventListener('change', event => {
+      const layer = document.querySelector(`[data-trace-layer="${event.target.dataset.traceToggle}"]`);
+      layer.hidden = !event.target.checked;
+      const summary = document.getElementById(`summary-${event.target.dataset.traceToggle}`);
+      summary.style.opacity = event.target.checked ? '1' : '.38';
+      updateTraceSummary();
+    }));
+
+    document.getElementById('restore-traces').addEventListener('click', () => {
+      document.querySelectorAll('[data-trace-toggle]').forEach(toggle => {
+        toggle.checked = true;
+        document.querySelector(`[data-trace-layer="${toggle.dataset.traceToggle}"]`).hidden = false;
+        document.getElementById(`summary-${toggle.dataset.traceToggle}`).style.opacity = '1';
+      });
+      updateTraceSummary();
+    });
+
+    document.getElementById('focus-selected').addEventListener('click', () => {
+      setPlaying(false);
+      selectEvent(state.selectedId);
+      document.getElementById('live-status').textContent = `Viewport focused on ${events.find(event => event.id === state.selectedId).name}.`;
+    });
+
+    document.getElementById('reset-view').addEventListener('click', () => {
+      setPlaying(false);
+      document.querySelectorAll('[data-trace-toggle]').forEach(toggle => {
+        toggle.checked = true;
+        document.querySelector(`[data-trace-layer="${toggle.dataset.traceToggle}"]`).hidden = false;
+        document.getElementById(`summary-${toggle.dataset.traceToggle}`).style.opacity = '1';
+      });
+      selectEvent('prompt-loaded');
+      updateTraceSummary();
+    });
+
+    document.addEventListener('keydown', event => {
+      const target = event.target;
+      const isControl = target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement;
+      if (event.code === 'Space' && !isControl) { event.preventDefault(); setPlaying(!state.playing); }
+      if (event.key === 'ArrowLeft' && !isControl) { event.preventDefault(); moveEvent(-1); }
+      if (event.key === 'ArrowRight' && !isControl) { event.preventDefault(); moveEvent(1); }
+    });
+
+    renderTimeline();
+    updateInspector(events[0]);
+    setProgress(0, false);
+    document.querySelector('[data-marker="prompt-loaded"]')?.classList.add('is-selected');
+    updateTraceSummary();
+  </script>
+</body>
+</html>

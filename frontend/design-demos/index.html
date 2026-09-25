@@ -3,69 +3,82 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MECH — White GUI Structure Demos</title>
+  <title>MECH — Seven White GUI Concepts</title>
   <link rel="stylesheet" href="./demo.css" />
   <style>
     .index-shell { min-height: calc(100vh - 30px); background: var(--bg); }
     .index-header { display: grid; min-height: 62px; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
-    .index-main { width: min(1440px, 100%); margin: 0 auto; padding: 48px clamp(18px, 4vw, 54px) 80px; }
-    .index-intro { display: grid; grid-template-columns: minmax(0, 1fr) 430px; gap: 44px; align-items: end; margin-bottom: 38px; }
-    .index-intro h1 { max-width: 850px; margin-top: 8px; color: var(--text); font-size: clamp(34px, 5vw, 60px); letter-spacing: -.06em; line-height: 1.02; }
+    .index-main { width: min(1480px, 100%); margin: 0 auto; padding: 46px clamp(18px, 4vw, 54px) 80px; }
+    .index-intro { display: grid; grid-template-columns: minmax(0, 1fr) 430px; gap: 44px; align-items: end; margin-bottom: 34px; }
+    .index-intro h1 { max-width: 900px; margin-top: 8px; font-size: clamp(34px, 5vw, 58px); letter-spacing: -.06em; line-height: 1.02; }
     .index-intro p { color: var(--muted); font-size: 16px; line-height: 1.65; }
-    .study-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-    .study { display: grid; grid-template-rows: 230px auto; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); transition: border-color 150ms ease, transform 150ms ease; }
+    .study-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+    .study { display: grid; min-height: 310px; grid-template-columns: minmax(280px, .95fr) minmax(0, 1.05fr); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); transition: border-color 150ms ease, transform 150ms ease; }
     .study:hover { border-color: var(--line-strong); transform: translateY(-2px); }
-    .study-preview { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-    .study-copy { padding: 18px; }
+    .study-copy { display: flex; min-width: 0; flex-direction: column; padding: 20px; }
     .study-copy-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-    .study-copy h2 { margin-top: 4px; font-size: 19px; }
-    .study-copy p { margin-top: 8px; color: var(--muted); }
-    .study-link { display: inline-flex; margin-top: 15px; color: var(--accent); font-size: 12px; font-weight: 700; text-decoration: none; }
+    .study-copy h2 { margin-top: 4px; font-size: 20px; }
+    .study-copy p { margin-top: 9px; color: var(--muted); }
+    .study-link { display: inline-flex; margin-top: auto; padding-top: 16px; color: var(--accent); font-size: 12px; font-weight: 700; text-decoration: none; }
     .study-link:hover { text-decoration: underline; }
-    .mini { position: absolute; inset: 22px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); }
-    .mini-top { position: absolute; top: 0; right: 0; left: 0; height: 24px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .study-preview { position: relative; min-height: 310px; overflow: hidden; border-left: 1px solid var(--line); background: var(--surface-2); }
+    .study-label { position: absolute; z-index: 3; top: 12px; left: 12px; }
+    .mini { position: absolute; inset: 36px 18px 18px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); }
+    .mini .bar { position: absolute; top: 0; right: 0; left: 0; height: 24px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
     .mini .block { position: absolute; border: 1px solid var(--line); background: var(--surface-2); }
     .mini .accent { border-color: var(--accent); background: var(--accent-soft); }
-    .ide-mini .block:nth-child(2) { top: 34px; left: 8px; width: 18%; height: 136px; }
-    .ide-mini .block:nth-child(3) { top: 34px; left: 29%; width: 43%; height: 136px; background: var(--surface); }
-    .ide-mini .block:nth-child(4) { top: 34px; right: 7%; width: 21%; height: 136px; }
-    .ide-mini .block:nth-child(5) { bottom: 7px; left: 8px; width: 85%; height: 26px; }
-    .chat-mini .block:nth-child(2) { top: 42px; left: 12%; width: 46%; height: 24px; }
-    .chat-mini .block:nth-child(3) { top: 78px; left: 18%; width: 52%; height: 52px; }
-    .chat-mini .block:nth-child(4) { top: 142px; left: 12%; width: 58%; height: 36px; }
-    .chat-mini .block:nth-child(5) { top: 34px; right: 7%; width: 23%; height: 136px; }
-    .launcher-mini .block:nth-child(2) { top: 42px; left: 10%; width: 64%; height: 30px; border-color: var(--accent); background: var(--surface); }
-    .launcher-mini .block:nth-child(3) { top: 88px; left: 10%; width: 25%; height: 76px; }
-    .launcher-mini .block:nth-child(4) { top: 88px; left: 37.5%; width: 25%; height: 76px; }
-    .launcher-mini .block:nth-child(5) { top: 88px; right: 10%; width: 25%; height: 76px; }
-    .matrix-mini { background: var(--surface); }
-    .matrix-mini .block:nth-child(2) { top: 34px; left: 7px; right: 7px; height: 22px; background: var(--surface-3); }
-    .matrix-mini .block:nth-child(3) { top: 64px; left: 7px; right: 7px; height: 86px; background: var(--surface); }
-    .matrix-mini .block:nth-child(4) { bottom: 7px; left: 7px; right: 7px; height: 30px; }
-    .study-label { position: absolute; top: 10px; left: 10px; z-index: 2; }
-    @media (max-width: 900px) {
+    .ribbon-mini .block:nth-child(2) { top: 32px; left: 6px; right: 6px; height: 38px; }
+    .ribbon-mini .block:nth-child(3) { top: 78px; left: 6px; right: 6px; bottom: 6px; background: var(--surface); }
+    .tabs-mini .bar { height: 34px; }
+    .tabs-mini .block:nth-child(2) { top: 8px; left: 10px; width: 24%; height: 26px; background: var(--accent-soft); border-color: var(--accent); }
+    .tabs-mini .block:nth-child(3) { top: 42px; left: 6px; right: 6px; bottom: 6px; background: var(--surface); }
+    .asset-mini .block:nth-child(2) { top: 32px; left: 6px; width: 28%; bottom: 6px; }
+    .asset-mini .block:nth-child(3) { top: 32px; left: 37%; right: 6px; bottom: 6px; background: var(--surface); }
+    .timeline-mini .block:nth-child(2) { top: 32px; left: 6px; right: 6px; height: 62%; background: var(--surface); }
+    .timeline-mini .block:nth-child(3) { left: 6px; right: 6px; bottom: 6px; height: 26%; }
+    .board-mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 34px 7px 7px; }
+    .board-mini .block { position: relative; top: auto; right: auto; bottom: auto; left: auto; }
+    .board-mini .block:nth-child(2) { grid-column: 1; }
+    .board-mini .block:nth-child(3) { grid-column: 2; }
+    .board-mini .block:nth-child(4) { grid-column: 3; }
+    .board-mini .block:nth-child(5) { grid-column: 4; }
+    .os-mini .block:nth-child(2) { top: 45px; left: 12px; width: 52%; height: 92px; background: var(--surface); }
+    .os-mini .block:nth-child(3) { top: 92px; right: 10px; width: 42%; height: 104px; background: var(--surface); }
+    .os-mini .block:nth-child(4) { bottom: 9px; left: 20px; width: 46%; height: 56px; }
+    .terminal-mini { background: var(--surface); }
+    .terminal-mini .block:nth-child(2) { top: 40px; left: 10px; right: 10px; height: 24px; }
+    .terminal-mini .block:nth-child(3) { top: 78px; left: 10px; width: 68%; height: 56px; }
+    .terminal-mini .block:nth-child(4) { top: 145px; right: 10px; width: 28%; height: 42px; }
+    .terminal-mini .block:nth-child(5) { bottom: 12px; left: 10px; right: 10px; height: 30px; border-color: var(--accent); background: var(--surface); }
+    .study.wide { grid-column: 1 / -1; grid-template-columns: minmax(320px, .7fr) minmax(0, 1.3fr); }
+    @media (max-width: 1050px) {
       .index-intro { grid-template-columns: 1fr; gap: 18px; }
-      .study-grid { grid-template-columns: 1fr; }
+      .study, .study.wide { grid-column: auto; grid-template-columns: 1fr; }
+      .study-preview { min-height: 260px; border-top: 1px solid var(--line); border-left: 0; }
     }
-    @media (max-width: 620px) {
+    @media (max-width: 700px) {
       .index-header { grid-template-columns: 1fr auto; }
       .index-header .brand-context { display: none; }
       .index-main { padding: 34px 12px 54px; }
-      .study { grid-template-rows: 190px auto; }
+      .study-grid { grid-template-columns: 1fr; }
+      .study { min-height: 0; }
     }
   </style>
 </head>
 <body>
-  <div class="prototype-ribbon"><strong>WHITE GUI STRUCTURE DEMOS</strong><span>Four new structures · sample data · production UI unchanged</span></div>
+  <div class="prototype-ribbon"><strong>WHITE GUI CONCEPT LIBRARY</strong><span>Seven standalone structures · sample data · production UI unchanged</span></div>
   <main class="index-shell">
-    <header class="index-header"><a class="brand" href="./index.html"><span class="brand-mark">M</span><span class="brand-name">MECH</span></a><div class="brand-context">Choose a white-theme GUI structure to inspect</div><span class="tag info">No backend required</span></header>
+    <header class="index-header"><a class="brand" href="./index.html"><span class="brand-mark">M</span><span class="brand-name">MECH</span></a><div class="brand-context">Compare seven fundamentally different GUI structures</div><span class="tag info">No backend required</span></header>
     <div class="index-main">
-      <header class="index-intro"><div><div class="kicker">Complete white-theme alternatives</div><h1>Four new ways to build the entire MECH interface.</h1></div><p>These replace the rejected dark prototypes. Each uses a clean white visual system but a fundamentally different interaction model. Every scientific value is clearly marked as sample data.</p></header>
-      <section class="study-grid" aria-label="White GUI prototype studies">
-        <article class="study"><div class="study-preview"><span class="tag info study-label">01 · IDE</span><div class="mini ide-mini"><span class="mini-top"></span><span class="block"></span><span class="block accent"></span><span class="block"></span><span class="block"></span></div></div><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Developer workbench</div><h2>IDE workspace</h2></div><span class="tag info">technical</span></div><p>Files, editor, properties, terminal, problems, and command palette. The research workspace behaves like a professional IDE.</p><a class="study-link" href="./ide-workspace.html">Open interactive demo →</a></div></article>
-        <article class="study"><div class="study-preview"><span class="tag info study-label">02 · Chat</span><div class="mini chat-mini"><span class="mini-top"></span><span class="block"></span><span class="block accent"></span><span class="block"></span><span class="block"></span></div></div><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Conversation workspace</div><h2>Chat-first studio</h2></div><span class="tag info">agentic</span></div><p>The research conversation is the home. Tools and evidence become inspectable artifacts beside the conversation.</p><a class="study-link" href="./chat-studio.html">Open interactive demo →</a></div></article>
-        <article class="study"><div class="study-preview"><span class="tag info study-label">03 · Launcher</span><div class="mini launcher-mini"><span class="mini-top"></span><span class="block"></span><span class="block"></span><span class="block"></span><span class="block"></span></div></div><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">No dashboard</div><h2>Focused tool launcher</h2></div><span class="tag info">minimal shell</span></div><p>Start from one searchable launcher. Each tool opens as a full-screen focused workspace, then returns to the launcher.</p><a class="study-link" href="./tool-launcher.html">Open interactive demo →</a></div></article>
-        <article class="study"><div class="study-preview"><span class="tag info study-label">04 · Matrix</span><div class="mini matrix-mini"><span class="mini-top"></span><span class="block"></span><span class="block"></span><span class="block"></span></div></div><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Research comparison</div><h2>Analysis matrix</h2></div><span class="tag info">comparative</span></div><p>A spreadsheet-like matrix connects runs, models, prompts, components, metrics, provenance, and validation gates.</p><a class="study-link" href="./analysis-matrix.html">Open interactive demo →</a></div></article>
+      <header class="index-intro"><div><div class="kicker">Complete structural alternatives</div><h1>Seven ways to rebuild the entire MECH interface.</h1></div><p>These are not incremental themes. Each concept uses a different mental model while preserving the same clean white visual language and explicit sample-data labeling.</p></header>
+      <section class="study-grid" aria-label="GUI concept library">
+        <article class="study"><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Office suite</div><h2>Ribbon workspace</h2></div><span class="tag info">command-first</span></div><p>Top ribbon tabs organize the product into Model, Analyze, Evidence, Reproduce and Publish. Commands stay visible while the central work area changes.</p><a class="study-link" href="./office-ribbon.html">Open interactive demo →</a></div><div class="study-preview"><span class="tag info study-label">01 · Ribbon</span><div class="mini ribbon-mini"><span class="bar"></span><span class="block accent"></span><span class="block"></span></div></div></article>
+        <article class="study"><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Creative application</div><h2>Tabbed desktop</h2></div><span class="tag info">full-screen tools</span></div><p>No dashboard and no permanent navigation. Model, circuit, society and report tools live as full-screen top tabs like a professional design application.</p><a class="study-link" href="./tabbed-desktop.html">Open interactive demo →</a></div><div class="study-preview"><span class="tag info study-label">02 · Tabs</span><div class="mini tabs-mini"><span class="bar"></span><span class="block accent"></span><span class="block"></span></div></div></article>
+        <article class="study"><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">File organization</div><h2>Asset manager</h2></div><span class="tag info">record-centric</span></div><p>Models, prompts, circuits, tensors, runs and reports behave like files. Browse, filter, select, preview and open research artifacts.</p><a class="study-link" href="./asset-manager.html">Open interactive demo →</a></div><div class="study-preview"><span class="tag info study-label">03 · Assets</span><div class="mini asset-mini"><span class="bar"></span><span class="block"></span><span class="block accent"></span></div></div></article>
+        <article class="study"><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Sequential analysis</div><h2>Timeline editor</h2></div><span class="tag info">intervention-first</span></div><p>A large viewport sits above a chronological intervention timeline. Select or play events to inspect how the model explanation changes.</p><a class="study-link" href="./timeline-editor.html">Open interactive demo →</a></div><div class="study-preview"><span class="tag info study-label">04 · Timeline</span><div class="mini timeline-mini"><span class="bar"></span><span class="block accent"></span><span class="block"></span></div></div></article>
+        <article class="study"><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Research operations</div><h2>Research board</h2></div><span class="tag info">workflow visibility</span></div><p>Planned, Running, Review and Published columns contain real research runs. Filter the board and open a run without losing board context.</p><a class="study-link" href="./research-board.html">Open interactive demo →</a></div><div class="study-preview"><span class="tag info study-label">05 · Board</span><div class="mini board-mini"><span class="bar"></span><span class="block"></span><span class="block accent"></span><span class="block"></span><span class="block"></span></div></div></article>
+        <article class="study"><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Window manager</div><h2>Desktop OS</h2></div><span class="tag info">multi-window</span></div><p>The studio behaves like a white operating system with draggable, resizable windows for prompts, evidence, reports and terminal output.</p><a class="study-link" href="./desktop-os.html">Open interactive demo →</a></div><div class="study-preview"><span class="tag info study-label">06 · OS</span><div class="mini os-mini"><span class="bar"></span><span class="block accent"></span><span class="block"></span><span class="block"></span></div></div></article>
+        <article class="study wide"><div class="study-copy"><div class="study-copy-head"><div><div class="kicker">Command line</div><h2>Terminal first</h2></div><span class="tag info">operator-first</span></div><p>One prompt controls MECH. Commands return structured records, agent state, validation gates, figures and evidence directly in the output stream.</p><a class="study-link" href="./terminal-first.html">Open interactive demo →</a></div><div class="study-preview"><span class="tag info study-label">07 · Terminal</span><div class="mini terminal-mini"><span class="bar"></span><span class="block"></span><span class="block accent"></span><span class="block"></span><span class="block"></span></div></div></article>
       </section>
     </div>
   </main>

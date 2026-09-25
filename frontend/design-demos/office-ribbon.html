@@ -1,0 +1,1386 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MECH — Office Ribbon Prototype</title>
+  <link rel="stylesheet" href="./demo.css" />
+  <style>
+    .office-shell {
+      display: grid;
+      height: calc(100vh - 30px);
+      min-height: 680px;
+      grid-template-rows: 58px auto auto minmax(0, 1fr) 30px;
+      background: var(--surface);
+    }
+
+    .office-topbar {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .office-document {
+      min-width: 0;
+    }
+
+    .office-document strong {
+      display: block;
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .office-document span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .office-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ribbon-tabs {
+      display: flex;
+      min-height: 42px;
+      align-items: stretch;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .ribbon-tablist {
+      display: flex;
+      min-width: 0;
+      align-items: stretch;
+      gap: 2px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .ribbon-tab {
+      position: relative;
+      min-width: 84px;
+      padding: 0 13px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .ribbon-tab::after {
+      position: absolute;
+      right: 10px;
+      bottom: 0;
+      left: 10px;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: transparent;
+      content: "";
+    }
+
+    .ribbon-tab:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    .ribbon-tab[aria-selected="true"] {
+      color: var(--accent);
+    }
+
+    .ribbon-tab[aria-selected="true"]::after {
+      background: var(--accent);
+    }
+
+    .ribbon-context {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .ribbon-context strong {
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    .command-ribbon {
+      min-height: 94px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-2);
+    }
+
+    .command-groups {
+      display: grid;
+      min-width: max-content;
+      min-height: 94px;
+      grid-auto-flow: column;
+      grid-auto-columns: max-content;
+      align-items: stretch;
+      padding: 0 10px;
+    }
+
+    .command-group {
+      display: flex;
+      min-width: 128px;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 9px 14px 8px;
+      border-right: 1px solid var(--line);
+    }
+
+    .command-group:first-child {
+      padding-left: 4px;
+    }
+
+    .command-group:last-child {
+      border-right: 0;
+    }
+
+    .group-label {
+      color: var(--muted);
+      font: 650 9px/1 var(--font-mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .command-stack {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .command-button {
+      display: inline-flex;
+      min-width: 42px;
+      min-height: 56px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 4px 7px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.15;
+      text-align: center;
+      transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+    }
+
+    .command-button:hover,
+    .command-button.active {
+      border-color: #c8d8f7;
+      background: var(--accent-soft);
+      color: var(--accent-hover);
+    }
+
+    .command-button[disabled] {
+      cursor: not-allowed;
+      opacity: .45;
+    }
+
+    .command-icon {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--accent);
+      font: 750 10px/1 var(--font-mono);
+    }
+
+    .work-surface {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background: var(--surface-2);
+    }
+
+    .surface-heading {
+      display: flex;
+      min-height: 82px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 16px clamp(16px, 3vw, 38px);
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .surface-heading h1 {
+      margin-top: 3px;
+      font-size: 21px;
+      letter-spacing: -.025em;
+    }
+
+    .surface-heading p {
+      max-width: 720px;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .surface-meta {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .work-scroll {
+      height: calc(100% - 82px);
+      overflow: auto;
+      padding: 18px clamp(14px, 3vw, 38px) 34px;
+    }
+
+    .view[hidden] {
+      display: none;
+    }
+
+    .view-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .paper {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .paper-pad {
+      padding: 18px;
+    }
+
+    .paper-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .paper-head h2 {
+      margin-top: 3px;
+      font-size: 16px;
+      letter-spacing: -.02em;
+    }
+
+    .paper-head p {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .paper-subhead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 11px;
+    }
+
+    .paper-subhead h3 {
+      font-size: 12px;
+    }
+
+    .spec-table {
+      display: grid;
+      grid-template-columns: 145px minmax(0, 1fr);
+      border-top: 1px solid var(--line);
+    }
+
+    .spec-table dt,
+    .spec-table dd {
+      min-width: 0;
+      margin: 0;
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 11px;
+    }
+
+    .spec-table dt {
+      color: var(--muted);
+      background: var(--surface-2);
+    }
+
+    .spec-table dd {
+      overflow: hidden;
+      color: var(--text);
+      font-family: var(--font-mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .control-block {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .control-block h3 {
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+
+    .range-label {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .range-label output {
+      color: var(--text);
+      font-family: var(--font-mono);
+    }
+
+    .range-label input {
+      grid-column: 1 / -1;
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .check-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      color: var(--text);
+      font-size: 11px;
+    }
+
+    .check-row + .check-row {
+      margin-top: 9px;
+    }
+
+    .check-row input {
+      margin-top: 2px;
+      accent-color: var(--accent);
+    }
+
+    .callout {
+      margin-top: 15px;
+      padding: 11px 12px;
+      border: 1px solid #c8d8f7;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: #214da3;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .metric-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .metric-button {
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr) 44px;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 8px 9px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .metric-button:hover,
+    .metric-button[aria-pressed="true"] {
+      border-color: #c8d8f7;
+      background: var(--accent-soft);
+    }
+
+    .metric-name {
+      color: var(--muted);
+      font: 650 10px/1 var(--font-mono);
+    }
+
+    .metric-track {
+      height: 9px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-3);
+    }
+
+    .metric-fill {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+    }
+
+    .metric-fill.green {
+      background: var(--green);
+    }
+
+    .metric-fill.amber {
+      background: var(--amber);
+    }
+
+    .metric-value {
+      color: var(--text);
+      font: 650 11px/1 var(--font-mono);
+      text-align: right;
+    }
+
+    .metric-detail {
+      min-height: 46px;
+      margin-top: 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .evidence-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .evidence-row {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .evidence-row:hover,
+    .evidence-row[aria-pressed="true"] {
+      border-color: #c8d8f7;
+      background: var(--accent-soft);
+    }
+
+    .evidence-kind {
+      display: grid;
+      width: 34px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      background: var(--surface-2);
+      color: var(--accent);
+      font: 700 9px/1 var(--font-mono);
+    }
+
+    .evidence-row strong {
+      display: block;
+      font-size: 11px;
+    }
+
+    .evidence-row span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .evidence-detail {
+      margin-top: 15px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .evidence-detail h3 {
+      font-size: 12px;
+    }
+
+    .evidence-detail p {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .run-log {
+      display: grid;
+      gap: 0;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .run-log li {
+      display: grid;
+      grid-template-columns: 62px minmax(0, 1fr) auto;
+      gap: 9px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 11px;
+    }
+
+    .run-log li:last-child {
+      border-bottom: 0;
+    }
+
+    .run-time {
+      color: var(--faint);
+      font: 10px/1.45 var(--font-mono);
+    }
+
+    .run-action {
+      color: var(--text);
+    }
+
+    .run-state {
+      color: var(--muted);
+      font: 10px/1.45 var(--font-mono);
+      text-align: right;
+    }
+
+    .select-label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .select-label select {
+      width: 100%;
+      min-height: 34px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .select-label input.demo-button {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    .gate-meter {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr) 58px;
+      align-items: center;
+      gap: 12px;
+      padding: 15px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-2);
+    }
+
+    .gate-score {
+      font: 750 25px/1 var(--font-mono);
+      letter-spacing: -.04em;
+    }
+
+    .gate-meter progress {
+      width: 100%;
+      height: 8px;
+      accent-color: var(--amber);
+    }
+
+    .gate-meter span:last-child {
+      color: var(--muted);
+      font: 10px/1 var(--font-mono);
+      text-align: right;
+    }
+
+    .checklist {
+      display: grid;
+      gap: 10px;
+    }
+
+    .checklist .check-row {
+      align-items: center;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface-2);
+    }
+
+    .checklist .check-row:has(input:checked) {
+      border-color: #b9dfd3;
+      background: var(--green-soft);
+    }
+
+    .checklist .check-row input {
+      margin-top: 0;
+    }
+
+    .inspector-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .inspector-row {
+      display: grid;
+      grid-template-columns: 90px minmax(0, 1fr);
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 11px;
+    }
+
+    .inspector-row:last-child {
+      border-bottom: 0;
+    }
+
+    .inspector-row span:first-child {
+      color: var(--muted);
+    }
+
+    .inspector-row span:last-child {
+      overflow: hidden;
+      font-family: var(--font-mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .surface-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .office-status {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 12px;
+      border-top: 1px solid var(--line);
+      background: var(--surface-2);
+      color: var(--muted);
+      font: 10px/1 var(--font-mono);
+    }
+
+    .office-status-left,
+    .office-status-right {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 14px;
+    }
+
+    #status-message {
+      overflow: hidden;
+      color: var(--text);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toast {
+      position: fixed;
+      z-index: 90;
+      right: 18px;
+      bottom: 44px;
+      max-width: min(360px, calc(100vw - 36px));
+      padding: 10px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 11px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(5px);
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+
+    .toast.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 900px) {
+      .office-topbar {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        padding: 0 12px;
+      }
+
+      .office-actions .tag,
+      .office-actions .demo-button:not(.primary) {
+        display: none;
+      }
+
+      .ribbon-context span:last-child {
+        display: none;
+      }
+
+      .view-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .view-grid > aside {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .office-shell {
+        min-height: 720px;
+      }
+
+      .office-topbar {
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+      }
+
+      .office-document {
+        display: none;
+      }
+
+      .ribbon-tabs {
+        padding: 0 8px;
+      }
+
+      .ribbon-tab {
+        min-width: 72px;
+        padding: 0 9px;
+        font-size: 11px;
+      }
+
+      .ribbon-context {
+        display: none;
+      }
+
+      .surface-heading {
+        min-height: 102px;
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+        padding: 14px;
+      }
+
+      .surface-heading h1 {
+        font-size: 19px;
+      }
+
+      .work-scroll {
+        height: calc(100% - 102px);
+        padding: 12px 10px 24px;
+      }
+
+      .view-grid > aside {
+        display: block;
+      }
+
+      .view-grid > aside + * {
+        margin-top: 12px;
+      }
+
+      .paper-head,
+      .paper-pad,
+      .gate-meter {
+        padding-right: 13px;
+        padding-left: 13px;
+      }
+
+      .spec-table {
+        grid-template-columns: 112px minmax(0, 1fr);
+      }
+
+      .run-log li {
+        grid-template-columns: 52px minmax(0, 1fr);
+      }
+
+      .run-state {
+        grid-column: 2;
+        text-align: left;
+      }
+
+      .office-status-right {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-ribbon" role="status">
+    <strong>PROTOTYPE · SAMPLE DATA</strong>
+    <span>Office ribbon study · values and records are illustrative · production UI unchanged</span>
+  </div>
+
+  <main class="office-shell">
+    <header class="office-topbar">
+      <a class="brand" href="./index.html" aria-label="MECH design demos home">
+        <span class="brand-mark">M</span>
+        <span class="brand-name">MECH</span>
+      </a>
+      <div class="office-document">
+        <span class="kicker">Research notebook</span>
+        <strong>Mechanistic interpretability / IOI</strong>
+      </div>
+      <div class="office-actions">
+        <span class="tag live">sample data</span>
+        <button class="demo-button" id="save-button" type="button">Save state</button>
+        <button class="demo-button primary" id="export-button" type="button">Export</button>
+      </div>
+    </header>
+
+    <nav class="ribbon-tabs" aria-label="Research workflow ribbon">
+      <div class="ribbon-tablist" role="tablist" aria-label="Research workflow tabs">
+        <button class="ribbon-tab" id="tab-model" type="button" role="tab" aria-selected="true" aria-controls="work-surface" tabindex="0" data-tab="model">Model</button>
+        <button class="ribbon-tab" id="tab-analyze" type="button" role="tab" aria-selected="false" aria-controls="work-surface" tabindex="-1" data-tab="analyze">Analyze</button>
+        <button class="ribbon-tab" id="tab-evidence" type="button" role="tab" aria-selected="false" aria-controls="work-surface" tabindex="-1" data-tab="evidence">Evidence</button>
+        <button class="ribbon-tab" id="tab-reproduce" type="button" role="tab" aria-selected="false" aria-controls="work-surface" tabindex="-1" data-tab="reproduce">Reproduce</button>
+        <button class="ribbon-tab" id="tab-publish" type="button" role="tab" aria-selected="false" aria-controls="work-surface" tabindex="-1" data-tab="publish">Publish</button>
+      </div>
+      <div class="ribbon-context" aria-live="polite">
+        <span id="context-label">Model context</span>
+        <strong id="context-note">GPT-2 Small · selected</strong>
+      </div>
+    </nav>
+
+    <section class="command-ribbon" aria-label="Contextual commands">
+      <div class="command-groups" id="command-groups"></div>
+    </section>
+
+    <section class="work-surface" id="work-surface" role="tabpanel" tabindex="0" aria-labelledby="tab-model">
+      <header class="surface-heading">
+        <div>
+          <span class="kicker" id="surface-kicker">Model workspace</span>
+          <h1 id="surface-title">Model definition</h1>
+          <p id="surface-description">Keep the model, prompt, and selected context in one inspectable notebook surface.</p>
+        </div>
+        <div class="surface-meta">
+          <span class="tag info" id="surface-tag">model</span>
+          <span class="mono" id="surface-record">MECH-024</span>
+        </div>
+      </header>
+
+      <div class="work-scroll">
+        <div class="view-stack">
+          <section class="view" data-view="model" aria-labelledby="view-model-title">
+            <div class="view-grid">
+              <article class="paper" aria-labelledby="view-model-title">
+                <div class="paper-head">
+                  <div>
+                    <span class="kicker">Model card</span>
+                    <h2 id="view-model-title">GPT-2 Small</h2>
+                    <p>Transformer language model used for the sample IOI investigation.</p>
+                  </div>
+                  <span class="tag live">loaded</span>
+                </div>
+                <div class="paper-pad">
+                  <div class="paper-subhead"><h3>Run context</h3><span class="mono faint">sample-record-024</span></div>
+                  <dl class="spec-table">
+                    <dt>Architecture</dt><dd>12 layers · 12 heads · 768 hidden</dd>
+                    <dt>Tokenizer</dt><dd>Byte-level BPE · 50,257 tokens</dd>
+                    <dt>Evaluation position</dt><dd>final token · index 7</dd>
+                    <dt>Device</dt><dd>CPU sample runtime</dd>
+                  </dl>
+                  <div class="control-block">
+                    <h3>Prompt preview</h3>
+                    <label class="select-label" for="prompt-text">Prompt text
+                      <input id="prompt-text" class="demo-button" value="When Mary and John went to the store, John gave a drink to" />
+                    </label>
+                    <div class="callout" id="prompt-preview">The final-position output is expected to favor <strong>Mary</strong> in this illustrative task.</div>
+                  </div>
+                  <div class="control-block">
+                    <label class="range-label" for="temperature">Sampling temperature <output id="temperature-output" for="temperature">0.00</output></label>
+                    <input id="temperature" type="range" min="0" max="2" value="0" step="0.1" />
+                    <label class="check-row" style="margin-top:12px"><input id="include-residual" type="checkbox" checked /> Include residual stream in evidence bundle</label>
+                  </div>
+                </div>
+              </article>
+              <aside class="paper paper-pad" aria-label="Model context inspector">
+                <div class="paper-subhead"><h3>Selected context</h3><span class="tag">model</span></div>
+                <div class="inspector-list">
+                  <div class="inspector-row"><span>Model</span><span>gpt2-small</span></div>
+                  <div class="inspector-row"><span>Question</span><span>IOI name mover</span></div>
+                  <div class="inspector-row"><span>Best head</span><span>L9H9</span></div>
+                  <div class="inspector-row"><span>Expected</span><span>Mary</span></div>
+                  <div class="inspector-row"><span>Provenance</span><span>illustrative</span></div>
+                </div>
+                <div class="control-block">
+                  <h3>Context actions</h3>
+                  <div style="display:flex;flex-wrap:wrap;gap:7px"><button class="demo-button" type="button" data-command-short="focus-prompt">Edit prompt</button><button class="demo-button soft" type="button" data-command-short="load-model">Load model</button></div>
+                </div>
+                <p class="surface-note"><span class="status-dot live"></span><span>All fields are sample workspace data.</span></p>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" data-view="analyze" aria-labelledby="view-analyze-title" hidden>
+            <div class="view-grid">
+              <article class="paper" aria-labelledby="view-analyze-title">
+                <div class="paper-head">
+                  <div>
+                    <span class="kicker">Signal inspection</span>
+                    <h2 id="view-analyze-title">Layer signal map</h2>
+                    <p>Select a metric to make the sample comparison explicit.</p>
+                  </div>
+                  <span class="tag info">illustrative run</span>
+                </div>
+                <div class="paper-pad">
+                  <div class="paper-subhead"><h3>Candidate components</h3><button class="demo-button primary" id="run-sweep" type="button">Run sweep</button></div>
+                  <div class="metric-stack" role="group" aria-label="Candidate signal metrics">
+                    <button class="metric-button" type="button" data-metric="L9H9" data-value="0.86" aria-pressed="true"><span class="metric-name">L9H9</span><span class="metric-track"><span class="metric-fill" style="width:86%"></span></span><span class="metric-value">0.86</span></button>
+                    <button class="metric-button" type="button" data-metric="L10H0" data-value="0.81" aria-pressed="false"><span class="metric-name">L10H0</span><span class="metric-track"><span class="metric-fill green" style="width:81%"></span></span><span class="metric-value">0.81</span></button>
+                    <button class="metric-button" type="button" data-metric="L9H6" data-value="0.68" aria-pressed="false"><span class="metric-name">L9H6</span><span class="metric-track"><span class="metric-fill amber" style="width:68%"></span></span><span class="metric-value">0.68</span></button>
+                    <button class="metric-button" type="button" data-metric="L5H1" data-value="0.42" aria-pressed="false"><span class="metric-name">L5H1</span><span class="metric-track"><span class="metric-fill amber" style="width:42%"></span></span><span class="metric-value">0.42</span></button>
+                  </div>
+                  <div class="metric-detail" id="metric-detail" role="status" aria-live="polite"><strong>L9H9</strong> is the strongest sample candidate at 0.86 fidelity. It remains linked to the original prompt and residual tensor.</div>
+                </div>
+              </article>
+              <aside class="paper paper-pad" aria-label="Analysis inspector">
+                <div class="paper-subhead"><h3>Analysis state</h3><span class="tag live">ready</span></div>
+                <div class="inspector-list">
+                  <div class="inspector-row"><span>Method</span><span>path patch</span></div>
+                  <div class="inspector-row"><span>Positions</span><span>0–7</span></div>
+                  <div class="inspector-row"><span>Seeds</span><span>3</span></div>
+                  <div class="inspector-row"><span>Last run</span><span>10:42:14</span></div>
+                </div>
+                <div class="callout">The sample map is a visual aid, not a claim of causal sufficiency. Reproduce the baseline before publication.</div>
+                <div class="control-block"><h3>Quick actions</h3><button class="demo-button" style="width:100%" type="button" data-command-short="compare">Compare selected head</button></div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" data-view="evidence" aria-labelledby="view-evidence-title" hidden>
+            <div class="view-grid">
+              <article class="paper" aria-labelledby="view-evidence-title">
+                <div class="paper-head">
+                  <div>
+                    <span class="kicker">Evidence ledger</span>
+                    <h2 id="view-evidence-title">Linked records</h2>
+                    <p>Every sample record keeps its source and confidence state visible.</p>
+                  </div>
+                  <span class="tag live">6 linked</span>
+                </div>
+                <div class="paper-pad">
+                  <div class="evidence-list" role="group" aria-label="Evidence records">
+                    <button class="evidence-row" type="button" data-evidence="tensor" aria-pressed="true"><span class="evidence-kind">NPY</span><span><strong>resid-layer-9.npy</strong><span>Final-position residual tensor</span></span><span class="tag live">stored</span></button>
+                    <button class="evidence-row" type="button" data-evidence="baseline" aria-pressed="false"><span class="evidence-kind">BIB</span><span><strong>wang-2022.bib</strong><span>Published IOI comparison</span></span><span class="tag">reference</span></button>
+                    <button class="evidence-row" type="button" data-evidence="prompt" aria-pressed="false"><span class="evidence-kind">TXT</span><span><strong>prompt.txt</strong><span>Exact evaluation prompt</span></span><span class="tag">stored</span></button>
+                    <button class="evidence-row" type="button" data-evidence="circuit" aria-pressed="false"><span class="evidence-kind">CIR</span><span><strong>ioi-circuit.json</strong><span>Reference candidate catalog</span></span><span class="tag warn">catalog</span></button>
+                  </div>
+                  <div class="evidence-detail" role="status" aria-live="polite">
+                    <h3 id="evidence-name">resid-layer-9.npy</h3>
+                    <p id="evidence-description">Shape 8 × 768 · float32 · linked to MECH-024 and the selected prompt.</p>
+                    <p id="evidence-source" class="mono faint">source: evidence/resid-layer-9.npy</p>
+                  </div>
+                  <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:14px"><button class="demo-button" id="pin-evidence" type="button">Pin record</button><button class="demo-button soft" type="button" data-command-short="trace">Trace provenance</button></div>
+                </div>
+              </article>
+              <aside class="paper paper-pad" aria-label="Evidence integrity inspector">
+                <div class="paper-subhead"><h3>Integrity</h3><span class="tag warn">1 missing</span></div>
+                <div class="inspector-list">
+                  <div class="inspector-row"><span>Source</span><span>run-MECH-024</span></div>
+                  <div class="inspector-row"><span>Shape</span><span>8 × 768</span></div>
+                  <div class="inspector-row"><span>Layer</span><span>9</span></div>
+                  <div class="inspector-row"><span>Redundancy</span><span>unavailable</span></div>
+                </div>
+                <div class="callout">Missing redundancy ablation keeps the publication gate pending.</div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" data-view="reproduce" aria-labelledby="view-reproduce-title" hidden>
+            <div class="view-grid">
+              <article class="paper" aria-labelledby="view-reproduce-title">
+                <div class="paper-head">
+                  <div>
+                    <span class="kicker">Execution log</span>
+                    <h2 id="view-reproduce-title">Reproduce MECH-024</h2>
+                    <p>Queue a run with the same sample environment and inspect the event trace.</p>
+                  </div>
+                  <span class="tag info" id="queue-state">1 queued</span>
+                </div>
+                <div class="paper-pad">
+                  <div class="paper-subhead"><h3>Run configuration</h3><label class="select-label" for="environment">Environment<select id="environment"><option>python 3.11 · cpu sample</option><option>python 3.11 · cuda sample</option><option>locked research image</option></select></label></div>
+                  <ol class="run-log" id="run-log" aria-live="polite">
+                    <li><span class="run-time">10:42:08</span><span class="run-action">Loaded GPT-2 Small checkpoint</span><span class="run-state">complete</span></li>
+                    <li><span class="run-time">10:42:10</span><span class="run-action">Captured layer 9 residual tensor</span><span class="run-state">stored</span></li>
+                    <li><span class="run-time">10:42:14</span><span class="run-action">Path-patched candidate heads</span><span class="run-state">complete</span></li>
+                    <li><span class="run-time">queued</span><span class="run-action">Redundancy ablation</span><span class="run-state">pending</span></li>
+                  </ol>
+                  <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:15px"><button class="demo-button primary" id="queue-run" type="button">Queue reproduction</button><button class="demo-button" type="button" data-command-short="pin-env">Pin environment</button></div>
+                </div>
+              </article>
+              <aside class="paper paper-pad" aria-label="Reproducibility inspector">
+                <div class="paper-subhead"><h3>Run manifest</h3><span class="tag live">locked</span></div>
+                <div class="inspector-list">
+                  <div class="inspector-row"><span>Run ID</span><span>MECH-024</span></div>
+                  <div class="inspector-row"><span>Seed</span><span>42</span></div>
+                  <div class="inspector-row"><span>Device</span><span>CPU</span></div>
+                  <div class="inspector-row"><span>Timeout</span><span>120 s</span></div>
+                </div>
+                <div class="callout">Reproduction compares the sample result against the linked baseline before the gate can pass.</div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" data-view="publish" aria-labelledby="view-publish-title" hidden>
+            <div class="view-grid">
+              <article class="paper" aria-labelledby="view-publish-title">
+                <div class="gate-meter">
+                  <span class="gate-score" id="gate-score">0.83</span>
+                  <progress id="gate-progress" max="1" step="0.01" value="0.83" aria-label="Composite confidence"></progress>
+                  <span id="gate-threshold">target 0.85</span>
+                </div>
+                <div class="paper-pad">
+                  <div class="paper-subhead"><h3>Validation gate</h3><span class="tag warn" id="gate-status">pending</span></div>
+                  <div class="checklist">
+                    <label class="check-row"><input id="check-fidelity" type="checkbox" checked /> Fidelity reproduction passes</label>
+                    <label class="check-row"><input id="check-confidence" type="checkbox" checked /> Confidence reproduction passes</label>
+                    <label class="check-row"><input id="check-minimality" type="checkbox" /> Minimality evidence available</label>
+                    <label class="check-row"><input id="check-provenance" type="checkbox" checked /> Provenance is attached</label>
+                  </div>
+                  <div class="control-block"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3>Publication packet</h3><span class="mono faint" id="packet-count">3 / 4 checks</span></div><div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px"><button class="demo-button primary" id="validate-gate" type="button">Validate gate</button><button class="demo-button" type="button" data-command-short="build">Build report</button><button class="demo-button soft" type="button" data-command-short="export">Export packet</button></div></div>
+                </div>
+              </article>
+              <aside class="paper paper-pad" aria-label="Publication checklist inspector">
+                <div class="paper-subhead"><h3>Release notes</h3><span class="tag">draft</span></div>
+                <p class="muted" style="font-size:11px;line-height:1.6">The report keeps passing evidence and unresolved validation requirements visibly separate.</p>
+                <div class="inspector-list" style="margin-top:13px">
+                  <div class="inspector-row"><span>Report</span><span>validation-gate.md</span></div>
+                  <div class="inspector-row"><span>Linked run</span><span>MECH-024</span></div>
+                  <div class="inspector-row"><span>Baseline</span><span>Wang 2022</span></div>
+                  <div class="inspector-row"><span>Decision</span><span id="decision-note">Hold for minimality</span></div>
+                </div>
+                <p class="surface-note"><span class="status-dot warn"></span><span>Prototype output only; no publication is performed.</span></p>
+              </aside>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <footer class="office-status">
+      <div class="office-status-left"><span class="status-dot live"></span><span id="status-message" role="status" aria-live="polite">Model view ready</span><span class="tag">sample notebook</span></div>
+      <div class="office-status-right"><span id="status-position">Ln 1, Col 1</span><span>UTF-8</span><span>No backend</span></div>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const tabData = {
+      model: { label: 'Model', kicker: 'Model workspace', title: 'Model definition', description: 'Keep the model, prompt, and selected context in one inspectable notebook surface.', context: 'Model context', note: 'GPT-2 Small · selected', tag: 'model', record: 'MECH-024' },
+      analyze: { label: 'Analyze', kicker: 'Analysis workspace', title: 'Signal inspection', description: 'Compare candidate components without losing the link to the original evaluation record.', context: 'Analysis context', note: 'Path patch · 3 candidates', tag: 'analysis', record: 'RUN-024' },
+      evidence: { label: 'Evidence', kicker: 'Evidence workspace', title: 'Linked evidence', description: 'Inspect source records, provenance, and the checks that keep a result honest.', context: 'Evidence context', note: '6 records · 1 missing', tag: 'evidence', record: 'EVID-024' },
+      reproduce: { label: 'Reproduce', kicker: 'Reproduction workspace', title: 'Reproduce a run', description: 'Queue a bounded sample run and keep the environment, seed, and event trace together.', context: 'Run context', note: 'MECH-024 · queued', tag: 'reproduce', record: 'MECH-024' },
+      publish: { label: 'Publish', kicker: 'Publication workspace', title: 'Validation gate', description: 'Prepare a reviewable packet while keeping unresolved requirements explicit.', context: 'Publication context', note: '0.83 · target 0.85', tag: 'publish', record: 'REPORT-024' }
+    };
+
+    const commandSets = {
+      model: [
+        { label: 'Model', commands: [{ icon: 'M', label: 'Open model', effect: 'open' }, { icon: '＋', label: 'New variant', effect: 'variant' }] },
+        { label: 'Prompt', commands: [{ icon: 'T', label: 'Edit prompt', effect: 'prompt' }, { icon: '↗', label: 'Send to analyze', effect: 'analyze' }] },
+        { label: 'Workspace', commands: [{ icon: '▦', label: 'Duplicate view', effect: 'duplicate' }] }
+      ],
+      analyze: [
+        { label: 'Sweep', commands: [{ icon: '▶', label: 'Run sweep', effect: 'sweep' }, { icon: '↻', label: 'Reset view', effect: 'reset' }] },
+        { label: 'Compare', commands: [{ icon: '±', label: 'Compare heads', effect: 'compare' }, { icon: '⌁', label: 'Mark candidate', effect: 'candidate' }] },
+        { label: 'Output', commands: [{ icon: '↗', label: 'Open evidence', effect: 'evidence' }] }
+      ],
+      evidence: [
+        { label: 'Records', commands: [{ icon: '▤', label: 'Open record', effect: 'open' }, { icon: '☆', label: 'Pin current', effect: 'pin' }] },
+        { label: 'Trace', commands: [{ icon: '↳', label: 'Trace provenance', effect: 'trace' }, { icon: '⊕', label: 'Link run', effect: 'link' }] },
+        { label: 'Bundle', commands: [{ icon: '⇩', label: 'Add to report', effect: 'report' }] }
+      ],
+      reproduce: [
+        { label: 'Run', commands: [{ icon: '▶', label: 'Queue run', effect: 'queue' }, { icon: '■', label: 'Stop queue', effect: 'stop' }] },
+        { label: 'Environment', commands: [{ icon: '⚙', label: 'Pin environment', effect: 'environment' }, { icon: '↔', label: 'Compare seed', effect: 'seed' }] },
+        { label: 'Trace', commands: [{ icon: '↗', label: 'Open report', effect: 'report' }] }
+      ],
+      publish: [
+        { label: 'Gate', commands: [{ icon: '✓', label: 'Validate gate', effect: 'validate' }, { icon: '↻', label: 'Recheck', effect: 'recheck' }] },
+        { label: 'Report', commands: [{ icon: '▥', label: 'Build report', effect: 'build' }, { icon: '↗', label: 'Preview packet', effect: 'preview' }] },
+        { label: 'Output', commands: [{ icon: '⇩', label: 'Export packet', effect: 'export' }] }
+      ]
+    };
+
+    const commandCopy = {
+      open: 'Selected model record opened in the sample notebook.',
+      variant: 'New model variant staged as an illustrative draft.',
+      prompt: 'Prompt field focused for editing.',
+      analyze: 'Prompt sent to the analysis workspace.',
+      duplicate: 'Workspace view duplicated for comparison.',
+      sweep: 'Analysis sweep queued for the sample model.',
+      reset: 'Analysis view reset to the first candidate.',
+      compare: 'Candidate comparison prepared.',
+      candidate: 'Selected component marked as a candidate.',
+      evidence: 'Evidence workspace opened for the current run.',
+      pin: 'Current evidence record pinned to the sample bundle.',
+      trace: 'Provenance trace opened for the selected record.',
+      link: 'Current run linked to the selected evidence record.',
+      report: 'Evidence record added to the draft report.',
+      queue: 'Reproduction run queued in the sample environment.',
+      stop: 'Queued sample work marked for review.',
+      environment: 'Environment manifest pinned to this notebook.',
+      seed: 'Seed comparison is ready for review.',
+      validate: 'Validation gate checked against the current checklist.',
+      recheck: 'Gate recheck queued.',
+      build: 'Draft validation report built from linked records.',
+      preview: 'Publication packet preview prepared.',
+      export: 'Sample packet marked for export.'
+    };
+
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    const views = [...document.querySelectorAll('[data-view]')];
+    const commandGroups = document.getElementById('command-groups');
+    const workSurface = document.getElementById('work-surface');
+    const statusMessage = document.getElementById('status-message');
+    const toast = document.getElementById('toast');
+    let activeTab = 'model';
+    let toastTimer;
+
+    function setStatus(message) {
+      statusMessage.textContent = message;
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('visible'), 2200);
+    }
+
+    function renderCommands(tab) {
+      commandGroups.innerHTML = commandSets[tab].map(group => `
+        <div class="command-group">
+          <span class="group-label">${group.label}</span>
+          <div class="command-stack">
+            ${group.commands.map(command => `<button class="command-button" type="button" data-command="${command.label}" data-effect="${command.effect}"><span class="command-icon" aria-hidden="true">${command.icon}</span><span>${command.label}</span></button>`).join('')}
+          </div>
+        </div>
+      `).join('');
+      commandGroups.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runCommand(button)));
+    }
+
+    function activateTab(key, moveFocus) {
+      if (!tabData[key]) return;
+      activeTab = key;
+      const data = tabData[key];
+      tabs.forEach(tab => {
+        const selected = tab.dataset.tab === key;
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      views.forEach(view => { view.hidden = view.dataset.view !== key; });
+      workSurface.setAttribute('aria-labelledby', `tab-${key}`);
+      document.getElementById('surface-kicker').textContent = data.kicker;
+      document.getElementById('surface-title').textContent = data.title;
+      document.getElementById('surface-description').textContent = data.description;
+      document.getElementById('surface-tag').textContent = data.tag;
+      document.getElementById('surface-record').textContent = data.record;
+      document.getElementById('context-label').textContent = data.context;
+      document.getElementById('context-note').textContent = data.note;
+      document.getElementById('status-position').textContent = key === 'publish' ? 'Gate 0.83' : 'Ln 1, Col 1';
+      renderCommands(key);
+      setStatus(`${data.label} view ready`);
+      if (moveFocus) document.getElementById(`tab-${key}`).focus();
+    }
+
+    function appendRunLog(action, state) {
+      const log = document.getElementById('run-log');
+      const item = document.createElement('li');
+      const time = document.createElement('span');
+      const name = document.createElement('span');
+      const result = document.createElement('span');
+      time.className = 'run-time';
+      name.className = 'run-action';
+      result.className = 'run-state';
+      time.textContent = 'now';
+      name.textContent = action;
+      result.textContent = state;
+      item.append(time, name, result);
+      log.appendChild(item);
+    }
+
+    function runCommand(button) {
+      commandGroups.querySelectorAll('[data-command]').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      const effect = button.dataset.effect;
+      const message = commandCopy[effect] || 'Command selected.';
+      if (effect === 'prompt') document.getElementById('prompt-text').focus();
+      if (effect === 'sweep') appendRunLog('Analysis sweep queued', 'queued');
+      if (effect === 'queue') {
+        appendRunLog('Reproduction run queued', 'queued');
+        document.getElementById('queue-state').textContent = '2 queued';
+      }
+      if (effect === 'pin') selectEvidence('tensor');
+      if (effect === 'validate' || effect === 'recheck') validateGate();
+      if (effect === 'export') exportPacket();
+      if (effect === 'evidence') activateTab('evidence', false);
+      if (effect === 'report') activateTab('publish', false);
+      if (effect === 'analyze') activateTab('analyze', false);
+      setStatus(message);
+      showToast(message);
+    }
+
+    function selectEvidence(key) {
+      const records = {
+        tensor: ['resid-layer-9.npy', 'Shape 8 × 768 · float32 · linked to MECH-024 and the selected prompt.', 'source: evidence/resid-layer-9.npy'],
+        baseline: ['wang-2022.bib', 'Published IOI comparison · used as a reference baseline, not proof of internal equivalence.', 'source: references/wang-2022.bib'],
+        prompt: ['prompt.txt', 'Exact evaluation prompt · eight tokens with the indirect-object name at the final position.', 'source: prompts/prompt.txt'],
+        circuit: ['ioi-circuit.json', 'Reference candidate catalog · nodes and edges are illustrative until validated.', 'source: registry/ioi-circuit.json']
+      };
+      document.querySelectorAll('[data-evidence]').forEach(row => row.setAttribute('aria-pressed', String(row.dataset.evidence === key)));
+      const record = records[key];
+      document.getElementById('evidence-name').textContent = record[0];
+      document.getElementById('evidence-description').textContent = record[1];
+      document.getElementById('evidence-source').textContent = record[2];
+      if (activeTab !== 'evidence') activateTab('evidence', false);
+    }
+
+    function validateGate() {
+      const checks = ['check-fidelity', 'check-confidence', 'check-minimality', 'check-provenance'].map(id => document.getElementById(id).checked);
+      const count = checks.filter(Boolean).length;
+      const score = count === 4 ? 0.91 : count === 3 ? 0.83 : 0.67;
+      const passed = count === 4;
+      document.getElementById('packet-count').textContent = `${count} / 4 checks`;
+      document.getElementById('gate-score').textContent = score.toFixed(2);
+      document.getElementById('gate-progress').value = score;
+      document.getElementById('gate-status').textContent = passed ? 'passed' : 'pending';
+      document.getElementById('gate-status').className = passed ? 'tag live' : 'tag warn';
+      document.getElementById('decision-note').textContent = passed ? 'Ready for review' : 'Hold for minimality';
+      const message = passed ? 'Validation gate passed for the sample packet.' : `Validation gate pending: ${count} of 4 checks pass.`;
+      setStatus(message);
+      showToast(message);
+    }
+
+    function exportPacket() {
+      const button = document.getElementById('export-button');
+      const original = button.textContent;
+      button.textContent = 'Ready';
+      setStatus('Sample publication packet prepared; no file was written.');
+      showToast('Sample packet prepared for review.');
+      setTimeout(() => { button.textContent = original; }, 1200);
+    }
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => activateTab(tab.dataset.tab, false));
+      tab.addEventListener('keydown', event => {
+        let next = index;
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % tabs.length;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + tabs.length) % tabs.length;
+        if (event.key === 'Home') next = 0;
+        if (event.key === 'End') next = tabs.length - 1;
+        if (next !== index) {
+          event.preventDefault();
+          activateTab(tabs[next].dataset.tab, true);
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-evidence]').forEach(row => row.addEventListener('click', () => selectEvidence(row.dataset.evidence)));
+    document.querySelectorAll('[data-metric]').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('[data-metric]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      document.getElementById('metric-detail').innerHTML = `<strong>${button.dataset.metric}</strong> is the selected sample candidate at ${button.dataset.value} signal strength. The original run and evidence links remain attached.`;
+      setStatus(`${button.dataset.metric} selected for comparison.`);
+    }));
+    document.getElementById('run-sweep').addEventListener('click', () => {
+      appendRunLog('Analysis sweep queued', 'queued');
+      setStatus('Analysis sweep queued for the sample model.');
+      showToast('Sample sweep queued.');
+    });
+    document.getElementById('temperature').addEventListener('input', event => {
+      document.getElementById('temperature-output').textContent = Number(event.target.value).toFixed(2);
+      setStatus(`Sampling temperature set to ${Number(event.target.value).toFixed(2)}.`);
+    });
+    document.getElementById('prompt-text').addEventListener('input', event => {
+      const value = event.target.value.trim() || 'the sample prompt';
+      document.getElementById('prompt-preview').textContent = `Preview: ${value}`;
+    });
+    document.getElementById('include-residual').addEventListener('change', event => {
+      setStatus(event.target.checked ? 'Residual stream added to the evidence bundle.' : 'Residual stream removed from the evidence bundle.');
+    });
+    document.getElementById('pin-evidence').addEventListener('click', () => {
+      setStatus('Selected evidence record pinned to the sample bundle.');
+      showToast('Evidence record pinned.');
+    });
+    document.getElementById('queue-run').addEventListener('click', () => {
+      appendRunLog('Reproduction run queued', 'queued');
+      document.getElementById('queue-state').textContent = '2 queued';
+      setStatus('Reproduction run queued in the sample environment.');
+      showToast('Reproduction run queued.');
+    });
+    document.getElementById('environment').addEventListener('change', event => {
+      setStatus(`Environment set to ${event.target.value}.`);
+    });
+    document.getElementById('validate-gate').addEventListener('click', validateGate);
+    document.querySelectorAll('[data-command-short]').forEach(button => button.addEventListener('click', () => {
+      const effect = button.dataset.commandShort;
+      if (effect === 'focus-prompt') document.getElementById('prompt-text').focus();
+      if (effect === 'load-model') {
+        setStatus('GPT-2 Small checkpoint loaded into the sample notebook.');
+        showToast('Sample checkpoint loaded.');
+      }
+      if (effect === 'compare') {
+        setStatus('Selected head prepared for comparison.');
+        showToast('Comparison prepared.');
+      }
+      if (effect === 'trace') {
+        selectEvidence('tensor');
+        setStatus('Provenance trace opened for the selected record.');
+      }
+      if (effect === 'pin-env') {
+        setStatus('Environment manifest pinned to this notebook.');
+        showToast('Environment pinned.');
+      }
+      if (effect === 'build') {
+        setStatus('Draft validation report built from linked records.');
+        showToast('Draft report built.');
+      }
+      if (effect === 'export') exportPacket();
+    }));
+    document.getElementById('save-button').addEventListener('click', event => {
+      event.currentTarget.textContent = 'Saved';
+      setStatus('Sample notebook state saved locally.');
+      showToast('Sample state saved.');
+      setTimeout(() => { event.currentTarget.textContent = 'Save state'; }, 1200);
+    });
+    document.getElementById('export-button').addEventListener('click', exportPacket);
+
+    renderCommands(activeTab);
+  </script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MECH — Research Board Demo</title>
+  <link rel="stylesheet" href="./demo.css" />
+  <style>
+    .board-shell { min-height: calc(100vh - 30px); background: var(--bg); }
+    .board-heading { display: flex; min-width: 0; flex-direction: column; }
+    .board-heading strong { font-size: 13px; }
+    .board-heading span { color: var(--muted); font: 500 10px/1.3 var(--font-mono); }
+    .board-toolbar { display: flex; min-height: 56px; align-items: center; gap: 8px; padding: 9px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .board-search { display: flex; width: min(390px, 36vw); min-height: 34px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); }
+    .board-search input { min-width: 0; flex: 1; border: 0; background: transparent; }
+    .toolbar-count { color: var(--muted); font: 600 10px/1 var(--font-mono); }
+    .board-scroll { height: calc(100vh - 144px); min-height: 620px; overflow: auto; }
+    .board { display: grid; min-width: 1050px; min-height: 100%; grid-template-columns: repeat(4, minmax(245px, 1fr)); gap: 0; background: var(--surface); }
+    .board-column { min-width: 0; padding: 0 12px 34px; border-right: 1px solid var(--line); }
+    .board-column:last-child { border-right: 0; }
+    .column-head { position: sticky; z-index: 5; top: 0; display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 2px solid var(--line-strong); background: rgba(255,255,255,.97); }
+    .column-title { display: flex; align-items: center; gap: 8px; }
+    .column-title h2 { font-size: 12px; }
+    .column-marker { width: 8px; height: 8px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface-2); }
+    .board-column[data-stage="running"] .column-marker { border-color: var(--accent); background: var(--accent-soft); }
+    .board-column[data-stage="review"] .column-marker { border-color: var(--amber); background: var(--amber-soft); }
+    .board-column[data-stage="published"] .column-marker { border-color: var(--green); background: var(--green-soft); }
+    .column-count { min-width: 23px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--muted); text-align: center; font: 650 10px/1 var(--font-mono); }
+    .run-card { position: relative; margin-top: 12px; }
+    .run-card[hidden] { display: none; }
+    .card-open { display: block; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); cursor: pointer; text-align: left; transition: border-color 140ms ease, background-color 140ms ease, transform 100ms ease; }
+    .card-open:hover { border-color: var(--line-strong); background: var(--surface-2); }
+    .card-open:active { transform: translateY(1px); }
+    .card-topline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .run-id { color: var(--accent); font: 700 10px/1 var(--font-mono); }
+    .card-title { display: block; margin-top: 9px; font-size: 13px; font-weight: 720; line-height: 1.35; }
+    .card-question { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .card-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
+    .card-progress { height: 5px; margin-top: 12px; overflow: hidden; border-radius: 5px; background: var(--surface-3); }
+    .card-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+    .board-column[data-stage="review"] .card-progress > span { background: var(--amber); }
+    .board-column[data-stage="published"] .card-progress > span { background: var(--green); }
+    .card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; color: var(--muted); font: 500 9px/1.2 var(--font-mono); }
+    .column-empty { display: none; margin: 12px 0; padding: 14px; border: 1px dashed var(--line-strong); color: var(--muted); font-size: 11px; text-align: center; }
+    .column-empty.visible { display: block; }
+    .board-no-results { display: none; margin: 20px; padding: 18px; border: 1px dashed var(--line-strong); background: var(--surface); color: var(--muted); text-align: center; }
+    .board-no-results.visible { display: block; }
+    .board-footer { display: flex; min-height: 28px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border-top: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: 500 9px/1 var(--font-mono); }
+    .run-dialog { width: min(720px, calc(100vw - 28px)); max-height: min(760px, calc(100vh - 48px)); margin: auto; overflow: auto; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface); color: var(--text); }
+    .run-dialog::backdrop { background: rgba(100,116,132,.24); }
+    .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .dialog-head h2 { margin-top: 5px; font-size: 20px; letter-spacing: -.025em; }
+    .dialog-body { padding: 18px; }
+    .dialog-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-top: 18px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--line); }
+    .detail-cell { min-width: 0; padding: 12px; background: var(--surface); }
+    .detail-cell dt { color: var(--muted); font-size: 10px; }
+    .detail-cell dd { margin: 4px 0 0; overflow-wrap: anywhere; font: 650 12px/1.35 var(--font-mono); }
+    .dialog-section { margin-top: 20px; }
+    .dialog-section h3 { margin-bottom: 8px; font-size: 12px; }
+    .dialog-section p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .trace-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+    .trace-list li { display: grid; grid-template-columns: 68px 1fr auto; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
+    .trace-list time { color: var(--faint); font-family: var(--font-mono); }
+    .trace-list span:last-child { color: var(--muted); font-family: var(--font-mono); }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    @media (max-width: 760px) {
+      .board-heading { display: none; }
+      .board-toolbar { align-items: stretch; flex-wrap: wrap; padding: 9px 12px; }
+      .board-search { width: 100%; }
+      .board-scroll { height: auto; min-height: 0; overflow: visible; }
+      .board { min-width: 0; min-height: 0; grid-template-columns: 1fr; }
+      .board-column { border-right: 0; border-bottom: 1px solid var(--line); }
+      .column-head { position: static; }
+      .board-footer { align-items: flex-start; flex-direction: column; padding: 9px 12px; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .trace-list li { grid-template-columns: 1fr auto; }
+      .trace-list li span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-ribbon"><strong>WHITE GUI STUDY 05 · SAMPLE DATA</strong><span>Research board · illustrative runs and metrics · production UI unchanged</span></div>
+  <main class="board-shell">
+    <header class="app-topbar">
+      <a class="brand" href="./index.html"><span class="brand-mark">M</span><span class="brand-name">MECH</span></a>
+      <div class="board-heading"><strong>Research board</strong><span>mechanistic-interpretability / investigations</span></div>
+      <div class="topbar-actions"><span class="tag info">live-demo workspace</span><button class="demo-button primary" id="new-run" type="button">Add sample run</button></div>
+    </header>
+
+    <form class="board-toolbar" id="filter-form" role="search" aria-label="Filter research board">
+      <label class="board-search"><span aria-hidden="true">⌕</span><span class="sr-only">Search runs</span><input id="board-search" type="search" placeholder="Search run, question, model, or agent" /></label>
+      <label><span class="sr-only">Filter by model</span><select class="demo-button" id="model-filter"><option value="all">All models</option><option value="gpt2-small">GPT-2 Small</option><option value="gpt2-medium">GPT-2 Medium</option><option value="gemma-2-2b">Gemma 2 2B</option></select></label>
+      <label><span class="sr-only">Filter by evidence source</span><select class="demo-button" id="source-filter"><option value="all">All sources</option><option value="sample">Sample evidence</option><option value="reference">Reference catalog</option></select></label>
+      <button class="text-button" id="reset-filters" type="button">Clear filters</button>
+      <span class="toolbar-spacer"></span>
+      <output class="toolbar-count" id="filter-count" aria-live="polite">8 sample runs</output>
+    </form>
+
+    <section class="board-scroll" aria-label="Research run board">
+      <div class="board" id="board">
+        <section class="board-column" data-stage="planned" aria-labelledby="planned-heading">
+          <header class="column-head"><div class="column-title"><span class="column-marker" aria-hidden="true"></span><h2 id="planned-heading">Planned</h2></div><span class="column-count" aria-label="2 visible runs">2</span></header>
+          <article class="run-card" data-id="MECH-026" data-stage="planned" data-model="gemma-2-2b" data-source="sample" data-title="Cross-model induction-head replication" data-question="Replicate the induction-head localization protocol on Gemma 2 2B." data-agent="Society plan" data-stage-label="Planned" data-progress="12%" data-evidence="0" data-fidelity="pending" data-confidence="pending" data-updated="Sample · 08:52">
+            <button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-026</span><span class="tag">sample</span></span><span class="card-title">Cross-model induction-head replication</span><span class="card-question">Replicate the induction-head localization protocol on Gemma 2 2B.</span><span class="card-tags"><span class="tag info">gemma-2-2b</span><span class="tag">plan only</span></span><span class="card-progress" aria-hidden="true"><span style="width:12%"></span></span><span class="card-footer"><span>Society plan</span><span>0 evidence</span></span></button>
+          </article>
+          <article class="run-card" data-id="MECH-025" data-stage="planned" data-model="gpt2-small" data-source="sample" data-title="Residual patching minimality sweep" data-question="Measure whether the candidate set survives a minimal residual intervention." data-agent="Evidence planner" data-stage-label="Planned" data-progress="8%" data-evidence="1" data-fidelity="pending" data-confidence="pending" data-updated="Sample · 08:41">
+            <button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-025</span><span class="tag">sample</span></span><span class="card-title">Residual patching minimality sweep</span><span class="card-question">Measure whether the candidate set survives a minimal residual intervention.</span><span class="card-tags"><span class="tag info">gpt2-small</span><span class="tag">1 evidence</span></span><span class="card-progress" aria-hidden="true"><span style="width:8%"></span></span><span class="card-footer"><span>Evidence planner</span><span>updated 08:41</span></span></button>
+          </article>
+          <div class="column-empty">No planned runs match these filters.</div>
+        </section>
+
+        <section class="board-column" data-stage="running" aria-labelledby="running-heading">
+          <header class="column-head"><div class="column-title"><span class="column-marker" aria-hidden="true"></span><h2 id="running-heading">Running</h2></div><span class="column-count" aria-label="2 visible runs">2</span></header>
+          <article class="run-card" data-id="MECH-024" data-stage="running" data-model="gpt2-small" data-source="sample" data-title="IOI name-mover circuit" data-question="Trace the final-position computation that moves the indirect-object name." data-agent="Research Society" data-stage-label="Running" data-progress="62%" data-evidence="6" data-fidelity="0.86 sample" data-confidence="0.83 sample" data-updated="Sample · 10:42">
+            <button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-024</span><span class="tag live">sample run</span></span><span class="card-title">IOI name-mover circuit</span><span class="card-question">Trace the final-position computation that moves the indirect-object name.</span><span class="card-tags"><span class="tag info">gpt2-small</span><span class="tag warn">L9H9</span><span class="tag">6 evidence</span></span><span class="card-progress" aria-hidden="true"><span style="width:62%"></span></span><span class="card-footer"><span>Step 4 of 7</span><span>62%</span></span></button>
+          </article>
+          <article class="run-card" data-id="MECH-023" data-stage="running" data-model="gpt2-small" data-source="sample" data-title="Layer logit-lens trace" data-question="Compare final-token logits across every transformer layer." data-agent="Analyst agent" data-stage-label="Running" data-progress="84%" data-evidence="4" data-fidelity="0.91 sample" data-confidence="0.90 sample" data-updated="Sample · 10:38">
+            <button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-023</span><span class="tag live">sample run</span></span><span class="card-title">Layer logit-lens trace</span><span class="card-question">Compare final-token logits across every transformer layer.</span><span class="card-tags"><span class="tag info">gpt2-small</span><span class="tag">layer 12</span><span class="tag">4 evidence</span></span><span class="card-progress" aria-hidden="true"><span style="width:84%"></span></span><span class="card-footer"><span>Capturing layers</span><span>84%</span></span></button>
+          </article>
+          <div class="column-empty">No running investigations match these filters.</div>
+        </section>
+
+        <section class="board-column" data-stage="review" aria-labelledby="review-heading">
+          <header class="column-head"><div class="column-title"><span class="column-marker" aria-hidden="true"></span><h2 id="review-heading">Review</h2></div><span class="column-count" aria-label="2 visible runs">2</span></header>
+          <article class="run-card" data-id="MECH-022" data-stage="review" data-model="gpt2-small" data-source="reference" data-title="Published IOI baseline" data-question="Check the sample implementation against the published reference protocol." data-agent="Reviewer agent" data-stage-label="Review" data-progress="92%" data-evidence="8" data-fidelity="0.88 reference" data-confidence="0.88 reference" data-updated="Reference · 09:58">
+            <button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-022</span><span class="tag">reference</span></span><span class="card-title">Published IOI baseline</span><span class="card-question">Check the sample implementation against the published reference protocol.</span><span class="card-tags"><span class="tag info">gpt2-small</span><span class="tag live">gate passed</span><span class="tag">8 evidence</span></span><span class="card-progress" aria-hidden="true"><span style="width:92%"></span></span><span class="card-footer"><span>Reviewer agent</span><span>matched</span></span></button>
+          </article>
+          <article class="run-card" data-id="MECH-021" data-stage="review" data-model="gpt2-medium" data-source="sample" data-title="Cross-size IOI comparison" data-question="Test whether the candidate mechanism transfers from GPT-2 Small to Medium." data-agent="Critic agent" data-stage-label="Review" data-progress="88%" data-evidence="5" data-fidelity="0.71 sample" data-confidence="0.69 sample" data-updated="Sample · 09:36">
+            <button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-021</span><span class="tag warn">sample run</span></span><span class="card-title">Cross-size IOI comparison</span><span class="card-question">Test whether the candidate mechanism transfers from GPT-2 Small to Medium.</span><span class="card-tags"><span class="tag info">gpt2-medium</span><span class="tag fail">gate failed</span><span class="tag">5 evidence</span></span><span class="card-progress" aria-hidden="true"><span style="width:88%"></span></span><span class="card-footer"><span>Critic review</span><span>needs evidence</span></span></button>
+          </article>
+          <div class="column-empty">No review items match these filters.</div>
+        </section>
+
+        <section class="board-column" data-stage="published" aria-labelledby="published-heading">
+          <header class="column-head"><div class="column-title"><span class="column-marker" aria-hidden="true"></span><h2 id="published-heading">Published</h2></div><span class="column-count" aria-label="2 visible runs">2</span></header>
+          <article class="run-card" data-id="MECH-019" data-stage="published" data-model="gpt2-small" data-source="reference" data-title="Greater-than arithmetic circuit" data-question="Document the reference neuron and activation patching evidence." data-agent="Society report" data-stage-label="Published" data-progress="100%" data-evidence="9" data-fidelity="0.82 reference" data-confidence="0.86 reference" data-updated="Reference · Tue">
+            <button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-019</span><span class="tag live">published reference</span></span><span class="card-title">Greater-than arithmetic circuit</span><span class="card-question">Document the reference neuron and activation patching evidence.</span><span class="card-tags"><span class="tag info">gpt2-small</span><span class="tag">N42</span><span class="tag">9 evidence</span></span><span class="card-progress" aria-hidden="true"><span style="width:100%"></span></span><span class="card-footer"><span>Report MECH-R19</span><span>complete</span></span></button>
+          </article>
+          <article class="run-card" data-id="MECH-018" data-stage="published" data-model="gpt2-small" data-source="reference" data-title="Residual-stream patching" data-question="Publish the reference intervention record and linked tensor provenance." data-agent="Society report" data-stage-label="Published" data-progress="100%" data-evidence="7" data-fidelity="0.80 reference" data-confidence="0.78 reference" data-updated="Reference · Mon">
+            <button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-018</span><span class="tag live">published reference</span></span><span class="card-title">Residual-stream patching</span><span class="card-question">Publish the reference intervention record and linked tensor provenance.</span><span class="card-tags"><span class="tag info">gpt2-small</span><span class="tag">L8H1</span><span class="tag">7 evidence</span></span><span class="card-progress" aria-hidden="true"><span style="width:100%"></span></span><span class="card-footer"><span>Report MECH-R18</span><span>complete</span></span></button>
+          </article>
+          <div class="column-empty">No published references match these filters.</div>
+        </section>
+      </div>
+      <div class="board-no-results" id="board-no-results">No sample runs match the current filters. Clear a filter to restore the board.</div>
+    </section>
+    <footer class="board-footer"><span id="board-summary">Showing 8 of 8 sample runs</span><span>All metrics are sample or reference values</span></footer>
+  </main>
+
+  <dialog class="run-dialog" id="run-dialog" aria-labelledby="dialog-title">
+    <header class="dialog-head"><div><span class="kicker" id="dialog-id">MECH-024 · sample run</span><h2 id="dialog-title">IOI name-mover circuit</h2><div class="dialog-summary" id="dialog-tags"></div></div><form method="dialog"><button class="icon-button" type="submit" aria-label="Close run details">×</button></form></header>
+    <div class="dialog-body">
+      <p id="dialog-question"></p>
+      <dl class="detail-grid">
+        <div class="detail-cell"><dt>Stage</dt><dd id="detail-stage"></dd></div>
+        <div class="detail-cell"><dt>Model</dt><dd id="detail-model"></dd></div>
+        <div class="detail-cell"><dt>Active agent</dt><dd id="detail-agent"></dd></div>
+        <div class="detail-cell"><dt>Progress</dt><dd id="detail-progress"></dd></div>
+        <div class="detail-cell"><dt>Fidelity</dt><dd id="detail-fidelity"></dd></div>
+        <div class="detail-cell"><dt>Confidence</dt><dd id="detail-confidence"></dd></div>
+        <div class="detail-cell"><dt>Evidence records</dt><dd id="detail-evidence"></dd></div>
+        <div class="detail-cell"><dt>Source</dt><dd id="detail-source"></dd></div>
+        <div class="detail-cell"><dt>Last activity</dt><dd id="detail-updated"></dd></div>
+      </dl>
+      <section class="dialog-section"><h3>Run trace</h3><ol class="trace-list"><li><time>10:42</time><span>Candidate head analysis completed</span><span>sample</span></li><li><time>10:39</time><span>Layer 9 tensor linked to run</span><span>sample</span></li><li><time>10:36</time><span>Research Society plan accepted</span><span>sample</span></li></ol></section>
+      <p class="faint" style="margin-top:18px;font-size:10px">Prototype detail. Values are illustrative sample or reference data and are not live scientific measurements.</p>
+    </div>
+  </dialog>
+
+  <script>
+    const search = document.getElementById('board-search');
+    const modelFilter = document.getElementById('model-filter');
+    const sourceFilter = document.getElementById('source-filter');
+    const filterCount = document.getElementById('filter-count');
+    const boardSummary = document.getElementById('board-summary');
+    const noResults = document.getElementById('board-no-results');
+    const cards = [...document.querySelectorAll('.run-card')];
+    const columns = [...document.querySelectorAll('.board-column')];
+    const dialog = document.getElementById('run-dialog');
+    let lastTrigger = null;
+
+    function applyFilters() {
+      const query = search.value.trim().toLowerCase();
+      let visible = 0;
+      cards.forEach(card => {
+        const haystack = card.dataset.title.toLowerCase() + ' ' + card.dataset.id.toLowerCase() + ' ' + card.dataset.model.toLowerCase() + ' ' + card.dataset.agent.toLowerCase();
+        const show = (!query || haystack.includes(query)) && (modelFilter.value === 'all' || card.dataset.model === modelFilter.value) && (sourceFilter.value === 'all' || card.dataset.source === sourceFilter.value);
+        card.hidden = !show;
+        if (show) visible += 1;
+      });
+      columns.forEach(column => {
+        const count = [...column.querySelectorAll('.run-card')].filter(card => !card.hidden).length;
+        column.querySelector('.column-count').textContent = count;
+        column.querySelector('.column-count').setAttribute('aria-label', count + (count === 1 ? ' visible run' : ' visible runs'));
+        column.querySelector('.column-empty').classList.toggle('visible', count === 0);
+      });
+      filterCount.textContent = visible + (visible === 1 ? ' sample run' : ' sample runs');
+      boardSummary.textContent = 'Showing ' + visible + ' of ' + cards.length + ' sample runs';
+      noResults.classList.toggle('visible', visible === 0);
+    }
+
+    function openCard(card, trigger) {
+      lastTrigger = trigger;
+      const data = card.dataset;
+      document.getElementById('dialog-id').textContent = data.id + ' · ' + data.source + ' run';
+      document.getElementById('dialog-title').textContent = data.title;
+      document.getElementById('dialog-question').textContent = data.question;
+      document.getElementById('detail-stage').textContent = data.stageLabel;
+      document.getElementById('detail-model').textContent = data.model;
+      document.getElementById('detail-agent').textContent = data.agent;
+      document.getElementById('detail-progress').textContent = data.progress;
+      document.getElementById('detail-fidelity').textContent = data.fidelity;
+      document.getElementById('detail-confidence').textContent = data.confidence;
+      document.getElementById('detail-evidence').textContent = data.evidence;
+      document.getElementById('detail-source').textContent = data.source === 'reference' ? 'reference catalog' : 'sample evidence';
+      document.getElementById('detail-updated').textContent = data.updated;
+      const tags = document.getElementById('dialog-tags');
+      tags.replaceChildren();
+      [data.model, data.stageLabel, data.source].forEach((text, index) => {
+        const tag = document.createElement('span');
+        tag.className = 'tag' + (index === 0 ? ' info' : '');
+        tag.textContent = text;
+        tags.appendChild(tag);
+      });
+      dialog.showModal();
+    }
+
+    cards.forEach(card => {
+      const trigger = card.querySelector('.card-open');
+      trigger.addEventListener('click', () => openCard(card, trigger));
+    });
+    dialog.addEventListener('close', () => { if (lastTrigger) lastTrigger.focus(); });
+    dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+
+    [search, modelFilter, sourceFilter].forEach(control => control.addEventListener(control.tagName === 'SELECT' ? 'change' : 'input', applyFilters));
+    document.getElementById('reset-filters').addEventListener('click', () => {
+      search.value = '';
+      modelFilter.value = 'all';
+      sourceFilter.value = 'all';
+      applyFilters();
+      search.focus();
+    });
+    document.getElementById('filter-form').addEventListener('submit', event => event.preventDefault());
+    document.getElementById('new-run').addEventListener('click', () => {
+      const article = document.createElement('article');
+      article.className = 'run-card';
+      article.dataset.id = 'MECH-027';
+      article.dataset.stage = 'planned';
+      article.dataset.model = 'gemma-2-2b';
+      article.dataset.source = 'sample';
+      article.dataset.title = 'Sparse evidence dependency check';
+      article.dataset.question = 'Identify which evidence records are required before the next society run can start.';
+      article.dataset.agent = 'Evidence planner';
+      article.dataset.stageLabel = 'Planned';
+      article.dataset.progress = '4%';
+      article.dataset.evidence = '0';
+      article.dataset.fidelity = 'pending';
+      article.dataset.confidence = 'pending';
+      article.dataset.updated = 'Sample · just now';
+      article.innerHTML = '<button class="card-open" type="button" aria-haspopup="dialog"><span class="card-topline"><span class="run-id">MECH-027</span><span class="tag">sample</span></span><span class="card-title">Sparse evidence dependency check</span><span class="card-question">Identify which evidence records are required before the next society run can start.</span><span class="card-tags"><span class="tag info">gemma-2-2b</span><span class="tag">plan only</span></span><span class="card-progress" aria-hidden="true"><span style="width:4%"></span></span><span class="card-footer"><span>Evidence planner</span><span>0 evidence</span></span></button>';
+      document.querySelector('[data-stage="planned"]').appendChild(article);
+      cards.push(article);
+      const trigger = article.querySelector('.card-open');
+      trigger.addEventListener('click', () => openCard(article, trigger));
+      applyFilters();
+      article.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    applyFilters();
+  </script>
+</body>
+</html>
