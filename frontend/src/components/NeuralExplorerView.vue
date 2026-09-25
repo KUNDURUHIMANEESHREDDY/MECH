@@ -422,7 +422,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { api } from '../services/api';
 import NeuronUMAPWrapper from './visualizations/neuron-umap/NeuronUMAPWrapper.vue';
 import { buildLayerNeuronPoints, idForLayerNeuron, parseNeuronId } from './visualizations/neuron-umap/data';
-import { AttentionHeatmap } from './visualizations/panels/AttentionHeatmap';
+import AttentionHeatmap from './visualizations/vue-panels/AttentionHeatmap.vue';
 
 /* ── helpers ────────────────────────────────────── */
 function fmtToken(tok: string) {

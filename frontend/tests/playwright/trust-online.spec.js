@@ -58,3 +58,13 @@ test('Research Society runs before model loading and persists its evidence surfa
   await expect(society.locator('.society__report')).toContainText(/Experiment ID|Generated At/i, { timeout: 90000 });
   await expect(society).toContainText(/Fidelity|Confidence|Validated/i, { timeout: 90000 });
 });
+
+test('native Vue visualization surfaces mount without a React bridge error', async ({ page }) => {
+  for (const id of ['neuralexplorer', 'transformerExplorer']) {
+    await page.goto(`/#${id}`);
+    const window = page.getByTestId(`window-${id}`);
+    await expect(window).toBeVisible({ timeout: 30000 });
+    await expect(window.locator('.route-error')).toHaveCount(0);
+    await expect(window.locator('.tool-window__body')).toContainText(/Layer|Attention|Model/i);
+  }
+});

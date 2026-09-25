@@ -183,8 +183,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { colors } from '../../design/tokens/colors';
-import { AttentionHeatmap } from './panels/AttentionHeatmap';
-import { ActivationHeatmap } from './panels/ActivationHeatmap';
+import AttentionHeatmap from './vue-panels/AttentionHeatmap.vue';
+import ActivationHeatmap from './vue-panels/ActivationHeatmap.vue';
 import NeuronUMAPWrapper from './neuron-umap/NeuronUMAPWrapper.vue';
 import { buildNeuronPoints, idForHeadNeuron, parseNeuronId } from './neuron-umap/data';
 
