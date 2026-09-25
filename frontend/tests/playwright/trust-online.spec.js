@@ -1,37 +1,46 @@
 const { test, expect } = require('@playwright/test');
 
-// Backend-required trust specs. NOT run in CI (no backend there) — run
-// locally with the Python backend up: npx playwright test trust-online.spec.js
-// Proves the full vertical: registry -> view -> members, with zero fakes.
+// Backend-required trust specs. Run locally with the Python backend up:
+//   npx playwright test tests/playwright/trust-online.spec.js
+// These tests use the Desktop OS route directory and the real Model Explorer
+// load flow; no rendered result is treated as live without a backend payload.
 
-async function loadModel(page) {
-  await page.goto('/');
-  const loadBtn = page.getByRole('button', { name: /Load gpt/i });
-  await expect(loadBtn.first()).toBeVisible({ timeout: 15000 });
-  await loadBtn.first().click();
+async function loadGpt2(page) {
+  await page.goto('/#explorer');
+  const explorer = page.getByTestId('window-explorer');
+  const modelSelect = explorer.locator('#model-explorer-model');
+  await expect(modelSelect).toBeVisible({ timeout: 15000 });
+  await modelSelect.selectOption('gpt2-small');
+  const loadButton = explorer.getByRole('button', { name: /Load model/i });
+  await expect(loadButton).toBeEnabled({ timeout: 15000 });
+  await loadButton.click();
+  await expect(explorer.locator('.loaded-model')).toContainText(/Loaded/i, { timeout: 30000 });
+}
+
+async function openCircuitExplorer(page) {
+  await page.getByTestId('directory-toggle').click();
+  const nav = page.getByTestId('nav-circuitexplorer');
+  await nav.scrollIntoViewIfNeeded();
+  await nav.click();
+  return page.getByTestId('window-circuitexplorer');
 }
 
 test('circuit explorer shows live registry circuits', async ({ page }) => {
-  await loadModel(page);
-  const nav = page.getByTestId('nav-circuitexplorer');
-  await nav.scrollIntoViewIfNeeded();
-  await nav.click();
-  await expect(page.locator('header').getByText('Circuit Explorer', { exact: true })).toBeVisible();
-  const select = page.locator('.explorer-page select.input-text');
+  await loadGpt2(page);
+  const circuitWindow = await openCircuitExplorer(page);
+
+  await expect(circuitWindow.locator('.window-title')).toHaveText('Circuit Explorer');
+  const select = circuitWindow.locator('select.input-text');
   await expect(select).toBeVisible({ timeout: 15000 });
   const options = await select.locator('option').allTextContents();
-  expect(options.some(t => /Indirect Object Identification/i.test(t))).toBe(true);
-  // No backend error state when the registry is reachable.
-  await expect(page.getByText(/Cannot reach the circuit registry/)).toHaveCount(0);
+  expect(options.some(text => /Indirect Object Identification/i.test(text))).toBe(true);
+  await expect(circuitWindow.getByText(/Cannot reach the circuit registry/)).toHaveCount(0);
 });
 
 test('circuit detail shows measured members', async ({ page }) => {
-  await loadModel(page);
-  const nav = page.getByTestId('nav-circuitexplorer');
-  await nav.scrollIntoViewIfNeeded();
-  await nav.click();
-  const select = page.locator('.explorer-page select.input-text');
+  await loadGpt2(page);
+  const circuitWindow = await openCircuitExplorer(page);
+  const select = circuitWindow.locator('select.input-text');
   await expect(select).toBeVisible({ timeout: 15000 });
-  // Detail panel renders member chips from the live registry payload.
-  await expect(page.locator('.explorer-page .member-chip').first()).toBeVisible({ timeout: 15000 });
+  await expect(circuitWindow.locator('.explorer-page .member-chip').first()).toBeVisible({ timeout: 15000 });
 });

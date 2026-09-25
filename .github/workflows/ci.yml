@@ -54,4 +54,4 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       # Offline specs only (Desktop OS shell, directory, status): no Python backend on CI.
-      - run: npx playwright test tests/playwright/desktop-os-shell.spec.js tests/playwright/shell-smoke.spec.js tests/playwright/trust.spec.js
+      - run: npx playwright test tests/playwright/desktop-os-shell.spec.js tests/playwright/desktop-tool-pages.spec.js tests/playwright/shell-smoke.spec.js tests/playwright/trust.spec.js

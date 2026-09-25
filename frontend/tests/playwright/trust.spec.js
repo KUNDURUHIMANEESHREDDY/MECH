@@ -1,15 +1,11 @@
 const { test, expect } = require('@playwright/test');
 
-// Trust UX specs. These run WITHOUT the Python backend (same offline
-// assumption as shell-smoke): the app must say so instead of faking data.
-
-test('status indicator shows offline without backend', async ({ page }) => {
+// Trust UX specs. The API request is deliberately aborted so this test is
+// deterministic even when a developer backend is running locally.
+test('status indicator reports an unavailable backend without fabricating data', async ({ page }) => {
+  await page.route('**/api/**', route => route.abort());
   await page.goto('/');
   const status = page.getByTestId('python-status');
   await expect(status).toBeVisible({ timeout: 15000 });
   await expect(status).toContainText(/Offline/);
 });
-
-// NOTE: the circuit explorer view sits behind the model-load gate, so its
-// backend states are covered by trust-online.spec.js (requires backend).
-// This file stays offline-safe for CI.
