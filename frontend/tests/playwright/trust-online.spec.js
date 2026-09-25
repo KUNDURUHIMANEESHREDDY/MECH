@@ -44,3 +44,16 @@ test('circuit detail shows measured members', async ({ page }) => {
   await expect(select).toBeVisible({ timeout: 15000 });
   await expect(circuitWindow.locator('.explorer-page .member-chip').first()).toBeVisible({ timeout: 15000 });
 });
+
+test('Research Society runs before model loading and persists its evidence surfaces', async ({ page }) => {
+  await page.goto('/#society');
+  const society = page.getByTestId('window-society');
+  await expect(society.getByRole('heading', { name: 'Research Society', exact: true })).toBeVisible();
+  await society.locator('#society-goal').fill('Verify the live Society trace and validation gate contract');
+  await society.getByRole('button', { name: 'Run Society' }).click();
+
+  await expect(society).toContainText(/Backend status: completed/i, { timeout: 90000 });
+  await expect(society.locator('.society__steps li').first()).toBeVisible({ timeout: 90000 });
+  await expect(society.locator('.society__report')).toContainText(/Experiment ID|Generated At/i, { timeout: 90000 });
+  await expect(society).toContainText(/Fidelity|Confidence|Validated/i, { timeout: 90000 });
+});

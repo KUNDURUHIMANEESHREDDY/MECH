@@ -18,7 +18,7 @@
         @click="handleRunPrompt"
         :disabled="promptRunning || !selectedModel"
         class="rounded-lg px-4 py-1.5 text-xs font-semibold text-white cursor-pointer disabled:cursor-default disabled:opacity-65"
-        :class="promptRunning ? 'bg-[var(--purple)]' : 'bg-gradient-to-br from-[var(--purple)] to-[var(--primary)]'"
+        :class="promptRunning ? 'bg-[var(--primary)]' : 'bg-[var(--primary)]'"
       >
         {{ promptRunning ? 'Running…' : 'Run Prompt' }}
       </button>
@@ -26,7 +26,7 @@
         id="ne-refresh-btn"
         @click="loadTree"
         title="Reload layer data"
-        class="bg-transparent border border-[var(--border)] rounded-lg px-3.5 py-1.5 text-xs text-[var(--purple-border)] cursor-pointer"
+        class="bg-transparent border border-[var(--border)] rounded-lg px-3.5 py-1.5 text-xs text-[var(--primary-focus)] cursor-pointer"
       >
         Refresh
       </button>
@@ -53,7 +53,7 @@
         :data-testid="`ne-token-chip-${i}`"
         class="text-[10px] px-1.5 py-0.5 rounded"
         :class="i === selTokIdx
-          ? 'bg-[var(--purple)]/[0.2] border border-[var(--purple)] text-[var(--purple-border)] font-semibold'
+          ? 'bg-[var(--primary)]/[0.2] border border-[var(--primary)] text-[var(--primary-focus)] font-semibold'
           : 'bg-[var(--bg)] border border-[var(--border)] text-[var(--ink-muted-48)]'"
       >
         {{ fmtToken(t) }}
@@ -83,8 +83,8 @@
               @click="() => { selectLayer(layer); expandedLayers.toggle(layer.layer_index); }"
               class="w-full text-left py-[7px] px-3.5 border-none text-xs cursor-pointer flex items-center gap-1.5"
               :class="selectedLayer?.layer_index === layer.layer_index
-                ? 'bg-[var(--surface-pearl)] border-l-[3px] border-l-[var(--purple)] text-[var(--purple-border)]'
-                : 'bg-transparent border-l-[3px] border-l-transparent text-[var(--purple-border)]'"
+                ? 'bg-[var(--surface-pearl)] border-l-[3px] border-l-[var(--primary)] text-[var(--primary-focus)]'
+                : 'bg-transparent border-l-[3px] border-l-transparent text-[var(--primary-focus)]'"
             >
               <span class="inline-flex text-[var(--ink-muted-48)]">
                 <svg
@@ -107,10 +107,10 @@
                 @click="() => { selectLayer(layer); handleSelectHead(layer.layer_index, h.head_index); }"
                 class="block w-full text-left py-[3px] px-2 bg-transparent border-none text-[11px] cursor-pointer"
                 :class="selectedHead?.layer === layer.layer_index && selectedHead?.head_index === h.head_index
-                  ? 'text-[var(--purple)]' : 'text-[var(--ink-muted-48)]'"
+                  ? 'text-[var(--primary)]' : 'text-[var(--ink-muted-48)]'"
               >
                 H{{ h.head_index }}
-                <span v-if="h.top_token" class="text-[var(--purple)] text-[10px] ml-1">· {{ fmtToken(h.top_token) }}</span>
+                <span v-if="h.top_token" class="text-[var(--primary)] text-[10px] ml-1">· {{ fmtToken(h.top_token) }}</span>
               </button>
               <div class="text-[10px] text-[var(--ink-muted-48)] pl-2 mt-1">
                 {{ layer.num_mlp_neurons }} MLP neurons
@@ -123,10 +123,10 @@
                   @click="handleSelectNeuron({ layer: layer.layer_index, neuron_index: n.neuron_index })"
                   class="block w-full text-left py-[3px] px-2 bg-transparent border-none text-[11px] cursor-pointer"
                   :class="selectedNeuron?.layer === layer.layer_index && selectedNeuron?.neuron_index === n.neuron_index
-                    ? 'text-[var(--purple)]' : 'text-[var(--ink-muted-48)]'"
+                    ? 'text-[var(--primary)]' : 'text-[var(--ink-muted-48)]'"
                 >
                   N{{ n.neuron_index }}
-                  <span v-if="n.top_token" class="text-[var(--purple)] text-[10px] ml-1">· {{ fmtToken(n.top_token) }}</span>
+                  <span v-if="n.top_token" class="text-[var(--primary)] text-[10px] ml-1">· {{ fmtToken(n.top_token) }}</span>
                 </button>
               </template>
               <div v-else class="text-[10px] text-[var(--ink-muted-48)] pl-2">Run a prompt to see active neurons</div>
@@ -137,7 +137,7 @@
 
       <!-- Layer detail -->
       <div v-if="selectedLayer" class="w-[260px] bg-[var(--surface-pearl)] border-r border-[var(--border)] overflow-y-auto p-4">
-        <div class="text-[13px] font-bold text-[var(--purple)] mb-3">
+        <div class="text-[13px] font-bold text-[var(--primary)] mb-3">
           Layer {{ selectedLayer.layer_index }}
           <span class="text-[10px] text-[var(--ink-muted-48)] font-normal ml-2">d={{ selectedLayer.residual_stream_dim }}</span>
         </div>
@@ -155,7 +155,7 @@
               ? 'bg-[var(--bg)] border border-[var(--primary-focus)]' : 'bg-[var(--bg)] border border-[var(--border)] text-[var(--ink-muted-48)]'"
           >
             H{{ h.head_index }}
-            <div v-if="h.top_token" class="text-[9px] text-[var(--purple)] mt-0.5">{{ fmtToken(h.top_token) }}</div>
+            <div v-if="h.top_token" class="text-[9px] text-[var(--primary)] mt-0.5">{{ fmtToken(h.top_token) }}</div>
           </button>
         </div>
 
@@ -169,7 +169,7 @@
               class="py-1 px-0.5 rounded text-center text-[10px] bg-[var(--bg)] border border-[var(--border)] text-[var(--ink-muted-48)] cursor-default"
             >
               {{ n.neuron_index }}
-              <div v-if="n.top_token" class="text-[9px] text-[var(--purple)] mt-0.5">{{ fmtToken(n.top_token) }}</div>
+              <div v-if="n.top_token" class="text-[9px] text-[var(--primary)] mt-0.5">{{ fmtToken(n.top_token) }}</div>
             </div>
           </div>
         </template>
@@ -178,7 +178,7 @@
 
       <!-- Neuron map (UMAP) -->
       <div v-if="selectedLayer?.mlp_neurons_preview" class="w-[430px] bg-[var(--surface-pearl)] border-r border-[var(--border)] overflow-y-auto p-4 shrink-0">
-        <div class="text-[13px] font-bold text-[var(--purple)] mb-3">
+        <div class="text-[13px] font-bold text-[var(--primary)] mb-3">
           Neuron Map — Layer {{ selectedLayer.layer_index }}
         </div>
         <div v-if="!hasActivations" class="text-[11px] text-[var(--ink-muted-48)] mb-2.5">
@@ -202,7 +202,7 @@
         Loading model tree…
       </div>
       <div v-else-if="selectedHead" class="flex-1 overflow-y-auto p-5 bg-[var(--bg)]">
-        <div class="text-[18px] font-bold text-[var(--purple-border)] mb-1">
+        <div class="text-[18px] font-bold text-[var(--primary-focus)] mb-1">
           GPT-2 · L{{ selectedHead.layer }}H{{ selectedHead.head_index }}
         </div>
         <div class="text-[11px] text-[var(--ink-muted-48)] mb-4">
@@ -231,19 +231,19 @@
         <template v-else>
           <div class="flex items-center gap-3 mb-5">
             <div>
-              <div class="text-[18px] font-bold text-[var(--purple-border)]">
+              <div class="text-[18px] font-bold text-[var(--primary-focus)]">
                 {{ selectedModel?.label || 'GPT-2' }} · {{ neuronDetail.id || `L${neuronDetail.layer}N${neuronDetail.neuron_index}` }}
               </div>
               <div class="text-[11px] text-[var(--ink-muted-48)] mt-0.5">{{ neuronDetail.description }}</div>
               <div v-if="activatesOn" class="mt-2 flex items-center gap-2">
                 <span class="text-[10px] text-[var(--ink-muted-48)] uppercase tracking-widest">Activates on</span>
-                <code class="bg-[var(--purple)]/[0.13] border border-[var(--purple)]/[0.33] text-[var(--purple-border)] rounded-md px-2.5 py-0.5 text-[14px] font-semibold">
+                <code class="bg-[var(--primary)]/[0.13] border border-[var(--primary)]/[0.33] text-[var(--primary-focus)] rounded-md px-2.5 py-0.5 text-[14px] font-semibold">
                   {{ fmtToken(activatesOn.token) }}
                 </code>
               </div>
             </div>
             <div class="ml-auto flex gap-2">
-              <span class="bg-[var(--purple)]/[0.13] text-[var(--purple)] border border-[var(--purple)]/[0.33] rounded-full px-2.5 py-0.5 text-[11px] mr-1 mb-1 inline-block">
+              <span class="bg-[var(--primary)]/[0.13] text-[var(--primary)] border border-[var(--primary)]/[0.33] rounded-full px-2.5 py-0.5 text-[11px] mr-1 mb-1 inline-block">
                 {{ neuronDetail.component }}
               </span>
             </div>
@@ -290,7 +290,7 @@
                   :key="i"
                   :title="`[${neuronDetail.activation_histogram.bins[i]}, ${neuronDetail.activation_histogram.bins[i+1]}): ${count}`"
                   class="flex-1 rounded-t-[2px] transition-[height] duration-300"
-                  :class="i === 4 || i === 5 ? 'bg-[var(--purple)]/40' : 'bg-[var(--bg)]'"
+                  :class="i === 4 || i === 5 ? 'bg-[var(--primary)]/40' : 'bg-[var(--bg)]'"
                   :style="{ height: `${Math.max(3, (count / maxHistCount) * 100)}%` }"
                 />
               </div>
@@ -304,11 +304,11 @@
                 <div class="flex-1 h-1.5 bg-[var(--border)] rounded-sm overflow-hidden">
                   <div
                     class="h-full rounded-sm"
-                    :class="w.weight >= 0 ? 'bg-[var(--purple)]' : 'bg-[var(--danger)]'"
+                    :class="w.weight >= 0 ? 'bg-[var(--primary)]' : 'bg-[var(--danger)]'"
                     :style="{ width: `${Math.min(100, (Math.abs(w.weight) / maxAbsWeight) * 100)}%` }"
                   />
                 </div>
-                <span class="min-w-[50px] text-right" :class="w.weight >= 0 ? 'text-[var(--purple)]' : 'text-[var(--danger)]'">
+                <span class="min-w-[50px] text-right" :class="w.weight >= 0 ? 'text-[var(--primary)]' : 'text-[var(--danger)]'">
                   {{ w.weight.toFixed(4) }}
                 </span>
               </div>
@@ -329,7 +329,7 @@
               <div class="text-[11px] text-[var(--ink-muted-48)] mb-2 uppercase tracking-widest">Per-Token Activations</div>
               <template v-if="neuronDetail.per_token_activations?.length">
                 <div v-for="ta in neuronDetail.per_token_activations.slice(0, 12)" :key="ta.token_index" class="flex items-center gap-2 mb-1">
-                  <code class="bg-[var(--surface-pearl)] rounded-sm px-1.5 py-[1px] text-[11px] text-[var(--purple-border)] min-w-[80px]">
+                  <code class="bg-[var(--surface-pearl)] rounded-sm px-1.5 py-[1px] text-[11px] text-[var(--primary-focus)] min-w-[80px]">
                     {{ ta.token }}
                   </code>
                   <div class="flex-1 h-1 bg-[var(--border)] rounded-sm relative overflow-visible">
@@ -378,7 +378,7 @@
                 <button
                   id="patch-run-btn"
                   @click="handlePatch"
-                  class="rounded-lg px-5 py-2 text-[13px] font-semibold text-white cursor-pointer mt-5 bg-gradient-to-br from-[var(--purple)] to-[var(--primary)]"
+                  class="rounded-lg px-5 py-2 text-[13px] font-semibold text-white cursor-pointer mt-5 bg-[var(--primary)]"
                 >
                   <svg width="12" height="12" viewBox="0 0 12 12" class="mr-1.5 inline-block align-middle">
                     <polygon points="2,0 12,6 2,12" fill="currentColor" />
@@ -389,9 +389,9 @@
                   <div class="flex gap-4 mt-4 flex-wrap">
                     <div class="bg-[var(--bg)] rounded-lg px-3.5 py-2 text-center">
                       <div class="text-[10px] text-[var(--ink-muted-48)]">Before</div>
-                      <code class="text-[var(--purple-border)] text-[13px]">{{ patchResult.top_token_before }}</code>
+                      <code class="text-[var(--primary-focus)] text-[13px]">{{ patchResult.top_token_before }}</code>
                     </div>
-                    <svg width="20" height="14" viewBox="0 0 20 14" class="text-[var(--purple)] self-center">
+                    <svg width="20" height="14" viewBox="0 0 20 14" class="text-[var(--primary)] self-center">
                       <path d="M0 7 H16 M11 2 L16 7 L11 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                     <div class="bg-[var(--bg)] rounded-lg px-3.5 py-2 text-center">

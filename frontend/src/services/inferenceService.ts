@@ -1,6 +1,7 @@
 import { InferenceResponse, LayerTensors, LogitLensAll } from '../types';
+import { apiUrl } from './api';
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = apiUrl('/api');
 
 export async function runInference(prompt: string, maxNewTokens = 10): Promise<InferenceResponse> {
   const res = await fetch(`${API_BASE}/infer`, {

@@ -2,7 +2,7 @@
   <div class="flex flex-col h-full bg-[var(--bg)] text-[var(--ink)] font-['Inter',system-ui,sans-serif] overflow-hidden">
     <!-- Header -->
     <div class="flex items-center gap-3 px-4 py-2.5 bg-[var(--surface-pearl)] border-b border-[var(--border)] shrink-0">
-      <h2 class="text-[13px] font-bold text-[var(--purple-border)]">GPT-2 Live</h2>
+      <h2 class="text-[13px] font-bold text-[var(--primary-focus)]">GPT-2 Live</h2>
       <div class="text-[11px] text-[var(--ink-muted-48)]" v-if="arch">
         {{ arch.model_name }} · {{ arch.n_layers }}L · {{ arch.n_heads }}H · d={{ arch.d_model }}
       </div>
@@ -20,13 +20,13 @@
       <button
         @click="runPrompt"
         :disabled="running || !prompt.trim()"
-        class="rounded-lg px-4 py-1.5 text-xs font-semibold text-white cursor-pointer disabled:cursor-default disabled:opacity-65 bg-gradient-to-br from-[var(--purple)] to-[var(--primary)]"
+        class="rounded-lg px-4 py-1.5 text-xs font-semibold text-white cursor-pointer disabled:cursor-default disabled:opacity-65 bg-[var(--primary)]"
       >
         {{ running ? 'Running…' : 'Run' }}
       </button>
       <button
         @click="loadArchitecture"
-        class="bg-transparent border border-[var(--border)] rounded-lg px-3.5 py-1.5 text-xs text-[var(--purple-border)] cursor-pointer"
+        class="bg-transparent border border-[var(--border)] rounded-lg px-3.5 py-1.5 text-xs text-[var(--primary-focus)] cursor-pointer"
       >
         Load Architecture
       </button>
@@ -42,7 +42,7 @@
     <div class="flex flex-1 min-h-0">
       <!-- Left: Architecture Panel -->
       <div class="w-[260px] bg-[var(--surface-pearl)] border-r border-[var(--border)] overflow-y-auto p-4 shrink-0">
-        <div class="text-[13px] font-bold text-[var(--purple)] mb-3">Architecture</div>
+        <div class="text-[13px] font-bold text-[var(--primary)] mb-3">Architecture</div>
 
         <template v-if="arch">
           <div class="grid grid-cols-2 gap-1.5 text-[11px] mb-4">
@@ -131,7 +131,7 @@
             <span class="text-[var(--ink-muted-48)]">Subject</span>
             <span class="text-[var(--ink)]">{{ result.ioi.subj_name }}</span>
             <span class="text-[var(--ink-muted-48)]">S-Idiot Head</span>
-            <span class="text-[var(--purple)]">{{ result.ioi.s_idiot_head }}</span>
+            <span class="text-[var(--primary)]">{{ result.ioi.s_idiot_head }}</span>
             <span class="text-[var(--ink-muted-48)]">S-Name Mover</span>
             <span class="text-[var(--primary)]">{{ result.ioi.s_name_mover }}</span>
           </div>
@@ -146,7 +146,7 @@
 
       <!-- Right: Layer Detail -->
       <div v-if="selectedLayer !== null" class="w-[280px] bg-[var(--surface-pearl)] border-l border-[var(--border)] overflow-y-auto p-4 shrink-0">
-        <div class="text-[13px] font-bold text-[var(--purple)] mb-3">
+        <div class="text-[13px] font-bold text-[var(--primary)] mb-3">
           Layer {{ selectedLayer }}
         </div>
 
