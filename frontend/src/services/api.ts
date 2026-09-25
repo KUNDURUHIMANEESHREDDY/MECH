@@ -1,36 +1,81 @@
-const BASE = 'http://localhost:8000';
+type AnyFunction = (...args: any[]) => any;
+type LocalBridge = Record<string, AnyFunction | undefined>;
+
+type RuntimeGlobals = typeof globalThis & {
+  __MECH_API_BASE__?: string;
+  appApi?: LocalBridge;
+};
+
+const runtime = globalThis as RuntimeGlobals;
+const browserUsesOriginProxy = typeof window !== 'undefined' && window.location.protocol !== 'file:';
+
+export const API_ORIGIN = runtime.__MECH_API_BASE__ || (browserUsesOriginProxy ? '' : 'http://localhost:8000');
+export const API_BASE = `${API_ORIGIN}/api`;
+
+export function apiUrl(path: string): string {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return `${API_ORIGIN}${normalized}`;
+}
+
+const BASE = API_ORIGIN;
+const REQUEST_TIMEOUT_MS = 30_000;
+
+function localBridge(): LocalBridge | null {
+  return runtime.appApi ?? null;
+}
+
+function localUnavailable(name: string): Error {
+  return new Error(`Local application bridge unavailable for ${name}.`);
+}
+
+async function localCall<T>(name: string, ...args: any[]): Promise<T> {
+  const method = localBridge()?.[name];
+  if (typeof method !== 'function') throw localUnavailable(name);
+  return (await method(...args)) as T;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${BASE}${path}`, { ...init, signal: controller.signal });
+    if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${path} failed: ${response.status}`);
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`${init.method ?? 'GET'} ${path} timed out after ${REQUEST_TIMEOUT_MS} ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
-  return res.json();
+  return request<T>(path, { method: 'GET' });
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  return request<T>(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
-  return res.json();
 }
 
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
-  return res.json();
+  return request<T>(path, { method: 'DELETE' });
 }
 
-const noopResolve = (val?: any) => Promise.resolve(val ?? []);
-
 export const api = {
+  baseUrl: BASE,
+
   pythonPing: () => get<{ status: string }>('/api/status'),
   pythonCall: (method: string, params: Record<string, unknown>) =>
     post<Record<string, unknown>>(`/api/${method}`, params),
 
   listModels: () => get<{ models: string[] }>('/api/models'),
-  loadModel: (name: string) => post<{ status: string }>('/api/models/load', { model_name: name }),
+  loadModel: (name: string) => post<{ status: string; model_name?: string }>('/api/models/load', { model_name: name }),
   getModelInfo: (name: string) => get<Record<string, unknown>>(`/api/models/${name}`),
   infer: (prompt: string, model?: string) =>
     post<Record<string, unknown>>('/api/infer', { prompt, model_name: model }),
@@ -41,6 +86,10 @@ export const api = {
     post<Record<string, unknown>>('/api/gpt2/run_prompt', { prompt }),
   gpt2GetActivations: (layer?: number) =>
     post<Record<string, unknown>>('/api/gpt2/activations', { layer }),
+  gpt2LayerActivations: (payload: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/gpt2/layer_activations', payload),
+  gpt2LogitLensAll: (payload: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/gpt2/logit_lens_all', payload),
   gpt2AttentionHead: (layer: number, head: number) =>
     post<Record<string, unknown>>('/api/gpt2/attention_head', { layer, head }),
   gpt2PatchHead: (layer: number, head: number, posToken: string, negToken: string) =>
@@ -78,18 +127,22 @@ export const api = {
   },
   runBenchmark: (name: string) => post<unknown>('/api/benchmarks/run', { benchmark_name: name }),
 
-  getAppLogs: () => noopResolve(),
-  getBuildLogs: () => noopResolve(),
-  onBuildEvent: () => () => {},
-  startBuild: () => noopResolve(),
-  clearBuildLogs: () => noopResolve(),
+  getAppLogs: () => localCall<unknown[]>('getAppLogs'),
+  getBuildLogs: () => localCall<unknown[]>('getBuildLogs'),
+  onBuildEvent: (listener: (...args: any[]) => void) => {
+    const method = localBridge()?.onBuildEvent;
+    if (typeof method !== 'function') return () => undefined;
+    return method(listener);
+  },
+  startBuild: (...args: any[]) => localCall<unknown>('startBuild', ...args),
+  clearBuildLogs: () => localCall<unknown>('clearBuildLogs'),
 
-  listRecentFiles: () => noopResolve(),
-  addRecentFile: () => noopResolve(),
-  clearRecentFiles: () => noopResolve(),
-  showInFolder: () => {},
+  listRecentFiles: () => localCall<unknown[]>('listRecentFiles'),
+  addRecentFile: (...args: any[]) => localCall<unknown>('addRecentFile', ...args),
+  clearRecentFiles: () => localCall<unknown>('clearRecentFiles'),
+  showInFolder: (...args: any[]) => localCall<unknown>('showInFolder', ...args),
 
-  listProjects: () => noopResolve(),
-  addProject: () => noopResolve(),
-  removeProject: () => noopResolve(),
+  listProjects: () => localCall<unknown[]>('listProjects'),
+  addProject: (...args: any[]) => localCall<unknown>('addProject', ...args),
+  removeProject: (...args: any[]) => localCall<unknown>('removeProject', ...args),
 };

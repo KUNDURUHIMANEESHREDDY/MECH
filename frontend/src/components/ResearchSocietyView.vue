@@ -238,6 +238,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { apiUrl } from '../services/api';
 import {
   getSocietyRun,
   startSocietyRun,
@@ -260,8 +261,8 @@ interface TraceStep {
   head?: number;
 }
 
-const API_BASE = 'http://localhost:8000/api';
-const SOCIETY_BASE = `${API_BASE}/society`;
+const API_BASE = apiUrl('/api');
+const SOCIETY_BASE = apiUrl('/api/society');
 const POLL_INTERVAL_MS = 2000;
 const runHistoryUrl = `${SOCIETY_BASE}/runs`;
 
@@ -668,7 +669,7 @@ const figurePatch = computed(() => steps.value.find((step) => (
 
 const figureUrl = computed(() => {
   if (!figurePatch.value || !runGoal.value) return '';
-  const url = new URL(`${API_BASE}/figures/attention`);
+  const url = new URL(apiUrl('/api/figures/attention'), window.location.origin);
   url.searchParams.set('prompt', runGoal.value);
   url.searchParams.set('layer', String(figurePatch.value.layer));
   url.searchParams.set('head', String(figurePatch.value.head));

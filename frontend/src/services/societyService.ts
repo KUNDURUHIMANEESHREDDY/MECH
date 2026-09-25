@@ -7,7 +7,9 @@
  * Mirrors the standalone-service pattern of inferenceService.ts.
  */
 
-const SOCIETY_BASE = 'http://localhost:8000/api/society';
+import { apiUrl } from './api';
+
+const SOCIETY_BASE = apiUrl('/api/society');
 
 export interface SocietyRunStarted {
   runId: string;
