@@ -8,8 +8,9 @@ type RuntimeGlobals = typeof globalThis & {
 
 const runtime = globalThis as RuntimeGlobals;
 const browserUsesOriginProxy = typeof window !== 'undefined' && window.location.protocol !== 'file:';
+const configuredOrigin = runtime.__MECH_API_BASE__?.replace(/\/+$/, '');
 
-export const API_ORIGIN = runtime.__MECH_API_BASE__ || (browserUsesOriginProxy ? '' : 'http://localhost:8000');
+export const API_ORIGIN = configuredOrigin || (browserUsesOriginProxy ? '' : 'http://localhost:8000');
 export const API_BASE = `${API_ORIGIN}/api`;
 
 export function apiUrl(path: string): string {

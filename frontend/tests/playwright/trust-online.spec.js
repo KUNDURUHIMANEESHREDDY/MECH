@@ -8,6 +8,7 @@ const { test, expect } = require('@playwright/test');
 async function loadGpt2(page) {
   await page.goto('/#explorer');
   const explorer = page.getByTestId('window-explorer');
+  await expect(explorer.locator('.model-explorer')).toBeVisible({ timeout: 30000 });
   const modelSelect = explorer.locator('#model-explorer-model');
   await expect(modelSelect).toBeVisible({ timeout: 15000 });
   await modelSelect.selectOption('gpt2-small');
