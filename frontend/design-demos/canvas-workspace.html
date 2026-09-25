@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MECH — Canvas Workspace Demo</title>
+  <link rel="stylesheet" href="./demo.css" />
+  <style>
+    .canvas-shell { height: calc(100vh - 30px); min-height: 640px; overflow: hidden; }
+    .canvas-topbar { display: grid; min-height: 56px; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+    .document-title { display: flex; align-items: center; gap: 9px; color: var(--muted); }
+    .document-title strong { color: var(--text); }
+    .canvas-actions { display: flex; gap: 7px; }
+    .canvas-layout { position: relative; display: grid; height: calc(100% - 56px); grid-template-columns: 54px minmax(0, 1fr); }
+    .tool-rail { position: relative; z-index: 10; display: flex; align-items: center; flex-direction: column; gap: 7px; padding: 10px 8px; border-right: 1px solid var(--line); background: var(--bg); }
+    .tool-button { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--muted); cursor: pointer; font: 650 11px/1 var(--font-mono); }
+    .tool-button:hover, .tool-button.active { border-color: var(--line); background: var(--surface-2); color: var(--text); }
+    .tool-separator { width: 26px; height: 1px; margin: 3px 0; background: var(--line); }
+    .canvas-stage { position: relative; min-width: 0; overflow: hidden; background: #0b1117; }
+    .canvas-stage::before, .canvas-stage::after { position: absolute; inset: 0; pointer-events: none; content: ""; }
+    .canvas-stage::before { background-image: linear-gradient(#17212a 1px, transparent 1px), linear-gradient(90deg, #17212a 1px, transparent 1px); background-size: 32px 32px; opacity: .45; }
+    .canvas-stage::after { box-shadow: inset 0 0 90px rgba(0,0,0,.32); }
+    .canvas-world { position: absolute; top: 0; left: 0; width: 1200px; height: 700px; transform-origin: 0 0; }
+    .edge-layer { position: absolute; inset: 0; width: 1200px; height: 700px; overflow: visible; }
+    .edge { fill: none; stroke: #3b4a56; stroke-width: 2; }
+    .edge.positive { stroke: var(--green); }
+    .edge.negative { stroke: var(--red); stroke-dasharray: 6 5; }
+    .edge.selected { stroke: var(--accent); stroke-width: 3; }
+    .graph-node { position: absolute; width: 158px; min-height: 76px; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: #121a22; cursor: grab; user-select: none; touch-action: none; }
+    .graph-node:active { cursor: grabbing; }
+    .graph-node:hover { border-color: #526674; }
+    .graph-node.selected { border-color: var(--accent); background: #1e1715; }
+    .graph-node.token { width: 106px; min-height: 50px; display: grid; place-items: center; padding: 8px; text-align: center; }
+    .graph-node.output { width: 170px; border-color: #3f6a5e; background: #101e1a; }
+    .node-type { color: var(--muted); font: 600 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
+    .node-title { margin-top: 7px; font-weight: 700; font-size: 12px; }
+    .node-meta { margin-top: 4px; color: var(--muted); font: 500 10px/1.3 var(--font-mono); }
+    .node-score { position: absolute; top: 8px; right: 9px; color: var(--green); font: 700 10px/1 var(--font-mono); }
+    .graph-label { position: absolute; padding: 3px 6px; border-radius: 3px; background: #0b1117; color: var(--faint); font: 600 9px/1 var(--font-mono); }
+    .canvas-float { position: absolute; z-index: 12; display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(16,22,29,.96); padding: 6px; }
+    .canvas-float.top-left { top: 14px; left: 14px; }
+    .canvas-float.bottom-left { bottom: 14px; left: 14px; }
+    .canvas-float.bottom-right { right: 14px; bottom: 14px; }
+    .canvas-float .icon-button { width: 30px; min-height: 30px; }
+    .inspector { position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; width: min(340px, 90vw); border-left: 1px solid var(--line); background: #0d1319; transform: translateX(100%); transition: transform 180ms ease; }
+    .inspector.open { transform: translateX(0); }
+    .inspector-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 14px; border-bottom: 1px solid var(--line); }
+    .inspector-body { height: calc(100% - 61px); overflow-y: auto; padding: 16px; }
+    .inspector-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .inspector-title h2 { font-size: 18px; }
+    .inspector-section { padding: 15px 0; border-top: 1px solid var(--line); }
+    .inspector-section:first-child { border-top: 0; }
+    .inspector-section h3 { margin-bottom: 10px; color: var(--muted); font: 650 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
+    .property { display: grid; grid-template-columns: 110px 1fr; gap: 8px; padding: 5px 0; }
+    .property span:first-child { color: var(--muted); }
+    .inspector-note { padding: 11px; border-left: 2px solid var(--accent); background: var(--surface-2); color: var(--muted); font-size: 12px; }
+    .edge-legend { position: absolute; z-index: 12; right: 14px; top: 14px; display: flex; gap: 10px; padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgba(16,22,29,.94); color: var(--muted); font: 500 9px/1 var(--font-mono); }
+    .edge-legend span { display: flex; align-items: center; gap: 5px; }
+    .legend-line { width: 15px; height: 2px; background: var(--green); }
+    .legend-line.neg { background: var(--red); }
+    .canvas-status { position: absolute; z-index: 11; right: 14px; bottom: 14px; display: none; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); font: 500 10px/1 var(--font-mono); }
+    @media (max-width: 760px) {
+      .canvas-topbar { grid-template-columns: 1fr auto; }
+      .document-title { display: none; }
+      .canvas-actions .demo-button:not(.primary) { display: none; }
+      .edge-legend { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-ribbon"><strong>GUI STUDY 02</strong><span>Canvas workspace · illustrative circuit · production UI unchanged</span></div>
+  <main class="canvas-shell">
+    <header class="canvas-topbar">
+      <a class="brand" href="./index.html" aria-label="Back to GUI structure studies"><span class="brand-mark">M</span><span class="brand-name">MECH</span></a>
+      <div class="document-title"><span class="status-dot live"></span><strong>IOI circuit</strong><span>/</span><span>Run MECH-024</span><span class="tag live">live evidence</span></div>
+      <div class="canvas-actions"><button class="demo-button" type="button" id="layout-button">Tidy layout</button><button class="demo-button primary" type="button">Run society</button></div>
+    </header>
+    <div class="canvas-layout">
+      <aside class="tool-rail" aria-label="Canvas tools">
+        <button class="tool-button active" type="button" aria-label="Select">Sel</button>
+        <button class="tool-button" type="button" aria-label="Add node">Nod</button>
+        <button class="tool-button" type="button" aria-label="Connect nodes">Edg</button>
+        <button class="tool-button" type="button" aria-label="Add annotation">Not</button>
+        <div class="tool-separator"></div>
+        <button class="tool-button" type="button" aria-label="Measure">Mea</button>
+        <button class="tool-button" type="button" aria-label="Evidence filter">Evd</button>
+        <div style="flex:1"></div>
+        <button class="tool-button" type="button" id="inspector-toggle" aria-label="Toggle inspector">Inf</button>
+      </aside>
+      <section class="canvas-stage" aria-label="Interactive circuit canvas">
+        <div class="canvas-float top-left"><span class="tag">Prompt</span><span class="mono muted" style="font-size:11px">When Mary and John …</span></div>
+        <div class="edge-legend"><span><i class="legend-line"></i> positive path</span><span><i class="legend-line neg"></i> suppressive path</span></div>
+        <div class="canvas-world" id="world">
+          <svg class="edge-layer" id="edges" viewBox="0 0 1200 700" aria-hidden="true">
+            <path class="edge" data-from="t-mary" data-to="l5h1" />
+            <path class="edge" data-from="t-john" data-to="l5h1" />
+            <path class="edge positive" data-from="l5h1" data-to="l9h6" />
+            <path class="edge positive selected" data-from="l5h1" data-to="l9h9" />
+            <path class="edge positive" data-from="l5h1" data-to="l10h0" />
+            <path class="edge positive" data-from="l9h9" data-to="logits" />
+            <path class="edge positive" data-from="l10h0" data-to="logits" />
+            <path class="edge negative" data-from="l9h6" data-to="logits" />
+          </svg>
+          <button class="graph-node token" data-id="t-mary" data-type="Token" data-title="Mary" data-description="Subject-name token from the prompt." style="left:70px;top:100px">Mary</button>
+          <button class="graph-node token" data-id="t-john" data-type="Token" data-title="John" style="left:70px;top:185px">John</button>
+          <button class="graph-node token" data-id="t-store" data-type="Token" data-title="store" style="left:70px;top:270px">store</button>
+          <button class="graph-node" data-id="l5h1" data-type="Attention head" data-title="L5H1 · Induction" data-score="0.91" data-description="Builds an upstream representation used by the name-moving heads." style="left:290px;top:165px"><span class="node-type">Attention head</span><span class="node-score">0.91</span><div class="node-title">L5H1 · Induction</div><div class="node-meta">layer 5 · head 1</div></button>
+          <button class="graph-node" data-id="l9h6" data-type="Attention head" data-title="L9H6 · Negative name mover" data-score="0.71" data-description="Suppresses competing name-token paths in the illustrative circuit." style="left:550px;top:65px"><span class="node-type">Attention head</span><span class="node-score">0.71</span><div class="node-title">L9H6 · Negative</div><div class="node-meta">suppressive path</div></button>
+          <button class="graph-node selected" data-id="l9h9" data-type="Attention head" data-title="L9H9 · Name mover" data-score="0.95" data-description="Selected candidate with the largest measured positive contribution in this demo." style="left:550px;top:185px"><span class="node-type">Attention head</span><span class="node-score">0.95</span><div class="node-title">L9H9 · Name mover</div><div class="node-meta">Δ logit +1.84</div></button>
+          <button class="graph-node" data-id="l10h0" data-type="Attention head" data-title="L10H0 · Name mover" data-score="0.93" data-description="Second positive candidate entering the output projection." style="left:550px;top:305px"><span class="node-type">Attention head</span><span class="node-score">0.93</span><div class="node-title">L10H0 · Name mover</div><div class="node-meta">Δ logit +1.57</div></button>
+          <button class="graph-node output" data-id="logits" data-type="Output" data-title="IO token logit" data-score="+2.91" data-description="Final-position output comparison used by the validation pipeline." style="left:865px;top:185px"><span class="node-type">Output</span><span class="node-score">+2.91</span><div class="node-title">IO token logit</div><div class="node-meta">Mary − John</div></button>
+          <span class="graph-label" style="left:250px;top:120px">representation</span>
+          <span class="graph-label" style="left:765px;top:150px">direct write</span>
+        </div>
+        <div class="canvas-float bottom-left"><button class="icon-button" type="button" id="zoom-out" aria-label="Zoom out">−</button><span class="mono muted" id="zoom-label" style="min-width:42px;text-align:center;font-size:11px">100%</span><button class="icon-button" type="button" id="zoom-in" aria-label="Zoom in">+</button><button class="icon-button" type="button" id="fit-button" aria-label="Fit graph">Fit</button></div>
+        <div class="canvas-float bottom-right"><span class="status-dot live"></span><span style="font-size:11px">Live tensors</span></div>
+        <div class="canvas-status" id="canvas-status">Select and drag a node to rearrange the graph.</div>
+        <aside class="inspector open" id="inspector" aria-label="Node inspector">
+          <div class="inspector-head"><div><div class="kicker">Inspector</div><strong id="inspector-name">L9H9 · Name mover</strong></div><button class="icon-button" type="button" id="inspector-close" aria-label="Close inspector">×</button></div>
+          <div class="inspector-body">
+            <div class="inspector-title"><span class="tag live">Selected node</span><span class="tag" id="inspector-type">Attention head</span></div>
+            <div class="inspector-section"><h3>Interpretation</h3><p class="inspector-note" id="inspector-description">Selected candidate with the largest measured positive contribution in this demo.</p></div>
+            <div class="inspector-section"><h3>Properties</h3><div class="property"><span>Node ID</span><span class="mono" id="inspector-id">l9h9</span></div><div class="property"><span>Importance</span><span class="mono" id="inspector-score">0.95</span></div><div class="property"><span>Source</span><span>Run MECH-024</span></div><div class="property"><span>Provenance</span><span class="tag live">live</span></div></div>
+            <div class="inspector-section"><h3>Actions</h3><div style="display:flex;flex-wrap:wrap;gap:7px"><button class="demo-button" type="button">Open layer</button><button class="demo-button" type="button">Patch head</button><button class="demo-button primary" type="button">Add evidence</button></div></div>
+            <div class="inspector-section"><h3>Linked records</h3><div class="property"><span>Prompt</span><span>MECH-024/P0</span></div><div class="property"><span>Tensor</span><span>resid_post/9/7</span></div><div class="property"><span>Baseline</span><span>Wang et al. 2022</span></div></div>
+          </div>
+        </aside>
+      </section>
+    </div>
+  </main>
+  <script>
+    const world = document.getElementById('world');
+    const stage = document.querySelector('.canvas-stage');
+    const inspector = document.getElementById('inspector');
+    let zoom = 1;
+    let selected = document.querySelector('.graph-node.selected');
+    function setZoom(next) { zoom = Math.max(.65, Math.min(1.35, next)); world.style.transform = `scale(${zoom})`; document.getElementById('zoom-label').textContent = `${Math.round(zoom * 100)}%`; }
+    function fit() { const rect = stage.getBoundingClientRect(); setZoom(Math.min((rect.width - 40) / 1200, (rect.height - 40) / 700)); world.style.left = `${Math.max(12, (rect.width - 1200 * zoom) / 2)}px`; world.style.top = `${Math.max(12, (rect.height - 700 * zoom) / 2)}px`; }
+    document.getElementById('zoom-in').addEventListener('click', () => setZoom(zoom + .1));
+    document.getElementById('zoom-out').addEventListener('click', () => setZoom(zoom - .1));
+    document.getElementById('fit-button').addEventListener('click', fit);
+    document.getElementById('layout-button').addEventListener('click', () => { setZoom(1); world.style.left = '0px'; world.style.top = '0px'; });
+    document.getElementById('inspector-toggle').addEventListener('click', () => inspector.classList.add('open'));
+    document.getElementById('inspector-close').addEventListener('click', () => inspector.classList.remove('open'));
+    document.querySelectorAll('.tool-button').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.tool-button').forEach(item => item.classList.remove('active')); button.classList.add('active'); }));
+    document.querySelectorAll('.graph-node').forEach(node => {
+      node.addEventListener('click', event => { event.stopPropagation(); selected?.classList.remove('selected'); node.classList.add('selected'); selected = node; document.querySelectorAll('.edge').forEach(edge => edge.classList.remove('selected')); document.querySelectorAll('.edge').forEach(edge => { if (edge.dataset.to === node.dataset.id || edge.dataset.from === node.dataset.id) edge.classList.add('selected'); }); updateInspector(node); inspector.classList.add('open'); });
+      node.addEventListener('pointerdown', event => { const rect = node.getBoundingClientRect(); const offsetX = event.clientX - rect.left; const offsetY = event.clientY - rect.top; node.setPointerCapture(event.pointerId); const move = moveEvent => { node.style.left = `${moveEvent.clientX - offsetX - world.getBoundingClientRect().left}px`; node.style.top = `${moveEvent.clientY - offsetY - world.getBoundingClientRect().top}px`; }; const up = () => { node.removeEventListener('pointermove', move); node.removeEventListener('pointerup', up); }; node.addEventListener('pointermove', move); node.addEventListener('pointerup', up); });
+    });
+    function updateInspector(node) {
+      document.getElementById('inspector-name').textContent = node.dataset.title;
+      document.getElementById('inspector-type').textContent = node.dataset.type;
+      document.getElementById('inspector-description').textContent = node.dataset.description || `${node.dataset.title} selected in the illustrative circuit.`;
+      document.getElementById('inspector-id').textContent = node.dataset.id;
+      document.getElementById('inspector-score').textContent = node.dataset.score || '—';
+    }
+    window.addEventListener('resize', fit);
+    fit();
+  </script>
+</body>
+</html>

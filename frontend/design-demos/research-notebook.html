@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MECH — Research Notebook Demo</title>
+  <link rel="stylesheet" href="./demo.css" />
+  <style>
+    .notebook-shell { min-height: calc(100vh - 30px); }
+    .notebook-topbar { position: sticky; z-index: 30; top: 30px; display: grid; min-height: 58px; grid-template-columns: 230px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 0 18px; border-bottom: 1px solid var(--line); background: rgba(9,13,18,.96); }
+    .document-meta { min-width: 0; }
+    .document-title-row { display: flex; align-items: center; gap: 8px; }
+    .document-title-row h1 { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+    .save-state { margin-top: 2px; color: var(--faint); font: 500 10px/1 var(--font-mono); }
+    .notebook-actions { display: flex; gap: 7px; }
+    .notebook-layout { display: grid; grid-template-columns: 220px minmax(0, 820px) 220px; justify-content: center; gap: 24px; padding: 34px 24px 80px; }
+    .outline { position: sticky; top: 122px; align-self: start; max-height: calc(100vh - 150px); overflow-y: auto; }
+    .outline h2 { margin: 4px 0 10px; color: var(--muted); font: 650 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
+    .outline a { display: block; padding: 7px 8px; border-left: 2px solid transparent; color: var(--muted); font-size: 12px; text-decoration: none; }
+    .outline a:hover, .outline a.active { border-left-color: var(--accent); background: var(--surface); color: var(--text); }
+    .notebook-page { min-width: 0; }
+    .page-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 28px; color: var(--muted); font: 500 11px/1 var(--font-mono); }
+    .notebook-page h2 { margin: 38px 0 12px; font-size: 25px; letter-spacing: -.035em; }
+    .notebook-page h3 { margin: 25px 0 8px; font-size: 16px; }
+    .notebook-page p { max-width: 72ch; color: #c5d0d7; font-size: 16px; line-height: 1.72; }
+    .notebook-page h2:first-of-type { margin-top: 0; }
+    .question { margin: 24px 0 30px; padding: 18px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
+    .question .kicker { margin-bottom: 7px; }
+    .question p { color: var(--text); font-size: 20px; line-height: 1.45; }
+    .run-block { margin: 24px 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .run-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--line); }
+    .run-title { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+    .run-body { padding: 15px; }
+    .prompt-quote { padding: 12px 14px; border-left: 2px solid var(--accent); background: var(--surface-2); color: var(--text); font-size: 15px; }
+    .run-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 15px; background: var(--line); }
+    .run-metric { padding: 12px; background: var(--surface); }
+    .run-metric strong { display: block; font: 700 18px/1.2 var(--font-mono); }
+    .run-metric span { color: var(--muted); font-size: 11px; }
+    .run-output { margin-top: 14px; }
+    .bar-row { display: grid; grid-template-columns: 82px 1fr 52px; align-items: center; gap: 9px; margin: 8px 0; }
+    .bar-label, .bar-value { color: var(--muted); font: 600 10px/1 var(--font-mono); }
+    .bar-value { text-align: right; }
+    .bar-track { height: 7px; overflow: hidden; border-radius: 10px; background: var(--surface-3); }
+    .bar-fill { height: 100%; border-radius: inherit; background: var(--blue); }
+    .figure { margin: 26px 0; padding: 16px 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .figure-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+    .figure h3 { margin: 0; }
+    .figure figcaption { margin-top: 9px; color: var(--muted); font-size: 11px; }
+    .chart { width: 100%; height: 210px; }
+    .chart .axis { stroke: var(--line); stroke-width: 1; }
+    .chart .guide { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 5; }
+    .chart .series-a { fill: none; stroke: var(--green); stroke-width: 2.5; }
+    .chart .series-b { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+    .chart text { fill: var(--muted); font: 10px var(--font-mono); }
+    .claim { margin: 24px 0; padding: 16px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
+    .claim p { color: var(--text); font-size: 18px; }
+    .claim-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
+    .margin-notes { position: sticky; top: 122px; align-self: start; }
+    .margin-note { margin-bottom: 18px; padding-left: 12px; border-left: 1px solid var(--line-strong); color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .margin-note strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 11px; }
+    .new-note { display: none; margin-top: 18px; }
+    .new-note.open { display: block; }
+    .new-note textarea { width: 100%; min-height: 90px; resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); padding: 10px; }
+    .new-note-actions { display: flex; gap: 7px; margin-top: 7px; }
+    .inserted-note { display: none; margin: 18px 0; padding: 12px 14px; border-left: 2px solid var(--violet); background: #171622; color: #d8d0f7; }
+    .inserted-note.open { display: block; }
+    @media (max-width: 1180px) {
+      .notebook-layout { grid-template-columns: 190px minmax(0, 820px); }
+      .margin-notes { display: none; }
+    }
+    @media (max-width: 820px) {
+      .notebook-topbar { grid-template-columns: 1fr auto; }
+      .notebook-topbar > .brand { display: none; }
+      .notebook-actions .demo-button:not(.primary) { display: none; }
+      .notebook-layout { grid-template-columns: 1fr; padding: 24px 16px 60px; }
+      .outline { position: static; display: flex; gap: 4px; overflow-x: auto; max-height: none; padding-bottom: 5px; }
+      .outline h2 { display: none; }
+      .outline a { flex: 0 0 auto; border-bottom: 2px solid transparent; border-left: 0; }
+      .outline a:hover, .outline a.active { border-bottom-color: var(--accent); border-left: 0; }
+      .run-metrics { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-ribbon"><strong>GUI STUDY 03</strong><span>Research notebook · illustrative findings · production UI unchanged</span></div>
+  <main class="notebook-shell">
+    <header class="notebook-topbar">
+      <a class="brand" href="./index.html" aria-label="Back to GUI structure studies"><span class="brand-mark">M</span><span class="brand-name">MECH</span></a>
+      <div class="document-meta"><div class="document-title-row"><h1>IOI name-mover circuit — investigation notebook</h1><span class="tag live">saved</span></div><div class="save-state">MECH-024 · 6 linked records · edited just now</div></div>
+      <div class="notebook-actions"><button class="demo-button" type="button" id="add-note">Add note</button><button class="demo-button" type="button">Export</button><button class="demo-button primary" type="button" id="run-notebook">Run next check</button></div>
+    </header>
+
+    <div class="notebook-layout">
+      <nav class="outline" aria-label="Notebook outline">
+        <h2>Notebook outline</h2>
+        <a class="active" href="#question">Question</a>
+        <a href="#probe">Prompt probe</a>
+        <a href="#candidates">Candidates</a>
+        <a href="#comparison">Layer comparison</a>
+        <a href="#claim">Current claim</a>
+        <a href="#gate">Validation gate</a>
+      </nav>
+
+      <article class="notebook-page">
+        <div class="page-meta"><span>Created September 24, 2026</span><span>Research notebook · public export disabled</span></div>
+        <section id="question">
+          <div class="kicker">Research question</div>
+          <h2>What moves the indirect-object name into the final prediction?</h2>
+          <div class="question"><p>For GPT-2 Small, which attention heads form the smallest causal circuit that preserves the IO-token logit difference on the selected prompt family?</p></div>
+          <p>This notebook keeps the question, observations, interventions, and unresolved gaps in one chronological record. Every chart and result can point back to a model checkpoint, prompt, tensor record, and run identifier.</p>
+        </section>
+
+        <section id="probe">
+          <h2>Prompt probe</h2>
+          <p>The initial probe uses a completed IOI sentence and records the final prompt position. The demo values below illustrate the intended layout; they are not live measurements.</p>
+          <div class="run-block" id="probe-run">
+            <div class="run-head"><div class="run-title"><span class="status-dot live"></span>Prompt + forward pass</div><div style="display:flex;align-items:center;gap:7px"><span class="tag">sample</span><button class="text-button" type="button" id="rerun-probe">Run</button></div></div>
+            <div class="run-body">
+              <div class="prompt-quote">When Mary and John went to the store, John gave a drink to</div>
+              <div class="run-output">
+                <div class="bar-row"><span class="bar-label">Mary</span><div class="bar-track"><div class="bar-fill" style="width:88%;background:var(--blue)"></div></div><span class="bar-value">4.21</span></div>
+                <div class="bar-row"><span class="bar-label">John</span><div class="bar-track"><div class="bar-fill" style="width:69%;background:var(--green)"></div></div><span class="bar-value">3.36</span></div>
+                <div class="bar-row"><span class="bar-label">store</span><div class="bar-track"><div class="bar-fill" style="width:31%;background:var(--amber)"></div></div><span class="bar-value">1.82</span></div>
+              </div>
+              <div class="run-metrics"><div class="run-metric"><strong>8</strong><span>prompt tokens</span></div><div class="run-metric"><strong>7</strong><span>final position</span></div><div class="run-metric"><strong>live</strong><span>illustrative provenance</span></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="candidates">
+          <h2>Candidate heads</h2>
+          <p>Path-patching results identify two direct positive contributors and one suppressive candidate. The notebook would insert each intervention as a run block rather than separating it into another dashboard page.</p>
+          <div class="result-list" style="display:grid;gap:1px;overflow:hidden;border:1px solid var(--line);border-radius:var(--radius);background:var(--line)">
+            <div style="display:grid;grid-template-columns:1fr 110px 90px;gap:12px;padding:13px;background:var(--surface)"><div><strong>L9H9 · Name mover</strong><div class="muted" style="font-size:12px">Direct positive contribution</div></div><span class="tag live">candidate</span><span class="mono">0.95</span></div>
+            <div style="display:grid;grid-template-columns:1fr 110px 90px;gap:12px;padding:13px;background:var(--surface)"><div><strong>L10H0 · Name mover</strong><div class="muted" style="font-size:12px">Direct positive contribution</div></div><span class="tag live">candidate</span><span class="mono">0.93</span></div>
+            <div style="display:grid;grid-template-columns:1fr 110px 90px;gap:12px;padding:13px;background:var(--surface)"><div><strong>L9H6 · Negative mover</strong><div class="muted" style="font-size:12px">Suppressive path</div></div><span class="tag warn">candidate</span><span class="mono">0.71</span></div>
+          </div>
+        </section>
+
+        <section id="comparison">
+          <h2>Layer comparison</h2>
+          <p>The chart is embedded directly in the argument it supports. The full data table remains available from the figure, but readers do not need to leave the notebook to understand the claim.</p>
+          <figure class="figure">
+            <div class="figure-head"><div><h3>Positive logit contribution by layer</h3><div class="muted" style="font-size:12px;margin-top:3px">Illustrative candidate path, normalized to the strongest layer</div></div><button class="text-button" type="button">Open data</button></div>
+            <svg class="chart" viewBox="0 0 720 210" role="img" aria-label="Illustrative line chart comparing positive and suppressive candidate contributions across twelve layers">
+              <line class="axis" x1="44" y1="174" x2="690" y2="174" /><line class="axis" x1="44" y1="18" x2="44" y2="174" />
+              <line class="guide" x1="44" y1="134" x2="690" y2="134" /><line class="guide" x1="44" y1="94" x2="690" y2="94" /><line class="guide" x1="44" y1="54" x2="690" y2="54" />
+              <path class="series-b" d="M44 164 L102 157 L160 146 L218 121 L276 78 L334 43 L392 68 L450 55 L508 82 L566 102 L624 117 L682 126" />
+              <path class="series-a" d="M44 166 L102 162 L160 155 L218 145 L276 126 L334 111 L392 97 L450 105 L508 118 L566 128 L624 138 L682 145" />
+              <text x="8" y="178">0.0</text><text x="0" y="138">0.5</text><text x="0" y="98">1.0</text><text x="0" y="58">1.5</text>
+              <text x="38" y="196">L0</text><text x="204" y="196">L4</text><text x="370" y="196">L8</text><text x="536" y="196">L11</text><text x="652" y="196">L12</text>
+              <text x="474" y="64" fill="var(--green)">L9H9</text><text x="538" y="101" fill="var(--accent)">L10H0</text>
+            </svg>
+            <figcaption>Sample data · normalized contribution · source: design prototype, not a MECH measurement</figcaption>
+          </figure>
+        </section>
+
+        <section id="claim">
+          <h2>Current claim</h2>
+          <div class="claim"><div class="kicker">Supported with a known gap</div><p>L9H9 and L10H0 are the strongest direct positive contributors in this prompt probe. The circuit is not yet accepted as minimal because redundancy ablation has not been implemented.</p><div class="claim-meta"><span class="tag live">live reproduction</span><span class="tag live">published baseline</span><span class="tag warn">minimality pending</span><span class="tag">MECH-024</span></div></div>
+          <div class="inserted-note" id="inserted-note"><strong>New note</strong><br>This note is part of the notebook chronology and can be linked to a later experiment.</div>
+        </section>
+
+        <section id="gate">
+          <h2>Validation gate</h2>
+          <p>The report is allowed to export, but the claim remains visibly gated. A failed or incomplete gate cannot be hidden by publication formatting.</p>
+          <div class="run-block"><div class="run-head"><div class="run-title"><span class="status-dot warn"></span>Composite validation</div><span class="tag warn">0.83 / 0.85</span></div><div class="run-body"><div class="prompt-quote">Fidelity passed. Confidence reproduction passed. Redundancy evidence is unavailable.</div><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px"><button class="demo-button" type="button">Inspect missing evidence</button><button class="demo-button primary" type="button">Queue redundancy ablation</button></div></div></div>
+        </section>
+      </article>
+
+      <aside class="margin-notes" aria-label="Margin notes">
+        <div class="kicker" style="margin-bottom:12px">Margin notes</div>
+        <div class="margin-note"><strong>Model</strong>GPT-2 Small · checkpoint hash stored in MECH-024.</div>
+        <div class="margin-note"><strong>Position</strong>Final prompt position, index 7. Do not compare against padded positions.</div>
+        <div class="margin-note"><strong>Baseline</strong>Published reference is a comparison point, not proof of internal equivalence.</div>
+        <div class="margin-note"><strong>Open question</strong>Does the L10H0 path remain necessary after L9H9 is ablated?</div>
+        <div class="new-note" id="new-note-panel"><label class="kicker" for="note-input">New margin note</label><textarea id="note-input" placeholder="Capture an observation or follow-up question"></textarea><div class="new-note-actions"><button class="demo-button primary" type="button" id="save-note">Insert note</button><button class="demo-button" type="button" id="cancel-note">Cancel</button></div></div>
+      </aside>
+    </div>
+  </main>
+  <script>
+    const addNote = document.getElementById('add-note');
+    const notePanel = document.getElementById('new-note-panel');
+    const noteInput = document.getElementById('note-input');
+    addNote.addEventListener('click', () => { notePanel.classList.toggle('open'); if (notePanel.classList.contains('open')) noteInput.focus(); });
+    document.getElementById('cancel-note').addEventListener('click', () => { notePanel.classList.remove('open'); noteInput.value = ''; });
+    document.getElementById('save-note').addEventListener('click', () => { const value = noteInput.value.trim(); if (!value) return; const note = document.getElementById('inserted-note'); note.innerHTML = `<strong>New note</strong><br>${value.replace(/[<>]/g, '')}`; note.classList.add('open'); noteInput.value = ''; notePanel.classList.remove('open'); });
+    document.getElementById('rerun-probe').addEventListener('click', event => { const button = event.currentTarget; button.textContent = 'Running…'; button.disabled = true; setTimeout(() => { button.textContent = 'Run'; button.disabled = false; }, 900); });
+    document.getElementById('run-notebook').addEventListener('click', event => { const button = event.currentTarget; const original = button.textContent; button.textContent = 'Queued…'; button.disabled = true; setTimeout(() => { button.textContent = original; button.disabled = false; }, 1100); });
+    const links = [...document.querySelectorAll('.outline a')];
+    const observer = new IntersectionObserver(entries => { entries.forEach(entry => { if (entry.isIntersecting) { links.forEach(link => link.classList.toggle('active', link.getAttribute('href') === `#${entry.target.id}`)); } }); }, { rootMargin: '-20% 0px -65% 0px' });
+    document.querySelectorAll('.notebook-page section[id]').forEach(section => observer.observe(section));
+  </script>
+</body>
+</html>
