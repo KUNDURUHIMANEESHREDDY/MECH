@@ -1,13 +1,12 @@
 """Society Scribe agent (capability: publish).
 
-Turns a run trace into durable artifacts. Wraps:
-- backend.services.report_service.ReportService
-  .generate_report(experiment_id, title) -> {markdown, html, ...}
-- backend.core.evidence_graph.TraceableEvidenceGraph
-  .from_run() for per-run graphs (no demo nodes)
-- backend.knowledge_graph.graph_store.GraphStore for persistent
-  write-back, so discoveries compound across sessions
-- backend.core.unified_registry.UnifiedRegistry (report/paper catalog reads)
+Turns an explicitly live run trace into durable artifacts. Wraps:
+- backend.services.report_service.ReportService for a neutral transport report
+- backend.core.evidence_graph.TraceableEvidenceGraph for per-run graphs
+- backend.knowledge_graph.graph_store.GraphStore for persistent write-back
+
+Stages without explicit live provenance are blocked before any report, graph,
+or knowledge-base promotion occurs.
 
 Legacy stubs replaced: _mechanistic_reports ("IOI Circuit Report..."),
 _dashboard_summary ({goals:3, discoveries:14}), _evidence_rank,
@@ -18,6 +17,8 @@ from __future__ import annotations
 
 import datetime as _dt
 from typing import Any, Dict, List, Optional
+
+from .evidence_policy import publication_block_reason
 
 
 def _first_score(result: Any, keys: Any) -> float:
@@ -45,45 +46,88 @@ class Scribe:
     capability = "publish"
 
     def evidence(self, run_id: str = "", goal: str = "",
-                   trace: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-        """Per-run evidence graph (demo-free). Falls back to the legacy
-        demo graph only when no trace is supplied (back-compat)."""
+                  trace: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """Build an evidence graph only from an eligible live trace."""
+        if trace is None:
+            return {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": "A run trace is required; reference/demo graphs cannot be published.",
+            }
+        reason = publication_block_reason(trace)
+        if reason:
+            return {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": reason,
+            }
         try:
             from backend.core.evidence_graph import TraceableEvidenceGraph
-            if trace is None:
-                return {"status": "completed",
-                        "result": TraceableEvidenceGraph().to_dict()}
             graph = TraceableEvidenceGraph.from_run(
                 run_id or "run_unknown", goal, trace)
-            return {"status": "completed", "result": graph.to_dict()}
+            return {"status": "completed", "provenance": "live",
+                    "result": graph.to_dict()}
         except Exception as exc:
-            return {"status": "error", "error": str(exc)[:500]}
+            return {"status": "error", "provenance": "unavailable",
+                    "error": str(exc)[:500]}
 
-    def report(self, experiment_id: str, title: str) -> Dict[str, Any]:
+    def report(self, experiment_id: str, title: str,
+               provenance: str = "unavailable") -> Dict[str, Any]:
         try:
             from backend.services.report_service import ReportService
             res = ReportService().generate_report(
-                experiment_id=experiment_id, title=title)
-            return {"status": "completed", "result": res}
+                experiment_id=experiment_id, title=title,
+                provenance=provenance)
+            return {"status": "completed", "provenance": provenance,
+                    "result": res}
         except Exception as exc:
-            return {"status": "error", "error": str(exc)[:500]}
+            return {"status": "error", "provenance": "unavailable",
+                    "error": str(exc)[:500]}
 
     def publish(self, goal: str, trace: List[Dict[str, Any]],
                 reflection: Dict[str, Any],
                 run_id: str = "",
                 reproducibility: Optional[Dict[str, Any]] = None,
                 gate: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Assemble the final deliverable: report + evidence + reflection +
-        reproducibility report + gate verdict, then write discoveries back
-        to the persistent knowledge graph."""
+        """Publish only a complete, explicitly live evidence chain."""
+        reason = publication_block_reason(trace, reproducibility, gate)
+        if reason:
+            return {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "goal": goal,
+                "reason": reason,
+                "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
+            }
+
         exp_id = f"exp_{abs(hash(goal)) % 10000:04d}"
         rep = self.report(experiment_id=exp_id,
-                          title=f"Mechanistic Report: {goal[:60]}")
+                          title=f"Mechanistic Report: {goal[:60]}",
+                          provenance="live")
         ev = self.evidence(run_id=run_id or exp_id, goal=goal, trace=trace)
+        if rep.get("status") != "completed" or ev.get("status") != "completed":
+            return {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "goal": goal,
+                "reason": "Report or evidence generation did not return a live artifact.",
+                "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
+            }
         ok_steps = sum(1 for t in trace
                        if t.get("status") in ("completed", "ok", "loaded"))
         publication = {
             "status": "completed",
+            "provenance": "live",
+            "validation_eligible": True,
+            "publication_eligible": True,
             "goal": goal,
             "experiment_id": exp_id,
             "steps_completed": f"{ok_steps}/{len(trace)}",
@@ -108,6 +152,31 @@ class Scribe:
         Never raises: KG write-back must not fail a run. Returns a summary
         of stored node ids (empty when nothing measurable was found).
         """
+        if not isinstance(publication, dict) or publication.get("status") != "completed":
+            return {
+                "stored": [],
+                "status": "blocked",
+                "provenance": "unavailable",
+                "reason": "Knowledge write-back requires a completed live publication.",
+            }
+        publication_repro = (publication.get("reproducibility")
+                             if isinstance(publication, dict) else None)
+        publication_gate = (publication.get("gate")
+                            if isinstance(publication, dict) else None)
+        if publication_repro == {}:
+            publication_repro = None
+        if publication_gate == {}:
+            publication_gate = None
+        reason = publication_block_reason(trace, publication_repro,
+                                          publication_gate)
+        if reason:
+            return {
+                "stored": [],
+                "status": "blocked",
+                "provenance": "unavailable",
+                "reason": reason,
+            }
+
         stored: List[str] = []
         try:
             if store is None:

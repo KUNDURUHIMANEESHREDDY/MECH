@@ -232,7 +232,7 @@ function statusTone(status: string): StatusTone {
   const normalized = status.toLowerCase();
   if (['completed', 'complete', 'ok', 'success', 'passed', 'loaded'].includes(normalized)) return 'success';
   if (['running', 'started', 'starting', 'queued'].includes(normalized)) return 'running';
-  if (['error', 'failed', 'failure', 'unavailable', 'stopped'].includes(normalized)) return 'error';
+  if (['error', 'failed', 'failure', 'unavailable', 'blocked', 'stopped'].includes(normalized)) return 'error';
   return 'neutral';
 }
 function formatDate(value: string): string {
@@ -246,7 +246,10 @@ function eventLabel(event: TraceEvent): string {
     case 'ResearchStarted': return `Goal: ${text(payload.goal, 'unavailable')}`;
     case 'ExperimentQueued': return Array.isArray(payload.plan) ? `Plan: ${payload.plan.map((item) => text(item)).filter(Boolean).join(' → ') || 'unavailable'}` : 'Experiment queued';
     case 'DiscoveryCreated': return `Discovery ${text(payload.discovery_id, '(ID unavailable)')}`;
-    case 'CircuitValidated': return `Validation event · ${text(payload.fidelity_pct, 'fidelity not returned')}`;
+    case 'CircuitValidated':
+      return payload.status === 'blocked' || payload.reason
+        ? `Validation blocked · ${text(payload.reason, 'live evidence unavailable')}`
+        : `Validation event · ${text(payload.fidelity_pct, 'fidelity not returned')}`;
     case 'PublicationGenerated': return `Publication ${text(payload.experiment_id, '(ID unavailable)')}`;
     case 'ResearchFinished': return `Finished · ${text(payload.steps_completed, 'step count unavailable')}`;
     default: return 'Backend event payload';

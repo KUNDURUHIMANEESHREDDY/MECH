@@ -7,7 +7,8 @@ with a real loop over the six Society agents in this package:
     Planner -> Executor -> Inspector -> Discoverer -> Critic -> Scribe
 
 Guardrails: MAX_STEPS=8 nodes per plan, MAX_REPLANS=2, fail-fast when a
-stage returns {"status": "error"} with confidence below threshold.
+stage returns an error, unavailable, or blocked status. Scientific stages
+also require explicit live provenance before they can publish.
 
 All cross-module imports are lazy (inside methods) so importing this module
 never requires torch/transformers. Agent-to-op dispatch falls back to
@@ -21,6 +22,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List
+
+from .evidence_policy import (
+    blocked_reason,
+    discovery_is_live,
+    provenance_of,
+    validation_is_live,
+)
 
 MAX_STEPS = 8
 MAX_REPLANS = 2
@@ -95,6 +103,7 @@ class ResearchSocietyV2:
         if agent_name == "critic" and op == "validate":
             args.setdefault("discovery_id",
                             ctx.get("discovery_id", "disc_unknown"))
+            args.setdefault("discovery_result", ctx.get("discovery_result", {}))
         if agent_name == "scribe" and op == "publish":
             return self.scribe.publish(
                 goal=ctx.get("goal", ""), trace=ctx.get("trace", []),
@@ -109,7 +118,7 @@ class ResearchSocietyV2:
 
     @staticmethod
     def _failed(res: Dict[str, Any]) -> bool:
-        return res.get("status") in ("error", "unavailable", "failed")
+        return res.get("status") in ("error", "unavailable", "failed", "blocked")
 
     @staticmethod
     def _confidence_of(vres: Any) -> float:
@@ -151,9 +160,16 @@ class ResearchSocietyV2:
             step = {"node": node["id"], "agent": self.dispatch(node), **res}
             trace.append(step)
             ctx["trace"] = trace
-            if node["id"] == "discover" and res.get("status") == "completed":
+            if node["id"] == "discover":
                 disc = res.get("result", {})
-                if isinstance(disc, dict) and disc.get("discovery_id"):
+                if not isinstance(disc, dict):
+                    disc = {}
+                ctx["discovery_result"] = disc
+                if res.get("discovery_id"):
+                    ctx["discovery_id"] = res["discovery_id"]
+                if (res.get("status") == "completed"
+                        and discovery_is_live(disc)
+                        and disc.get("discovery_id")):
                     ctx["discovery_id"] = disc["discovery_id"]
                     self._emit(events, on_event, "DiscoveryCreated",
                                {"discovery_id": disc["discovery_id"]})
@@ -170,36 +186,72 @@ class ResearchSocietyV2:
             campaign_id=f"camp_{abs(hash(goal)) % 10000:04d}",
             successful=successful, failed=failed,
             planner_decisions=[n["id"] for n in nodes])
-        # Closed validation loop: live reproduction vs published baselines.
-        # Runs in a thread (torch forwards) so the event loop stays free.
+
         paper_id = workflow.get("pipeline", "ioi")
-        repro = await asyncio.to_thread(self.critic.reproduce, paper_id)
+        discovery_step = next(
+            (t for t in trace if t.get("node") == "discover"), {})
+        discovery_result = (discovery_step.get("result", {})
+                            if isinstance(discovery_step, dict) else {})
+        if not isinstance(discovery_result, dict):
+            discovery_result = {}
+        discovery_eligible = discovery_is_live(discovery_result)
+
+        # Do not run or publish reproduction evidence when discovery is not
+        # explicitly live.  This keeps synthetic DiscoveryEngine fields out
+        # of the validation/publication chain rather than merely hiding them.
+        if discovery_eligible:
+            repro = await asyncio.to_thread(self.critic.reproduce, paper_id)
+        else:
+            repro = {
+                "status": "blocked",
+                "provenance": provenance_of(discovery_result),
+                "publication_eligible": False,
+                "reason": blocked_reason(discovery_result, "Discovery"),
+            }
         ctx["reproducibility"] = repro
+
         valid_step = next((t for t in trace if t.get("node") == "validate"),
                           {})
         vres = valid_step.get("result", {}) if isinstance(valid_step, dict) \
             else {}
-        confident = self.critic.is_confident(
-            vres if isinstance(vres, dict) else {})
-        gate = dict(repro.get("gate", {})) if isinstance(repro, dict) else {}
-        gate.update({
-            "confidence": self._confidence_of(vres),
-            "validated": bool(vres.get("validated", False))
-            if isinstance(vres, dict) else False,
-            "passed": bool(gate.get("passed", False)) and confident,
-        })
+        if not isinstance(vres, dict):
+            vres = {}
+        validation_eligible = validation_is_live(vres)
+        confident = self.critic.is_confident(vres)
+        if discovery_eligible:
+            gate = dict(repro.get("gate", {})) if isinstance(repro, dict) else {}
+            gate.update({
+                "status": "completed" if repro.get("status") == "completed"
+                          else "unavailable",
+                "provenance": "live" if repro.get("provenance") == "live"
+                              else "unavailable",
+                "confidence": self._confidence_of(vres),
+                "validated": bool(vres.get("validated", False)),
+                "passed": bool(gate.get("passed", False))
+                          and confident and validation_eligible,
+            })
+        else:
+            gate = {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "validated": False,
+                "passed": False,
+                "reason": blocked_reason(discovery_result, "Discovery"),
+            }
         ctx["gate"] = gate
         self._emit(events, on_event, "CircuitValidated",
                    {"successful": successful, "failed": failed,
+                    "status": "completed" if validation_eligible else "blocked",
                     "gate_passed": gate["passed"],
-                    "fidelity_pct": gate.get("value")})
+                    "fidelity_pct": gate.get("value"),
+                    "reason": gate.get("reason", "")})
 
         needs_replan = bool(failed) and self.replans < MAX_REPLANS
         if needs_replan and not any(t["node"] == "validate" and not self._failed(t)
                                     for t in trace):
             self.replans += 1
             # Narrow retry: re-run only the failed scope would go here;
-            # v1 records the replan and proceeds to publish partial results.
+            # v1 records the replan and does not publish partial evidence.
             self._emit(events, on_event, "ExperimentQueued",
                        {"replan": self.replans, "failed": failed})
 
@@ -208,12 +260,32 @@ class ResearchSocietyV2:
                                           run_id=run_id,
                                           reproducibility=repro,
                                           gate=gate)
-        self._emit(events, on_event, "PublicationGenerated",
-                   {"experiment_id": publication.get("experiment_id")})
+        if publication.get("status") == "completed":
+            self._emit(events, on_event, "PublicationGenerated",
+                       {"experiment_id": publication.get("experiment_id")})
+        else:
+            self._emit(events, on_event, "HypothesisRejected",
+                       {"node": "publish",
+                        "reason": str(publication.get("reason")
+                                      or "Publication evidence is unavailable")
+                        [:200]})
         self._emit(events, on_event, "ResearchFinished",
-                   {"steps_completed": publication.get("steps_completed")})
+                   {"steps_completed": publication.get("steps_completed")
+                    or f"{len(successful)}/{len(trace)}"})
+
+        if publication.get("status") == "blocked":
+            status = "blocked"
+        elif failed:
+            status = "failed"
+        elif successful:
+            status = "completed"
+        else:
+            status = "failed"
         return {
-            "status": "completed" if successful else "failed",
+            "status": status,
+            "provenance": publication.get("provenance", "unavailable"),
+            "validation_eligible": bool(publication.get("validation_eligible", False)),
+            "publication_eligible": bool(publication.get("publication_eligible", False)),
             "goal": goal,
             "workflow": workflow,
             "trace": trace,
@@ -231,9 +303,7 @@ class ResearchSocietyV2:
                                     on_event=on_event, run_id=run_id))
 
 
-# Backwards-compatible alias: legacy_dispatcher imports ResearchSociety.
-# Keep the old stub class importable; new code should use ResearchSocietyV2.
-try:
-    from .research_society import ResearchSociety  # noqa: F401
-except Exception:  # pragma: no cover
-    ResearchSociety = ResearchSocietyV2  # type: ignore
+# Keep the legacy import name, but point it at the guarded supervisor.  The
+# old standalone stub remains available only from its historical module and
+# must not be reachable through the active Society package.
+ResearchSociety = ResearchSocietyV2

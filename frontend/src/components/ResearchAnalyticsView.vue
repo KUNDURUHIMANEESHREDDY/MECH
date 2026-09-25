@@ -206,7 +206,7 @@ function statusTone(status: string): ItemTone {
   const normalized = status.toLowerCase();
   if (['completed', 'complete', 'ok', 'success', 'passed'].includes(normalized)) return 'success';
   if (['running', 'started', 'starting', 'queued'].includes(normalized)) return 'running';
-  if (['error', 'failed', 'failure', 'stopped', 'cancelled'].includes(normalized)) return 'error';
+  if (['error', 'failed', 'failure', 'stopped', 'cancelled', 'blocked', 'unavailable'].includes(normalized)) return 'error';
   return 'neutral';
 }
 function normalizeRun(value: unknown): RunSummary | null {

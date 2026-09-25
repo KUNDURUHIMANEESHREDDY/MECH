@@ -46,6 +46,39 @@ STEP_TYPES = {"planner": "Plan", "executor": "Execution",
               "critic": "Validation", "scribe": "Publication"}
 
 
+def _scientific_policy():
+    try:
+        try:
+            from backend.agents.evidence_policy import (
+                discovery_is_live,
+                provenance_of,
+                validation_is_live,
+            )
+        except ImportError:
+            from agents.evidence_policy import (
+                discovery_is_live,
+                provenance_of,
+                validation_is_live,
+            )
+        return discovery_is_live, provenance_of, validation_is_live
+    except Exception:
+        return None
+
+
+def _step_allows_evidence(step: Dict[str, Any]) -> bool:
+    """Prevent synthetic discovery/validation numbers becoming evidence."""
+    node = str(step.get("node", ""))
+    if node not in {"discover", "validate"}:
+        return True
+    policy = _scientific_policy()
+    if policy is None:
+        return False
+    discovery_is_live, _, validation_is_live = policy
+    result = step.get("result")
+    return (discovery_is_live(result) if node == "discover"
+            else validation_is_live(result))
+
+
 class TraceableEvidenceGraph:
     """DAG graph tracking full evidence provenance from neuron activations to final paper."""
 
@@ -118,16 +151,26 @@ class TraceableEvidenceGraph:
             node_id = f"{run_id}_{step.get('node', 'step')}"
             agent = str(step.get("agent", ""))
             status = str(step.get("status", ""))
+            node_payload = {
+                "agent": agent,
+                "status": status,
+                "op": step.get("op", ""),
+            }
+            if str(step.get("node", "")) in {"discover", "validate"}:
+                policy = _scientific_policy()
+                if policy is not None:
+                    _, provenance_of, _ = policy
+                    node_payload["provenance"] = provenance_of(step.get("result"))
+                    node_payload["scientific_eligible"] = _step_allows_evidence(step)
             graph.add_node(
                 node_id, STEP_TYPES.get(agent, "Execution"),
-                f"{step.get('node', 'step')} ({status})",
-                {"agent": agent, "status": status,
-                 "op": step.get("op", "")})
+                f"{step.get('node', 'step')} ({status})", node_payload)
             graph.add_edge(prev, node_id, "followed_by")
-            for key, value in _iter_evidence(step):
-                ev_id = f"{node_id}_ev_{key.replace('.', '_')}"
-                graph.add_node(ev_id, "Evidence", f"{key} = {value}")
-                graph.add_edge(node_id, ev_id, "yields")
+            if _step_allows_evidence(step):
+                for key, value in _iter_evidence(step):
+                    ev_id = f"{node_id}_ev_{key.replace('.', '_')}"
+                    graph.add_node(ev_id, "Evidence", f"{key} = {value}")
+                    graph.add_edge(node_id, ev_id, "yields")
             prev = node_id
         return graph
 

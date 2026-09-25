@@ -140,8 +140,29 @@ class Executor:
             except Exception:
                 pipeline = cls()
             res = pipeline.run()
-            return {"status": "completed", "paper_id": paper_id,
-                    "result": _jsonable(res)}
+            if not isinstance(res, dict):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "paper_id": paper_id,
+                    "reason": "Reproduction pipeline returned no structured result.",
+                }
+            if res.get("mock_mode") is True or res.get("provenance") != "live":
+                return {
+                    "status": "unavailable",
+                    "provenance": res.get("provenance", "synthetic"),
+                    "paper_id": paper_id,
+                    "reason": (
+                        "The Society reproduction stage is reference/mock data; "
+                        "it cannot enter validation or publication."
+                    ),
+                }
+            return {
+                "status": "completed",
+                "provenance": "live",
+                "paper_id": paper_id,
+                "result": _jsonable(res),
+            }
         except Exception as exc:
             return {"status": "error", "paper_id": paper_id,
                     "error": str(exc)[:500]}

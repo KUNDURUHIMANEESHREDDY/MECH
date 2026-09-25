@@ -10,25 +10,31 @@ from typing import Any, Dict
 
 
 class ReportService:
-    """Service for generating automated experiment summary reports."""
+    """Create a transport report without inventing scientific findings."""
 
-    def generate_report(self, experiment_id: str, title: str = "Experiment Report") -> Dict[str, Any]:
+    def generate_report(
+        self,
+        experiment_id: str,
+        title: str = "Experiment Report",
+        provenance: str = "unavailable",
+    ) -> Dict[str, Any]:
         now = _dt.datetime.utcnow().isoformat() + "Z"
         markdown = f"""# {title}
 
 **Experiment ID:** {experiment_id}
 **Generated At:** {now}
-**Model:** GPT-2 Small
+**Evidence provenance:** {provenance}
 
-## Key Findings
-- **Layer 8 Pause**: Verified breakpoint at Layer 8.
-- **Intervention**: Applied activation patch on Layer 8, Neuron 402.
-- **Outcome**: Prediction probability updated from 0.12 (" France") to 0.82 (" Paris").
+## Evidence boundary
+- This document is a transport summary for the supplied run record.
+- No layer, intervention, probability, or mechanistic claim is synthesized here.
+- Consult the run's explicitly live evidence payload for measurements.
 """
         html = f"<html><body><pre>{markdown}</pre></body></html>"
         return {
             "experiment_id": experiment_id,
             "title": title,
+            "provenance": provenance,
             "markdown": markdown,
             "html": html,
             "generated_at": now,

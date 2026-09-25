@@ -5,7 +5,7 @@
         <h2 id="research-society-title">Research Society</h2>
         <p class="society__intro">
           Run the backend planner, executor, inspector, discoverer, critic, and scribe workflow.
-          No model needs to be loaded in this view first.
+          No model needs to be loaded in this view first. Stages without explicit live provenance stop before scientific validation or publication.
         </p>
       </div>
       <a
@@ -183,6 +183,9 @@
         <span>Waiting for the backend report…</span>
       </div>
       <pre v-else-if="reportMarkdown && reportMarkdown.trim()" class="society__report">{{ reportMarkdown }}</pre>
+      <p v-else-if="publicationBlockReason" class="society__empty">
+        Publication blocked: {{ publicationBlockReason }}
+      </p>
       <p v-else-if="reportMarkdown !== null" class="society__empty">
         The backend returned an empty mechanistic report.
       </p>
@@ -344,6 +347,9 @@ function eventLabel(event: SocietyEvent): string {
     case 'HypothesisRejected':
       return `Stage failed: ${asText(payload.node) ?? 'node unavailable'} — ${asText(payload.reason, 100) ?? 'reason unavailable'}`;
     case 'CircuitValidated': {
+      if (payload.status === 'blocked' || payload.reason) {
+        return `Validation blocked: ${asText(payload.reason) || 'live evidence unavailable'}`;
+      }
       const successful = Array.isArray(payload.successful)
         ? payload.successful.map((node) => asText(node)).filter((node): node is string => Boolean(node))
         : [];
@@ -450,9 +456,11 @@ function applyDone(id: string, rawResult: unknown): void {
   const rawGate = publication.value?.gate ?? rawResult.gate;
   gate.value = isRecord(rawGate) && Object.keys(rawGate).length > 0 ? rawGate : null;
 
-  const resultError = asText(rawResult.error);
-  const failedStatus = ['error', 'failed', 'cancelled'].includes(runStatus.value ?? '');
-  if (failedStatus || (resultError && runStatus.value !== 'completed')) {
+  const resultError = asText(rawResult.error)
+    ?? (publication.value?.status === 'blocked' ? asText(publication.value.reason) : undefined)
+    ?? asText(rawResult.reason);
+  const failedStatus = ['error', 'failed', 'cancelled', 'blocked'].includes(runStatus.value ?? '');
+  if (failedStatus || publication.value?.status === 'blocked' || (resultError && runStatus.value !== 'completed')) {
     phase.value = 'failed';
     errorMessage.value = resultError ?? `The backend ended this run with status “${runStatus.value ?? 'unavailable'}”.`;
   } else {
@@ -654,6 +662,12 @@ const statusDetail = computed(() => {
   }
 });
 
+const publicationBlockReason = computed(() => (
+  publication.value?.status === 'blocked'
+    ? asText(publication.value.reason) ?? 'Live evidence is unavailable.'
+    : ''
+));
+
 const runSummary = computed(() => {
   const parts: string[] = [];
   const completed = publication.value ? asText(publication.value.steps_completed) : undefined;
@@ -706,7 +720,7 @@ const gateConfidence = computed(() => {
 });
 
 const gateValidated = computed(() => {
-  if (!gate.value) return 'Unavailable';
+  if (!gate.value || gate.value.status === 'blocked') return 'Unavailable';
   if (typeof gate.value.validated === 'boolean') return gate.value.validated ? 'Yes' : 'No';
   return 'Unavailable';
 });
@@ -714,7 +728,7 @@ const gateValidated = computed(() => {
 function stepTone(status: string | undefined): StatusTone {
   if (status === 'completed' || status === 'ok' || status === 'loaded') return 'success';
   if (status === 'running') return 'running';
-  if (status === 'error' || status === 'failed' || status === 'unavailable') return 'error';
+  if (status === 'error' || status === 'failed' || status === 'unavailable' || status === 'blocked') return 'error';
   return 'idle';
 }
 

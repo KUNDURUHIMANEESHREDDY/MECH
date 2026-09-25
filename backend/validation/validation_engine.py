@@ -5,8 +5,7 @@ Validation Pipeline: Discovery ➔ Validation ➔ Reproduction ➔ Confidence �
 
 from __future__ import annotations
 
-import datetime as _dt
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from .benchmark_runner import MechanisticBenchmarkRunner
 from .confidence_engine import ScientificConfidenceEngine
@@ -15,7 +14,7 @@ from .reproducibility import DiscoveryReproductionEngine
 
 
 class ScientificValidationEngine:
-    """Central scientific validation engine verifying discoveries prior to knowledge base entry."""
+    """Fail-closed scientific validation boundary."""
 
     def __init__(self) -> None:
         self.reproducibility = DiscoveryReproductionEngine()
@@ -24,26 +23,22 @@ class ScientificValidationEngine:
         self.benchmark_runner = MechanisticBenchmarkRunner()
 
     def validate_discovery(self, discovery_id: str, hypothesis_statement: str) -> Dict[str, Any]:
-        # 1. Validation & Reproduction
-        repro = self.reproducibility.reproduce_discovery(discovery_id=discovery_id)
+        """Fail closed until a live validation executor is connected.
 
-        # 2. Benchmark Execution
-        bench = self.benchmark_runner.run_benchmark(benchmark_id=f"bench_{discovery_id}")
-
-        # 3. Peer Review Critique
-        review = self.peer_reviewer.review_manuscript(title=hypothesis_statement)
-
-        # 4. Statistical Confidence Scoring
-        conf = self.confidence_engine.compute_confidence(reproducibility_score=repro["reproducibility_score"])
-
-        is_validated = conf["confidence_score"] >= 0.85 and review["decision"] == "Accept"
-
+        The legacy reproduction, benchmark, peer-review, and confidence
+        helpers return deterministic reference values.  They must not be
+        combined into a scientific validation verdict or handed to Society
+        publication.
+        """
         return {
             "discovery_id": discovery_id,
-            "validated": is_validated,
-            "reproduction": repro,
-            "benchmark": bench,
-            "peer_review": review,
-            "confidence": conf,
-            "validated_at": _dt.datetime.utcnow().isoformat() + "Z",
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "validated": False,
+            "reason": (
+                "No live scientific validation executor is connected; "
+                "reference validation fields cannot support a verdict."
+            ),
         }

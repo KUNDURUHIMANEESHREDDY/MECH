@@ -2,7 +2,8 @@
 
 Runs circuit/feature discovery over observed activations. Wraps:
 - backend.interpretability.discovery.discovery_engine.DiscoveryEngine
-  .discover_and_orchestrate(hypothesis_statement)  [REAL, full lifecycle]
+  .discover_and_orchestrate(hypothesis_statement)  [currently unavailable
+  until a live discovery executor is connected]
 - backend.interpretability.discovery.cross_model_circuits
   .CrossModelCircuitsEngine.compare_circuits(source_model, target_model,
   circuit_type)
@@ -29,14 +30,41 @@ class Discoverer:
 
     def discover(self, hypothesis: str) -> Dict[str, Any]:
         try:
+            from .evidence_policy import (
+                blocked_reason,
+                discovery_is_live,
+                provenance_of,
+            )
             from backend.interpretability.discovery.discovery_engine import (
                 DiscoveryEngine,
             )
             engine = DiscoveryEngine()
             res = engine.discover_and_orchestrate(hypothesis_statement=hypothesis)
-            return {"status": "completed", "result": res}
+            if not discovery_is_live(res):
+                # Do not place the synthetic result under ``result``: that
+                # key is consumed by validation, evidence graphs, and the
+                # scribe as scientific evidence.
+                return {
+                    "status": "unavailable",
+                    "provenance": provenance_of(res),
+                    "validation_eligible": False,
+                    "publication_eligible": False,
+                    "discovery_id": res.get("discovery_id", ""),
+                    "reason": blocked_reason(res, "Discovery"),
+                }
+            return {
+                "status": "completed",
+                "provenance": "live",
+                "result": res,
+            }
         except Exception as exc:
-            return {"status": "error", "error": str(exc)[:500]}
+            return {
+                "status": "error",
+                "provenance": "unavailable",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "error": str(exc)[:500],
+            }
 
     def cross_model(self, source_model: str = "gpt2",
                     target_model: str = "gpt2-medium",

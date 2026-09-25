@@ -89,9 +89,28 @@ class IOIReproductionPipeline:
             # 1. Clean Run
             clean_res = self.adapter.get_logits(p["text"])
             clean_top = clean_res["top_tokens"]
-            io_logit = next((t["logit"] for t in clean_top if p["indirect_object"] in t["token"]), 0.0)
-            s_logit = next((t["logit"] for t in clean_top if p["subject"] in t["token"]), 0.0)
-            clean_diff = io_logit - s_logit if io_logit != 0 else random.uniform(2.0, 3.5)
+            io_token = next((t for t in clean_top
+                             if p["indirect_object"] in t.get("token", "")), None)
+            s_token = next((t for t in clean_top
+                            if p["subject"] in t.get("token", "")), None)
+            if not self.adapter.spec.mock_mode and (io_token is None or s_token is None):
+                return {
+                    "pipeline": "IOIReproductionPipeline-HighFidelity",
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "mock_mode": False,
+                    "validation_eligible": False,
+                    "publication_eligible": False,
+                    "reason": (
+                        "Live IOI logits did not contain both required comparison "
+                        "tokens; no fallback logit was generated."
+                    ),
+                }
+            io_logit = float(io_token["logit"]) if io_token else 0.0
+            s_logit = float(s_token["logit"]) if s_token else 0.0
+            clean_diff = io_logit - s_logit
+            if self.adapter.spec.mock_mode and io_logit == 0:
+                clean_diff = random.uniform(2.0, 3.5)
 
             # 2. Corrupted Run (Baseline for patching)
             # In real ACDC, we patch clean activations into a corrupted run
@@ -133,13 +152,25 @@ class IOIReproductionPipeline:
         # Step 4 — Discovery Algorithm Evaluation (Level 1, 2, 3)
         # 4a. Run ACDC search (Mocked component list in mock_mode)
         if self.adapter.spec.mock_mode:
-            # High quality recovery mock
+            # Deterministic reference output, explicitly non-live.
             discovered_heads = ["L9H6", "L9H9", "L10H0", "L10H7", "L7H3", "L8H6", "L5H1", "L5H5", "L0H1", "L0H10"]
             discovered_edges = {("L0H1", "L5H1"), ("L5H1", "L7H3"), ("L7H3", "L9H9")}
         else:
-            # Full ACDC logic would go here
-            discovered_heads = ["L9H9"]
+            # A real ACDC executor has not been connected.  Do not substitute
+            # the paper's canonical head list for a measured discovery.
+            discovered_heads = []
             discovered_edges = set()
+
+        if not self.adapter.spec.mock_mode and not discovered_heads:
+            return {
+                "pipeline": "IOIReproductionPipeline-HighFidelity",
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "mock_mode": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": "Live ACDC discovery is not connected; no reference head list was used.",
+            }
 
         # 4b. Measure Functional Recovery on Isolated Circuit
         iso_res = self.adapter.run_isolated_circuit(prompts[0]["text"], discovered_heads)
@@ -184,6 +215,10 @@ class IOIReproductionPipeline:
 
         return {
             "pipeline": "IOIReproductionPipeline-HighFidelity",
+            "status": "completed",
+            "provenance": "synthetic" if self.adapter.spec.mock_mode else "live",
+            "validation_eligible": not self.adapter.spec.mock_mode,
+            "publication_eligible": not self.adapter.spec.mock_mode,
             "mock_mode": self.adapter.spec.mock_mode,
             "observed_metrics": observed_metrics,
             "reproducibility_report": report,

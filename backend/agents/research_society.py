@@ -1,8 +1,8 @@
-"""Research Society Orchestrator.
+"""Historical Research Society facade.
 
-A unified facade that internally manages the entire suite of autonomous AI
-research agents. This simplifies the public API and promotes modularity without
-bloating the dispatcher or creating spaghetti dependencies.
+The original implementation was a synthetic demonstration scaffold. Its
+collaboration entry point is intentionally fail-closed; active Society work
+uses :class:`backend.agents.society.ResearchSocietyV2`.
 """
 
 from typing import Any, Dict, List, Optional
@@ -53,29 +53,15 @@ class ResearchSociety:
         self.roadmap_generator = RoadmapGenerator()
 
     def run_society_collaboration(self, goal: str) -> Dict[str, Any]:
-        """Execute a full collaborative research loop."""
-        refined_goal = self.goal_optimizer.optimize(goal)
-        plan = self.planner.create_plan(refined_goal)
-        
-        findings = []
-        for step in plan:
-            result = self.agent.execute_step(step)
-            score = self.critic.evaluate(result)
-            result["critic_score"] = score
-            findings.append(result)
-            
-        debate_result = self.debate_engine.debate(refined_goal)
-        synthesis = self.consensus_engine.synthesize(findings)
-        
-        report = f"Report on {refined_goal}: {synthesis['synthesis']}"
-        review = self.reviewer.review(report)
-        
+        """Disable the historical stub instead of returning synthetic claims."""
         return {
-            "status": "completed" if review["approved"] else "failed",
+            "status": "blocked",
+            "provenance": "unavailable",
+            "validation_eligible": False,
+            "publication_eligible": False,
             "goal": goal,
-            "refined_goal": refined_goal,
-            "debate": debate_result,
-            "findings_count": len(findings),
-            "synthesis": synthesis,
-            "review": review
+            "reason": (
+                "The historical Society stub is disabled; use the guarded "
+                "ResearchSocietyV2 workflow with live evidence."
+            ),
         }
