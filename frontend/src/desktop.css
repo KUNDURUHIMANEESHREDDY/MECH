@@ -359,6 +359,63 @@ select:focus-visible,
   }
 }
 
+/* Window-size responsive tools: inner layouts collapse based on the actual
+   window width (is-compact < 600px, is-medium < 950px), not the viewport,
+   so resizing a window reflows its content. */
+.tool-window.is-compact .tool-header,
+.tool-window.is-compact .panel-header,
+.tool-window.is-compact .section-heading {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.tool-window.is-compact .tool-header__actions {
+  width: 100%;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.tool-window.is-compact .metric-strip {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tool-window.is-compact .metric-tile--note {
+  grid-column: 1 / -1;
+}
+
+.tool-window.is-compact .record-grid,
+.tool-window.is-compact .result-grid,
+.tool-window.is-compact .result-row__metrics,
+.tool-window.is-compact .repro-status-grid,
+.tool-window.is-compact .graph-summary-grid,
+.tool-window.is-compact .node-board,
+.tool-window.is-compact .check-grid,
+.tool-window.is-compact .guidance-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tool-window.is-compact .metric-grid,
+.tool-window.is-compact .report-row,
+.tool-window.is-compact .catalog-row,
+.tool-window.is-compact .selector-panel,
+.tool-window.is-compact .run-form,
+.tool-window.is-compact .selection-actions {
+  grid-template-columns: 1fr;
+}
+
+.tool-window.is-compact .tool-layout,
+.tool-window.is-compact .society__grid,
+.tool-window.is-compact .registry-panel {
+  grid-template-columns: 1fr;
+}
+
+.tool-window.is-medium .record-grid,
+.tool-window.is-medium .metric-grid,
+.tool-window.is-medium .check-grid,
+.tool-window.is-medium .repro-status-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

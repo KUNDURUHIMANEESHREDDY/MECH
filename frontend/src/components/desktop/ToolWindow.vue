@@ -7,6 +7,8 @@
       'is-active': active,
       'is-maximized': maximized,
       'is-narrow': isNarrow,
+      'is-compact': sizeClass === 'compact',
+      'is-medium': sizeClass === 'medium',
     }"
     :style="windowStyle"
     :data-testid="`window-${id}`"
@@ -113,6 +115,8 @@ interface PointerInteraction {
 const MIN_WIDTH = 320;
 const MIN_HEIGHT = 220;
 const NARROW_SCREEN_QUERY = '(max-width: 760px)';
+const COMPACT_WINDOW_WIDTH = 600;
+const MEDIUM_WINDOW_WIDTH = 950;
 const keyboardShortcuts = 'ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight';
 
 const props = defineProps<{
@@ -139,6 +143,16 @@ const emit = defineEmits<{
 const windowElement = ref<HTMLElement | null>(null);
 const isNarrow = ref(false);
 let interaction: PointerInteraction | null = null;
+
+// Window-width breakpoints (not viewport): inner tool layouts collapse
+// based on the actual window size so resized windows reflow their content.
+const sizeClass = computed<'compact' | 'medium' | ''>(() => {
+  if (isNarrow.value || props.maximized) return '';
+  const width = finiteNumber(props.width, 0);
+  if (width > 0 && width < COMPACT_WINDOW_WIDTH) return 'compact';
+  if (width > 0 && width < MEDIUM_WINDOW_WIDTH) return 'medium';
+  return '';
+});
 let mediaQuery: MediaQueryList | null = null;
 
 const titleId = computed(() => {
