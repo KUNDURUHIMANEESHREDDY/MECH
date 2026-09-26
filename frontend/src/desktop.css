@@ -359,6 +359,53 @@ select:focus-visible,
   }
 }
 
+/* Vertical-only tools: nothing inside a window may scroll horizontally.
+   Content always fits the window width and flows vertically. */
+.tool-window__body {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.tool-window__body :where(*) {
+  min-width: 0;
+}
+
+/* Auto widths occasionally resolve against content instead of filling the
+   window (notably stretched flex children in resized windows). Capping
+   children at the containing block guarantees vertical-only flow. */
+.tool-window__body :where(div, section, header, footer, form, article, aside,
+  main, ul, ol, table, pre, figure) {
+  max-width: 100%;
+}
+
+.tool-window__body :where(p, li, dd, span, div) {
+  overflow-wrap: anywhere;
+}
+
+.tool-window__body :where(table) {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.tool-window__body :where(td, th) {
+  overflow-wrap: anywhere;
+}
+
+.tool-window__body :where(pre) {
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-window__body :where(code) {
+  overflow-wrap: anywhere;
+}
+
+.tool-window__body :where(img, canvas, svg, video) {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Window-size responsive tools: inner layouts collapse based on the actual
    window width (is-compact < 600px, is-medium < 950px), not the viewport,
    so resizing a window reflows its content. */
@@ -383,6 +430,19 @@ select:focus-visible,
   grid-column: 1 / -1;
 }
 
+/* Row flex layouts wrap instead of forcing horizontal overflow. */
+.tool-window.is-compact .tool-window__body :where(div, section, header, footer, form, fieldset, ul, ol) {
+  flex-wrap: wrap;
+}
+
+.tool-window.is-compact .run-form,
+.tool-window.is-compact .society__controls,
+.tool-window.is-compact .graph-toolbar,
+.tool-window.is-compact .selection-actions {
+  align-items: stretch;
+  flex-direction: column;
+}
+
 .tool-window.is-compact .record-grid,
 .tool-window.is-compact .result-grid,
 .tool-window.is-compact .result-row__metrics,
@@ -405,7 +465,20 @@ select:focus-visible,
 
 .tool-window.is-compact .tool-layout,
 .tool-window.is-compact .society__grid,
-.tool-window.is-compact .registry-panel {
+.tool-window.is-compact .registry-panel,
+.tool-window.is-compact .benchmark-grid,
+.tool-window.is-compact .suite-layout,
+.tool-window.is-compact .workspace-grid,
+.tool-window.is-compact .evidence-layout,
+.tool-window.is-compact .graph-workspace,
+.tool-window.is-compact .repro-layout,
+.tool-window.is-compact .reports-grid,
+.tool-window.is-compact .experiments-layout,
+.tool-window.is-compact .lab-layout,
+.tool-window.is-compact .logging-layout,
+.tool-window.is-compact .build-layout,
+.tool-window.is-compact .launch-controls,
+.tool-window.is-compact .event-list li {
   grid-template-columns: 1fr;
 }
 
