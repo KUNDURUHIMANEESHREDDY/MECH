@@ -9,6 +9,8 @@
       @toggle-directory="directoryOpen = !directoryOpen"
     />
 
+    <WindowTabs @focus="focusRoute" @close="closeWindow" />
+
     <section
       ref="desktopElement"
       class="desktop-workspace"
@@ -122,6 +124,7 @@ import DesktopMenuBar from './components/desktop/DesktopMenuBar.vue';
 import DesktopStatusBar from './components/desktop/DesktopStatusBar.vue';
 import ToolWindow from './components/desktop/ToolWindow.vue';
 import WindowDirectory from './components/desktop/WindowDirectory.vue';
+import WindowTabs from './components/desktop/WindowTabs.vue';
 
 type RuntimeStatus = 'connecting' | 'connected' | 'offline';
 type Bounds = { width: number; height: number };
