@@ -86,10 +86,21 @@ export const useDesktopStore = defineStore('desktop', () => {
     const existing = windows[route.id];
     if (existing) return existing;
 
+    // Cascade new windows so each one lands visibly offset from the last
+    // instead of stacking exactly on top of it.
+    const cascadeStep = 36;
+    const cascadeIndex = Object.keys(windows).length % 8;
     const windowState: DesktopWindowState = {
       id: route.id,
       routeId: route.id,
-      ...clampGeometry(DEFAULT_WINDOW_GEOMETRY, DEFAULT_DESKTOP_BOUNDS),
+      ...clampGeometry(
+        {
+          ...DEFAULT_WINDOW_GEOMETRY,
+          x: DEFAULT_WINDOW_GEOMETRY.x + cascadeStep * cascadeIndex,
+          y: DEFAULT_WINDOW_GEOMETRY.y + cascadeStep * cascadeIndex,
+        },
+        DEFAULT_DESKTOP_BOUNDS,
+      ),
       closed: true,
       minimized: false,
       maximized: false,
