@@ -590,23 +590,29 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   z-index: 2;
-  width: 18px;
-  height: 18px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 0;
+  border-radius: var(--radius) 0 var(--radius-lg) 0;
   background: transparent;
   cursor: nwse-resize;
   touch-action: none;
 }
 
+.resize-handle:hover,
+.resize-handle:focus-visible {
+  background: var(--bg-hover);
+}
+
 .resize-handle::after {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
-  border-right: 1px solid var(--text-muted);
-  border-bottom: 1px solid var(--text-muted);
+  right: 6px;
+  bottom: 6px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
   content: '';
   transform: rotate(45deg);
 }
