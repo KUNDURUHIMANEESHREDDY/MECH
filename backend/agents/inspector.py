@@ -96,6 +96,16 @@ class Inspector:
     def attention(self, layer: int, head: int,
                   tokens: Optional[List[str]] = None) -> Dict[str, Any]:
         out = self._engine_call("attention_head", layer, head)
+        if out.get("status") == "error" and "prompt first" in str(
+                out.get("error", "")):
+            # The engine needs a cached forward pass before a head can be
+            # read.  Prime it with the canonical IOI prompt so the returned
+            # matrix is a live measurement, then retry once.
+            primed = self._engine_call(
+                "run_prompt",
+                "When Alice and Bob went to the store, Alice gave a bottle to")
+            if primed.get("status") == "ok":
+                out = self._engine_call("attention_head", layer, head)
         if out.get("status") in ("unavailable", "error"):
             try:
                 from backend.interpretability.inspectors.attention_inspector import (

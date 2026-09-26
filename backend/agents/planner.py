@@ -70,7 +70,7 @@ class Planner:
             {"id": "load", "agent": "executor", "op": "ensure_model",
              "args": {"model_name": "gpt2"}, "state": "Experiment"},
             {"id": "reproduce", "agent": "executor", "op": "reproduce",
-             "args": {"paper_id": pipeline}, "state": "Running"},
+             "args": {"paper_id": pipeline, "n_prompts": 4}, "state": "Running"},
             {"id": "inspect", "agent": "inspector", "op": "attention",
              "args": {"layer": 10, "head": 7}, "state": "Observation"},
             {"id": "patch", "agent": "executor", "op": "patch_head",

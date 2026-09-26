@@ -78,6 +78,14 @@ class Executor:
         from backend.services import gpt2_engine
         return gpt2_engine
 
+    @staticmethod
+    def _live_available() -> bool:
+        try:
+            from backend.services import gpt2_engine
+            return bool(gpt2_engine.is_available())
+        except Exception:
+            return False
+
     async def _call(self, name: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         try:
             engine = self._engine()
@@ -147,7 +155,8 @@ class Executor:
         return await self._call("ioi", **kwargs)
 
     # -- pipelines & orchestration (sync, CPU-cheap dispatch) ------------
-    def reproduce(self, paper_id: str = "ioi") -> Dict[str, Any]:
+    def reproduce(self, paper_id: str = "ioi",
+                  n_prompts: int = 4) -> Dict[str, Any]:
         mod_name, cls_name = PIPELINE_MODULES.get(
             paper_id, PIPELINE_MODULES["ioi"])
         try:
@@ -157,10 +166,18 @@ class Executor:
             cls = getattr(mod, cls_name)
             try:
                 params = _inspect.signature(cls.__init__).parameters
-                pipeline = cls(mock_mode=True) if "mock_mode" in params else cls()
+                live = "mock_mode" in params and self._live_available()
+                pipeline = (cls(mock_mode=not live)
+                            if "mock_mode" in params else cls())
             except Exception:
                 pipeline = cls()
-            res = pipeline.run()
+                live = False
+            try:
+                run_params = _inspect.signature(pipeline.run).parameters
+                res = (pipeline.run(n_prompts=n_prompts)
+                       if "n_prompts" in run_params else pipeline.run())
+            except Exception:
+                res = pipeline.run()
             if not isinstance(res, dict):
                 return {
                     "status": "unavailable",

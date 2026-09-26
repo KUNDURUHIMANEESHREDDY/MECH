@@ -1,8 +1,10 @@
 """Central Mechanistic Discovery Engine (Sprint 4 & 5).
 
-The registered extension engines currently provide reference/synthetic fields.
-They remain available for non-scientific catalog inspection, but the active
-orchestrator fails closed until a live discovery executor is connected.
+The registered extension engines provide reference/synthetic fields and remain
+available for non-scientific catalog inspection only.  The active orchestrator
+first tries the live causal discovery executor (real GPT-2 Small forward
+passes); only when no live model is connected does it fail closed with an
+explicit unavailable envelope.
 """
 
 from __future__ import annotations
@@ -71,21 +73,47 @@ class DiscoveryEngine:
         self.algorithm_registry.register_algorithm("PaperReplication", lambda p: self.paper_replicator.replicate_paper())
 
     def discover_and_orchestrate(self, hypothesis_statement: str) -> Dict[str, Any]:
-        """Return an explicit unavailable envelope until a live executor exists.
+        """Run live causal discovery when a model is connected.
 
-        The registered discovery algorithms currently return reference or
-        synthetic measurements.  They must not be promoted into a lifecycle
-        that looks validated or publication-ready, so the orchestrator stops
-        at evidence collection and exposes no synthetic result fields.
+        The registered discovery algorithms return reference or synthetic
+        measurements.  They must not be promoted into a lifecycle that looks
+        validated or publication-ready, so when no live executor is available
+        the orchestrator stops at evidence collection and exposes no synthetic
+        result fields.
         """
         disc_id = f"disc_{hash(hypothesis_statement) & 0xffffffff:08x}"
         lifecycle = DiscoveryLifecycleState(discovery_id=disc_id,
                                             title=hypothesis_statement[:50])
         self.discoveries[disc_id] = lifecycle
-        lifecycle.transition_to(
-            "Evidence Collection",
-            "No live discovery executor is connected; reference fields are not scientific evidence",
-        )
+
+        try:
+            from .live_discovery import LiveIOIDiscovery
+        except Exception:
+            LiveIOIDiscovery = None  # type: ignore[assignment]
+        if LiveIOIDiscovery is not None and LiveIOIDiscovery.available():
+            result = LiveIOIDiscovery().run(hypothesis_statement)
+            if (isinstance(result, dict)
+                    and result.get("status") == "completed"
+                    and result.get("provenance") == "live"):
+                lifecycle.transition_to(
+                    "Evidence Collection",
+                    "measured head effects/edges from live GPT-2 Small",
+                )
+                lifecycle.transition_to(
+                    "Validation",
+                    "released to Society validation with live provenance",
+                )
+                result["lifecycle"] = lifecycle.to_dict()
+                return result
+            lifecycle.transition_to(
+                "Evidence Collection",
+                f"live executor returned: {result.get('reason', 'no result')}",
+            )
+        else:
+            lifecycle.transition_to(
+                "Evidence Collection",
+                "No live discovery executor is connected; reference fields are not scientific evidence",
+            )
 
         return {
             "discovery_id": disc_id,
@@ -105,14 +133,23 @@ class DiscoveryEngine:
         }
 
     def get_status(self) -> Dict[str, Any]:
+        try:
+            from .live_discovery import LiveIOIDiscovery
+            live_available = LiveIOIDiscovery.available()
+        except Exception:
+            live_available = False
+        evidence = "live" if live_available else "unavailable"
         return {
             "status": "active",
-            "live_discovery_available": False,
-            "scientific_evidence_status": "unavailable",
-            "field_provenance": field_map(
-                ("status", "discoveries_count", "mechanisms_count", "registered_algorithms"),
-                "unavailable",
-            ),
+            "live_discovery_available": live_available,
+            "scientific_evidence_status": evidence,
+            "field_provenance": {
+                "live_discovery_available": "live" if live_available else "unavailable",
+                "scientific_evidence_status": evidence,
+                "discoveries_count": "unavailable",
+                "mechanisms_count": "reference",
+                "registered_algorithms": "reference",
+            },
             "discoveries_count": len(self.discoveries),
             "mechanisms_count": len(self.mechanism_registry.list_mechanisms()),
             "registered_algorithms": self.algorithm_registry.list_algorithms(),

@@ -29,10 +29,12 @@ from .evidence_policy import (
 CONFIDENCE_THRESHOLD = 0.85
 
 # Paper metric <- pipeline observed metric (documented, semantic match).
-# circuit_minimality has no pipeline measure: reported honestly as
-# unmeasured (0.0 + explanation) rather than fabricated.
+# circuit_completeness is proxied by functional_recovery (injection-recovered
+# logit-diff ratio); circuit_minimality is the measured fraction of circuit
+# heads individually necessary on usable prompts.
 METRIC_MAP = {"circuit_faithfulness": "circuit_faithfulness",
-              "circuit_completeness": "functional_recovery"}
+              "circuit_completeness": "functional_recovery",
+              "circuit_minimality": "circuit_minimality"}
 
 
 class Critic:
@@ -63,7 +65,8 @@ class Critic:
                 ScientificValidationEngine,
             )
             res = ScientificValidationEngine().validate_discovery(
-                discovery_id=discovery_id, hypothesis_statement=hypothesis)
+                discovery_id=discovery_id, hypothesis_statement=hypothesis,
+                discovery_result=discovery_result)
             if not validation_is_live(res):
                 return {
                     "status": "unavailable",
@@ -191,9 +194,9 @@ class Critic:
                 observed_metrics=mapped,
                 explanation_of_diffs=[
                     "circuit_completeness proxied by functional_recovery "
-                    "(isolated-circuit top-logit ratio).",
-                    "circuit_minimality not measured by this pipeline; "
-                    "reported as 0 pending a redundancy ablation.",
+                    "(injection-recovered logit-diff ratio).",
+                    "circuit_minimality measured as the fraction of circuit "
+                    "heads individually necessary on usable prompts.",
                     f"live run over {observed.get('n_samples', n_prompts)} "
                     "prompts; mock_mode=False.",
                 ],

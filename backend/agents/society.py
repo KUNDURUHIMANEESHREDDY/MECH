@@ -215,7 +215,10 @@ class ResearchSocietyV2:
         # explicitly live.  This keeps synthetic DiscoveryEngine fields out
         # of the validation/publication chain rather than merely hiding them.
         if discovery_eligible:
-            repro = await asyncio.to_thread(self.critic.reproduce, paper_id)
+            # Bounded panel: the trace already ran a live reproduction smoke
+            # test; this independent run feeds the publication gate.
+            repro = await asyncio.to_thread(
+                self.critic.reproduce, paper_id, 8)
         else:
             repro = {
                 "status": "blocked",

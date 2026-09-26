@@ -10,7 +10,7 @@ Methodology (Refined):
 from __future__ import annotations
 
 import random
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from ..models.gpt2_adapter import GPT2Adapter
 from .dataset_versioning import DatasetVersioningEngine
@@ -72,22 +72,242 @@ class IOIReproductionPipeline:
     REFERENCE_NAME_MOVER_HEADS = ((9, 6), (9, 9), (10, 0), (10, 7))
 
     def __init__(self, mock_mode: bool = True) -> None:
-        self.adapter = GPT2Adapter(variant="small", mock_mode=mock_mode)
+        # Metadata-only adapter construction: mock mode never touches
+        # weights, and live mode measures through
+        # backend.services.gpt2_engine, so neither path loads a second
+        # copy of the weights here.
+        self.adapter = GPT2Adapter(variant="small", mock_mode=True)
+        if not mock_mode:
+            from dataclasses import replace
+            self.adapter.spec = replace(self.adapter.spec, mock_mode=False)
         self._versioning = DatasetVersioningEngine()
         self._report_engine = ReproducibilityReportEngine()
 
     def diagnose_failure(self, observed_metrics: Dict[str, float]) -> List[str]:
         causes = []
-        if observed_metrics.get("patch_success_rate", 0) < 90:
+        if ("patch_success_rate" in observed_metrics
+                and observed_metrics.get("patch_success_rate", 0) < 90):
             causes.append("Low patch success: Verify 'patch_head_output' hook registration.")
         if observed_metrics.get("circuit_faithfulness", 0) < 0.80:
             causes.append("Low faithfulness: Systematic bias in Name Mover Head identification.")
         return causes
 
+    def _run_live(self, prompts: List[Dict[str, str]], manifest: Any,
+                  seed: int) -> Dict[str, Any]:
+        """Measure the IOI circuit on live weights (no reference coordinates).
+
+        Baseline accuracy, causal head discovery, injection recovery, and
+        leave-one-out necessity are all computed from fresh forward passes
+        over `prompts`.  Any missing vocabulary item fails the run closed.
+        """
+        from statistics import mean
+
+        from backend.interpretability.discovery import live_measure as lm
+        from backend.interpretability.discovery.live_discovery import (
+            LiveIOIDiscovery,
+        )
+
+        names = sorted({p["subject"] for p in prompts}
+                       | {p["indirect_object"] for p in prompts})
+        token_ids = lm.single_token_names(names)
+        missing = sorted(n for n in names if token_ids[n] is None)
+        if missing:
+            return {
+                "pipeline": "IOIReproductionPipeline-HighFidelity",
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": _field_map(
+                    ("status", "observed_metrics", "raw_traces", "report",
+                     "reason"),
+                    "unavailable",
+                ),
+                "mock_mode": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": (
+                    "Required IOI comparison tokens are not single "
+                    "vocabulary items: " + ", ".join(missing)
+                ),
+            }
+
+        raw_traces: List[Dict[str, Any]] = []
+        correct = 0
+        for p in prompts:
+            io_id = token_ids[p["indirect_object"]]
+            subj_id = token_ids[p["subject"]]
+            assert io_id is not None and subj_id is not None
+            clean_base = lm.baseline(p["text"], io_id, subj_id)
+            corr_base = lm.baseline(p["corrupted_text"], io_id, subj_id)
+            hit = clean_base["top1"].strip() == p["indirect_object"]
+            correct += 1 if hit else 0
+            raw_traces.append({
+                "prompt": p["text"],
+                "target": p["target"],
+                "provenance": "live",
+                "logit_source": "model_logits",
+                "io_logit": None,
+                "s_logit": None,
+                "clean_top1": clean_base["top1"],
+                "clean_logit_diff": round(clean_base["logit_diff"], 4),
+                "corrupted_logit_diff": round(corr_base["logit_diff"], 4),
+                "patch_success": hit,
+                "synthetic_fields": [],
+            })
+
+        discovery = LiveIOIDiscovery().run(
+            "IOIReproductionPipeline-HighFidelity",
+            n_prompts=min(len(prompts), 4))
+        heads = [lm.parse_head(label) for label in discovery.get("heads", [])]
+        heads = [h for h in heads if h is not None]
+        if (not isinstance(discovery, dict)
+                or discovery.get("status") != "completed"
+                or discovery.get("provenance") != "live"
+                or not heads):
+            return {
+                "pipeline": "IOIReproductionPipeline-HighFidelity",
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": _field_map(
+                    ("status", "observed_metrics", "raw_traces", "report",
+                     "reason"),
+                    "unavailable",
+                ),
+                "mock_mode": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": ("Live causal discovery returned no measured "
+                           "circuit; reference heads were not substituted."),
+                "raw_traces": raw_traces,
+            }
+        circuit = set(heads)
+
+        faithfulness_scores: List[float] = []
+        recovery_scores: List[float] = []
+        clean_diffs: List[float] = []
+        corr_diffs: List[float] = []
+        rec_diffs: List[float] = []
+        necessary_votes: Dict[Tuple[int, int], int] = {h: 0 for h in circuit}
+        usable = 0
+        for p in prompts:
+            io_id = token_ids[p["indirect_object"]]
+            subj_id = token_ids[p["subject"]]
+            assert io_id is not None and subj_id is not None
+            clean_base = lm.baseline(p["text"], io_id, subj_id)
+            corr_base = lm.baseline(p["corrupted_text"], io_id, subj_id)
+            clean_diff = clean_base["logit_diff"]
+            corr_diff = corr_base["logit_diff"]
+            _, caps = lm.capture(p["text"])
+            patched = lm.inject(p["corrupted_text"], io_id, subj_id,
+                                caps, circuit)
+            rec_diff = patched["logit_diff"]
+            denom = clean_diff - corr_diff
+            clean_diffs.append(clean_diff)
+            corr_diffs.append(corr_diff)
+            rec_diffs.append(rec_diff)
+            if denom > 0.2 and clean_diff > 0.2:
+                usable += 1
+                faithfulness_scores.append(
+                    max(0.0, min(1.0, (rec_diff - corr_diff) / denom)))
+                recovery_scores.append(
+                    max(0.0, min(1.0, rec_diff / clean_diff)))
+                for head in circuit:
+                    single = lm.ablate(p["text"], io_id, subj_id, {head})
+                    if abs(single - clean_diff) >= 0.10 * abs(clean_diff):
+                        necessary_votes[head] += 1
+
+        n = len(prompts)
+        minimality = (sum(1 for h in circuit
+                          if necessary_votes[h] >= max(1, usable // 2))
+                      / len(circuit)) if circuit and usable else 0.0
+        observed_metrics = {
+            "circuit_faithfulness": (
+                round(mean(faithfulness_scores), 4) if faithfulness_scores else 0.0),
+            "patch_success_rate": round(100.0 * correct / n, 2) if n else 0.0,
+            "n_samples": n,
+            "functional_recovery": (
+                round(mean(recovery_scores), 4) if recovery_scores else 0.0),
+            "circuit_minimality": round(minimality, 4),
+            "full_logit_diff": round(mean(clean_diffs), 4) if clean_diffs else 0.0,
+            "ablated_logit_diff": round(mean(corr_diffs), 4) if corr_diffs else 0.0,
+            "isolated_logit_diff": round(mean(rec_diffs), 4) if rec_diffs else 0.0,
+            "discovered_nodes": sorted(
+                f"L{layer}H{head}" for layer, head in circuit),
+            "discovered_edges": discovery.get("edges", []),
+            "discovery_provenance": "live",
+            "synthetic_fields": [],
+            "field_provenance": _field_map(
+                ("circuit_faithfulness", "patch_success_rate",
+                 "functional_recovery", "circuit_minimality",
+                 "full_logit_diff", "ablated_logit_diff",
+                 "isolated_logit_diff", "discovered_nodes",
+                 "discovered_edges"),
+                "live",
+            ),
+        }
+
+        failure_diagnostics = self.diagnose_failure(observed_metrics)
+        report = self._report_engine.generate_report(
+            paper_id=self.PAPER_ID,
+            pipeline_name="IOIReproductionPipeline-HighFidelity",
+            model_id=self.adapter.spec.model_id,
+            dataset_manifest_id=manifest.manifest_id,
+            observed_metrics=observed_metrics,
+            explanation_of_diffs=[
+                "circuit_completeness proxied by functional_recovery "
+                "(injection-recovered logit-diff ratio).",
+                "circuit_minimality measured as the fraction of circuit "
+                "heads individually necessary (>=10% single-ablation "
+                "effect) on usable prompts.",
+                f"live run over {n} prompts; mock_mode=False.",
+            ],
+        )
+
+        return {
+            "pipeline": "IOIReproductionPipeline-HighFidelity",
+            "status": "completed",
+            "provenance": "live",
+            "field_provenance": _field_map(
+                ("status", "observed_metrics", "raw_traces",
+                 "reproducibility_report", "manifest_id",
+                 "discovery_provenance"),
+                "live",
+            ),
+            "provenance_note": "Observed from the connected model run.",
+            "validation_eligible": True,
+            "publication_eligible": True,
+            "mock_mode": False,
+            "discovery_provenance": "live",
+            "synthetic_fields": [],
+            "reference_only_discovery": None,
+            "observed_metrics": observed_metrics,
+            "reproducibility_report": report,
+            "raw_traces": raw_traces,
+            "manifest_id": manifest.manifest_id,
+            "model_id": self.adapter.spec.model_id,
+        }
+
     def run(self, n_prompts: int = 100, seed: int = 42, model_variant: str = "small") -> Dict[str, Any]:
-        # Switch model if needed (simulated for mock)
-        if not self.adapter.spec.mock_mode and self.adapter.spec.model_id != f"gpt2-{model_variant}":
-             self.adapter = GPT2Adapter(variant=model_variant, mock_mode=False)
+        # Switch model metadata if needed (simulated for mock). Live mode
+        # always measures through backend.services.gpt2_engine (gpt2-small);
+        # never construct a second weights copy here.
+        if self.adapter.spec.mock_mode and self.adapter.spec.model_id != f"gpt2-{model_variant}":
+            self.adapter = GPT2Adapter(variant=model_variant, mock_mode=True)
+        if not self.adapter.spec.mock_mode and model_variant != "small":
+            return {
+                "pipeline": "IOIReproductionPipeline-HighFidelity",
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": _field_map(
+                    ("status", "observed_metrics", "raw_traces", "report",
+                     "reason"),
+                    "unavailable",
+                ),
+                "mock_mode": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": ("The live IOI executor supports gpt2-small only; "
+                           f"'{model_variant}' was requested."),
+            }
 
         manifest = self._versioning.create_manifest(
             paper_id=self.PAPER_ID,
@@ -100,6 +320,10 @@ class IOIReproductionPipeline:
         )
 
         prompts = _make_high_fidelity_ioi_prompts(n_prompts, seed)
+        if not self.adapter.spec.mock_mode:
+            # Live weights: measure everything; never substitute the
+            # reference-only head/edge fixtures for a discovery.
+            return self._run_live(prompts, manifest, seed)
         raw_traces: List[Dict[str, Any]] = []
         faithfulness_scores = []
         patch_success_count = 0
@@ -141,31 +365,8 @@ class IOIReproductionPipeline:
 
             # 2. Corrupted Run (Baseline for patching)
             # In real ACDC, we patch clean activations into a corrupted run
-            
+
             # 3. Head-Level Patching
-            if not self.adapter.spec.mock_mode:
-                return {
-                    "pipeline": "IOIReproductionPipeline-HighFidelity",
-                    "status": "unavailable",
-                    "provenance": "unavailable",
-                    "field_provenance": _field_map(
-                        ("status", "observed_metrics", "raw_traces", "report", "reason"),
-                        "unavailable",
-                    ),
-                    "mock_mode": False,
-                    "validation_eligible": False,
-                    "publication_eligible": False,
-                    "reason": (
-                        "No measured patch head is connected; the reference "
-                        "coordinate was not used for a live run."
-                    ),
-                    "reference_only_discovery": {
-                        "provenance": "reference",
-                        "eligible": False,
-                        "heads": list(REFERENCE_ONLY_DISCOVERED_HEADS),
-                        "edges": [list(edge) for edge in REFERENCE_ONLY_DISCOVERED_EDGES],
-                    },
-                }
             # Reference-only coordinate for the mock audit; not a discovered head.
             patch_layer, patch_head = REFERENCE_ONLY_PATCH_HEAD
             patch_res = self.adapter.patch_head_output(
