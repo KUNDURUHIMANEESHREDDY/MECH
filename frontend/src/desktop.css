@@ -80,7 +80,7 @@ select:focus-visible,
   width: 100vw;
   height: 100dvh;
   min-width: 320px;
-  grid-template-rows: 42px minmax(0, 1fr) 28px;
+  grid-template-rows: 42px auto minmax(0, 1fr) 28px;
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
