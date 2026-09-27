@@ -169,4 +169,13 @@ export const api = {
     get<Record<string, unknown>>(`/api/logs${limit ? `?limit=${limit}` : ''}`),
   getBackendBuild: () => get<Record<string, unknown>>('/api/build'),
   startBackendBuild: () => post<Record<string, unknown>>('/api/build', {}),
+  getBackendPlugins: () => get<Record<string, unknown>>('/api/plugins'),
+  installBackendPlugin: (path: string) =>
+    post<Record<string, unknown>>('/api/plugins/install', { path }),
+  enableBackendPlugin: (name: string) =>
+    post<Record<string, unknown>>(`/api/plugins/${name}/enable`, {}),
+  disableBackendPlugin: (name: string) =>
+    post<Record<string, unknown>>(`/api/plugins/${name}/disable`, {}),
+  uninstallBackendPlugin: (name: string) =>
+    del<Record<string, unknown>>(`/api/plugins/${name}`),
 };

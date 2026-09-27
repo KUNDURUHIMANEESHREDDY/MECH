@@ -442,6 +442,70 @@ def start_build() -> Dict[str, Any]:
     }
 
 
+def _plugin_service():  # type: ignore[no-untyped-def]
+    from backend.plugins.service import get_service
+    return get_service()
+
+
+def _plugin_envelope(status: str, plugins: Any = None,
+                     error: str = "") -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
+    body: Dict[str, Any] = {
+        "status": status,
+        "provenance": "live" if status == "ok" else "unavailable",
+        "field_provenance": field_map(
+            ("status", "plugins"), "live" if status == "ok" else "unavailable"),
+    }
+    if plugins is not None:
+        body["plugins"] = plugins
+    if error:
+        body["error"] = error[:500]
+    return body
+
+
+@router.get("/plugins")
+def list_plugins() -> Dict[str, Any]:
+    try:
+        return _plugin_envelope("ok", _plugin_service().list_all())
+    except Exception as exc:
+        return _plugin_envelope("error", error=str(exc))
+
+
+@router.post("/plugins/install")
+def install_plugin(payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        record = _plugin_service().install(str((payload or {}).get("path", "")))
+        return _plugin_envelope("ok", [record])
+    except (ValueError, RuntimeError) as exc:
+        return _plugin_envelope("error", error=str(exc))
+
+
+@router.post("/plugins/{name}/enable")
+def enable_plugin(name: str) -> Dict[str, Any]:
+    try:
+        return _plugin_envelope("ok", [_plugin_service().enable(name)])
+    except (ValueError, RuntimeError) as exc:
+        return _plugin_envelope("error", error=str(exc))
+
+
+@router.post("/plugins/{name}/disable")
+def disable_plugin(name: str) -> Dict[str, Any]:
+    try:
+        return _plugin_envelope("ok", [_plugin_service().disable(name)])
+    except (ValueError, RuntimeError) as exc:
+        return _plugin_envelope("error", error=str(exc))
+
+
+@router.delete("/plugins/{name}")
+def uninstall_plugin(name: str) -> Dict[str, Any]:
+    try:
+        _plugin_service().uninstall(name)
+        return _plugin_envelope("ok", [])
+    except (ValueError, RuntimeError) as exc:
+        return _plugin_envelope("error", error=str(exc))
+
+
 @router.get("/discoveries")
 def list_discoveries() -> Dict[str, Any]:
     from backend.agents.evidence_policy import field_map

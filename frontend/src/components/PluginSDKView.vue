@@ -7,17 +7,17 @@
         <p class="surface-description">Inspect the local plugin bridge and catalog contract. This window does not provide a simulated marketplace.</p>
       </div>
       <div class="header-actions">
-        <span class="surface-status" :class="{ 'is-connected': bridgeAvailable }" role="status" aria-live="polite">
+        <span class="surface-status" :class="{ 'is-connected': bridgeAvailable || apiActive }" role="status" aria-live="polite">
           <span class="status-dot" aria-hidden="true" />
-          {{ bridgeAvailable ? 'Bridge detected' : 'Bridge unavailable' }}
+          {{ bridgeAvailable ? 'Bridge detected' : apiActive ? 'Backend API' : 'Bridge unavailable' }}
         </span>
-        <button v-if="canReadCatalog" class="quiet-button" type="button" :disabled="isLoading" @click="refreshCatalog">
+        <button v-if="canReadCatalog || apiActive" class="quiet-button" type="button" :disabled="isLoading" @click="refreshCatalog">
           {{ isLoading ? 'Refreshing…' : 'Refresh catalog' }}
         </button>
       </div>
     </header>
 
-    <div v-if="!bridgeAvailable" class="surface-notice notice-warning" role="status">
+    <div v-if="!bridgeAvailable && !apiActive" class="surface-notice notice-warning" role="status">
       <strong>Local plugin bridge unavailable</strong>
       <p>
         Plugin capabilities belong to the Electron desktop bridge. Browser preview can show the contract boundary, but it cannot
@@ -25,7 +25,7 @@
       </p>
     </div>
 
-    <div v-else-if="!canReadCatalog" class="surface-notice notice-warning" role="status">
+    <div v-else-if="!canReadCatalog && !apiActive" class="surface-notice notice-warning" role="status">
       <strong>Catalog reader not exposed</strong>
       <p>
         <code>window.appApi</code> is present, but it does not expose a supported catalog reader. No plugin records are inferred
@@ -48,9 +48,9 @@
           <div>
             <p class="panel-kicker">Installed records</p>
             <h3 id="plugin-catalog-title">Local plugin catalog</h3>
-            <p class="panel-description">Only records returned by the active <code>window.appApi</code> reader are shown.</p>
+            <p class="panel-description">{{ bridgeAvailable ? 'Only records returned by the active window.appApi reader are shown.' : 'Only records returned by the backend registry are shown.' }}</p>
           </div>
-          <span class="source-badge">SOURCE: BRIDGE</span>
+          <span class="source-badge">SOURCE: {{ bridgeAvailable ? 'BRIDGE' : 'BACKEND API' }}</span>
         </header>
 
         <div v-if="isLoading" class="panel-message" role="status" aria-live="polite">
@@ -72,9 +72,38 @@
               <div><dt>ID</dt><dd class="mono">{{ plugin.id }}</dd></div>
               <div><dt>Version</dt><dd>{{ plugin.version || 'Not supplied' }}</dd></div>
               <div><dt>Author</dt><dd>{{ plugin.author || 'Not supplied' }}</dd></div>
+              <div v-if="plugin.hooks.length"><dt>Hooks</dt><dd class="mono">{{ plugin.hooks.join(', ') }}</dd></div>
             </dl>
+            <div v-if="plugin.source === 'api'" class="plugin-actions">
+              <button
+                v-if="!plugin.enabled"
+                class="quiet-button"
+                type="button"
+                :aria-label="`Enable plugin ${plugin.name}`"
+                @click="setPluginEnabled(plugin, true)"
+              >
+                Enable
+              </button>
+              <button
+                v-else
+                class="quiet-button"
+                type="button"
+                :aria-label="`Disable plugin ${plugin.name}`"
+                @click="setPluginEnabled(plugin, false)"
+              >
+                Disable
+              </button>
+              <button
+                class="quiet-button quiet-button--danger"
+                type="button"
+                :aria-label="`Uninstall plugin ${plugin.name}`"
+                @click="uninstallPlugin(plugin)"
+              >
+                Uninstall
+              </button>
+            </div>
             <details v-if="plugin.raw" class="raw-details">
-              <summary>Raw bridge record</summary>
+              <summary>Raw {{ plugin.source === 'api' ? 'registry' : 'bridge' }} record</summary>
               <pre>{{ formatJson(plugin.raw) }}</pre>
             </details>
           </li>
@@ -83,15 +112,46 @@
         <p v-else-if="catalogError" class="panel-message panel-message-error">
           Plugin catalog records are unavailable for this request.
         </p>
-        <p v-else-if="canReadCatalog && hasLoaded" class="panel-message">
-          The local bridge returned an empty plugin catalog. No marketplace entries are substituted.
+        <p v-else-if="(canReadCatalog || apiActive) && hasLoaded" class="panel-message">
+          The {{ bridgeAvailable ? 'local bridge' : 'backend registry' }} returned an empty plugin catalog. No marketplace entries are substituted.
         </p>
         <p v-else-if="bridgeAvailable" class="panel-message">
           The detected bridge does not expose a catalog reader, so no plugin records are shown.
         </p>
         <p v-else class="panel-message">
-          An installed plugin catalog requires the local application bridge.
+          An installed plugin catalog requires the local application bridge or the backend registry.
         </p>
+      </section>
+
+      <section v-if="apiActive && !bridgeAvailable" class="surface-panel install-panel" aria-labelledby="plugin-install-title">
+        <header class="panel-heading">
+          <div>
+            <p class="panel-kicker">Local install only</p>
+            <h3 id="plugin-install-title">Install plugin</h3>
+            <p class="panel-description">Installs a local directory with a manifest.json after a sandbox scan. No downloads, no marketplace, and new plugins start disabled.</p>
+          </div>
+        </header>
+        <form class="entry-form" @submit.prevent="installPlugin(installPath, installPath)">
+          <div class="field">
+            <label for="plugin-path">Plugin directory path</label>
+            <input
+              id="plugin-path"
+              v-model="installPath"
+              type="text"
+              autocomplete="off"
+              placeholder="C:\research\my-plugin"
+              required
+            >
+          </div>
+          <div class="form-actions">
+            <button class="primary-button" type="submit" :disabled="isLoading">
+              {{ isLoading ? 'Installing…' : 'Install from path' }}
+            </button>
+            <button class="secondary-button" type="button" :disabled="isLoading" @click="installPlugin('sample:ioi_experiment_logger', 'bundled sample')">
+              Install bundled sample
+            </button>
+          </div>
+        </form>
       </section>
 
       <aside class="surface-panel capability-panel" aria-labelledby="plugin-capabilities-title">
@@ -122,8 +182,8 @@
       <p class="panel-kicker">Integration boundary</p>
       <h3 id="plugin-contract-title">What this window does not claim</h3>
       <div class="contract-columns">
-        <p>No plugin is installed, enabled, or removed from this screen. No package is downloaded, signed, or executed.</p>
-        <p>A future catalog reader can be added to <code>window.appApi</code>; until then, the absence of a reader remains visible.</p>
+        <p>No plugin is installed, enabled, or removed from this screen without a real registry behind it. No package is downloaded or signed; installs accept local directories only, and enabled plugin code runs with backend privileges, so install only code you trust.</p>
+        <p>A future catalog reader can be added to <code>window.appApi</code>; until then, the backend registry is the source of truth in this browser.</p>
       </div>
     </section>
   </main>
@@ -131,6 +191,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { api } from '../services/api';
 
 type UnknownRecord = Record<string, unknown>;
 type Bridge = Record<string, unknown>;
@@ -143,11 +204,15 @@ interface PluginRecord {
   author: string;
   description: string;
   enabled: boolean;
+  hooks: string[];
+  source: 'bridge' | 'api';
   raw: unknown;
 }
 
 const bridge = ref<Bridge | null>(resolveBridge());
 const catalog = ref<PluginRecord[]>([]);
+const installPath = ref('');
+const apiActive = ref(false);
 const isLoading = ref(false);
 const hasLoaded = ref(false);
 const catalogError = ref('');
@@ -155,7 +220,11 @@ const actionMessage = ref('');
 
 const bridgeAvailable = computed(() => Boolean(bridge.value));
 const canReadCatalog = computed(() => Boolean(readerMethod()));
-const catalogSourceLabel = computed(() => bridgeAvailable.value ? 'window.appApi' : 'Unavailable');
+const catalogSourceLabel = computed(() => {
+  if (bridgeAvailable.value) return 'window.appApi';
+  if (apiActive.value) return 'backend API';
+  return 'Unavailable';
+});
 const capabilities = computed(() => {
   const activeBridge = bridge.value;
   return [
@@ -170,7 +239,7 @@ const capabilities = computed(() => {
 
 onMounted(() => {
   if (canReadCatalog.value) void refreshCatalog();
-  else hasLoaded.value = true;
+  else void refreshApiCatalog();
 });
 
 function readerMethod(): BridgeMethod | null {
@@ -186,7 +255,7 @@ function readerMethod(): BridgeMethod | null {
 async function refreshCatalog() {
   const reader = readerMethod();
   if (!reader) {
-    hasLoaded.value = true;
+    await refreshApiCatalog();
     return;
   }
 
@@ -199,7 +268,7 @@ async function refreshCatalog() {
       throw new Error(stringValue(result.error) || 'The local plugin bridge returned an error.');
     }
     catalog.value = extractCatalog(result)
-      .map((value, index) => normalizePlugin(value, index))
+      .map((value, index) => normalizePlugin(value, index, 'bridge'))
       .filter((value): value is PluginRecord => value !== null);
     hasLoaded.value = true;
     actionMessage.value = 'Plugin catalog refreshed from the local bridge.';
@@ -209,6 +278,101 @@ async function refreshCatalog() {
     catalogError.value = errorMessage(error);
   } finally {
     isLoading.value = false;
+  }
+}
+
+async function refreshApiCatalog() {
+  isLoading.value = true;
+  catalogError.value = '';
+  actionMessage.value = '';
+  try {
+    const result = await api.getBackendPlugins();
+    if (!isRecord(result) || result.status === 'error' || !Array.isArray(result.plugins)) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend returned no plugin catalog.',
+      );
+    }
+    apiActive.value = true;
+    catalog.value = result.plugins
+      .map((value, index) => normalizePlugin(value, index, 'api'))
+      .filter((value): value is PluginRecord => value !== null);
+    hasLoaded.value = true;
+  } catch (error) {
+    apiActive.value = false;
+    catalog.value = [];
+    hasLoaded.value = true;
+    catalogError.value = '';
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+async function installPlugin(source: string, label: string) {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    catalogError.value = 'Enter a local plugin directory path before installing.';
+    return;
+  }
+  isLoading.value = true;
+  catalogError.value = '';
+  actionMessage.value = '';
+  try {
+    const result = await api.installBackendPlugin(trimmed);
+    if (!isRecord(result) || result.status === 'error') {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend refused the plugin install.',
+      );
+    }
+    actionMessage.value = `Plugin installed (${label}). It is disabled until you enable it.`;
+    await refreshApiCatalog();
+  } catch (error) {
+    catalogError.value = errorMessage(error);
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+async function setPluginEnabled(plugin: PluginRecord, enabled: boolean) {
+  catalogError.value = '';
+  actionMessage.value = '';
+  try {
+    const result = enabled
+      ? await api.enableBackendPlugin(plugin.id)
+      : await api.disableBackendPlugin(plugin.id);
+    if (!isRecord(result) || result.status === 'error') {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : `The backend refused to ${enabled ? 'enable' : 'disable'} the plugin.`,
+      );
+    }
+    actionMessage.value = `Plugin ${enabled ? 'enabled' : 'disabled'}: ${plugin.name}.`;
+    await refreshApiCatalog();
+  } catch (error) {
+    catalogError.value = errorMessage(error);
+  }
+}
+
+async function uninstallPlugin(plugin: PluginRecord) {
+  catalogError.value = '';
+  actionMessage.value = '';
+  try {
+    const result = await api.uninstallBackendPlugin(plugin.id);
+    if (!isRecord(result) || result.status === 'error') {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend refused to uninstall the plugin.',
+      );
+    }
+    actionMessage.value = `Plugin uninstalled: ${plugin.name}.`;
+    await refreshApiCatalog();
+  } catch (error) {
+    catalogError.value = errorMessage(error);
   }
 }
 
@@ -222,15 +386,16 @@ function extractCatalog(value: unknown): unknown[] {
   throw new Error('The local plugin bridge returned no catalog list.');
 }
 
-function normalizePlugin(value: unknown, index: number): PluginRecord | null {
+function normalizePlugin(value: unknown, index: number, source: 'bridge' | 'api'): PluginRecord | null {
   if (typeof value === 'string') {
     const name = value.trim();
-    return name ? { id: `plugin-${index}-${name}`, name, version: '', author: '', description: '', enabled: false, raw: value } : null;
+    return name ? { id: `plugin-${index}-${name}`, name, version: '', author: '', description: '', enabled: false, hooks: [], source, raw: value } : null;
   }
   if (!isRecord(value)) return null;
   const name = stringValue(value.name) || stringValue(value.label) || stringValue(value.title);
   const id = stringValue(value.id) || stringValue(value.plugin_id);
   if (!name && !id) return null;
+  const hooks = Array.isArray(value.hooks) ? value.hooks.filter((hook): hook is string => typeof hook === 'string') : [];
   return {
     id: id || `plugin-${index}`,
     name: name || id || `Plugin ${index + 1}`,
@@ -238,6 +403,8 @@ function normalizePlugin(value: unknown, index: number): PluginRecord | null {
     author: stringValue(value.author),
     description: stringValue(value.description) || stringValue(value.summary),
     enabled: value.enabled === true || value.active === true || value.installed === true,
+    hooks,
+    source,
     raw: value,
   };
 }

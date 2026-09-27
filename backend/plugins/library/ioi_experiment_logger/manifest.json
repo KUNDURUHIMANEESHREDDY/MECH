@@ -1,0 +1,14 @@
+{
+  "name": "ioi-experiment-logger",
+  "version": "1.0.0",
+  "description": "Example plugin: logs every IOI-related experiment plan, campaign event, and paper to a local JSONL audit trail.",
+  "author": "MECH Platform Team",
+  "entry": "__init__.py",
+  "capabilities": [
+    "on_experiment_planned",
+    "on_campaign_started",
+    "on_campaign_completed",
+    "on_paper_generated",
+    "on_validation_completed"
+  ]
+}

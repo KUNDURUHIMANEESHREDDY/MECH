@@ -41,6 +41,13 @@ app.add_middleware(
 async def _startup_probe():
     """Start fast; load ML modules/models only when the frontend asks."""
     logger.info("Backend ready. ML model modules will load on demand.")
+    try:
+        from backend.plugins.service import get_service
+        restored = get_service().restore_enabled()
+        if restored:
+            logger.info("Restored enabled plugins: %s", ", ".join(restored))
+    except Exception as exc:
+        logger.warning("Plugin restore skipped: %s", exc)
 
 
 @app.middleware("http")

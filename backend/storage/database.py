@@ -83,6 +83,14 @@ class DesktopStorage:
                     payload TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS plugins (
+                    name TEXT PRIMARY KEY,
+                    path TEXT NOT NULL,
+                    manifest TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    installed_at TEXT NOT NULL
+                );
                 """
             )
             for key, value in DEFAULT_SETTINGS.items():
@@ -243,6 +251,70 @@ class DesktopStorage:
 
     def delete_session(self, item_id: str) -> bool:
         return self._delete_json_item("sessions", item_id)
+
+    def list_plugins(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT name, path, manifest, enabled, installed_at
+                FROM plugins
+                ORDER BY name
+                """
+            ).fetchall()
+        items = []
+        for row in rows:
+            try:
+                manifest = json.loads(row["manifest"])
+            except (TypeError, ValueError):
+                manifest = {}
+            items.append({
+                "name": row["name"],
+                "path": row["path"],
+                "manifest": manifest if isinstance(manifest, dict) else {},
+                "enabled": bool(row["enabled"]),
+                "installed_at": row["installed_at"],
+            })
+        return items
+
+    def upsert_plugin(self, name: str, path: str, manifest: dict[str, Any],
+                      enabled: bool) -> dict[str, Any]:
+        installed_at = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO plugins (name, path, manifest, enabled, installed_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    path = excluded.path,
+                    manifest = excluded.manifest,
+                    enabled = excluded.enabled,
+                    installed_at = excluded.installed_at
+                """,
+                (name, path, json.dumps(manifest), int(bool(enabled)),
+                 installed_at),
+            )
+        return {
+            "name": name,
+            "path": path,
+            "manifest": manifest,
+            "enabled": bool(enabled),
+            "installed_at": installed_at,
+        }
+
+    def set_plugin_enabled(self, name: str, enabled: bool) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE plugins SET enabled = ? WHERE name = ?",
+                (int(bool(enabled)), name),
+            )
+        return cursor.rowcount > 0
+
+    def delete_plugin(self, name: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM plugins WHERE name = ?", (name,)
+            )
+        return cursor.rowcount > 0
 
     def describe_workspace(self, path: str) -> dict[str, Any]:
         workspace_path = self._require_path(path, "workspace path")

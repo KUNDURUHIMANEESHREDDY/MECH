@@ -40,15 +40,17 @@ class PluginManager:
         except Exception as e:
             raise ValueError(f"Plugin rejected during security scan: {str(e)}")
 
-        # Save code
+        # Save code (explicit UTF-8: the loader exec's the file back and
+        # platform-default encodings corrupt non-ASCII source).
         plugin_path = os.path.join(self.plugins_dir, f"{name}.py")
-        with open(plugin_path, 'w') as f:
+        with open(plugin_path, 'w', encoding='utf-8') as f:
             f.write(source_code)
             
         self.registry[name] = {
             "version": version,
             "dependencies": manifest.get("dependencies", []),
             "description": manifest.get("description", ""),
+            "author": manifest.get("author", ""),
             "enabled": False,
             "path": plugin_path
         }

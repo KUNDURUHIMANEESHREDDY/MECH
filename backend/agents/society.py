@@ -151,12 +151,24 @@ class ResearchSocietyV2:
                 pass
         return ev
 
+    @staticmethod
+    def _emit_plugin_hook(hook_name: str, payload: Dict[str, Any]) -> None:
+        """Fan a platform event out to enabled plugins. Never fails a run."""
+        try:
+            from backend.plugins.service import get_service
+            get_service().bus().emit(hook_name, payload)
+        except Exception:
+            pass
+
     async def run(self, goal: str,
                   model_name: str = "gpt2",
                   on_event: Any = None,
                   run_id: str = "") -> Dict[str, Any]:
         events: List[Dict[str, Any]] = []
         self._emit(events, on_event, "ResearchStarted", {"goal": goal})
+        self._emit_plugin_hook("on_campaign_started",
+                               {"campaign_id": run_id or "run_unknown",
+                                "goal": goal, "model_name": model_name})
         workflow = self.planner.plan(goal)
         workflow["provenance"] = "reference"
         workflow["field_provenance"] = field_map(
@@ -301,6 +313,10 @@ class ResearchSocietyV2:
         self._emit(events, on_event, "ResearchFinished",
                    {"steps_completed": publication.get("steps_completed")
                     or f"{len(successful)}/{len(trace)}"})
+        self._emit_plugin_hook("on_campaign_completed",
+                               {"campaign_id": run_id or "run_unknown",
+                                "goal": goal,
+                                "status": publication.get("status", "")})
 
         if publication.get("status") == "blocked":
             status = "blocked"
