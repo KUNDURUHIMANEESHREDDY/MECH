@@ -58,6 +58,15 @@ export const ROUTES: DesktopRoute[] = [
     load: () => import('../components/visualizations/TransformerExplorer.vue'),
   },
   {
+    id: 'network',
+    label: 'Network',
+    group: 'Explore',
+    requirement: 'model',
+    legacy: true,
+    aliases: ['neural-network', 'neural_network'],
+    load: () => import('../components/NetworkView.vue'),
+  },
+  {
     id: 'workspace',
     label: 'Workspace',
     group: 'Explore',
