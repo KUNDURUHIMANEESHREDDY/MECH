@@ -85,6 +85,8 @@ export const api = {
     post<{ status: string; model_name: string }>('/api/gpt2/load', { model_name: model ?? 'gpt2' }),
   gpt2RunPrompt: (prompt: string) =>
     post<Record<string, unknown>>('/api/gpt2/run_prompt', { prompt }),
+  gpt2FreshPrompt: () =>
+    post<Record<string, unknown>>('/api/gpt2/fresh_prompt', {}),
   gpt2GetActivations: (layer?: number) =>
     post<Record<string, unknown>>('/api/gpt2/activations', { layer }),
   gpt2LayerActivations: (payload: Record<string, unknown>) =>

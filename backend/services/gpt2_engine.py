@@ -361,6 +361,49 @@ def run_prompt(prompt: str) -> Dict[str, Any]:
     }
 
 
+def generate_text(primer: str, max_new_tokens: int = 12,
+                  temperature: float = 0.9, top_k: int = 40) -> Dict[str, Any]:
+    """Sample a fresh prompt continuation from the live weights.
+
+    Starts from `primer` and samples up to `max_new_tokens` continuation
+    tokens (temperature + top-k). Every returned token comes from a live
+    forward pass — no prompt pool, dataset, or template is involved.
+    """
+    err = _ensure_loaded()
+    if err:
+        return err
+    primer = (primer or "").strip() or "The"
+    max_new_tokens = max(1, min(48, int(max_new_tokens)))
+    temperature = max(0.1, min(2.0, float(temperature)))
+    top_k = max(1, min(200, int(top_k)))
+    device = next(_model.parameters()).device
+    with torch.no_grad():
+        inputs = _tokenizer(primer, return_tensors="pt")
+        input_ids = inputs["input_ids"].to(device)
+        generated = input_ids[0].tolist()
+        for _ in range(max_new_tokens):
+            out = _model(input_ids=input_ids[:, -_cfg().n_positions:])
+            logits = out.logits[0, -1].float() / temperature
+            topk = torch.topk(logits, k=min(top_k, logits.numel()))
+            probs = torch.softmax(topk.values, dim=-1)
+            choice = int(torch.multinomial(probs, num_samples=1).item())
+            next_id = int(topk.indices[choice].item())
+            generated.append(next_id)
+            if next_id == _tokenizer.eos_token_id:
+                break
+            input_ids = torch.tensor([generated], device=device)
+    text = _tokenizer.decode(generated)
+    return {
+        "status": "ok",
+        "primer": primer,
+        "text": text,
+        "token_ids": generated,
+        "tokens_added": len(generated) - len(_tokenizer.encode(primer)),
+        "temperature": temperature,
+        "top_k": top_k,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Layer detail
 # ---------------------------------------------------------------------------

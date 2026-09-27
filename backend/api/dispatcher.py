@@ -118,9 +118,9 @@ def get_model_info(name: str) -> Dict[str, Any]:
 
 @router.post("/infer")
 def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
-    prompt = payload.get("prompt") or _random_prompt()
-    model_name = payload.get("model_name", "gpt2-small")
     engine = get_engine()
+    prompt = payload.get("prompt") or _default_prompt(engine)
+    model_name = payload.get("model_name", "gpt2-small")
     if engine and engine.is_available():
         res = engine.infer(prompt, model_name)
         if isinstance(res, dict):
@@ -457,6 +457,38 @@ def _random_prompt() -> str:
     return random.choice(PROMPT_POOL)
 
 
+# Short openers used only to seed live generation. The returned prompt text
+# itself is always sampled from the model, never taken from a pool.
+PRIMER_OPENERS = [
+    "The", "When", "In", "Scientists", "Once", "Deep",
+    "After", "A", "Researchers", "The future",
+]
+
+
+def _fresh_primer() -> str:
+    return PRIMER_OPENERS[int(time.time() // 60) % len(PRIMER_OPENERS)]
+
+
+def _generate_fresh_prompt(engine: Any, max_new_tokens: int = 12) -> str:
+    """Ask the live model for a brand-new prompt; pool fallback on failure."""
+    try:
+        res = engine.generate_text(_fresh_primer(),
+                                   max_new_tokens=max_new_tokens)
+        text = str(res.get("text", "")).strip()
+        if text:
+            return text
+    except Exception:
+        pass
+    return _random_prompt()
+
+
+def _default_prompt(engine: Any) -> str:
+    """Prompt default: live generation when the model is up, pool otherwise."""
+    if engine is not None and engine.is_available():
+        return _generate_fresh_prompt(engine, max_new_tokens=8)
+    return _random_prompt()
+
+
 TOKEN_POOLS = [
     ["When", "Mary", "and", "John", "went", "to", "the", "store", ",", "John", "gave", "a", "bottle", "to"],
     ["The", "cat", "sat", "on", "the", "mat", "and", "looked", "at", "the", "dog"],
@@ -473,10 +505,54 @@ def _random_token_sequence() -> list:
     return list(random.choice(TOKEN_POOLS))
 
 
+@router.post("/gpt2/fresh_prompt")
+def gpt2_fresh_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate a brand-new prompt from the live model (never from a pool).
+
+    Samples a continuation from a rotating opener using the loaded weights.
+    Fails closed when the engine is unavailable: no seeded or pooled text is
+    ever substituted, since the whole point is model-created prompts.
+    """
+    engine = get_engine()
+    if not (engine and engine.is_available()):
+        return _mark({
+            "status": "unavailable",
+            "error": "torch/transformers not available — the model cannot create a prompt",
+        }, "unavailable")
+    primer = str(payload.get("primer") or _fresh_primer())
+    try:
+        max_new_tokens = max(1, min(48, int(payload.get("max_new_tokens", 12))))
+    except (TypeError, ValueError):
+        max_new_tokens = 12
+    try:
+        res = engine.generate_text(primer, max_new_tokens=max_new_tokens)
+    except Exception as exc:
+        return _mark({
+            "status": "error",
+            "primer": primer,
+            "error": str(exc)[:300],
+        }, "unavailable")
+    if not isinstance(res, dict) or res.get("status") != "ok" or not str(res.get("text", "")).strip():
+        return _mark({
+            "status": "unavailable",
+            "primer": primer,
+            "error": "The model did not return usable prompt text.",
+        }, "unavailable")
+    return _mark({
+        "status": "ok",
+        "prompt": str(res["text"]).strip(),
+        "primer": primer,
+        "method": ("sampled continuation (temperature "
+                   f"{res.get('temperature')}, top-k {res.get('top_k')}) "
+                   "from live GPT-2 weights"),
+        "tokens_added": res.get("tokens_added"),
+    }, "live")
+
+
 @router.post("/gpt2/run_prompt")
 def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
-    prompt = payload.get("prompt") or _random_prompt()
     engine = get_engine()
+    prompt = payload.get("prompt") or _default_prompt(engine)
     if engine and engine.is_available():
         return _mark(engine.run_prompt(prompt), "live")
     str_tokens = [t for t in prompt.replace(",", " ,").replace(".", " .").split() if t]

@@ -198,6 +198,15 @@
             <button
               class="button button--secondary"
               type="button"
+              :disabled="freshPromptState === 'loading'"
+              @click="fetchFreshPrompt(true)"
+            >
+              <span v-if="freshPromptState === 'loading'" class="spinner spinner--small" aria-hidden="true" />
+              {{ freshPromptState === 'loading' ? 'Creating…' : 'New prompt' }}
+            </button>
+            <button
+              class="button button--secondary"
+              type="button"
               :disabled="!canRunPrompt"
               @click="runPrompt('infer')"
             >
@@ -215,6 +224,11 @@
           <p id="model-explorer-prompt-help" class="field-help">
             Results are shown only when the backend returns them. A seeded response is labeled and is not presented as a live measurement.
           </p>
+          <label class="auto-prompt-toggle">
+            <input v-model="autoPrompt" type="checkbox" />
+            <span>New model-created prompt every minute</span>
+          </label>
+          <p v-if="freshPromptNote" class="provenance-note">{{ freshPromptNote }}</p>
           <p v-if="promptResult" class="provenance-note">{{ promptProvenanceNote }}</p>
           <p v-if="promptResult && formatFieldProvenance(promptFieldProvenance) !== 'Unavailable'" class="provenance-note">Field provenance: {{ formatFieldProvenance(promptFieldProvenance) }}</p>
           <p v-if="promptError" id="model-explorer-prompt-error" class="inline-error" role="alert">
@@ -771,6 +785,11 @@ const architectureLoading = ref(false);
 const architectureError = ref('');
 
 const prompt = ref('The capital of France is');
+
+const autoPrompt = ref(true);
+const freshPromptNote = ref('');
+const freshPromptState = ref<'idle' | 'loading'>('idle');
+let freshPromptTimer: ReturnType<typeof setInterval> | null = null;
 const runMode = ref<PromptMode>('gpt2');
 const promptState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle');
 const promptError = ref('');
@@ -1457,6 +1476,54 @@ function onPromptKeydown(event: KeyboardEvent): void {
   }
 }
 
+function freshPromptTimestamp(): string {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+async function fetchFreshPrompt(manual: boolean): Promise<void> {
+  if (freshPromptState.value === 'loading') return;
+  if (promptState.value === 'loading') {
+    if (manual) freshPromptNote.value = 'Wait for the running inference to finish, then try again.';
+    return;
+  }
+  if (!browserOnline.value) {
+    freshPromptNote.value = 'Reconnect this browser before requesting a model-created prompt.';
+    return;
+  }
+  freshPromptState.value = 'loading';
+  try {
+    const response = requireResponse(await api.gpt2FreshPrompt(), 'Fresh prompt');
+    const text = firstText(response, ['prompt', 'text']);
+    const provenance = provenanceFrom(response, 'unavailable');
+    if (!text || provenance !== 'live') {
+      freshPromptNote.value = 'The model did not return a usable prompt; the previous text was kept.';
+      return;
+    }
+    prompt.value = text;
+    promptError.value = '';
+    freshPromptNote.value = `New prompt created by GPT-2 (live) · ${freshPromptTimestamp()}`;
+  } catch (error) {
+    freshPromptNote.value = `Fresh prompt unavailable: ${errorText(error)}`;
+  } finally {
+    freshPromptState.value = 'idle';
+  }
+}
+
+function startFreshPromptTimer(): void {
+  stopFreshPromptTimer();
+  freshPromptTimer = setInterval(() => {
+    if (!autoPrompt.value || document.hidden) return;
+    void fetchFreshPrompt(false);
+  }, 60_000);
+}
+
+function stopFreshPromptTimer(): void {
+  if (freshPromptTimer !== null) {
+    clearInterval(freshPromptTimer);
+    freshPromptTimer = null;
+  }
+}
+
 async function runPrompt(mode?: PromptMode): Promise<void> {
   const selectedMode = mode ?? runMode.value;
   const text = prompt.value.trim();
@@ -1738,9 +1805,12 @@ onMounted(() => {
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
   void loadCatalog();
+  void fetchFreshPrompt(false);
+  startFreshPromptTimer();
 });
 
 onBeforeUnmount(() => {
+  stopFreshPromptTimer();
   window.removeEventListener('online', handleOnline);
   window.removeEventListener('offline', handleOffline);
 });
@@ -2347,6 +2417,22 @@ onBeforeUnmount(() => {
   color: var(--text-muted, #647184);
   font-size: 9px;
   line-height: 1.45;
+}
+
+.auto-prompt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-dim, #354256);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.auto-prompt-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary, #2563eb);
 }
 
 .provenance-note {
