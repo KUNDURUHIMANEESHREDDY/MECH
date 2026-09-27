@@ -110,7 +110,20 @@
         <button class="tool-button tool-button--primary" type="submit" :disabled="wiringLoading">
           {{ wiringLoading ? 'Running…' : 'Light up wires' }}
         </button>
+        <button
+          class="tool-button"
+          type="button"
+          :disabled="freshPromptState === 'loading'"
+          @click="fetchFreshPrompt(true)"
+        >
+          {{ freshPromptState === 'loading' ? 'Creating…' : 'New prompt' }}
+        </button>
       </form>
+      <label class="auto-prompt-toggle">
+        <input v-model="autoPrompt" type="checkbox" />
+        <span>New model-created prompt every minute</span>
+      </label>
+      <p v-if="freshPromptNote" class="wire-note">{{ freshPromptNote }}</p>
       <div v-if="wiringError" class="tool-notice tool-notice--error" role="alert">
         <strong>Wiring run failed</strong>
         <span>{{ wiringError }}</span>
@@ -202,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { api } from '../services/api';
 
 type JsonRecord = Record<string, unknown>;
@@ -282,6 +295,11 @@ const wirePrompt = ref('The capital of France is');
 const wiringLoading = ref(false);
 const wiringError = ref('');
 const wireTokens = ref<string[]>([]);
+
+const autoPrompt = ref(true);
+const freshPromptNote = ref('');
+const freshPromptState = ref<'idle' | 'loading'>('idle');
+let freshPromptTimer: ReturnType<typeof setInterval> | null = null;
 const attentionMaps = ref<AttentionMap[]>([]);
 const wireLayer = ref(10);
 const wireHead = ref(7);
@@ -656,7 +674,60 @@ async function toggleLayer(layerIndex: number): Promise<void> {
 
 onMounted(() => {
   void loadArchitecture();
+  void fetchFreshPrompt(false);
+  startFreshPromptTimer();
 });
+
+onBeforeUnmount(() => {
+  stopFreshPromptTimer();
+});
+
+function freshPromptTimestamp(): string {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+async function fetchFreshPrompt(manual: boolean): Promise<void> {
+  if (freshPromptState.value === 'loading') return;
+  if (wiringLoading.value) {
+    if (manual) freshPromptNote.value = 'Wait for the wiring run to finish, then try again.';
+    return;
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    freshPromptNote.value = 'Reconnect this browser before requesting a model-created prompt.';
+    return;
+  }
+  freshPromptState.value = 'loading';
+  try {
+    const res = await api.gpt2FreshPrompt();
+    const text = isRecord(res) && typeof res.prompt === 'string' ? res.prompt.trim() : '';
+    const provenance = isRecord(res) && typeof res.provenance === 'string' ? res.provenance : 'unavailable';
+    if (!text || provenance !== 'live') {
+      freshPromptNote.value = 'The model did not return a usable prompt; the previous text was kept.';
+      return;
+    }
+    wirePrompt.value = text;
+    freshPromptNote.value = `New prompt created by GPT-2 (live) · ${freshPromptTimestamp()}`;
+  } catch (error) {
+    freshPromptNote.value = `Fresh prompt unavailable: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    freshPromptState.value = 'idle';
+  }
+}
+
+function startFreshPromptTimer(): void {
+  stopFreshPromptTimer();
+  freshPromptTimer = setInterval(() => {
+    if (!autoPrompt.value || document.hidden) return;
+    void fetchFreshPrompt(false);
+  }, 60_000);
+}
+
+function stopFreshPromptTimer(): void {
+  if (freshPromptTimer !== null) {
+    clearInterval(freshPromptTimer);
+    freshPromptTimer = null;
+  }
+}
 </script>
 
 <style scoped>
@@ -1062,6 +1133,29 @@ onMounted(() => {
 .wire-caption {
   margin: 0 0 6px;
   color: var(--text-muted);
+  font-size: 11px;
+}
+
+.auto-prompt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.auto-prompt-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+}
+
+.wire-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
