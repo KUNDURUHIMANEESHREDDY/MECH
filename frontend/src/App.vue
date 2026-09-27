@@ -1,12 +1,23 @@
 <template>
-  <div class="mech-app" data-testid="app-shell">
-    <aside class="app-nav" aria-label="Tool navigation">
+  <div class="mech-app" data-testid="app-shell" :class="{ 'nav-collapsed': sidebarCollapsed }">
+    <aside class="app-nav" aria-label="Tool navigation" :class="{ 'is-collapsed': sidebarCollapsed }">
       <div class="brand" aria-label="MECH">
         <span class="brand-mark" aria-hidden="true">M</span>
         <span class="brand-name">MECH</span>
+        <button
+          type="button"
+          class="collapse-button"
+          aria-label="Collapse navigation"
+          aria-controls="tool-navigation-groups"
+          title="Collapse navigation"
+          data-testid="nav-collapse"
+          @click="setSidebarCollapsed(true)"
+        >
+          <span aria-hidden="true">«</span>
+        </button>
       </div>
 
-      <nav class="nav-groups">
+      <nav class="nav-groups" id="tool-navigation-groups">
         <div v-for="group in navGroups" :key="group.name" class="nav-group">
           <h2 class="nav-group__title">{{ group.name }}</h2>
           <button
@@ -31,6 +42,19 @@
     </aside>
 
     <main class="app-main">
+      <button
+        v-if="sidebarCollapsed"
+        type="button"
+        class="expand-button"
+        aria-label="Expand navigation"
+        aria-controls="tool-navigation-groups"
+        title="Expand navigation"
+        data-testid="nav-expand"
+        @click="setSidebarCollapsed(false)"
+      >
+        <span aria-hidden="true">»</span>
+        <span>Menu</span>
+      </button>
       <div v-if="unknownRoute" class="not-found" role="alert">
         <p class="desktop-kicker">Unknown tool</p>
         <strong>No MECH tool matches “{{ unknownRoute }}”</strong>
@@ -85,6 +109,7 @@ const unknownRoute = ref('');
 const modelStatus = ref<RuntimeStatus>('connecting');
 const modelName = ref('No model selected');
 const activeRouteId = ref('explorer');
+const sidebarCollapsed = ref(readSidebarCollapsed());
 const loadErrors = reactive<Record<string, string>>({});
 const componentCache = new Map<string, ReturnType<typeof defineAsyncComponent>>();
 
@@ -120,6 +145,24 @@ function componentFor(routeId: string) {
   }));
   componentCache.set(routeId, component);
   return component;
+}
+
+function setSidebarCollapsed(collapsed: boolean) {
+  sidebarCollapsed.value = collapsed;
+  try {
+    window.localStorage.setItem('mech-nav-collapsed', collapsed ? '1' : '0');
+  } catch {
+    // Private browsing or disabled storage: collapse still works per session.
+  }
+}
+
+function readSidebarCollapsed(): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return false;
+    return window.localStorage.getItem('mech-nav-collapsed') === '1';
+  } catch {
+    return false;
+  }
 }
 
 function setHash(routeId: string) {
@@ -186,14 +229,26 @@ onBeforeUnmount(() => {
   background: var(--bg);
   color: var(--text);
   color-scheme: light;
+  transition: grid-template-columns 0.18s ease-out;
+}
+
+.mech-app.nav-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
 }
 
 .app-nav {
   display: flex;
   min-height: 0;
   flex-direction: column;
+  overflow: hidden;
   border-right: 1px solid var(--border);
   background: var(--bg-elev);
+  white-space: nowrap;
+}
+
+.app-nav.is-collapsed {
+  visibility: hidden;
+  border-right: 0;
 }
 
 .brand {
@@ -216,9 +271,53 @@ onBeforeUnmount(() => {
 }
 
 .brand-name {
+  flex: 1;
   font-size: 14px;
   font-weight: 750;
   letter-spacing: 0.04em;
+}
+
+.collapse-button {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.collapse-button:hover {
+  border-color: var(--border);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.expand-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.expand-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .nav-groups {
@@ -364,6 +463,11 @@ onBeforeUnmount(() => {
   }
 
   .nav-status {
+    display: none;
+  }
+
+  .collapse-button,
+  .expand-button {
     display: none;
   }
 
