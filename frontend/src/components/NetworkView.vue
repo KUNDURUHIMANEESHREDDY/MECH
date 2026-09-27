@@ -95,6 +95,109 @@
       <strong>No network returned.</strong>
       <span>Press Refresh weights to read the loaded model.</span>
     </div>
+
+    <section aria-label="Live wiring">
+      <h2 class="section-title">Wiring</h2>
+      <p class="section-note">
+        Run a prompt to light up real connections: token-to-token attention wires for one head,
+        and input/output weight wires for one MLP neuron. Both come from live forward passes.
+      </p>
+      <form class="wire-form" @submit.prevent="runWiringPrompt">
+        <label class="wire-field">
+          <span>Prompt</span>
+          <input v-model="wirePrompt" type="text" class="control" placeholder="The capital of France is" />
+        </label>
+        <button class="tool-button tool-button--primary" type="submit" :disabled="wiringLoading">
+          {{ wiringLoading ? 'Running…' : 'Light up wires' }}
+        </button>
+      </form>
+      <div v-if="wiringError" class="tool-notice tool-notice--error" role="alert">
+        <strong>Wiring run failed</strong>
+        <span>{{ wiringError }}</span>
+      </div>
+
+      <div v-if="wireTokens.length" class="wire-panels">
+        <div class="wire-panel">
+          <div class="wire-panel__head">
+            <h3>Attention wires</h3>
+            <div class="wire-selectors">
+              <label>Layer
+                <select v-model.number="wireLayer" class="control control--inline">
+                  <option v-for="n in 12" :key="n" :value="n - 1">L{{ n - 1 }}</option>
+                </select>
+              </label>
+              <label>Head
+                <select v-model.number="wireHead" class="control control--inline">
+                  <option v-for="n in 12" :key="n" :value="n - 1">H{{ n - 1 }}</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <p class="wire-caption">{{ attentionEdgeCount }} wires above 0.08 · final-token focus: {{ finalFocusToken }}</p>
+          <svg
+            class="wire-svg"
+            :viewBox="`0 0 ${attentionSvg.width} ${attentionSvg.height}`"
+            role="img"
+            :aria-label="`Attention wiring for layer ${wireLayer} head ${wireHead}`"
+          >
+            <path
+              v-for="edge in attentionSvg.edges"
+              :key="`${edge.from}-${edge.to}`"
+              :d="edge.d"
+              class="wire wire--attention"
+              :stroke-width="edge.width"
+              :opacity="edge.opacity"
+            />
+            <g v-for="node in attentionSvg.nodes" :key="node.index">
+              <rect :x="node.x" :y="node.y" width="10" height="10" rx="5" class="wire-node" />
+              <text :x="node.x + 5" :y="node.y + 24" text-anchor="middle" class="wire-label">{{ node.token }}</text>
+            </g>
+          </svg>
+        </div>
+
+        <div class="wire-panel">
+          <div class="wire-panel__head">
+            <h3>Neuron wires</h3>
+            <div class="wire-selectors">
+              <label>Layer
+                <select v-model.number="wireNeuronLayer" class="control control--inline" @change="loadNeuronWires">
+                  <option v-for="n in 12" :key="n" :value="n - 1">L{{ n - 1 }}</option>
+                </select>
+              </label>
+              <label>Neuron
+                <input v-model.number="wireNeuronIndex" type="number" min="0" max="3071" class="control control--inline control--number" @change="loadNeuronWires" />
+              </label>
+            </div>
+          </div>
+          <p class="wire-caption">{{ neuronEdgeCount }} strongest weight wires · green feeds, red drains</p>
+          <div v-if="neuronWiresLoading" class="tool-state" role="status">Reading live neuron weights…</div>
+          <div v-else-if="neuronWiresError" class="tool-notice tool-notice--error" role="alert">
+            <strong>Neuron weights unavailable</strong>
+            <span>{{ neuronWiresError }}</span>
+          </div>
+          <svg
+            v-else-if="neuronSvg.edges.length"
+            class="wire-svg"
+            :viewBox="`0 0 ${neuronSvg.width} ${neuronSvg.height}`"
+            role="img"
+            :aria-label="`Weight wiring for neuron ${wireNeuronIndex} in layer ${wireNeuronLayer}`"
+          >
+            <path
+              v-for="edge in neuronSvg.edges"
+              :key="edge.key"
+              :d="edge.d"
+              :class="edge.positive ? 'wire wire--positive' : 'wire wire--negative'"
+              :stroke-width="edge.width"
+              :opacity="edge.opacity"
+            />
+            <g v-for="node in neuronSvg.nodes" :key="node.key">
+              <rect :x="node.x" :y="node.y" :width="node.w" :height="node.h" rx="4" :class="node.class" />
+              <text :x="node.x + node.w / 2" :y="node.y + node.h / 2 + 4" text-anchor="middle" class="wire-label">{{ node.label }}</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+    </section>
   </section>
 </template>
 
@@ -125,6 +228,44 @@ interface HeadNorms {
   o_weight_l2?: number;
 }
 
+interface SvgEdge {
+  key: string;
+  d: string;
+  width: number;
+  opacity: number;
+  from: number;
+  to: number;
+  positive?: boolean;
+}
+
+interface SvgNode {
+  key: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  index?: number;
+  token?: string;
+  class?: string;
+}
+
+interface AttentionMap {
+  layer: number;
+  head: number;
+  tokens: string[];
+  matrix: number[][];
+}
+
+interface WeightLink {
+  dim: number;
+  weight: number;
+}
+
+const ATTENTION_THRESHOLD = 0.08;
+const MAX_ATTENTION_EDGES = 60;
+const NEURON_LINKS = 12;
+
 const loading = ref(false);
 const errorMessage = ref('');
 const layers = ref<LayerSummary[]>([]);
@@ -136,6 +277,20 @@ const layerDetailLoading = ref(false);
 const layerDetailError = ref('');
 const layerDetailHeads = ref<HeadNorms[]>([]);
 const layerDetailCache = new Map<number, HeadNorms[]>();
+
+const wirePrompt = ref('The capital of France is');
+const wiringLoading = ref(false);
+const wiringError = ref('');
+const wireTokens = ref<string[]>([]);
+const attentionMaps = ref<AttentionMap[]>([]);
+const wireLayer = ref(10);
+const wireHead = ref(7);
+const wireNeuronLayer = ref(5);
+const wireNeuronIndex = ref(0);
+const neuronWiresLoading = ref(false);
+const neuronWiresError = ref('');
+const neuronInLinks = ref<WeightLink[]>([]);
+const neuronOutLinks = ref<WeightLink[]>([]);
 
 const sourceTone = computed(() => {
   if (loading.value) return 'loading';
@@ -161,6 +316,234 @@ function formatInt(value: number | undefined): string {
 function formatWeight(value: number | undefined): string {
   if (value === undefined) return '—';
   return value.toFixed(2);
+}
+
+function shortToken(token: string): string {
+  const cleaned = token.replace(/Ġ/g, ' ').trim();
+  return cleaned.length > 10 ? `${cleaned.slice(0, 9)}…` : cleaned || '·';
+}
+
+const selectedAttentionMap = computed((): AttentionMap | null => {
+  const found = attentionMaps.value.find(
+    item => item.layer === wireLayer.value && item.head === wireHead.value,
+  );
+  return found ?? null;
+});
+
+const attentionEdgeCount = computed(() => attentionSvg.value.edges.length);
+
+const finalFocusToken = computed(() => {
+  const map = selectedAttentionMap.value;
+  if (!map || !map.matrix.length) return '—';
+  const row = map.matrix[map.matrix.length - 1] ?? [];
+  let best = 0;
+  for (let i = 1; i < row.length; i++) {
+    if ((row[i] ?? 0) > (row[best] ?? 0)) best = i;
+  }
+  return shortToken(map.tokens[best] ?? '');
+});
+
+const attentionSvg = computed(() => {
+  const map = selectedAttentionMap.value;
+  const tokens = wireTokens.value;
+  const width = 60 + Math.max(0, tokens.length - 1) * 70 + 30;
+  const height = 130;
+  const nodes: SvgNode[] = tokens.map((token, index) => ({
+    key: `t-${index}`,
+    x: 30 + index * 70 - 5,
+    y: 88,
+    w: 10,
+    h: 10,
+    label: shortToken(token),
+    index,
+    token,
+  }));
+  if (!map || !map.matrix.length) {
+    return { width: Math.max(width, 200), height, nodes, edges: [] as SvgEdge[] };
+  }
+  const candidates: Array<{ from: number; to: number; weight: number }> = [];
+  for (let to = 0; to < map.matrix.length && to < tokens.length; to++) {
+    const row = map.matrix[to] ?? [];
+    for (let from = 0; from < row.length && from < tokens.length; from++) {
+      const weight = row[from] ?? 0;
+      if (weight >= ATTENTION_THRESHOLD) {
+        candidates.push({ from, to, weight });
+      }
+    }
+  }
+  candidates.sort((a, b) => b.weight - a.weight);
+  const edges: SvgEdge[] = candidates.slice(0, MAX_ATTENTION_EDGES).map(edge => {
+    const x1 = 30 + edge.from * 70;
+    const x2 = 30 + edge.to * 70;
+    const lift = edge.from === edge.to ? 26 : 14 + Math.abs(x2 - x1) * 0.35;
+    return {
+      key: `${edge.from}-${edge.to}`,
+      from: edge.from,
+      to: edge.to,
+      d: `M ${x1} 88 Q ${(x1 + x2) / 2} ${88 - lift} ${x2} 88`,
+      width: 0.8 + edge.weight * 3.2,
+      opacity: 0.3 + edge.weight * 0.7,
+    };
+  });
+  return { width: Math.max(width, 200), height, nodes, edges };
+});
+
+const neuronEdgeCount = computed(
+  () => neuronInLinks.value.length + neuronOutLinks.value.length,
+);
+
+const neuronSvg = computed(() => {
+  const width = 640;
+  const rowHeight = 26;
+  const inLinks = neuronInLinks.value;
+  const outLinks = neuronOutLinks.value;
+  const rows = Math.max(inLinks.length, outLinks.length, 1);
+  const height = 60 + rows * rowHeight;
+  const midY = 30 + ((rows - 1) * rowHeight) / 2;
+  const nodes: SvgNode[] = [
+    {
+      key: 'neuron',
+      x: 300,
+      y: midY - 17,
+      w: 40,
+      h: 34,
+      label: `N${wireNeuronIndex.value}`,
+      class: 'wire-neuron',
+    },
+  ];
+  const edges: SvgEdge[] = [];
+  const peak = Math.max(
+    0.0001,
+    ...inLinks.map(link => Math.abs(link.weight)),
+    ...outLinks.map(link => Math.abs(link.weight)),
+  );
+  inLinks.forEach((link, row) => {
+    const y = 30 + row * rowHeight;
+    nodes.push({
+      key: `in-${link.dim}`,
+      x: 10,
+      y: y - 9,
+      w: 150,
+      h: 18,
+      label: `d${link.dim} ${link.weight >= 0 ? '+' : ''}${link.weight.toFixed(2)}`,
+      class: 'wire-dim',
+    });
+    edges.push({
+      key: `in-${link.dim}`,
+      from: link.dim,
+      to: wireNeuronIndex.value,
+      d: `M 160 ${y} C 210 ${y}, 250 ${midY}, 300 ${midY}`,
+      width: 0.8 + (Math.abs(link.weight) / peak) * 3,
+      opacity: 0.35 + (Math.abs(link.weight) / peak) * 0.6,
+      positive: link.weight >= 0,
+    });
+  });
+  outLinks.forEach((link, row) => {
+    const y = 30 + row * rowHeight;
+    nodes.push({
+      key: `out-${link.dim}`,
+      x: 480,
+      y: y - 9,
+      w: 150,
+      h: 18,
+      label: `d${link.dim} ${link.weight >= 0 ? '+' : ''}${link.weight.toFixed(2)}`,
+      class: 'wire-dim',
+    });
+    edges.push({
+      key: `out-${link.dim}`,
+      from: wireNeuronIndex.value,
+      to: link.dim,
+      d: `M 340 ${midY} C 390 ${midY}, 430 ${y}, 480 ${y}`,
+      width: 0.8 + (Math.abs(link.weight) / peak) * 3,
+      opacity: 0.35 + (Math.abs(link.weight) / peak) * 0.6,
+      positive: link.weight >= 0,
+    });
+  });
+  return { width, height, nodes, edges };
+});
+
+function readLinks(value: unknown): WeightLink[] {
+  if (!Array.isArray(value)) return [];
+  const links: WeightLink[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const dim = asNumber(item.dim);
+    const weight = asNumber(item.weight);
+    if (dim === undefined || weight === undefined) continue;
+    links.push({ dim, weight });
+  }
+  links.sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
+  return links.slice(0, NEURON_LINKS);
+}
+
+async function runWiringPrompt(): Promise<void> {
+  const text = wirePrompt.value.trim();
+  if (!text || wiringLoading.value) return;
+  wiringLoading.value = true;
+  wiringError.value = '';
+  try {
+    const res = await api.infer(text);
+    if (!isRecord(res) || res.status === 'error') {
+      throw new Error(typeof res.error === 'string' ? res.error : 'Inference failed.');
+    }
+    const tokens = Array.isArray(res.tokens)
+      ? res.tokens.map(token => String(isRecord(token) ? token.text ?? '' : token ?? ''))
+      : [];
+    if (!tokens.length) throw new Error('The backend returned no token sequence.');
+    wireTokens.value = tokens;
+    const maps: AttentionMap[] = [];
+    if (Array.isArray(res.attention_maps)) {
+      for (const item of res.attention_maps) {
+        if (!isRecord(item)) continue;
+        const layer = asNumber(item.layer);
+        const head = asNumber(item.head);
+        if (layer === undefined || head === undefined || !Array.isArray(item.matrix)) continue;
+        maps.push({
+          layer,
+          head,
+          tokens,
+          matrix: item.matrix as number[][],
+        });
+      }
+    }
+    attentionMaps.value = maps;
+    await loadNeuronWires();
+  } catch (error) {
+    wiringError.value = error instanceof Error ? error.message : String(error);
+    wireTokens.value = [];
+    attentionMaps.value = [];
+  } finally {
+    wiringLoading.value = false;
+  }
+}
+
+async function loadNeuronWires(): Promise<void> {
+  const layer = Math.max(0, Math.min(11, Math.floor(wireNeuronLayer.value) || 0));
+  const index = Math.max(0, Math.min(3071, Math.floor(wireNeuronIndex.value) || 0));
+  wireNeuronLayer.value = layer;
+  wireNeuronIndex.value = index;
+  neuronWiresLoading.value = true;
+  neuronWiresError.value = '';
+  try {
+    const res = await api.gpt2Neuron(layer, index, 'mlp', 32);
+    if (!isRecord(res) || res.status === 'error') {
+      throw new Error(typeof res.error === 'string' ? res.error : 'Neuron read failed.');
+    }
+    neuronInLinks.value = [
+      ...readLinks(res.top_input_weights_positive).slice(0, 6),
+      ...readLinks(res.top_input_weights_negative).slice(0, 6),
+    ];
+    neuronOutLinks.value = [
+      ...readLinks(res.top_output_weights_positive).slice(0, 6),
+      ...readLinks(res.top_output_weights_negative).slice(0, 6),
+    ];
+  } catch (error) {
+    neuronWiresError.value = error instanceof Error ? error.message : String(error);
+    neuronInLinks.value = [];
+    neuronOutLinks.value = [];
+  } finally {
+    neuronWiresLoading.value = false;
+  }
 }
 
 async function loadArchitecture(): Promise<void> {
@@ -572,6 +955,152 @@ onMounted(() => {
   padding: 28px 16px;
   color: var(--text-muted);
   text-align: center;
+}
+
+.section-note {
+  margin: -6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wire-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.wire-field {
+  display: flex;
+  min-width: 220px;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-dim);
+}
+
+.wire-field .control {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.tool-button--primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.tool-button--primary:hover:not(:disabled) {
+  background: var(--primary-focus);
+}
+
+.wire-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.wire-panel {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 12px;
+  min-width: 0;
+}
+
+.wire-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.wire-panel h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.wire-selectors {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wire-selectors label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.control--inline {
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.control--number {
+  width: 84px;
+}
+
+.wire-caption {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.wire-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.wire {
+  fill: none;
+  stroke: var(--primary);
+}
+
+.wire--positive {
+  stroke: var(--success);
+}
+
+.wire--negative {
+  stroke: var(--danger);
+}
+
+.wire-node {
+  fill: var(--text-dim);
+}
+
+.wire-dim {
+  fill: var(--surface-2);
+  stroke: var(--border);
+}
+
+.wire-neuron {
+  fill: var(--primary);
+}
+
+.wire-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  fill: var(--text-dim);
 }
 
 @media (max-width: 760px) {
