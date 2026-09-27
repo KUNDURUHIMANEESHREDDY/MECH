@@ -14,20 +14,31 @@ class StorageError(Exception):
 DEFAULT_SETTINGS: dict[str, Any] = {
     "theme": "system",
     "gpuEnabled": False,
+    "acceleration": "auto",
+    "cacheEnabled": True,
+    "cacheMaxSizeMb": 1024,
     "cachePath": str(Path.home() / ".cache" / "neural-debugger"),
     "modelPath": "gpt2",
     "workspacePath": str(Path.home()),
+    "pythonPath": "",
+    "projectsPath": "",
 }
 
 SETTING_TYPES = {
     "theme": str,
     "gpuEnabled": bool,
+    "acceleration": str,
+    "cacheEnabled": bool,
+    "cacheMaxSizeMb": int,
     "cachePath": str,
     "modelPath": str,
     "workspacePath": str,
+    "pythonPath": str,
+    "projectsPath": str,
 }
 
 VALID_THEMES = {"system", "light", "dark"}
+VALID_ACCELERATION = {"auto", "on", "off"}
 
 
 class DesktopStorage:
@@ -101,10 +112,20 @@ class DesktopStorage:
             if key not in DEFAULT_SETTINGS:
                 raise StorageError(f"Unknown setting: {key}")
             expected_type = SETTING_TYPES[key]
-            if not isinstance(value, expected_type):
+            if expected_type is bool:
+                valid = isinstance(value, bool)
+            elif expected_type is int:
+                valid = isinstance(value, int) and not isinstance(value, bool)
+            else:
+                valid = isinstance(value, expected_type)
+            if not valid:
                 raise StorageError(f"Invalid type for setting {key}")
             if key == "theme" and value not in VALID_THEMES:
                 raise StorageError("theme must be system, light, or dark")
+            if key == "acceleration" and value not in VALID_ACCELERATION:
+                raise StorageError("acceleration must be auto, on, or off")
+            if key == "cacheMaxSizeMb" and value < 0:
+                raise StorageError("cacheMaxSizeMb must be a non-negative integer")
             current[key] = value
 
         with self._connect() as connection:

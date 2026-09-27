@@ -8,16 +8,16 @@
       </div>
       <span
         class="surface-status"
-        :class="{ 'is-connected': bridgeAvailable }"
+        :class="{ 'is-connected': bridgeAvailable || apiActive }"
         role="status"
         aria-live="polite"
       >
         <span class="status-dot" aria-hidden="true" />
-        {{ bridgeAvailable ? 'Bridge detected' : 'Bridge unavailable' }}
+        {{ bridgeAvailable ? 'Bridge detected' : apiActive ? 'Backend API' : 'Bridge unavailable' }}
       </span>
     </header>
 
-    <div v-if="!bridgeAvailable" class="surface-notice notice-warning" role="status">
+    <div v-if="!bridgeAvailable && !apiActive" class="surface-notice notice-warning" role="status">
       <strong>Local application bridge unavailable</strong>
       <p>
         Build controls and output belong to the Electron desktop process. Open MECH in its desktop shell to start a
@@ -25,7 +25,7 @@
       </p>
     </div>
 
-    <div v-else-if="!canRead && !canStart" class="surface-notice notice-warning" role="status">
+    <div v-else-if="!canRead && !canStart && !apiActive" class="surface-notice notice-warning" role="status">
       <strong>Local application bridge unavailable</strong>
       <p>The detected bridge does not expose a build reader or a start action. No build state is shown.</p>
     </div>
@@ -56,9 +56,9 @@
               <span v-if="canListen" class="live-label">{{ liveConnected ? 'Events connected' : 'Event subscription available' }}</span>
             </p>
           </div>
-          <div v-if="canRead || canClear" class="toolbar-actions">
+          <div v-if="canRead || canClear || apiActive" class="toolbar-actions">
             <button
-              v-if="canRead"
+              v-if="canRead || apiActive"
               class="quiet-button"
               type="button"
               :disabled="isLoading"
@@ -78,7 +78,7 @@
           </div>
         </header>
 
-        <form v-if="canStart" class="start-form" @submit.prevent="startBuild">
+        <form v-if="canStart || apiActive" class="start-form" @submit.prevent="startBuild">
           <div class="target-field">
             <label for="build-target">Build target</label>
             <select id="build-target" v-model="buildTarget">
@@ -92,7 +92,7 @@
         </form>
 
         <div v-else class="bridge-note" role="note">
-          {{ bridgeAvailable ? 'The active bridge does not expose a build start action. Output remains read-only.' : 'The local application bridge is unavailable, so no build action can be started.' }}
+          {{ bridgeAvailable ? 'The active bridge does not expose a build start action. Output remains read-only.' : apiActive ? 'The backend runs renderer builds; Python checks need the desktop bridge.' : 'The local application bridge is unavailable, so no build action can be started.' }}
         </div>
 
         <div v-if="isLoading" class="panel-message" role="status" aria-live="polite">
@@ -118,8 +118,8 @@
         <p v-else-if="errorMessage" class="panel-message panel-message-error">
           Build output is unavailable for this request.
         </p>
-        <p v-else-if="canRead" class="panel-message">
-          No build output has been recorded by the local application bridge.
+        <p v-else-if="canRead || apiActive" class="panel-message">
+          No build output has been recorded{{ bridgeAvailable ? ' by the local application bridge' : ' by the backend yet' }}.
         </p>
         <p v-else-if="bridgeAvailable" class="panel-message">
           The active bridge does not expose a build reader. No output records are shown.
@@ -139,7 +139,7 @@
           </div>
           <div>
             <dt>Reader</dt>
-            <dd>{{ canRead ? 'Available' : 'Not exposed' }}</dd>
+            <dd>{{ canRead ? 'Available' : apiActive ? 'Backend build API' : 'Not exposed' }}</dd>
           </div>
           <div>
             <dt>Events</dt>
@@ -151,7 +151,7 @@
           </div>
         </dl>
         <p class="info-help">
-          Status changes only after the bridge reports a start, event, or close. If no bridge is present, this surface
+          Status changes only after {{ bridgeAvailable ? 'the bridge' : 'the backend' }} reports a start, event, or close. If no bridge is present, this surface
           remains unstarted rather than displaying fabricated build history.
         </p>
       </aside>
@@ -161,6 +161,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { api } from '../services/api';
 
 type UnknownRecord = Record<string, unknown>;
 type Bridge = Record<string, unknown>;
@@ -179,6 +180,8 @@ const bridge = ref<Bridge | null>(resolveBridge());
 const buildEntries = ref<BuildEntry[]>([]);
 const buildTarget = ref<'renderer' | 'python'>('renderer');
 const buildStatus = ref<BuildStatus>('idle');
+const apiActive = ref(false);
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 const isLoading = ref(false);
 const isStarting = ref(false);
 const isClearing = ref(false);
@@ -209,6 +212,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopPolling();
   if (stopBuildEvents) {
     stopBuildEvents();
     stopBuildEvents = null;
@@ -288,8 +292,14 @@ function buildLogArray(value: unknown): unknown[] {
 
 async function loadBuildLogs() {
   const reader = getMethod(bridge.value, 'getBuildLogs');
-  if (!reader) return;
+  if (reader) {
+    await loadBridgeLogs(reader);
+    return;
+  }
+  await loadApiBuild();
+}
 
+async function loadBridgeLogs(reader: BridgeMethod) {
   isLoading.value = true;
   errorMessage.value = '';
   try {
@@ -306,9 +316,84 @@ async function loadBuildLogs() {
   }
 }
 
+function applyApiBuildState(build: unknown) {
+  if (!isRecord(build)) return;
+  const status = stringValue(build.status);
+  if (status === 'running') buildStatus.value = 'running';
+  else if (status === 'completed') buildStatus.value = 'success';
+  else if (status === 'failed') buildStatus.value = 'error';
+  else if (status === 'idle' && buildStatus.value !== 'running') buildStatus.value = 'idle';
+  const tail = stringValue(build.output_tail);
+  if (tail) {
+    buildEntries.value = tail.split(/\r?\n/).filter((line) => line.trim() !== '').slice(-200).map(
+      (line, index) => ({
+        id: `backend-build-${index}-${line.slice(0, 20)}`,
+        timestamp: stringValue(build.finished_at) || stringValue(build.started_at),
+        level: buildStatus.value === 'error' ? 'error' : 'info',
+        message: line,
+        context: '',
+      }),
+    );
+  }
+  if (buildStatus.value === 'running') startPolling();
+  else stopPolling();
+}
+
+async function loadApiBuild() {
+  isLoading.value = true;
+  errorMessage.value = '';
+  try {
+    const result = await api.getBackendBuild();
+    if (!isRecord(result) || result.status === 'error' || !isRecord(result.build)) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend returned no build state.',
+      );
+    }
+    apiActive.value = true;
+    applyApiBuildState(result.build);
+  } catch (error) {
+    apiActive.value = false;
+    buildEntries.value = [];
+    errorMessage.value = '';
+  } finally {
+    isLoading.value = false;
+  }
+}
+
 async function refreshLogs() {
-  if (!canRead.value) return;
+  if (!canRead.value && !apiActive.value) {
+    await loadApiBuild();
+    return;
+  }
   await loadBuildLogs();
+}
+
+function startPolling() {
+  if (pollTimer !== null) return;
+  pollTimer = setInterval(() => {
+    void refreshApiBuild();
+  }, 5000);
+}
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+async function refreshApiBuild() {
+  try {
+    const result = await api.getBackendBuild();
+    if (isRecord(result) && isRecord(result.build)) {
+      apiActive.value = true;
+      applyApiBuildState(result.build);
+    }
+  } catch {
+    // Poll failures must not wipe a running build view; the next tick retries.
+  }
 }
 
 function inferStatusFromEntries() {
@@ -369,9 +454,16 @@ function appendEntry(entry: BuildEntry) {
 }
 
 async function startBuild() {
+  if (isStarting.value || buildStatus.value === 'running') return;
   const start = getMethod(bridge.value, 'startBuild');
-  if (!start || isStarting.value || buildStatus.value === 'running') return;
+  if (start) {
+    await startBridgeBuild(start);
+    return;
+  }
+  await startApiBuild();
+}
 
+async function startBridgeBuild(start: BridgeMethod) {
   isStarting.value = true;
   errorMessage.value = '';
   actionMessage.value = '';
@@ -390,6 +482,39 @@ async function startBuild() {
     actionMessage.value = 'Build start accepted by the local application bridge.';
   } catch (error) {
     errorMessage.value = messageFrom(error) || 'The local application bridge could not start the build.';
+  } finally {
+    isStarting.value = false;
+  }
+}
+
+async function startApiBuild() {
+  if (buildTarget.value !== 'renderer') {
+    errorMessage.value = 'Python environment checks require the desktop bridge; the backend runs renderer builds only.';
+    return;
+  }
+  isStarting.value = true;
+  errorMessage.value = '';
+  actionMessage.value = '';
+  try {
+    const result = await api.startBackendBuild();
+    if (!isRecord(result) || result.status === 'busy') {
+      actionMessage.value = 'A build is already running on the backend.';
+      await refreshApiBuild();
+      return;
+    }
+    if (!isRecord(result) || result.status === 'error') {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend declined to start a build.',
+      );
+    }
+    apiActive.value = true;
+    buildStatus.value = 'running';
+    actionMessage.value = 'Renderer build started on the backend; output streams in below.';
+    startPolling();
+  } catch (error) {
+    errorMessage.value = messageFrom(error) || 'The backend could not start the build.';
   } finally {
     isStarting.value = false;
   }

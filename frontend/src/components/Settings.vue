@@ -8,16 +8,16 @@
       </div>
       <span
         class="surface-status"
-        :class="{ 'is-connected': bridgeAvailable }"
+        :class="{ 'is-connected': bridgeAvailable || apiActive }"
         role="status"
         aria-live="polite"
       >
         <span class="status-dot" aria-hidden="true" />
-        {{ bridgeAvailable ? 'Bridge detected' : 'Bridge unavailable' }}
+        {{ bridgeAvailable ? 'Bridge detected' : apiActive ? 'Backend API' : 'Bridge unavailable' }}
       </span>
     </header>
 
-    <div v-if="!bridgeAvailable" class="surface-notice notice-warning" role="status">
+    <div v-if="!bridgeAvailable && !apiActive" class="surface-notice notice-warning" role="status">
       <strong>Local application bridge unavailable</strong>
       <p>
         Settings can be read and saved only when MECH is running in its Electron desktop shell.
@@ -42,7 +42,7 @@
       <p v-if="bridgeAvailable && !canRead">
         The bridge was detected but does not expose a settings reader. No values below are treated as saved data.
       </p>
-      <p v-else-if="!bridgeAvailable && !providedSettings">
+      <p v-else-if="!bridgeAvailable && !apiActive && !providedSettings">
         The controls are a local preview only. They do not represent records in the application database.
       </p>
     </div>
@@ -83,7 +83,7 @@
             <h3>Theme</h3>
             <p class="panel-description">Choose the preference passed to the desktop application.</p>
           </div>
-          <span class="source-badge">{{ valuesLoaded ? 'PERSISTED SETTING' : 'LOCAL PREVIEW' }}</span>
+          <span class="source-badge">{{ valuesLoaded ? (settingsSource === 'api' ? 'BACKEND API' : 'PERSISTED SETTING') : 'LOCAL PREVIEW' }}</span>
         </div>
 
         <div class="form-grid form-grid-single">
@@ -120,7 +120,7 @@
             <h3>GPU</h3>
             <p class="panel-description">Control hardware acceleration for local model work.</p>
           </div>
-          <span class="source-badge">{{ valuesLoaded ? 'PERSISTED SETTING' : 'LOCAL PREVIEW' }}</span>
+          <span class="source-badge">{{ valuesLoaded ? (settingsSource === 'api' ? 'BACKEND API' : 'PERSISTED SETTING') : 'LOCAL PREVIEW' }}</span>
         </div>
 
         <fieldset class="settings-fieldset">
@@ -157,7 +157,7 @@
             <h3>Cache</h3>
             <p class="panel-description">Set the local cache behavior and retention limit.</p>
           </div>
-          <span class="source-badge">{{ valuesLoaded ? 'PERSISTED SETTING' : 'LOCAL PREVIEW' }}</span>
+          <span class="source-badge">{{ valuesLoaded ? (settingsSource === 'api' ? 'BACKEND API' : 'PERSISTED SETTING') : 'LOCAL PREVIEW' }}</span>
         </div>
 
         <fieldset class="settings-fieldset">
@@ -209,7 +209,7 @@
             <h3>Paths</h3>
             <p class="panel-description">Point the desktop application at local runtimes and workspaces.</p>
           </div>
-          <span class="source-badge">{{ valuesLoaded ? 'PERSISTED SETTING' : 'LOCAL PREVIEW' }}</span>
+          <span class="source-badge">{{ valuesLoaded ? (settingsSource === 'api' ? 'BACKEND API' : 'PERSISTED SETTING') : 'LOCAL PREVIEW' }}</span>
         </div>
 
         <div class="form-grid form-grid-single">
@@ -243,7 +243,7 @@
       <footer class="form-actions">
         <div class="action-context">
           <span class="save-indicator" :class="{ 'is-ready': canSave }" aria-hidden="true" />
-          <span v-if="canSave">Changes can be saved to the local application database.</span>
+          <span v-if="canSave">Changes can be saved {{ settingsSource === 'api' ? 'to the backend database' : 'to the local application database' }}.</span>
           <span v-else>Saving is disabled until a settings bridge is available.</span>
         </div>
         <div class="action-buttons">
@@ -266,6 +266,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { api } from '../services/api';
 
 type UnknownRecord = Record<string, unknown>;
 type Bridge = Record<string, unknown>;
@@ -300,6 +301,10 @@ const form = reactive({
 
 const bridge = ref<Bridge | null>(resolveBridge());
 const settingsRecord = ref<UnknownRecord | null>(isRecord(props.settings) ? cloneRecord(props.settings) : null);
+const settingsSource = ref<'bridge' | 'api' | null>(
+  isRecord(props.settings) ? 'bridge' : null,
+);
+const apiActive = ref(false);
 const activeTab = ref<SettingsTab>('theme');
 const isLoading = ref(false);
 const isSaving = ref(false);
@@ -311,7 +316,7 @@ const providedSettings = computed(() => isRecord(props.settings));
 const bridgeAvailable = computed(() => Boolean(bridge.value));
 const valuesLoaded = computed(() => settingsRecord.value !== null);
 const canRead = computed(() => hasMethod(bridge.value, 'getSettings'));
-const canSave = computed(() => valuesLoaded.value && Boolean(settingsWriter(bridge.value)));
+const canSave = computed(() => valuesLoaded.value && (Boolean(settingsWriter(bridge.value)) || settingsSource.value === 'api'));
 const canReset = computed(() => hasMethod(bridge.value, 'resetSettings'));
 
 onMounted(() => {
@@ -450,35 +455,83 @@ function nextSettings(): UnknownRecord {
 
 async function loadSettings() {
   const activeBridge = bridge.value;
-  if (!activeBridge) {
-    isLoading.value = false;
+  if (activeBridge) {
+    if (!hasMethod(activeBridge, 'getSettings')) {
+      loadError.value = 'The local application bridge does not expose getSettings().';
+      isLoading.value = false;
+      return;
+    }
+
+    isLoading.value = true;
+    loadError.value = '';
+    actionMessage.value = '';
+    try {
+      const result = await activeBridge.getSettings();
+      if (!isRecord(result) || result.error !== undefined) {
+        throw new Error(
+          isRecord(result) && typeof result.error === 'string'
+            ? result.error
+            : 'The bridge returned no settings object.',
+        );
+      }
+      settingsRecord.value = cloneRecord(result);
+      settingsSource.value = 'bridge';
+      populateForm(result);
+      applyTheme(form.theme);
+      notifyChange();
+    } catch (error) {
+      loadError.value = errorMessage(error);
+    } finally {
+      isLoading.value = false;
+    }
     return;
   }
 
-  if (!hasMethod(activeBridge, 'getSettings')) {
-    loadError.value = 'The local application bridge does not expose getSettings().';
-    isLoading.value = false;
-    return;
-  }
+  await loadSettingsFromApi();
+}
 
+async function loadSettingsFromApi() {
   isLoading.value = true;
   loadError.value = '';
   actionMessage.value = '';
   try {
-    const result = await activeBridge.getSettings();
-    if (!isRecord(result) || result.error !== undefined) {
+    const result = await api.getBackendSettings();
+    if (!isRecord(result) || result.status === 'error' || !isRecord(result.settings)) {
       throw new Error(
         isRecord(result) && typeof result.error === 'string'
           ? result.error
-          : 'The bridge returned no settings object.',
+          : 'The backend returned no settings object.',
       );
     }
-    settingsRecord.value = cloneRecord(result);
-    populateForm(result);
+    const stored = result.settings as UnknownRecord;
+    settingsRecord.value = {
+      theme: stored.theme,
+      gpu: { enabled: stored.gpuEnabled, acceleration: stored.acceleration },
+      cache: {
+        enabled: stored.cacheEnabled,
+        maxSizeMb: stored.cacheMaxSizeMb,
+        location: stored.cachePath,
+      },
+      paths: {
+        python: stored.pythonPath,
+        workspace: stored.workspacePath,
+        projects: stored.projectsPath,
+      },
+    };
+    settingsSource.value = 'api';
+    apiActive.value = true;
+    populateForm(settingsRecord.value);
     applyTheme(form.theme);
     notifyChange();
   } catch (error) {
-    loadError.value = errorMessage(error);
+    apiActive.value = false;
+    settingsRecord.value = isRecord(props.settings) ? cloneRecord(props.settings) : null;
+    settingsSource.value = isRecord(props.settings) ? 'bridge' : null;
+    if (!settingsRecord.value) {
+      loadError.value = '';
+    } else {
+      loadError.value = errorMessage(error);
+    }
   } finally {
     isLoading.value = false;
   }
@@ -486,8 +539,16 @@ async function loadSettings() {
 
 async function saveSettings() {
   const writer = settingsWriter(bridge.value);
-  if (!writer || !canSave.value) return;
+  if (writer && canSave.value) {
+    await saveSettingsViaBridge(writer);
+    return;
+  }
+  if (settingsSource.value === 'api') {
+    await saveSettingsViaApi();
+  }
+}
 
+async function saveSettingsViaBridge(writer: BridgeMethod) {
   isSaving.value = true;
   actionMessage.value = '';
   loadError.value = '';
@@ -508,6 +569,40 @@ async function saveSettings() {
     }
     applyTheme(form.theme);
     actionMessage.value = 'Settings saved through the local application bridge.';
+    notifyChange();
+  } catch (error) {
+    loadError.value = errorMessage(error);
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+async function saveSettingsViaApi() {
+  isSaving.value = true;
+  actionMessage.value = '';
+  loadError.value = '';
+  try {
+    const payload = {
+      theme: form.theme,
+      gpuEnabled: form.gpuEnabled,
+      acceleration: form.acceleration,
+      cacheEnabled: form.cacheEnabled,
+      cacheMaxSizeMb: numberValue(form.cacheMaxSizeMb, 1024),
+      cachePath: form.cacheLocation.trim(),
+      workspacePath: form.workspacePath.trim(),
+      pythonPath: form.pythonPath.trim(),
+      projectsPath: form.projectsPath.trim(),
+    };
+    const result = await api.updateBackendSettings(payload);
+    if (!isRecord(result) || result.status === 'error' || !isRecord(result.settings)) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend refused the settings update.',
+      );
+    }
+    await loadSettingsFromApi();
+    actionMessage.value = 'Settings saved to the backend database.';
     notifyChange();
   } catch (error) {
     loadError.value = errorMessage(error);

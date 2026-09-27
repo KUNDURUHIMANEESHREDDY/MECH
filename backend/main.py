@@ -5,9 +5,10 @@ packaged .exe. Keep /api routes available without needing a separate server.
 """
 import asyncio
 import logging
+import time
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -40,6 +41,25 @@ app.add_middleware(
 async def _startup_probe():
     """Start fast; load ML modules/models only when the frontend asks."""
     logger.info("Backend ready. ML model modules will load on demand.")
+
+
+@app.middleware("http")
+async def _request_log_middleware(request: Request, call_next):
+    """Record request metadata for the Logging view (no bodies stored)."""
+    started = time.perf_counter()
+    response = await call_next(request)
+    try:
+        if request.url.path != "/health":
+            from backend.core.request_log import record
+            record(
+                request.method,
+                request.url.path,
+                response.status_code,
+                (time.perf_counter() - started) * 1000.0,
+            )
+    except Exception:
+        pass
+    return response
 
 
 @app.get("/")

@@ -291,6 +291,157 @@ def delete_session(item_id: str) -> Dict[str, Any]:
     return {"status": "deleted" if deleted else "not_found", "id": item_id}
 
 
+@router.get("/settings")
+def get_settings() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
+    return {
+        "status": "ok",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "settings"), "live"),
+        "settings": _store.get_settings(),
+    }
+
+
+@router.put("/settings")
+def update_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+    from backend.storage.database import StorageError
+
+    try:
+        settings = _store.update_settings(dict(payload or {}))
+    except StorageError as exc:
+        return {
+            "status": "error",
+            "provenance": "unavailable",
+            "field_provenance": field_map(("status", "error"), "unavailable"),
+            "error": str(exc)[:300],
+        }
+    return {
+        "status": "ok",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "settings"), "live"),
+        "settings": settings,
+    }
+
+
+@router.get("/projects")
+def list_projects() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
+    return {
+        "status": "ok",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "projects"), "live"),
+        "projects": _store.list_recent_projects(),
+    }
+
+
+@router.post("/projects")
+def add_project(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+    from backend.storage.database import StorageError
+
+    try:
+        record = _store.add_recent_project(
+            str((payload or {}).get("path", "")),
+            str((payload or {}).get("name", "")) or None,
+        )
+    except StorageError as exc:
+        return {
+            "status": "error",
+            "provenance": "unavailable",
+            "field_provenance": field_map(("status", "error"), "unavailable"),
+            "error": str(exc)[:300],
+        }
+    return {
+        "status": "ok",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "project"), "live"),
+        "project": record,
+    }
+
+
+@router.get("/recent-files")
+def list_recent_files() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
+    return {
+        "status": "ok",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "files"), "live"),
+        "files": _store.list_recent_files(),
+    }
+
+
+@router.post("/recent-files")
+def add_recent_file(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+    from backend.storage.database import StorageError
+
+    try:
+        record = _store.add_recent_file(
+            str((payload or {}).get("path", "")),
+            str((payload or {}).get("project_path", "")) or None,
+        )
+    except StorageError as exc:
+        return {
+            "status": "error",
+            "provenance": "unavailable",
+            "field_provenance": field_map(("status", "error"), "unavailable"),
+            "error": str(exc)[:300],
+        }
+    return {
+        "status": "ok",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "file"), "live"),
+        "file": record,
+    }
+
+
+@router.get("/logs")
+def list_logs(limit: int = 100) -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+    from backend.core.request_log import list_entries
+
+    return {
+        "status": "ok",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "entries"), "live"),
+        "source": "backend request log (metadata only, no bodies)",
+        "entries": list_entries(limit),
+    }
+
+
+@router.get("/build")
+def build_status() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+    from backend.runtime.build_runner import history, status
+
+    return {
+        "status": "ok",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "build", "history"), "live"),
+        "build": status(),
+        "history": history(),
+    }
+
+
+@router.post("/build")
+def start_build() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+    from backend.runtime.build_runner import start, status
+
+    accepted = start()
+    return {
+        "status": "ok" if accepted.get("accepted") else "busy",
+        "provenance": "live",
+        "field_provenance": field_map(("status", "build"), "live"),
+        "detail": accepted,
+        "build": status(),
+    }
+
+
 @router.get("/discoveries")
 def list_discoveries() -> Dict[str, Any]:
     from backend.agents.evidence_policy import field_map

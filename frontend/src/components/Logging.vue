@@ -8,16 +8,16 @@
       </div>
       <span
         class="surface-status"
-        :class="{ 'is-connected': bridgeAvailable }"
+        :class="{ 'is-connected': bridgeAvailable || apiActive }"
         role="status"
         aria-live="polite"
       >
         <span class="status-dot" aria-hidden="true" />
-        {{ bridgeAvailable ? 'Bridge detected' : 'Bridge unavailable' }}
+        {{ bridgeAvailable ? 'Bridge detected' : apiActive ? 'Backend API' : 'Bridge unavailable' }}
       </span>
     </header>
 
-    <div v-if="!bridgeAvailable" class="surface-notice notice-warning" role="status">
+    <div v-if="!bridgeAvailable && !apiActive" class="surface-notice notice-warning" role="status">
       <strong>Local application bridge unavailable</strong>
       <p>
         Application logs are local desktop records. Open MECH in the Electron desktop app to read them; browser preview
@@ -53,7 +53,7 @@
             </p>
           </div>
           <button
-            v-if="canRead"
+            v-if="canRead || apiActive"
             class="quiet-button"
             type="button"
             :disabled="isLoading"
@@ -109,8 +109,8 @@
         <p v-else-if="searchQuery || levelFilter !== 'all'" class="panel-message">
           No log entries match the current filters.
         </p>
-        <p v-else-if="canRead" class="panel-message">
-          No log entries have been returned by the local application bridge.
+        <p v-else-if="canRead || apiActive" class="panel-message">
+          No log entries have been returned{{ bridgeAvailable ? ' by the local application bridge' : ' by the backend yet' }}.
         </p>
         <p v-else-if="bridgeAvailable" class="panel-message">
           The bridge does not expose a log reader. No log records are available.
@@ -126,7 +126,7 @@
         <dl class="info-list">
           <div>
             <dt>Reader</dt>
-            <dd>{{ canRead ? 'Bridge log reader available' : 'Not exposed' }}</dd>
+            <dd>{{ canRead ? 'Bridge log reader available' : apiActive ? 'Backend request log' : 'Not exposed' }}</dd>
           </div>
           <div>
             <dt>Live stream</dt>
@@ -138,7 +138,7 @@
           </div>
         </dl>
         <p class="info-help">
-          Logs are shown exactly as returned by the active bridge. If the desktop app is closed or the bridge is unavailable,
+          Logs are shown exactly as returned by the {{ bridgeAvailable ? 'active bridge' : 'backend request log' }}. If the desktop app is closed or the bridge is unavailable,
           this surface stays empty rather than substituting sample output.
         </p>
       </aside>
@@ -148,6 +148,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { api } from '../services/api';
 
 type UnknownRecord = Record<string, unknown>;
 type Bridge = Record<string, unknown>;
@@ -163,6 +164,7 @@ interface LogEntry {
 
 const bridge = ref<Bridge | null>(resolveBridge());
 const logEntries = ref<LogEntry[]>([]);
+const apiActive = ref(false);
 const searchQuery = ref('');
 const levelFilter = ref('all');
 const isLoading = ref(false);
@@ -275,8 +277,14 @@ function logArray(value: unknown): unknown[] {
 
 async function loadLogs() {
   const reader = getMethod(bridge.value, 'getAppLogs') ?? getMethod(bridge.value, 'listLogs');
-  if (!reader) return;
+  if (reader) {
+    await loadBridgeLogs(reader);
+    return;
+  }
+  await loadApiLogs();
+}
 
+async function loadBridgeLogs(reader: BridgeMethod) {
   isLoading.value = true;
   loadError.value = '';
   actionMessage.value = '';
@@ -293,8 +301,57 @@ async function loadLogs() {
   }
 }
 
+function normalizeBackendEntry(value: unknown, index: number): LogEntry | null {
+  if (!isRecord(value)) return null;
+  const method = typeof value.method === 'string' ? value.method : 'GET';
+  const path = typeof value.path === 'string' ? value.path : '/';
+  const status = typeof value.status === 'number' ? value.status : 0;
+  const duration = typeof value.duration_ms === 'number' ? value.duration_ms : 0;
+  const rawTimestamp = value.timestamp;
+  const timestamp = typeof rawTimestamp === 'number'
+    ? new Date(rawTimestamp * 1000).toISOString()
+    : stringValue(rawTimestamp);
+  const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+  return {
+    id: `backend-log-${index}-${method}-${path}-${timestamp}`,
+    timestamp,
+    level,
+    message: `${method} ${path} → ${status} (${duration} ms)`,
+    context: '',
+  };
+}
+
+async function loadApiLogs() {
+  isLoading.value = true;
+  loadError.value = '';
+  actionMessage.value = '';
+  try {
+    const result = await api.getBackendLogs(100);
+    if (!isRecord(result) || result.status === 'error' || !Array.isArray(result.entries)) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend returned no log list.',
+      );
+    }
+    apiActive.value = true;
+    logEntries.value = result.entries
+      .map((value, index) => normalizeBackendEntry(value, index))
+      .filter((value): value is LogEntry => value !== null);
+  } catch (error) {
+    apiActive.value = false;
+    logEntries.value = [];
+    loadError.value = '';
+  } finally {
+    isLoading.value = false;
+  }
+}
+
 async function refreshLogs() {
-  if (!canRead.value) return;
+  if (!canRead.value && !apiActive.value) {
+    await loadApiLogs();
+    return;
+  }
   await loadLogs();
 }
 

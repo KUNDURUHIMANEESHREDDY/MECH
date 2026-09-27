@@ -56,6 +56,14 @@ async function get<T>(path: string): Promise<T> {
   return request<T>(path, { method: 'GET' });
 }
 
+async function put<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 async function post<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, {
     method: 'POST',
@@ -119,8 +127,7 @@ export const api = {
   listSessions: async (): Promise<unknown[]> => {
     const res = await get<{ sessions?: unknown[] }>('/api/sessions');
     return Array.isArray(res) ? res : Array.isArray(res?.sessions) ? res.sessions : [];
-  },
-  createSession: (data: Record<string, unknown>) => post<unknown>('/api/sessions', data),
+  },  createSession: (data: Record<string, unknown>) => post<unknown>('/api/sessions', data),
   saveSession: (data: unknown) => post<unknown>('/api/sessions', data as Record<string, unknown>),
   deleteSession: (id: string) => del<{ status: string }>(`/api/sessions/${id}`),
 
@@ -148,4 +155,18 @@ export const api = {
   listProjects: () => localCall<unknown[]>('listProjects'),
   addProject: (...args: any[]) => localCall<unknown>('addProject', ...args),
   removeProject: (...args: any[]) => localCall<unknown>('removeProject', ...args),
+
+  getBackendSettings: () => get<Record<string, unknown>>('/api/settings'),
+  updateBackendSettings: (settings: Record<string, unknown>) =>
+    put<Record<string, unknown>>('/api/settings', settings),
+  listBackendProjects: () => get<Record<string, unknown>>('/api/projects'),
+  addBackendProject: (project: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/projects', project),
+  listBackendRecentFiles: () => get<Record<string, unknown>>('/api/recent-files'),
+  addBackendRecentFile: (file: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/recent-files', file),
+  getBackendLogs: (limit?: number) =>
+    get<Record<string, unknown>>(`/api/logs${limit ? `?limit=${limit}` : ''}`),
+  getBackendBuild: () => get<Record<string, unknown>>('/api/build'),
+  startBackendBuild: () => post<Record<string, unknown>>('/api/build', {}),
 };

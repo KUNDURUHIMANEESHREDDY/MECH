@@ -8,16 +8,16 @@
       </div>
       <span
         class="surface-status"
-        :class="{ 'is-connected': bridgeAvailable }"
+        :class="{ 'is-connected': bridgeAvailable || apiActive }"
         role="status"
         aria-live="polite"
       >
         <span class="status-dot" aria-hidden="true" />
-        {{ bridgeAvailable ? 'Bridge detected' : 'Bridge unavailable' }}
+        {{ bridgeAvailable ? 'Bridge detected' : apiActive ? 'Backend API' : 'Bridge unavailable' }}
       </span>
     </header>
 
-    <div v-if="!bridgeAvailable" class="surface-notice notice-warning" role="status">
+    <div v-if="!bridgeAvailable && !apiActive" class="surface-notice notice-warning" role="status">
       <strong>Local application bridge unavailable</strong>
       <p>
         Open MECH in the Electron desktop app to load application project records. Browser-only entries below are
@@ -40,10 +40,10 @@
           <div>
             <p class="panel-kicker">Application database</p>
             <h3 id="application-projects-title">Application projects</h3>
-            <p class="panel-description">Records returned by the active desktop bridge.</p>
+            <p class="panel-description">{{ bridgeAvailable ? 'Records returned by the active desktop bridge.' : 'Records returned by the backend database.' }}</p>
           </div>
           <button
-            v-if="bridgeCanList"
+            v-if="bridgeCanList || apiActive"
             class="quiet-button"
             type="button"
             :disabled="isLoading"
@@ -63,7 +63,7 @@
             <div class="record-main">
               <div class="record-title-line">
                 <h4>{{ project.name }}</h4>
-                <span class="record-badge">APPLICATION</span>
+                <span class="record-badge">{{ project.source === 'api' ? 'BACKEND API' : 'APPLICATION' }}</span>
               </div>
               <p v-if="project.path" class="record-path" :title="project.path">
                 <span aria-hidden="true">↳</span> {{ project.path }}
@@ -101,7 +101,7 @@
         <p v-else-if="bridgeError" class="panel-message panel-message-error">
           Application project records are unavailable for this request.
         </p>
-        <p v-else-if="bridgeAvailable && bridgeCanList" class="panel-message">
+        <p v-else-if="(bridgeAvailable && bridgeCanList) || apiActive" class="panel-message">
           No application projects have been recorded.
         </p>
         <p v-else-if="bridgeAvailable" class="panel-message">
@@ -145,8 +145,9 @@
           </div>
 
           <div class="destination-note" role="note">
-            <span class="destination-badge">{{ bridgeCanAdd ? 'APPLICATION BRIDGE' : 'LOCAL BROWSER' }}</span>
+            <span class="destination-badge">{{ bridgeCanAdd ? 'APPLICATION BRIDGE' : apiActive ? 'BACKEND API' : 'LOCAL BROWSER' }}</span>
             <span v-if="bridgeCanAdd">This entry will be sent to the active application bridge.</span>
+            <span v-else-if="apiActive">This entry will be saved to the backend database.</span>
             <span v-else>This entry will be stored only in this browser until a bridge is available.</span>
           </div>
 
@@ -216,11 +217,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { api } from '../services/api';
 
 type UnknownRecord = Record<string, unknown>;
 type Bridge = Record<string, unknown>;
 type BridgeMethod = (...args: unknown[]) => unknown;
-type ProjectSource = 'application' | 'local';
+type ProjectSource = 'application' | 'api' | 'local';
 
 interface ProjectRecord {
   id: string;
@@ -235,6 +237,7 @@ const LOCAL_PROJECTS_KEY = 'mech.local.projects.v1';
 const bridge = ref<Bridge | null>(resolveBridge());
 const applicationProjects = ref<ProjectRecord[]>([]);
 const localProjects = ref<ProjectRecord[]>([]);
+const apiActive = ref(false);
 const projectName = ref('');
 const projectPath = ref('');
 const isLoading = ref(false);
@@ -295,7 +298,8 @@ function recordArray(value: unknown, key: string): unknown[] {
 function normalizeProject(value: unknown, _index: number, source: ProjectSource): ProjectRecord | null {
   if (!isRecord(value)) return null;
 
-  const id = stringValue(value.id);
+  const rawId = value.id;
+  const id = stringValue(value.id) || (typeof rawId === 'number' && Number.isFinite(rawId) ? String(rawId) : '');
   const name = stringValue(value.name) || stringValue(value.label);
   const path = stringValue(value.path);
   if (!id || !name) return null;
@@ -350,10 +354,17 @@ function persistLocalProjects() {
 }
 
 async function loadApplicationProjects() {
-  if (!bridge.value) return;
-  const listProjects = getMethod(bridge.value, 'listProjects') ?? getMethod(bridge.value, 'listRecentProjects');
-  if (!listProjects) return;
+  if (bridge.value) {
+    const listProjects = getMethod(bridge.value, 'listProjects') ?? getMethod(bridge.value, 'listRecentProjects');
+    if (listProjects) {
+      await loadBridgeProjects(listProjects);
+      return;
+    }
+  }
+  await loadApiProjects();
+}
 
+async function loadBridgeProjects(listProjects: BridgeMethod) {
   isLoading.value = true;
   bridgeError.value = '';
   try {
@@ -371,8 +382,34 @@ async function loadApplicationProjects() {
   }
 }
 
+async function loadApiProjects() {
+  isLoading.value = true;
+  bridgeError.value = '';
+  try {
+    const result = await api.listBackendProjects();
+    if (!isRecord(result) || result.status === 'error' || !Array.isArray(result.projects)) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend returned no project list.',
+      );
+    }
+    apiActive.value = true;
+    applicationProjects.value = normalizeProjects(result.projects, 'api');
+  } catch (error) {
+    apiActive.value = false;
+    applicationProjects.value = [];
+    bridgeError.value = '';
+  } finally {
+    isLoading.value = false;
+  }
+}
+
 async function refreshProjects() {
-  if (!bridgeCanList.value) return;
+  if (!bridgeCanList.value && !apiActive.value) {
+    await loadApiProjects();
+    return;
+  }
   await loadApplicationProjects();
 }
 
@@ -389,6 +426,11 @@ async function addProject() {
 
   if (bridgeCanAdd.value) {
     await addApplicationProject(name, path);
+    return;
+  }
+
+  if (apiActive.value) {
+    await addApiProject(name, path);
     return;
   }
 
@@ -445,6 +487,33 @@ async function addApplicationProject(name: string, path: string) {
     projectName.value = '';
     projectPath.value = '';
     actionMessage.value = 'Project added through the local application bridge.';
+  } catch (error) {
+    formError.value = errorMessage(error);
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+async function addApiProject(name: string, path: string) {
+  isSaving.value = true;
+  try {
+    const result = await api.addBackendProject({ name, path });
+    if (!isRecord(result) || result.status === 'error' || !isRecord(result.project)) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend refused the project record.',
+      );
+    }
+    const returned = normalizeProject(result.project, Date.now(), 'api');
+    if (returned) {
+      applicationProjects.value = [returned, ...applicationProjects.value.filter((project) => project.id !== returned.id)];
+    } else {
+      await loadApplicationProjects();
+    }
+    projectName.value = '';
+    projectPath.value = '';
+    actionMessage.value = 'Project saved to the backend database.';
   } catch (error) {
     formError.value = errorMessage(error);
   } finally {

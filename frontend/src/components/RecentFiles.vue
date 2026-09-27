@@ -8,16 +8,16 @@
       </div>
       <span
         class="surface-status"
-        :class="{ 'is-connected': bridgeAvailable }"
+        :class="{ 'is-connected': bridgeAvailable || apiActive }"
         role="status"
         aria-live="polite"
       >
         <span class="status-dot" aria-hidden="true" />
-        {{ bridgeAvailable ? 'Bridge detected' : 'Bridge unavailable' }}
+        {{ bridgeAvailable ? 'Bridge detected' : apiActive ? 'Backend API' : 'Bridge unavailable' }}
       </span>
     </header>
 
-    <div v-if="!bridgeAvailable" class="surface-notice notice-warning" role="status">
+    <div v-if="!bridgeAvailable && !apiActive" class="surface-notice notice-warning" role="status">
       <strong>Local application bridge unavailable</strong>
       <p>
         Open MECH in the Electron desktop app to load application recent-file history. Files added below are
@@ -40,11 +40,11 @@
           <div>
             <p class="panel-kicker">Application history</p>
             <h3 id="application-files-title">Desktop recent files</h3>
-            <p class="panel-description">Records returned by the active application bridge.</p>
+            <p class="panel-description">{{ bridgeAvailable ? 'Records returned by the active application bridge.' : 'Records returned by the backend database.' }}</p>
           </div>
-          <div v-if="bridgeCanList || bridgeCanClear" class="toolbar-actions">
+          <div v-if="bridgeCanList || bridgeCanClear || apiActive" class="toolbar-actions">
             <button
-              v-if="bridgeCanList"
+              v-if="bridgeCanList || apiActive"
               class="quiet-button"
               type="button"
               :disabled="isLoading"
@@ -75,7 +75,7 @@
               <div class="record-title-line">
                 <span class="file-mark" aria-hidden="true">□</span>
                 <h4>{{ file.label }}</h4>
-                <span class="record-badge">APPLICATION</span>
+                <span class="record-badge">{{ file.source === 'api' ? 'BACKEND API' : 'APPLICATION' }}</span>
               </div>
               <p class="record-path" :title="file.path">{{ file.path }}</p>
               <p class="record-meta">
@@ -99,7 +99,7 @@
         <p v-else-if="bridgeError" class="panel-message panel-message-error">
           Application file history is unavailable for this request.
         </p>
-        <p v-else-if="bridgeAvailable && bridgeCanList" class="panel-message">
+        <p v-else-if="(bridgeAvailable && bridgeCanList) || apiActive" class="panel-message">
           No application recent files have been recorded.
         </p>
         <p v-else-if="bridgeAvailable" class="panel-message">
@@ -143,8 +143,9 @@
           </div>
 
           <div class="destination-note" role="note">
-            <span class="destination-badge">{{ bridgeCanAdd ? 'APPLICATION BRIDGE' : 'LOCAL BROWSER' }}</span>
+            <span class="destination-badge">{{ bridgeCanAdd ? 'APPLICATION BRIDGE' : apiActive ? 'BACKEND API' : 'LOCAL BROWSER' }}</span>
             <span v-if="bridgeCanAdd">This entry will be sent to the active application bridge.</span>
+            <span v-else-if="apiActive">This entry will be saved to the backend database.</span>
             <span v-else>This entry will be stored only in this browser until a bridge is available.</span>
           </div>
 
@@ -203,11 +204,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { api } from '../services/api';
 
 type UnknownRecord = Record<string, unknown>;
 type Bridge = Record<string, unknown>;
 type BridgeMethod = (...args: unknown[]) => unknown;
-type FileSource = 'application' | 'local';
+type FileSource = 'application' | 'api' | 'local';
 
 interface FileRecord {
   id: string;
@@ -221,6 +223,7 @@ const LOCAL_FILES_KEY = 'mech.local.recent-files.v1';
 const bridge = ref<Bridge | null>(resolveBridge());
 const applicationFiles = ref<FileRecord[]>([]);
 const localFiles = ref<FileRecord[]>([]);
+const apiActive = ref(false);
 const fileLabel = ref('');
 const filePath = ref('');
 const isLoading = ref(false);
@@ -279,7 +282,8 @@ function recordArray(value: unknown, key: string): unknown[] {
 
 function normalizeFile(value: unknown, _index: number, source: FileSource): FileRecord | null {
   if (!isRecord(value)) return null;
-  const id = stringValue(value.id);
+  const rawId = value.id;
+  const id = stringValue(rawId) || (typeof rawId === 'number' && Number.isFinite(rawId) ? String(rawId) : '');
   const path = stringValue(value.path);
   const label = stringValue(value.label) || stringValue(value.name) || path;
   if (!id || !path || !label) return null;
@@ -331,9 +335,17 @@ function persistLocalFiles() {
 }
 
 async function loadApplicationFiles() {
-  const list = getMethod(bridge.value, 'listRecentFiles');
-  if (!list) return;
+  if (bridge.value) {
+    const list = getMethod(bridge.value, 'listRecentFiles');
+    if (list) {
+      await loadBridgeFiles(list);
+      return;
+    }
+  }
+  await loadApiFiles();
+}
 
+async function loadBridgeFiles(list: BridgeMethod) {
   isLoading.value = true;
   bridgeError.value = '';
   try {
@@ -350,8 +362,34 @@ async function loadApplicationFiles() {
   }
 }
 
+async function loadApiFiles() {
+  isLoading.value = true;
+  bridgeError.value = '';
+  try {
+    const result = await api.listBackendRecentFiles();
+    if (!isRecord(result) || result.status === 'error' || !Array.isArray(result.files)) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend returned no file list.',
+      );
+    }
+    apiActive.value = true;
+    applicationFiles.value = normalizeFiles(result.files, 'api');
+  } catch (error) {
+    apiActive.value = false;
+    applicationFiles.value = [];
+    bridgeError.value = '';
+  } finally {
+    isLoading.value = false;
+  }
+}
+
 async function refreshFiles() {
-  if (!bridgeCanList.value) return;
+  if (!bridgeCanList.value && !apiActive.value) {
+    await loadApiFiles();
+    return;
+  }
   await loadApplicationFiles();
 }
 
@@ -370,6 +408,11 @@ async function addFile() {
     return;
   }
 
+  if (apiActive.value) {
+    await addApiFile(path);
+    return;
+  }
+
   const record: FileRecord = {
     id: makeId(),
     label,
@@ -382,6 +425,33 @@ async function addFile() {
   fileLabel.value = '';
   filePath.value = '';
   actionMessage.value = 'File saved as a local browser record.';
+}
+
+async function addApiFile(path: string) {
+  isSaving.value = true;
+  try {
+    const result = await api.addBackendRecentFile({ path });
+    if (!isRecord(result) || result.status === 'error' || !isRecord(result.file)) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'The backend refused the file record.',
+      );
+    }
+    const returned = normalizeFile(result.file, Date.now(), 'api');
+    if (returned) {
+      applicationFiles.value = [returned, ...applicationFiles.value.filter((file) => file.id !== returned.id)];
+    } else {
+      await loadApplicationFiles();
+    }
+    fileLabel.value = '';
+    filePath.value = '';
+    actionMessage.value = 'File saved to the backend database.';
+  } catch (error) {
+    formError.value = errorMessage(error);
+  } finally {
+    isSaving.value = false;
+  }
 }
 
 async function addApplicationFile(path: string, label: string) {
