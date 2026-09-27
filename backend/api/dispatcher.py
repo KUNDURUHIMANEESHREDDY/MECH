@@ -84,7 +84,7 @@ def load_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     name = payload.get("model_name", "gpt2-small")
     engine = get_engine()
     if engine and engine.is_available():
-        return engine.load()
+        return _mark(engine.load(), "live")
     return {
         "status": "loaded",
         "model_name": name,
@@ -316,9 +316,15 @@ def list_discoveries() -> Dict[str, Any]:
 
 @router.get("/portal/summary")
 def portal_summary() -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
     return {
         "status": "active",
-        "projects_count": 5
+        "experiments_count": len(_store.list_experiments()),
+        "sessions_count": len(_store.list_sessions()),
+        "provenance": "live",
+        "field_provenance": field_map(
+            ("status", "experiments_count", "sessions_count"), "live"),
     }
 
 
