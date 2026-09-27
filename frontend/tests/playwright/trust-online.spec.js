@@ -2,12 +2,12 @@ const { test, expect } = require('@playwright/test');
 
 // Backend-required trust specs. Run locally with the Python backend up:
 //   npx playwright test tests/playwright/trust-online.spec.js
-// These tests use the Desktop OS route directory and the real Model Explorer
+// These tests use the sidebar navigation and the real Model Explorer
 // load flow; no rendered result is treated as live without a backend payload.
 
 async function loadGpt2(page) {
   await page.goto('/#explorer');
-  const explorer = page.getByTestId('window-explorer');
+  const explorer = page.getByTestId('view-explorer');
   await expect(explorer.locator('.model-explorer')).toBeVisible({ timeout: 30000 });
   const modelSelect = explorer.locator('#model-explorer-model');
   await expect(modelSelect).toBeVisible({ timeout: 15000 });
@@ -19,36 +19,35 @@ async function loadGpt2(page) {
 }
 
 async function openCircuitExplorer(page) {
-  await page.getByTestId('directory-toggle').click();
   const nav = page.getByTestId('nav-circuitexplorer');
   await nav.scrollIntoViewIfNeeded();
   await nav.click();
-  return page.getByTestId('window-circuitexplorer');
+  return page.getByTestId('view-circuitexplorer');
 }
 
 test('circuit explorer shows live registry circuits', async ({ page }) => {
   await loadGpt2(page);
-  const circuitWindow = await openCircuitExplorer(page);
+  const circuitView = await openCircuitExplorer(page);
 
-  await expect(circuitWindow.locator('.window-title')).toHaveText('Circuit Explorer');
-  const select = circuitWindow.locator('select.input-text');
+  await expect(circuitView.getByRole('heading', { name: 'Circuit Explorer' }).first()).toBeVisible();
+  const select = circuitView.locator('select.input-text');
   await expect(select).toBeVisible({ timeout: 15000 });
   const options = await select.locator('option').allTextContents();
   expect(options.some(text => /Indirect Object Identification/i.test(text))).toBe(true);
-  await expect(circuitWindow.getByText(/Cannot reach the circuit registry/)).toHaveCount(0);
+  await expect(circuitView.getByText(/Cannot reach the circuit registry/)).toHaveCount(0);
 });
 
 test('circuit detail shows measured members', async ({ page }) => {
   await loadGpt2(page);
-  const circuitWindow = await openCircuitExplorer(page);
-  const select = circuitWindow.locator('select.input-text');
+  const circuitView = await openCircuitExplorer(page);
+  const select = circuitView.locator('select.input-text');
   await expect(select).toBeVisible({ timeout: 15000 });
-  await expect(circuitWindow.locator('.explorer-page .member-chip').first()).toBeVisible({ timeout: 15000 });
+  await expect(circuitView.locator('.explorer-page .member-chip').first()).toBeVisible({ timeout: 15000 });
 });
 
 test('Research Society runs before model loading and persists its evidence surfaces', async ({ page }) => {
   await page.goto('/#society');
-  const society = page.getByTestId('window-society');
+  const society = page.getByTestId('view-society');
   await expect(society.getByRole('heading', { name: 'Research Society', exact: true })).toBeVisible();
   await society.locator('#society-goal').fill('Verify the live Society trace and validation gate contract');
   await society.getByRole('button', { name: 'Run Society' }).click();
@@ -62,9 +61,9 @@ test('Research Society runs before model loading and persists its evidence surfa
 test('native Vue visualization surfaces mount without a React bridge error', async ({ page }) => {
   for (const id of ['neuralexplorer', 'transformerExplorer']) {
     await page.goto(`/#${id}`);
-    const window = page.getByTestId(`window-${id}`);
-    await expect(window).toBeVisible({ timeout: 30000 });
-    await expect(window.locator('.route-error')).toHaveCount(0);
-    await expect(window.locator('.tool-window__body')).toContainText(/Layer|Attention|Model/i);
+    const view = page.getByTestId(`view-${id}`);
+    await expect(view).toBeVisible({ timeout: 30000 });
+    await expect(view.locator('.route-error')).toHaveCount(0);
+    await expect(view).toContainText(/Layer|Attention|Model/i);
   }
 });

@@ -1,7 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-// Canonical Desktop OS route labels. The hash IDs remain compatible with
-// the previous Vue shell and its deep links.
+// Canonical route labels. Hash IDs remain compatible with deep links.
 const NAV_PAGES = [
   ['explorer', 'Model Explorer'],
   ['gpt2', 'GPT-2 Live'],
@@ -39,64 +38,47 @@ const HASH_ONLY_PAGES = [
   ['transformerExplorer', 'Transformer Explorer'],
 ];
 
-async function openDirectory(page) {
-  const directory = page.getByTestId('window-directory');
-  if (!(await directory.isVisible())) {
-    await page.getByTestId('directory-toggle').click();
-  }
-  await expect(directory).toBeVisible();
-}
-
-test('Desktop OS directory exposes legacy navigation items', async ({ page }) => {
+test('sidebar exposes every navigation item', async ({ page }) => {
   await page.goto('/');
-  await openDirectory(page);
   for (const [key] of NAV_PAGES) {
     await expect(page.getByTestId(`nav-${key}`)).toBeVisible();
   }
 });
 
-test('directory navigation opens a titled Desktop OS window and updates the hash', async ({ page }) => {
+test('sidebar navigation shows one titled tool view and updates the hash', async ({ page }) => {
   await page.goto('/');
-  for (const [key, label] of NAV_PAGES) {
-    await openDirectory(page);
+  for (const [key] of NAV_PAGES) {
     const item = page.getByTestId(`nav-${key}`);
     await item.scrollIntoViewIfNeeded();
     await item.click();
     await expect(page).toHaveURL(new RegExp(`#${key}$`));
-    await expect(page.getByTestId(`window-${key}`)).toBeVisible();
-    await expect(page.getByTestId(`window-${key}`).locator('.window-title')).toHaveText(label);
+    const view = page.getByTestId(`view-${key}`);
+    await expect(view).toBeVisible();
+    await expect(view.getByRole('heading').first()).toBeVisible();
   }
 });
 
 test('hash-only pages open without a model gate', async ({ page }) => {
-  for (const [key, label] of HASH_ONLY_PAGES) {
+  for (const [key] of HASH_ONLY_PAGES) {
     await page.goto(`/#${key}`);
-    await expect(page.getByTestId(`window-${key}`)).toBeVisible();
-    await expect(page.getByTestId(`window-${key}`).locator('.window-title')).toHaveText(label);
+    const view = page.getByTestId(`view-${key}`);
+    await expect(view).toBeVisible();
+    await expect(view.getByRole('heading').first()).toBeVisible();
   }
 });
 
-test('Desktop OS window controls tile, minimize and close tools', async ({ page }) => {
+test('navigating away replaces the visible tool instead of stacking', async ({ page }) => {
   await page.goto('/#explorer');
-  await page.getByRole('button', { name: 'Society' }).click();
-  await expect(page.getByTestId('window-society')).toBeVisible();
+  await expect(page.getByTestId('view-explorer')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Tile windows' }).click();
-  await expect(page.getByTestId('window-explorer')).toBeVisible();
-  await expect(page.getByTestId('window-society')).toBeVisible();
-
-  await page.getByTestId('window-society').getByRole('button', { name: 'Minimize window' }).click();
-  await expect(page.getByTestId('window-society')).toHaveCount(0);
-
-  await page.getByRole('button', { name: 'Society' }).click();
-  await expect(page.getByTestId('window-society')).toBeVisible();
-  await page.getByTestId('window-society').getByRole('button', { name: 'Close window' }).click();
-  await expect(page.getByTestId('window-society')).toHaveCount(0);
+  await page.getByTestId('nav-society').click();
+  await expect(page.getByTestId('view-society')).toBeVisible();
+  await expect(page.getByTestId('view-explorer')).toHaveCount(0);
 });
 
-test('desktop status exposes Python/runtime state', async ({ page }) => {
+test('sidebar status exposes Python/runtime state', async ({ page }) => {
   await page.goto('/');
-  const status = page.getByTestId('python-status');
+  const status = page.getByTestId('runtime-status');
   await expect(status).toBeVisible();
-  await expect(status).toContainText(/Connecting|Connected|Offline/);
+  await expect(status).toContainText(/Connecting|Connected|Offline|models available|No model selected/);
 });

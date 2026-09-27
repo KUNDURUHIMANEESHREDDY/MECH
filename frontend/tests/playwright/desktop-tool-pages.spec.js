@@ -1,27 +1,27 @@
 const { test, expect } = require('@playwright/test');
 
-test('local tool windows expose honest empty states when the backend is offline', async ({ page }) => {
+test('local tool views expose honest empty states when the backend is offline', async ({ page }) => {
   await page.route('**/api/**', route => route.abort());
   await page.goto('/#projects');
-  const projects = page.getByTestId('window-projects');
+  const projects = page.getByTestId('view-projects');
   await expect(projects).toBeVisible();
-  await expect(projects.locator('.tool-window__body').getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
+  await expect(projects.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
   await expect(projects).toContainText(/No projects|unavailable|offline/i);
 
   await page.goto('/#reports');
-  const reports = page.getByTestId('window-reports');
+  const reports = page.getByTestId('view-reports');
   await expect(reports).toBeVisible();
   await expect(reports).toContainText(/No reports|unavailable|offline/i);
 });
 
 test('model and research tools remain reachable without the old global gate', async ({ page }) => {
   await page.goto('/#models');
-  await expect(page.getByTestId('window-models')).toBeVisible();
-  await expect(page.getByTestId('window-models').locator('.tool-window__body').getByRole('heading', { name: 'Models', exact: true })).toBeVisible();
+  await expect(page.getByTestId('view-models')).toBeVisible();
+  await expect(page.getByTestId('view-models').getByRole('heading', { name: 'Models', exact: true })).toBeVisible();
 
   await page.goto('/#workspace');
-  await expect(page.getByTestId('window-workspace')).toBeVisible();
-  await expect(page.getByTestId('window-workspace')).toContainText(/Research workspace|Workspace/i);
+  await expect(page.getByTestId('view-workspace')).toBeVisible();
+  await expect(page.getByTestId('view-workspace')).toContainText(/Research workspace|Workspace/i);
 });
 
 test('remaining legacy tools expose real surfaces instead of placeholders', async ({ page }) => {
@@ -40,9 +40,9 @@ test('remaining legacy tools expose real surfaces instead of placeholders', asyn
 
   for (const [id, heading, marker] of routes) {
     await page.goto(`/#${id}`);
-    const window = page.getByTestId(`window-${id}`);
-    await expect(window).toBeVisible();
-    await expect(window.locator('.tool-window__body').getByRole('heading', { name: heading, exact: true })).toBeVisible();
-    await expect(window.locator('.tool-window__body')).toContainText(marker);
+    const view = page.getByTestId(`view-${id}`);
+    await expect(view).toBeVisible();
+    await expect(view.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+    await expect(view).toContainText(marker);
   }
 });

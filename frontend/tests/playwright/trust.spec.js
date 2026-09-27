@@ -5,7 +5,7 @@ const { test, expect } = require('@playwright/test');
 test('status indicator reports an unavailable backend without fabricating data', async ({ page }) => {
   await page.route('**/api/**', route => route.abort());
   await page.goto('/');
-  const status = page.getByTestId('python-status');
+  const status = page.getByTestId('runtime-status');
   await expect(status).toBeVisible({ timeout: 15000 });
   await expect(status).toContainText(/Offline/);
 });

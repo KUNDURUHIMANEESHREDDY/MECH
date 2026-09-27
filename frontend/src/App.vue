@@ -1,108 +1,68 @@
 <template>
-  <div class="mech-desktop" data-testid="desktop-shell">
-    <DesktopMenuBar
-      :model-status="modelStatus"
-      :model-name="modelName"
-      @open-route="openRoute"
-      @tile="tileWindows"
-      @reset="resetWindows"
-      @toggle-directory="directoryOpen = !directoryOpen"
-    />
-
-    <WindowTabs @focus="focusRoute" @close="closeWindow" />
-
-    <section
-      ref="desktopElement"
-      class="desktop-workspace"
-      aria-label="MECH desktop workspace"
-      @pointerdown="handleWorkspacePointer"
-    >
-      <div v-if="visibleWindows.length === 0 && !unknownRoute" class="desktop-empty">
-        <div>
-          <span class="desktop-empty__mark" aria-hidden="true">M</span>
-          <strong>No tools are open</strong>
-          <p>Open a tool from the window menu or restore the default desktop layout.</p>
-        </div>
+  <div class="mech-app" data-testid="app-shell">
+    <aside class="app-nav" aria-label="Tool navigation">
+      <div class="brand" aria-label="MECH">
+        <span class="brand-mark" aria-hidden="true">M</span>
+        <span class="brand-name">MECH</span>
       </div>
 
-      <div v-if="unknownRoute" class="not-found-window" role="alert">
-        <div>
-          <div class="desktop-kicker">Unknown window</div>
-          <strong>No MECH tool matches “{{ unknownRoute }}”</strong>
-          <p>The route was not registered. Choose a tool from the window menu or return to Model Explorer.</p>
-          <button class="desktop-button primary" type="button" @click="openRoute('explorer')">Open Model Explorer</button>
-        </div>
-      </div>
-
-      <ToolWindow
-        v-for="desktopWindow in visibleWindows"
-        :key="desktopWindow.id"
-        :id="desktopWindow.id"
-        :title="routeTitle(desktopWindow.routeId)"
-        :active="desktopWindow.id === activeWindowId"
-        :minimized="desktopWindow.minimized"
-        :maximized="desktopWindow.maximized"
-        :z-index="desktopWindow.zIndex"
-        :x="desktopWindow.x"
-        :y="desktopWindow.y"
-        :width="desktopWindow.width"
-        :height="desktopWindow.height"
-        @focus="focusRoute(desktopWindow.id)"
-        @close="closeWindow(desktopWindow.id)"
-        @minimize="minimizeWindow(desktopWindow.id)"
-        @maximize="toggleMaximize(desktopWindow.id)"
-        @geometry-change="geometry => updateGeometry(desktopWindow.id, geometry)"
-      >
-        <div class="desktop-route-content">
-          <div
-            v-if="modelStatus === 'offline'"
-            class="desktop-provenance"
-            data-kind="offline"
-            role="status"
+      <nav class="nav-groups">
+        <div v-for="group in navGroups" :key="group.name" class="nav-group">
+          <h2 class="nav-group__title">{{ group.name }}</h2>
+          <button
+            v-for="route in group.routes"
+            :key="route.id"
+            type="button"
+            class="nav-item"
+            :class="{ 'is-active': route.id === activeRouteId }"
+            :aria-current="route.id === activeRouteId ? 'page' : undefined"
+            :data-testid="`nav-${route.id}`"
+            @click="openRoute(route.id)"
           >
-            <span>Backend offline — local tools remain available.</span>
-            <span class="mono">localhost:8000</span>
-          </div>
-          <div v-else-if="modelStatus === 'connecting'" class="desktop-provenance" role="status">
-            <span>Connecting to the MECH runtime…</span>
-            <span class="mono">checking /api/models</span>
-          </div>
-
-          <div v-if="loadErrors[desktopWindow.routeId]" class="route-error" role="alert">
-            <div>
-              <strong>This tool could not be loaded.</strong>
-              <p>{{ loadErrors[desktopWindow.routeId] }}</p>
-            </div>
-          </div>
-          <Suspense v-else>
-            <component :is="componentFor(desktopWindow.routeId)" />
-            <template #fallback>
-              <div class="route-loading" role="status">
-                <div>
-                  <div class="route-loading__bar" aria-hidden="true"></div>
-                  <strong>Loading {{ routeTitle(desktopWindow.routeId) }}</strong>
-                  <p>Preparing the tool window without blocking the desktop.</p>
-                </div>
-              </div>
-            </template>
-          </Suspense>
+            {{ route.label }}
+          </button>
         </div>
-      </ToolWindow>
+      </nav>
 
-      <WindowDirectory
-        :open="directoryOpen"
-        :active-route-id="activeWindowId"
-        @close="directoryOpen = false"
-        @open-route="openFromDirectory"
-      />
-    </section>
+      <div class="nav-status" role="status" aria-live="polite" data-testid="runtime-status">
+        <span class="status-dot" :class="`status-${modelStatus}`" aria-hidden="true" />
+        <span class="nav-status__text">{{ modelName }}</span>
+      </div>
+    </aside>
 
-    <DesktopStatusBar
-      :model-status="modelStatus"
-      :model-name="modelName"
-      :active-window-title="activeWindowTitle"
-      :open-window-count="openWindowCount"
-    />
+    <main class="app-main">
+      <div v-if="unknownRoute" class="not-found" role="alert">
+        <p class="desktop-kicker">Unknown tool</p>
+        <strong>No MECH tool matches “{{ unknownRoute }}”</strong>
+        <p>Choose a tool from the navigation.</p>
+        <button class="desktop-button primary" type="button" @click="openRoute('explorer')">Open Model Explorer</button>
+      </div>
+
+      <section
+        v-else-if="activeRoute"
+        class="tool-view"
+        :data-testid="`view-${activeRoute.id}`"
+        :aria-label="activeRoute.label"
+      >
+        <div v-if="loadErrors[activeRoute.id]" class="route-error" role="alert">
+          <div>
+            <strong>This tool could not be loaded.</strong>
+            <p>{{ loadErrors[activeRoute.id] }}</p>
+          </div>
+        </div>
+        <Suspense v-else>
+          <component :is="componentFor(activeRoute.id)" />
+          <template #fallback>
+            <div class="route-loading" role="status">
+              <div>
+                <div class="route-loading__bar" aria-hidden="true"></div>
+                <strong>Loading {{ activeRoute.label }}</strong>
+              </div>
+            </div>
+          </template>
+        </Suspense>
+      </section>
+    </main>
   </div>
 </template>
 
@@ -111,51 +71,33 @@ import {
   computed,
   defineAsyncComponent,
   markRaw,
-  nextTick,
   onBeforeUnmount,
   onMounted,
   reactive,
   ref,
 } from 'vue';
-import { useDesktopStore } from './stores/desktop';
-import { getRouteById } from './desktop/routeRegistry';
+import { ROUTES, getRouteById } from './desktop/routeRegistry';
 import { api } from './services/api';
-import DesktopMenuBar from './components/desktop/DesktopMenuBar.vue';
-import DesktopStatusBar from './components/desktop/DesktopStatusBar.vue';
-import ToolWindow from './components/desktop/ToolWindow.vue';
-import WindowDirectory from './components/desktop/WindowDirectory.vue';
-import WindowTabs from './components/desktop/WindowTabs.vue';
 
 type RuntimeStatus = 'connecting' | 'connected' | 'offline';
-type Bounds = { width: number; height: number };
-type Geometry = { x: number; y: number; width: number; height: number };
 
-const store = useDesktopStore();
-const desktopElement = ref<HTMLElement | null>(null);
-const directoryOpen = ref(false);
 const unknownRoute = ref('');
 const modelStatus = ref<RuntimeStatus>('connecting');
 const modelName = ref('No model selected');
-const desktopBounds = ref<Bounds>({ width: 1200, height: 760 });
+const activeRouteId = ref('explorer');
 const loadErrors = reactive<Record<string, string>>({});
 const componentCache = new Map<string, ReturnType<typeof defineAsyncComponent>>();
-let resizeObserver: ResizeObserver | null = null;
 
-const activeWindowId = computed(() => store.activeWindowId);
-const visibleWindows = computed(() =>
-  Object.values(store.windows)
-    .filter(window => !window.closed)
-    .sort((left, right) => left.zIndex - right.zIndex),
+const GROUP_ORDER = ['Explore', 'Develop', 'Research', 'General'] as const;
+
+const navGroups = computed(() =>
+  GROUP_ORDER.map(name => ({
+    name,
+    routes: ROUTES.filter(route => route.group === name),
+  })).filter(group => group.routes.length > 0),
 );
-const openWindowCount = computed(() => visibleWindows.value.filter(window => !window.minimized).length);
-const activeWindowTitle = computed(() => {
-  const active = store.windows[activeWindowId.value];
-  return active && !active.closed ? routeTitle(active.routeId) : 'No active tool';
-});
 
-function routeTitle(routeId: string): string {
-  return getRouteById(routeId)?.label ?? routeId;
-}
+const activeRoute = computed(() => getRouteById(activeRouteId.value));
 
 function componentFor(routeId: string) {
   const cached = componentCache.get(routeId);
@@ -180,17 +122,9 @@ function componentFor(routeId: string) {
   return component;
 }
 
-function currentBounds(): Bounds {
-  const rect = desktopElement.value?.getBoundingClientRect();
-  return rect
-    ? { width: Math.max(320, rect.width), height: Math.max(240, rect.height) }
-    : desktopBounds.value;
-}
-
 function setHash(routeId: string) {
   if (typeof window === 'undefined') return;
-  const next = `#${routeId}`;
-  if (window.location.hash !== next) window.location.hash = routeId;
+  if (window.location.hash !== `#${routeId}`) window.location.hash = routeId;
 }
 
 function openRoute(routeId: string, updateHash = true) {
@@ -202,57 +136,8 @@ function openRoute(routeId: string, updateHash = true) {
   }
 
   unknownRoute.value = '';
-  directoryOpen.value = false;
-  store.openWindow(routeId);
-  if (updateHash) setHash(routeId);
-}
-
-function openFromDirectory(routeId: string) {
-  openRoute(routeId);
-}
-
-function focusRoute(routeId: string) {
-  if (!store.windows[routeId] || store.windows[routeId].closed) return;
-  store.focusWindow(routeId);
-  setHash(routeId);
-}
-
-function closeWindow(routeId: string) {
-  store.closeWindow(routeId);
-  const active = store.windows[activeWindowId.value];
-  if (active && !active.closed) setHash(active.routeId);
-  else if (window.location.hash === `#${routeId}`) history.replaceState(null, '', window.location.pathname + window.location.search);
-}
-
-function minimizeWindow(routeId: string) {
-  store.minimizeWindow(routeId);
-  const active = store.windows[activeWindowId.value];
-  if (active && !active.closed) setHash(active.routeId);
-}
-
-function toggleMaximize(routeId: string) {
-  store.toggleMaximize(routeId, currentBounds());
-}
-
-function updateGeometry(routeId: string, geometry: Geometry) {
-  store.setGeometry(routeId, geometry, currentBounds());
-}
-
-function tileWindows() {
-  store.tileWindows(currentBounds(), 14);
-}
-
-function resetWindows() {
-  const currentRoute = routeFromHash() || 'explorer';
-  store.resetWindows();
-  openRoute(getRouteById(currentRoute) ? currentRoute : 'explorer', false);
-}
-
-function handleWorkspacePointer(event: PointerEvent) {
-  const target = event.target as HTMLElement | null;
-  if (target?.closest('.desktop-tool-window') || target?.closest('.window-directory')) return;
-  const active = store.windows[activeWindowId.value];
-  if (active && !active.closed) store.focusWindow(activeWindowId.value);
+  activeRouteId.value = route.id;
+  if (updateHash) setHash(route.id);
 }
 
 function routeFromHash(): string {
@@ -262,7 +147,6 @@ function routeFromHash(): string {
 function handleHashChange() {
   const routeId = routeFromHash() || 'explorer';
   openRoute(routeId, false);
-  nextTick(() => focusRoute(store.activeWindowId));
 }
 
 async function refreshRuntimeStatus() {
@@ -284,18 +168,207 @@ onMounted(() => {
 
   window.addEventListener('hashchange', handleHashChange);
   refreshRuntimeStatus();
-
-  if (desktopElement.value && 'ResizeObserver' in window) {
-    resizeObserver = new ResizeObserver(entries => {
-      const rect = entries[0]?.contentRect;
-      if (rect) desktopBounds.value = { width: rect.width, height: rect.height };
-    });
-    resizeObserver.observe(desktopElement.value);
-  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', handleHashChange);
-  resizeObserver?.disconnect();
 });
 </script>
+
+<style scoped>
+.mech-app {
+  display: grid;
+  width: 100vw;
+  height: 100dvh;
+  min-width: 320px;
+  grid-template-columns: 232px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  color-scheme: light;
+}
+
+.app-nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 12px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.brand-name {
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.nav-groups {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 2px 10px 12px;
+}
+
+.nav-group__title {
+  margin: 0 0 4px 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nav-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.nav-item.is-active {
+  background: var(--bg-active);
+  color: var(--text);
+  font-weight: 650;
+}
+
+.nav-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.status-dot.status-connected {
+  background: var(--success);
+}
+
+.status-dot.status-connecting {
+  background: var(--warning);
+}
+
+.status-dot.status-offline {
+  background: var(--danger);
+}
+
+.nav-status__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 22px 32px;
+}
+
+.tool-view {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.not-found {
+  display: flex;
+  max-width: 520px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 48px auto;
+  text-align: left;
+}
+
+@media (max-width: 900px) {
+  .mech-app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .app-nav {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    padding: 10px 14px 6px;
+  }
+
+  .nav-groups {
+    flex-direction: row;
+    gap: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 10px 8px;
+  }
+
+  .nav-group {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .nav-group__title {
+    margin: 0 4px 0 0;
+  }
+
+  .nav-item {
+    width: auto;
+    padding: 6px 9px;
+    white-space: nowrap;
+  }
+
+  .nav-status {
+    display: none;
+  }
+
+  .app-main {
+    padding: 14px 14px 24px;
+  }
+}
+</style>
