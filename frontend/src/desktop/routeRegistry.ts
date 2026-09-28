@@ -35,7 +35,8 @@ export const ROUTES: DesktopRoute[] = [
     group: 'Explore',
     requirement: 'model',
     legacy: true,
-    load: () => import('../components/Gpt2View.vue'),
+    aliasOf: 'explorer',
+    load: () => import('../components/ModelExplorerView.vue'),
   },
   {
     id: 'gpt2explorer',
