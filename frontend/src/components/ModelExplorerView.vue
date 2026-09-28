@@ -462,7 +462,7 @@
             </div>
             <div v-else class="empty-state empty-state--result">
               <strong>No attention pattern selected.</strong>
-              <span>Load GPT-2, run a prompt, then choose a layer and attention head.</span>
+              <span>Run a prompt, then choose a layer and head. Head 0 loads by itself after each run.</span>
             </div>
           </section>
 
@@ -548,7 +548,7 @@
             </div>
             <div v-else class="empty-state empty-state--result">
               <strong>No activation evidence loaded.</strong>
-              <span>Run a prompt to populate the cache, then request shapes, tensors, or the logit lens.</span>
+              <span>Run a prompt to fill this panel. Shapes, tensors, and the lens load by themselves; the buttons refresh them.</span>
             </div>
 
             <div class="lens-section" :aria-busy="lensLoading">
@@ -571,7 +571,7 @@
                   <span v-if="row.tokens.length" class="lens-row__tokens">{{ row.tokens.join(' · ') }}</span>
                 </li>
               </ol>
-              <p v-else class="empty-state empty-state--inline">No logit-lens result has been requested.</p>
+              <p v-else class="empty-state empty-state--inline">No logit-lens result yet. It runs by itself after each prompt.</p>
             </div>
           </section>
         </div>
@@ -647,7 +647,7 @@
             </div>
             <div v-else class="empty-state empty-state--side">
               <strong>No layer detail.</strong>
-              <span>Select a layer after loading GPT-2 architecture.</span>
+              <span>Load GPT-2 to read layer detail. Layer 0 loads by itself.</span>
             </div>
           </div>
 
@@ -675,7 +675,7 @@
             </div>
             <div v-else class="empty-state empty-state--side">
               <strong>No head detail.</strong>
-              <span>Select a head to request its returned pattern and metadata.</span>
+              <span>Choose a head to read its pattern. Head 0 loads by itself after a prompt run.</span>
             </div>
           </div>
 
@@ -721,7 +721,7 @@
             </div>
             <div v-else class="empty-state empty-state--side">
               <strong>No neuron detail.</strong>
-              <span>Enter a returned neuron index or choose one from the active list.</span>
+              <span>Type a neuron index, or run a prompt and pick from the most active neurons.</span>
             </div>
           </div>
         </aside>
@@ -1460,7 +1460,7 @@ async function loadArchitecture(): Promise<void> {
     architecture.value = response;
     architectureProvenance.value = provenanceFrom(response, 'reference');
     const firstLayer = layerOptions.value[0];
-    if (selectedLayer.value === null && firstLayer !== undefined) selectedLayer.value = firstLayer;
+    if (selectedLayer.value === null && firstLayer !== undefined) await selectLayer(firstLayer);
   } catch (error) {
     architecture.value = null;
     architectureProvenance.value = 'unavailable';
@@ -1564,6 +1564,7 @@ async function runPrompt(mode?: PromptMode): Promise<void> {
     promptState.value = 'ready';
     if (nextToken.value) prompt.value = `${text}${nextToken.value}`;
     if (isGpt2Model.value) await loadActivations(false);
+    if (isGpt2Model.value) await runInspectionCascade();
   } catch (error) {
     promptState.value = 'error';
     promptError.value = errorText(error);
@@ -1572,7 +1573,10 @@ async function runPrompt(mode?: PromptMode): Promise<void> {
   }
 }
 
+let inspectionRunId = 0;
+
 function resetInspectionResults(): void {
+  inspectionRunId += 1;
   activationDetail.value = null;
   layerActivationDetail.value = null;
   activationProvenance.value = 'unavailable';
@@ -1618,7 +1622,7 @@ function onLayerChange(event: Event): void {
   if (value !== undefined) void selectLayer(value);
 }
 
-async function selectLayer(layer: number): Promise<void> {
+async function selectLayer(layer: number, opts?: { keepTab?: boolean }): Promise<void> {
   if (!Number.isInteger(layer) || layer < 0) return;
   selectedLayer.value = layer;
   selectedHead.value = null;
@@ -1634,7 +1638,15 @@ async function selectLayer(layer: number): Promise<void> {
     const response = requireResponse(await api.gpt2Layer(layer), `Layer ${layer}`);
     layerDetail.value = response;
     layerProvenance.value = provenanceFrom(response, 'reference');
-    inspectorTab.value = 'layer';
+    const firstOption = neuronOptions.value[0];
+    if (firstOption) {
+      await selectNeuron(firstOption.index);
+    } else {
+      neuronIndexInput.value = 0;
+      await selectNeuron(0);
+    }
+    if (!opts?.keepTab) inspectorTab.value = 'layer';
+    else if (selectedNeuron.value === null && !neuronDetail.value) inspectorTab.value = 'layer';
   } catch (error) {
     layerDetail.value = null;
     layerProvenance.value = 'unavailable';
@@ -1791,6 +1803,25 @@ async function loadLogitLens(): Promise<void> {
   } finally {
     lensLoading.value = false;
   }
+}
+
+async function runInspectionCascade(): Promise<void> {
+  const runId = ++inspectionRunId;
+  const targetLayer = selectedLayer.value ?? layerOptions.value[0];
+  if (targetLayer === undefined) return;
+  await selectLayer(targetLayer, { keepTab: true });
+  if (runId !== inspectionRunId) return;
+  if (layerDetail.value) {
+    await selectHead(0);
+    if (runId !== inspectionRunId) return;
+    const topNeuron = neuronOptions.value[0];
+    if (topNeuron) await selectNeuron(topNeuron.index);
+    if (runId !== inspectionRunId) return;
+  }
+  if (runId !== inspectionRunId) return;
+  await loadLayerActivations();
+  if (runId !== inspectionRunId) return;
+  await loadLogitLens();
 }
 
 function handleOnline(): void {
