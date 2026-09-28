@@ -223,6 +223,7 @@
           </div>
           <p id="model-explorer-prompt-help" class="field-help">
             Results are shown only when the backend returns them. A seeded response is labeled and is not presented as a live measurement.
+            After each run, the predicted next token is appended to the prompt, so repeated runs generate text token by token.
           </p>
           <label class="auto-prompt-toggle">
             <input v-model="autoPrompt" type="checkbox" />
@@ -1561,6 +1562,7 @@ async function runPrompt(mode?: PromptMode): Promise<void> {
     promptSource.value = selectedMode;
     promptProvenance.value = provenanceFrom(response, 'unavailable');
     promptState.value = 'ready';
+    if (nextToken.value) prompt.value = `${text}${nextToken.value}`;
     if (isGpt2Model.value) await loadActivations(false);
   } catch (error) {
     promptState.value = 'error';
