@@ -7,11 +7,19 @@ import {
 } from '../../src/desktop/routeRegistry';
 
 describe('desktop route registry', () => {
-  it('keeps all 31 legacy hash routes plus the additive Society tool', () => {
+  it('keeps every hash route unique (34 slugs, 31 sidebar entries)', () => {
     expect(new Set(ROUTES.map(route => route.id)).size).toBe(ROUTES.length);
-    expect(ROUTES).toHaveLength(32);
-    expect(LEGACY_ROUTE_IDS).toHaveLength(31);
-    expect(new Set(LEGACY_ROUTE_IDS).size).toBe(31);
+    expect(ROUTES).toHaveLength(34);
+    expect(LEGACY_ROUTE_IDS).toHaveLength(33);
+    expect(new Set(LEGACY_ROUTE_IDS).size).toBe(33);
+    expect(ROUTES.filter(route => !route.aliasOf)).toHaveLength(31);
+  });
+
+  it('keeps alias slugs resolving to their canonical entry', () => {
+    expect(getRouteById('gpt2explorer').aliasOf).toBe('explorer');
+    expect(getRouteById('campaigns').aliasOf).toBe('workspace');
+    expect(getRouteById('gpt2').aliasOf).toBe('explorer');
+    expect(getRouteById('explorer').aliasOf).toBeUndefined();
   });
 
   it('preserves canonical labels and deep-link routes', () => {
