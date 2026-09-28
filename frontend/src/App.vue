@@ -25,8 +25,8 @@
             :key="route.id"
             type="button"
             class="nav-item"
-            :class="{ 'is-active': route.id === activeRouteId }"
-            :aria-current="route.id === activeRouteId ? 'page' : undefined"
+            :class="{ 'is-active': route.id === highlightedRouteId }"
+            :aria-current="route.id === highlightedRouteId ? 'page' : undefined"
             :data-testid="`nav-${route.id}`"
             @click="openRoute(route.id)"
           >
@@ -118,11 +118,15 @@ const GROUP_ORDER = ['Explore', 'Develop', 'Research', 'General'] as const;
 const navGroups = computed(() =>
   GROUP_ORDER.map(name => ({
     name,
-    routes: ROUTES.filter(route => route.group === name),
+    routes: ROUTES.filter(route => route.group === name && !route.aliasOf),
   })).filter(group => group.routes.length > 0),
 );
 
 const activeRoute = computed(() => getRouteById(activeRouteId.value));
+
+// Sidebar highlights the canonical entry when an alias slug is open,
+// so keyboard and screen-reader users always see where they are.
+const highlightedRouteId = computed(() => activeRoute.value?.aliasOf ?? activeRouteId.value);
 
 function componentFor(routeId: string) {
   const cached = componentCache.get(routeId);

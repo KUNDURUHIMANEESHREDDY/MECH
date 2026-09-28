@@ -12,6 +12,12 @@ export interface DesktopRoute {
   legacy: boolean;
   load: VueLoader;
   aliases?: string[];
+  /**
+   * Sidebar alias: the URL slug keeps resolving (deep links, tests, and
+   * bookmarks keep working) but the sidebar lists only the canonical entry.
+   * Set to the canonical route id when two slugs mount the same component.
+   */
+  aliasOf?: string;
 }
 
 export const ROUTES: DesktopRoute[] = [
@@ -38,6 +44,7 @@ export const ROUTES: DesktopRoute[] = [
     requirement: 'model',
     legacy: true,
     aliases: ['gpt2-neuron-explorer', 'gpt2-neuron'],
+    aliasOf: 'explorer',
     load: () => import('../components/ModelExplorerView.vue'),
   },
   {
@@ -222,6 +229,7 @@ export const ROUTES: DesktopRoute[] = [
     group: 'General',
     requirement: 'backend',
     legacy: true,
+    aliasOf: 'workspace',
     load: () => import('../components/CampaignWorkspaceView.vue'),
   },
   {
