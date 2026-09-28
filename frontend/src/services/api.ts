@@ -107,6 +107,8 @@ export const api = {
     post<Record<string, unknown>>('/api/gpt2/patch_head', { layer, head, pos_token: posToken, neg_token: negToken }),
   gpt2RunIoi: (ioName: string, subjName: string) =>
     post<Record<string, unknown>>('/api/gpt2/ioi', { io_name: ioName, subj_name: subjName }),
+  gpt2Steer: (payload: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/gpt2/steer', payload),
   gpt2Architecture: () =>
     post<Record<string, unknown>>('/api/gpt2/architecture', {}),
   gpt2Layer: (layer: number) =>

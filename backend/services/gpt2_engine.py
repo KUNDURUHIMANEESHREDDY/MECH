@@ -1285,6 +1285,74 @@ def ablate_layer(layer: int, prompt: str,
     }
 
 
+def steer(prompt: str, layer: int, pos_prompt: str, neg_prompt: str,
+          alpha: float = 10.0) -> Dict[str, Any]:
+    """Activation steering: add alpha * unit(pos - neg) to block output.
+
+    The steering vector is the difference of last-token residual states for
+    two contrast prompts, measured live. No canned vectors anywhere.
+    """
+    err = _ensure_loaded()
+    if err:
+        return err
+    layer = max(0, min(_n_layers() - 1, int(layer)))
+    alpha = max(0.0, min(100.0, float(alpha)))
+    device = next(_model.parameters()).device
+
+    def resid(text: str):
+        inputs = {k: v.to(device) for k, v in
+                  _tokenizer(text, return_tensors="pt").items()}
+        with torch.no_grad():
+            out = _model(**inputs, output_hidden_states=True)
+        return out.hidden_states[layer + 1][0, -1].detach().float()
+
+    with torch.no_grad():
+        vec = resid(pos_prompt) - resid(neg_prompt)
+    norm = float(torch.linalg.vector_norm(vec))
+    if norm < 1e-9:
+        return {"status": "error",
+                "error": "Contrast prompts produce no residual difference."}
+    vec = (vec / norm).to(device)
+
+    def steer_hook(module: Any, inp: Any, out: Any) -> Any:
+        add = (alpha * vec).to(out[0].dtype).to(out[0].device)
+        if isinstance(out, tuple):
+            return (out[0] + add,) + tuple(out[1:])
+        return out + add
+
+    inputs = {k: v.to(device) for k, v in
+              _tokenizer(prompt, return_tensors="pt").items()}
+    with torch.no_grad():
+        clean_logits = _model(**inputs).logits[0, -1]
+        clean_top = _decode(int(torch.argmax(clean_logits)))
+        clean_top5 = [
+            _decode(int(i)) for i in
+            torch.topk(clean_logits, min(5, clean_logits.numel())).indices
+        ]
+    hook = _model.transformer.h[layer].register_forward_hook(steer_hook)
+    try:
+        with torch.no_grad():
+            steered_logits = _model(**inputs).logits[0, -1]
+            steered_top = _decode(int(torch.argmax(steered_logits)))
+            steered_top5 = [
+                _decode(int(i)) for i in
+                torch.topk(steered_logits, min(5, steered_logits.numel())).indices
+            ]
+    finally:
+        hook.remove()
+    return {
+        "status": "ok",
+        "layer": layer,
+        "alpha": alpha,
+        "vector_norm": round(norm, 4),
+        "clean_top": clean_top,
+        "clean_top5": clean_top5,
+        "steered_top": steered_top,
+        "steered_top5": steered_top5,
+        "flipped": clean_top != steered_top,
+    }
+
+
 def logit_lens(layer: int, prompt: str, top_k: int = 5) -> Dict[str, Any]:
     """Raw LogitLens projection: unembed hidden state at `layer`.
 

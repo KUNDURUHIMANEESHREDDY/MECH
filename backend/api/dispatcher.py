@@ -855,6 +855,23 @@ def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     }, "seeded")
 
 
+@router.post("/gpt2/steer")
+def gpt2_steer(payload: Dict[str, Any]) -> Dict[str, Any]:
+    engine = get_engine()
+    if engine and engine.is_available():
+        return _mark(engine.steer(
+            payload.get("prompt") or "The movie was",
+            int(payload.get("layer", 8)),
+            payload.get("pos_prompt") or "It was a fantastic wonderful amazing film. The movie was",
+            payload.get("neg_prompt") or "It was a terrible awful horrible film. The movie was",
+            float(payload.get("alpha", 25.0)),
+        ), "live")
+    return _mark({
+        "status": "unavailable",
+        "error": "torch/transformers not available — steering needs live weights",
+    }, "unavailable")
+
+
 @router.post("/gpt2/ioi")
 def gpt2_ioi(payload: Dict[str, Any]) -> Dict[str, Any]:
     io_name = payload.get("io_name") or random.choice(NAMES)

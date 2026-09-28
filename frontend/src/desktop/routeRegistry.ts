@@ -67,6 +67,15 @@ export const ROUTES: DesktopRoute[] = [
     load: () => import('../components/NetworkView.vue'),
   },
   {
+    id: 'steering',
+    label: 'Steering Lab',
+    group: 'Explore',
+    requirement: 'model',
+    legacy: true,
+    aliases: ['steer', 'vector-steering'],
+    load: () => import('../components/SteeringLabView.vue'),
+  },
+  {
     id: 'workspace',
     label: 'Workspace',
     group: 'Explore',
