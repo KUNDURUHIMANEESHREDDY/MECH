@@ -2,6 +2,7 @@
   <section class="society" aria-labelledby="research-society-title">
     <header class="society__header">
       <div>
+        <p class="society__kicker">Research / Live workflow</p>
         <h2 id="research-society-title">Research Society</h2>
         <p class="society__intro">
           Run the backend planner, executor, inspector, discoverer, critic, and scribe workflow.
@@ -782,6 +783,7 @@ onBeforeUnmount(() => {
   max-width: 1120px;
   color: var(--text);
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .society__header,
@@ -801,9 +803,18 @@ onBeforeUnmount(() => {
 }
 
 .society h2 {
-  font-size: 18px;
-  line-height: 1.3;
-  font-weight: 650;
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+
+.society__kicker {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
 }
 
 .society h3 {
@@ -844,7 +855,7 @@ onBeforeUnmount(() => {
 }
 
 .society :is(button, input, a):focus-visible {
-  outline: 2px solid var(--text);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
@@ -902,14 +913,15 @@ onBeforeUnmount(() => {
 }
 
 .society__button--primary {
-  border-color: var(--text);
-  background: var(--text);
-  color: var(--bg);
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
 }
 
 .society__button--primary:hover:not(:disabled) {
-  background: var(--text-dim);
-  color: var(--bg);
+  border-color: var(--primary-focus);
+  background: var(--primary-focus);
+  color: #ffffff;
 }
 
 .society__button:disabled {
@@ -931,6 +943,11 @@ onBeforeUnmount(() => {
 .society__status {
   min-height: 48px;
   padding: 10px 12px;
+  background: var(--surface-2);
+}
+
+.society__status strong {
+  font-size: 12px;
 }
 
 .society__status > div {
@@ -1165,21 +1182,25 @@ onBeforeUnmount(() => {
 
 .society__gate-verdict {
   display: inline-flex;
-  min-height: 26px;
+  min-height: 30px;
   align-items: center;
-  padding: 3px 10px;
-  border: 1px solid var(--text);
+  padding: 4px 14px;
+  border: 1px solid var(--primary);
   border-radius: 999px;
-  color: var(--text);
-  font-size: 10px;
+  background: var(--accent-soft);
+  color: var(--primary);
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .society__gate-verdict--failed,
 .society__gate-verdict--unknown {
   border-style: dashed;
+  border-color: var(--text-muted);
+  background: transparent;
+  color: var(--text-muted);
 }
 
 .society__gate dl {
@@ -1209,7 +1230,8 @@ onBeforeUnmount(() => {
   margin: 3px 0 0;
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .society__sr-only {

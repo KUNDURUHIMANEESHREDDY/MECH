@@ -845,13 +845,14 @@ function formatTimestamp(value: string): string {
 .primary-button {
   min-height: 36px;
   padding: 0 12px;
-  border-color: var(--text);
-  background: var(--text);
-  color: var(--surface);
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
 }
 
 .primary-button:hover:not(:disabled) {
-  background: var(--text-dim);
+  border-color: var(--primary-focus);
+  background: var(--primary-focus);
 }
 
 .quiet-button:disabled,
