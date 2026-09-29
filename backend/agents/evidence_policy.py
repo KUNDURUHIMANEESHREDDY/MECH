@@ -123,7 +123,10 @@ def publication_block_reason(
     for step in discoveries:
         if not _is_completed(step):
             return f"Discovery blocked: stage status '{status_of(step)}' is not complete."
+        # Trace steps store discoverer response fields directly (spread), not in "result"
         result = step.get("result")
+        if not result:
+            result = step
         if not discovery_is_live(result):
             return blocked_reason(result, "Discovery")
 
@@ -134,6 +137,8 @@ def publication_block_reason(
         if not _is_completed(step):
             return f"Validation blocked: stage status '{status_of(step)}' is not complete."
         result = step.get("result")
+        if not result:
+            result = step
         if not validation_is_live(result):
             return blocked_reason(result, "Validation")
 

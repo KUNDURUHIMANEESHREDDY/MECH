@@ -188,9 +188,12 @@ class ResearchSocietyV2:
             trace.append(step)
             ctx["trace"] = trace
             if node["id"] == "discover":
-                disc = res.get("result", {})
+                disc = res.get("result")
                 if not isinstance(disc, dict):
                     disc = {}
+                if not disc:
+                    # Discoverer now spreads live fields at top level; use res directly
+                    disc = res
                 ctx["discovery_result"] = disc
                 if res.get("discovery_id"):
                     ctx["discovery_id"] = res["discovery_id"]
@@ -217,10 +220,8 @@ class ResearchSocietyV2:
         paper_id = workflow.get("pipeline", "ioi")
         discovery_step = next(
             (t for t in trace if t.get("node") == "discover"), {})
-        discovery_result = (discovery_step.get("result", {})
-                            if isinstance(discovery_step, dict) else {})
-        if not isinstance(discovery_result, dict):
-            discovery_result = {}
+        # Trace steps store discoverer response fields directly (spread), not in "result"
+        discovery_result = discovery_step if isinstance(discovery_step, dict) else {}
         discovery_eligible = discovery_is_live(discovery_result)
 
         # Do not run or publish reproduction evidence when discovery is not
