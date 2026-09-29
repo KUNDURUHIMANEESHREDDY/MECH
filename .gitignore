@@ -14,12 +14,32 @@ frontend/*.tsbuildinfo
 .pytest_cache/
 frontend/node_modules/.vitest/
 frontend/test-results/
-test-results/.last-run.json
+# Playwright writes a full failure dump per spec; never commit the results dir.
+test-results/
+playwright-report/
+
+# Browser-automation scratch captures and ad-hoc audit scripts
+.playwright-mcp/
 
 # Local env
+# Local SQLite state. backend/storage/*.db is runtime state, not source.
+*.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 .env
+
+# Scratch: per-session agent continuation state
+.omo/run-continuation/
+
+# Ad-hoc debug renders written to the repo root by gpt2_steps.py etc.
+/attn_*.png
+/current-state*.png
+/broken-state.png
+/fixed-state.png
+/frontend/electron-*.png
+/frontend/*.log.err
 
 # Per-run evidence records accumulate at runtime (see MECH_EVIDENCE_DIR)
 backend/storage/evidence/

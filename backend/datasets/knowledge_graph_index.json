@@ -836,6 +836,267 @@
         "run_id": "run_1785239408"
       },
       "created_at": "2026-07-28T11:50:08.185599Z"
+    },
+    {
+      "node_id": "camp_exp_4778",
+      "node_type": "Campaign",
+      "label": "Campaign: Investigate IOI Circuit in GPT-2",
+      "properties": {
+        "goal": "Investigate IOI Circuit in GPT-2",
+        "steps_completed": "7/7",
+        "status": "completed"
+      },
+      "created_at": "2026-09-28T23:31:12.169321Z"
+    },
+    {
+      "node_id": "goal_exp_4778",
+      "node_type": "ResearchGoal",
+      "label": "Investigate IOI Circuit in GPT-2",
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.175480Z"
+    },
+    {
+      "node_id": "exp_4778",
+      "node_type": "Experiment",
+      "label": "Society run exp_4778",
+      "properties": {
+        "steps_completed": "7/7"
+      },
+      "created_at": "2026-09-28T23:31:12.186779Z"
+    },
+    {
+      "node_id": "circuit_disc_live_95166868",
+      "node_type": "Circuit",
+      "label": "Circuit disc_live_95166868",
+      "properties": {
+        "score": 0.0,
+        "heads": []
+      },
+      "created_at": "2026-09-28T23:31:12.205615Z"
+    },
+    {
+      "node_id": "ev_exp_4778_patch",
+      "node_type": "Evidence",
+      "label": "patch delta 0.0146",
+      "properties": {
+        "delta": 0.0146,
+        "layer": 9,
+        "head": 9
+      },
+      "created_at": "2026-09-28T23:31:12.220715Z"
+    },
+    {
+      "node_id": "ev_exp_4778_validation",
+      "node_type": "Evidence",
+      "label": "validation confidence 0.9204",
+      "properties": {
+        "confidence": 0.9204,
+        "validated": true
+      },
+      "created_at": "2026-09-28T23:31:12.233545Z"
+    },
+    {
+      "node_id": "claim_exp_4778",
+      "node_type": "MechanismClaim",
+      "label": "Validated: Investigate IOI Circuit in GPT-2",
+      "properties": {
+        "confidence": 0.9204
+      },
+      "created_at": "2026-09-28T23:31:12.245393Z"
+    },
+    {
+      "node_id": "pub_exp_4778",
+      "node_type": "Publication",
+      "label": "Mechanistic Report exp_4778",
+      "properties": {
+        "experiment_id": "exp_4778"
+      },
+      "created_at": "2026-09-28T23:31:12.257687Z"
+    },
+    {
+      "node_id": "ev_exp_4778_gate",
+      "node_type": "Evidence",
+      "label": "gate PASSED @ 90.9%",
+      "properties": {
+        "passed": true,
+        "threshold_pct": 85.0,
+        "fidelity_pct": 90.9
+      },
+      "created_at": "2026-09-28T23:31:12.268811Z"
+    },
+    {
+      "node_id": "camp_exp_1462",
+      "node_type": "Campaign",
+      "label": "Campaign: Investigate IOI Circuit in GPT-2",
+      "properties": {
+        "goal": "Investigate IOI Circuit in GPT-2",
+        "steps_completed": "7/7",
+        "status": "completed"
+      },
+      "created_at": "2026-09-29T10:55:01.238846Z"
+    },
+    {
+      "node_id": "goal_exp_1462",
+      "node_type": "ResearchGoal",
+      "label": "Investigate IOI Circuit in GPT-2",
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.244847Z"
+    },
+    {
+      "node_id": "exp_1462",
+      "node_type": "Experiment",
+      "label": "Society run exp_1462",
+      "properties": {
+        "steps_completed": "7/7"
+      },
+      "created_at": "2026-09-29T10:55:01.257880Z"
+    },
+    {
+      "node_id": "circuit_disc_live_90b35652",
+      "node_type": "Circuit",
+      "label": "Circuit disc_live_90b35652",
+      "properties": {
+        "score": 0.0,
+        "heads": []
+      },
+      "created_at": "2026-09-29T10:55:01.271903Z"
+    },
+    {
+      "node_id": "ev_exp_1462_patch",
+      "node_type": "Evidence",
+      "label": "patch delta 0.0146",
+      "properties": {
+        "delta": 0.0146,
+        "layer": 9,
+        "head": 9
+      },
+      "created_at": "2026-09-29T10:55:01.295300Z"
+    },
+    {
+      "node_id": "ev_exp_1462_validation",
+      "node_type": "Evidence",
+      "label": "validation confidence 0.9204",
+      "properties": {
+        "confidence": 0.9204,
+        "validated": true
+      },
+      "created_at": "2026-09-29T10:55:01.308829Z"
+    },
+    {
+      "node_id": "claim_exp_1462",
+      "node_type": "MechanismClaim",
+      "label": "Validated: Investigate IOI Circuit in GPT-2",
+      "properties": {
+        "confidence": 0.9204
+      },
+      "created_at": "2026-09-29T10:55:01.322343Z"
+    },
+    {
+      "node_id": "pub_exp_1462",
+      "node_type": "Publication",
+      "label": "Mechanistic Report exp_1462",
+      "properties": {
+        "experiment_id": "exp_1462"
+      },
+      "created_at": "2026-09-29T10:55:01.337859Z"
+    },
+    {
+      "node_id": "ev_exp_1462_gate",
+      "node_type": "Evidence",
+      "label": "gate PASSED @ 90.9%",
+      "properties": {
+        "passed": true,
+        "threshold_pct": 85.0,
+        "fidelity_pct": 90.9
+      },
+      "created_at": "2026-09-29T10:55:01.351378Z"
+    },
+    {
+      "node_id": "camp_exp_3832",
+      "node_type": "Campaign",
+      "label": "Campaign: Investigate IOI Circuit in GPT-2",
+      "properties": {
+        "goal": "Investigate IOI Circuit in GPT-2",
+        "steps_completed": "7/7",
+        "status": "completed"
+      },
+      "created_at": "2026-09-29T10:58:02.692647Z"
+    },
+    {
+      "node_id": "goal_exp_3832",
+      "node_type": "ResearchGoal",
+      "label": "Investigate IOI Circuit in GPT-2",
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.701130Z"
+    },
+    {
+      "node_id": "exp_3832",
+      "node_type": "Experiment",
+      "label": "Society run exp_3832",
+      "properties": {
+        "steps_completed": "7/7"
+      },
+      "created_at": "2026-09-29T10:58:02.709494Z"
+    },
+    {
+      "node_id": "circuit_disc_live_2a302295",
+      "node_type": "Circuit",
+      "label": "Circuit disc_live_2a302295",
+      "properties": {
+        "score": 0.0,
+        "heads": []
+      },
+      "created_at": "2026-09-29T10:58:02.717513Z"
+    },
+    {
+      "node_id": "ev_exp_3832_patch",
+      "node_type": "Evidence",
+      "label": "patch delta 0.0146",
+      "properties": {
+        "delta": 0.0146,
+        "layer": 9,
+        "head": 9
+      },
+      "created_at": "2026-09-29T10:58:02.727195Z"
+    },
+    {
+      "node_id": "ev_exp_3832_validation",
+      "node_type": "Evidence",
+      "label": "validation confidence 0.9204",
+      "properties": {
+        "confidence": 0.9204,
+        "validated": true
+      },
+      "created_at": "2026-09-29T10:58:02.738275Z"
+    },
+    {
+      "node_id": "claim_exp_3832",
+      "node_type": "MechanismClaim",
+      "label": "Validated: Investigate IOI Circuit in GPT-2",
+      "properties": {
+        "confidence": 0.9204
+      },
+      "created_at": "2026-09-29T10:58:02.743788Z"
+    },
+    {
+      "node_id": "pub_exp_3832",
+      "node_type": "Publication",
+      "label": "Mechanistic Report exp_3832",
+      "properties": {
+        "experiment_id": "exp_3832"
+      },
+      "created_at": "2026-09-29T10:58:02.743788Z"
+    },
+    {
+      "node_id": "ev_exp_3832_gate",
+      "node_type": "Evidence",
+      "label": "gate PASSED @ 90.9%",
+      "properties": {
+        "passed": true,
+        "threshold_pct": 85.0,
+        "fidelity_pct": 90.9
+      },
+      "created_at": "2026-09-29T10:58:02.761940Z"
     }
   ],
   "edges": [
@@ -1550,6 +1811,249 @@
         "ref_value": 0.79
       },
       "created_at": "2026-07-28T11:50:08.203601Z"
+    },
+    {
+      "edge_id": "camp_exp_4778__goal_exp_4778__EdgeType.CONTAINS",
+      "source_id": "camp_exp_4778",
+      "target_id": "goal_exp_4778",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.181719Z"
+    },
+    {
+      "edge_id": "camp_exp_4778__exp_4778__EdgeType.CONTAINS",
+      "source_id": "camp_exp_4778",
+      "target_id": "exp_4778",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.188786Z"
+    },
+    {
+      "edge_id": "camp_exp_4778__circuit_disc_live_95166868__EdgeType.DISCOVERED_BY",
+      "source_id": "camp_exp_4778",
+      "target_id": "circuit_disc_live_95166868",
+      "edge_type": "discovered_by",
+      "weight": 0.0,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.211640Z"
+    },
+    {
+      "edge_id": "exp_4778__circuit_disc_live_95166868__EdgeType.SUPPORTS",
+      "source_id": "exp_4778",
+      "target_id": "circuit_disc_live_95166868",
+      "edge_type": "supports",
+      "weight": 0.0,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.216168Z"
+    },
+    {
+      "edge_id": "exp_4778__ev_exp_4778_patch__EdgeType.SUPPORTS",
+      "source_id": "exp_4778",
+      "target_id": "ev_exp_4778_patch",
+      "edge_type": "supports",
+      "weight": 0.0146,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.227555Z"
+    },
+    {
+      "edge_id": "exp_4778__ev_exp_4778_validation__EdgeType.VALIDATED_BY",
+      "source_id": "exp_4778",
+      "target_id": "ev_exp_4778_validation",
+      "edge_type": "validated_by",
+      "weight": 0.9204,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.239822Z"
+    },
+    {
+      "edge_id": "ev_exp_4778_validation__claim_exp_4778__EdgeType.SUPPORTS",
+      "source_id": "ev_exp_4778_validation",
+      "target_id": "claim_exp_4778",
+      "edge_type": "supports",
+      "weight": 0.9204,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.250922Z"
+    },
+    {
+      "edge_id": "exp_4778__pub_exp_4778__EdgeType.SUPPORTS",
+      "source_id": "exp_4778",
+      "target_id": "pub_exp_4778",
+      "edge_type": "supports",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.262768Z"
+    },
+    {
+      "edge_id": "exp_4778__ev_exp_4778_gate__EdgeType.VALIDATED_BY",
+      "source_id": "exp_4778",
+      "target_id": "ev_exp_4778_gate",
+      "edge_type": "validated_by",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-28T23:31:12.274837Z"
+    },
+    {
+      "edge_id": "camp_exp_1462__goal_exp_1462__EdgeType.CONTAINS",
+      "source_id": "camp_exp_1462",
+      "target_id": "goal_exp_1462",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.251365Z"
+    },
+    {
+      "edge_id": "camp_exp_1462__exp_1462__EdgeType.CONTAINS",
+      "source_id": "camp_exp_1462",
+      "target_id": "exp_1462",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.265893Z"
+    },
+    {
+      "edge_id": "camp_exp_1462__circuit_disc_live_90b35652__EdgeType.DISCOVERED_BY",
+      "source_id": "camp_exp_1462",
+      "target_id": "circuit_disc_live_90b35652",
+      "edge_type": "discovered_by",
+      "weight": 0.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.279911Z"
+    },
+    {
+      "edge_id": "exp_1462__circuit_disc_live_90b35652__EdgeType.SUPPORTS",
+      "source_id": "exp_1462",
+      "target_id": "circuit_disc_live_90b35652",
+      "edge_type": "supports",
+      "weight": 0.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.286447Z"
+    },
+    {
+      "edge_id": "exp_1462__ev_exp_1462_patch__EdgeType.SUPPORTS",
+      "source_id": "exp_1462",
+      "target_id": "ev_exp_1462_patch",
+      "edge_type": "supports",
+      "weight": 0.0146,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.301825Z"
+    },
+    {
+      "edge_id": "exp_1462__ev_exp_1462_validation__EdgeType.VALIDATED_BY",
+      "source_id": "exp_1462",
+      "target_id": "ev_exp_1462_validation",
+      "edge_type": "validated_by",
+      "weight": 0.9204,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.315329Z"
+    },
+    {
+      "edge_id": "ev_exp_1462_validation__claim_exp_1462__EdgeType.SUPPORTS",
+      "source_id": "ev_exp_1462_validation",
+      "target_id": "claim_exp_1462",
+      "edge_type": "supports",
+      "weight": 0.9204,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.329345Z"
+    },
+    {
+      "edge_id": "exp_1462__pub_exp_1462__EdgeType.SUPPORTS",
+      "source_id": "exp_1462",
+      "target_id": "pub_exp_1462",
+      "edge_type": "supports",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.344863Z"
+    },
+    {
+      "edge_id": "exp_1462__ev_exp_1462_gate__EdgeType.VALIDATED_BY",
+      "source_id": "exp_1462",
+      "target_id": "ev_exp_1462_gate",
+      "edge_type": "validated_by",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:55:01.358380Z"
+    },
+    {
+      "edge_id": "camp_exp_3832__goal_exp_3832__EdgeType.CONTAINS",
+      "source_id": "camp_exp_3832",
+      "target_id": "goal_exp_3832",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.701130Z"
+    },
+    {
+      "edge_id": "camp_exp_3832__exp_3832__EdgeType.CONTAINS",
+      "source_id": "camp_exp_3832",
+      "target_id": "exp_3832",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.712000Z"
+    },
+    {
+      "edge_id": "camp_exp_3832__circuit_disc_live_2a302295__EdgeType.DISCOVERED_BY",
+      "source_id": "camp_exp_3832",
+      "target_id": "circuit_disc_live_2a302295",
+      "edge_type": "discovered_by",
+      "weight": 0.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.720507Z"
+    },
+    {
+      "edge_id": "exp_3832__circuit_disc_live_2a302295__EdgeType.SUPPORTS",
+      "source_id": "exp_3832",
+      "target_id": "circuit_disc_live_2a302295",
+      "edge_type": "supports",
+      "weight": 0.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.720507Z"
+    },
+    {
+      "edge_id": "exp_3832__ev_exp_3832_patch__EdgeType.SUPPORTS",
+      "source_id": "exp_3832",
+      "target_id": "ev_exp_3832_patch",
+      "edge_type": "supports",
+      "weight": 0.0146,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.734191Z"
+    },
+    {
+      "edge_id": "exp_3832__ev_exp_3832_validation__EdgeType.VALIDATED_BY",
+      "source_id": "exp_3832",
+      "target_id": "ev_exp_3832_validation",
+      "edge_type": "validated_by",
+      "weight": 0.9204,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.738275Z"
+    },
+    {
+      "edge_id": "ev_exp_3832_validation__claim_exp_3832__EdgeType.SUPPORTS",
+      "source_id": "ev_exp_3832_validation",
+      "target_id": "claim_exp_3832",
+      "edge_type": "supports",
+      "weight": 0.9204,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.743788Z"
+    },
+    {
+      "edge_id": "exp_3832__pub_exp_3832__EdgeType.SUPPORTS",
+      "source_id": "exp_3832",
+      "target_id": "pub_exp_3832",
+      "edge_type": "supports",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.754884Z"
+    },
+    {
+      "edge_id": "exp_3832__ev_exp_3832_gate__EdgeType.VALIDATED_BY",
+      "source_id": "exp_3832",
+      "target_id": "ev_exp_3832_gate",
+      "edge_type": "validated_by",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-29T10:58:02.768992Z"
     }
   ]
 }
