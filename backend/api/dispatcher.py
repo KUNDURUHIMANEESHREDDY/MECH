@@ -1298,6 +1298,3 @@ def society_stream(runId: str):  # type: ignore[no-untyped-def]
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
-
-
-from .legacy_dispatcher import build_dispatcher  # noqa: E402

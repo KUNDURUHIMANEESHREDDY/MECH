@@ -42,6 +42,38 @@ class GPT2Adapter(ModelAdapter):
         "When Mary and John went":  [("to", 0.61), ("home", 0.22), ("back", 0.09)],
     }
 
+    # IOI name set used by reproducibility pipelines
+    _IOI_NAMES = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank"]
+
+    @classmethod
+    def _match_ioi_prompt(cls, prompt: str):
+        """Match IOI-style prompts: 'When {a} and {b} went to the store, {a} gave a drink to'
+        Returns (subject, indirect_object) or None."""
+        prefix = "When "
+        middle = " and "
+        suffix = " went to the store, "
+        end = " gave a drink to"
+        if not prompt.startswith(prefix) or not prompt.endswith(end):
+            return None
+        rest = prompt[len(prefix):-len(end)]
+        if middle not in rest:
+            return None
+        a, b = rest.split(middle, 1)
+        if suffix not in rest:
+            return None
+        # rest = a + middle + b + suffix
+        # We need to split: a + middle + b + suffix
+        parts = rest.split(suffix, 1)
+        if len(parts) != 2:
+            return None
+        ab = parts[0]  # a + middle + b
+        if middle not in ab:
+            return None
+        a, b = ab.split(middle, 1)
+        if a in cls._IOI_NAMES and b in cls._IOI_NAMES and a != b:
+            return (a, b)
+        return None
+
     def __init__(self, variant: str = "small", mock_mode: bool = False) -> None:
         super().__init__(_gpt2_spec(variant, mock_mode))
         self._hooks: List[Any] = []
@@ -134,6 +166,19 @@ class GPT2Adapter(ModelAdapter):
             }
 
         # Mock
+        # IOI-style prompt: return the indirect_object as top token
+        ioi_match = self._match_ioi_prompt(prompt)
+        if ioi_match:
+            subject, indirect = ioi_match
+            return {
+                "prompt": prompt,
+                "top_tokens": [
+                    {"token": f" {indirect}", "logit": 8.2, "prob": 0.82},
+                    {"token": f" {subject}", "logit": 1.1, "prob": 0.11},
+                    {"token": " the", "logit": 0.4, "prob": 0.04},
+                ],
+                "top_token": f" {indirect}",
+            }
         for prefix, tokens in self._KNOWN_TOP_TOKENS.items():
             if prefix in prompt:
                 return {

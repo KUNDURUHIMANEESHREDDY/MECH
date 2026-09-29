@@ -21,11 +21,17 @@ TRACE = [
      "status": "ok", "layer": 9, "head": 9, "delta": -1.4},
     {"node": "discover", "agent": "discoverer", "op": "discover",
      "status": "completed",
-     "result": {"discovery_id": "disc_abc", "circuit_score": 0.88}},
+     "result": {"discovery_id": "disc_abc", "circuit_score": 0.88,
+                "status": "completed",
+                "provenance": "live", "validation_eligible": True,
+                "publication_eligible": True}},
     {"node": "validate", "agent": "critic", "op": "validate",
      "status": "completed",
      "result": {"validated": True,
-                "confidence": {"confidence_score": 0.96}}},
+                "confidence": {"confidence_score": 0.96},
+                "status": "completed",
+                "provenance": "live", "validation_eligible": True,
+                "publication_eligible": True}},
     {"node": "publish", "agent": "scribe", "op": "publish",
      "status": "completed"},
 ]
@@ -92,7 +98,25 @@ def test_kg_writeback_compounds(tmp_path):
 
 def test_kg_writeback_never_fails_run():
     from agents.scribe import Scribe
-    out = Scribe().write_back("r_x", "g", [], {}, {},
-                              store="not-a-store")
+    # Use a valid trace so write_back reaches the store error path
+    valid_trace = [
+        {"node": "discover", "agent": "discoverer", "op": "discover",
+         "status": "completed",
+         "result": {"discovery_id": "disc_x", "circuit_score": 0.88,
+                    "status": "completed",
+                    "provenance": "live", "validation_eligible": True,
+                    "publication_eligible": True}},
+        {"node": "validate", "agent": "critic", "op": "validate",
+         "status": "completed",
+         "result": {"validated": True,
+                    "confidence": {"confidence_score": 0.96},
+                    "status": "completed",
+                    "provenance": "live", "validation_eligible": True,
+                    "publication_eligible": True}},
+    ]
+    publication = {"status": "completed", "experiment_id": "exp_x",
+                   "steps_completed": "7/7"}
+    out = Scribe().write_back("r_x", "g", valid_trace, {},
+                              publication, store="not-a-store")
     assert out["stored"] == []
     assert "error" in out
