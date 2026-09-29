@@ -61,10 +61,18 @@ def _read_source_dir(directory: Path) -> tuple[Dict[str, Any], str]:
         p for p in directory.glob("*.py")
         if p.is_file() and p.name != "manifest.json"
     )
+    base = directory.resolve()
     entry = manifest.get("entry")
     if isinstance(entry, str) and entry.strip():
-        chosen = directory / entry.strip()
-        if not chosen.is_file():
+        # ``entry`` is attacker-controlled manifest data. Resolve it and
+        # require containment, so ``../`` or an absolute path cannot read a
+        # .py file outside the plugin directory.
+        chosen = (base / entry.strip()).resolve()
+        if not chosen.is_relative_to(base):
+            raise ValueError(
+                "manifest 'entry' must name a .py file inside the plugin directory"
+            )
+        if chosen.suffix != ".py" or not chosen.is_file():
             raise ValueError(f"manifest entry '{entry}' was not found")
     elif len(candidates) == 1:
         chosen = candidates[0]
@@ -122,7 +130,7 @@ class PluginService:
         info = self._manager.registry.get(name)
         if info is None:
             raise ValueError(f"No installed plugin named '{name}'.")
-        plugin = self._loader.load_from_file(info["path"])
+        plugin = self._loader.load_from_file_sandboxed(info["path"])
         manifest = plugin.manifest
         # Pin the SDK plugin_id on first load; later loads must present the
         # same id, so a swapped-in file cannot silently take another name.

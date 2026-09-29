@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from typing import Dict, Any, List
 from .plugin_dependency import PluginDependencyResolver
 from .plugin_sandbox import PluginSandbox
@@ -33,7 +34,24 @@ class PluginManager:
         """
         name = manifest["name"]
         version = manifest["version"]
-        
+
+        # Defence in depth: the service layer already enforces this, but
+        # install_plugin is a public entry point and must not trust its
+        # caller to have validated the name. A name containing a separator
+        # would write outside plugins_dir.
+        if not re.match(r"^[a-z0-9][a-z0-9_.-]{1,63}$", name):
+            raise ValueError(
+                "Plugin name must be 2-64 chars: lowercase, digits, '_', '.', '-'"
+            )
+
+        # Refuse to overwrite an installed plugin. Overwriting in place let a
+        # same-named install silently replace a trusted plugin's source while
+        # the registry kept the old plugin_id.
+        if name in self.registry:
+            raise ValueError(
+                f"Plugin '{name}' is already installed; uninstall it first."
+            )
+
         # Verify Sandbox compliance before installation
         try:
             PluginSandbox.analyze_ast(source_code)
@@ -43,6 +61,8 @@ class PluginManager:
         # Save code (explicit UTF-8: the loader exec's the file back and
         # platform-default encodings corrupt non-ASCII source).
         plugin_path = os.path.join(self.plugins_dir, f"{name}.py")
+        if os.path.dirname(os.path.abspath(plugin_path)) != os.path.abspath(self.plugins_dir):
+            raise ValueError("Refusing to install outside the plugins directory.")
         with open(plugin_path, 'w', encoding='utf-8') as f:
             f.write(source_code)
             
