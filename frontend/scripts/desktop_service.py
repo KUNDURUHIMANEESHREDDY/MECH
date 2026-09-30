@@ -2,28 +2,79 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+# Path bootstrap. Two different roots are needed and the old code supplied
+# neither:
+#   "storage.database"        -> <repo>/backend/storage/database.py, so backend/
+#   "backend.neuron_inspector" -> <repo>/backend/neuron_inspector.py, so the repo root
+# Only frontend/ was added, so the process died at import with
+# ModuleNotFoundError: No module named 'storage'.
+#
+# Roots are resolved from __file__ (resolved, so a symlinked launch still lands
+# on the real tree) rather than from the working directory, because Electron
+# spawns this with an app-root cwd that differs from the script location.
+# MECH_APP_ROOT overrides the detection for packaged layouts, where the app root
+# is process.resourcesPath and the backend tree is copied alongside it.
+def _candidate_roots() -> list[Path]:
+    script = Path(__file__).resolve()
+    # frontend/scripts/desktop_service.py -> frontend/ -> repo/
+    frontend = script.parents[1]
+    repo = frontend.parent
+    roots = [repo, repo / "backend", frontend]
+
+    override = os.environ.get("MECH_APP_ROOT", "").strip()
+    if override:
+        app_root = Path(override).expanduser().resolve()
+        # Packaged: resources/frontend + resources/backend
+        roots += [app_root.parent, app_root.parent / "backend", app_root,
+                  app_root / "backend"]
+    return roots
+
+
+for _root in _candidate_roots():
+    if _root.is_dir():
+        _entry = str(_root)
+        if _entry not in sys.path:
+            sys.path.insert(0, _entry)
 
 from storage.database import DesktopStorage, StorageError
-from backend.neuron_inspector import GPT2Model
+
+if False:  # TYPE_CHECKING-only anchor for the annotation below
+    from backend.neuron_inspector import GPT2Model
+
+else:
+    GPT2Model = None  # resolved lazily by NeuronInspectorController._get_gpt2
 
 
 class NeuronInspectorController:
     """Dispatches IPC requests — all real model inference via GPT2Model."""
 
     def __init__(self):
-        self._gpt2: GPT2Model | None = None
+        self._gpt2 = None
 
-    def _get_gpt2(self) -> GPT2Model:
+    def _get_gpt2(self):
+        """Import and construct the model on first neuron request.
+
+        The import is deliberately deferred. backend.neuron_inspector pulls in
+        transformer_lens -> datasets, and a broken or missing ML dependency
+        should only break neuron inspection — not settings, projects, or
+        workspace.describe, none of which need a model. Importing it at module
+        scope made the whole sidecar unbootable.
+        """
         if self._gpt2 is None:
-            self._gpt2 = GPT2Model("gpt2-small")
+            try:
+                from backend.neuron_inspector import GPT2Model as _GPT2Model
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"GPT-2 is unavailable for neuron inspection: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+            self._gpt2 = _GPT2Model("gpt2-small")
         return self._gpt2
 
     def handle(self, method: str, params: dict[str, Any]) -> Any:

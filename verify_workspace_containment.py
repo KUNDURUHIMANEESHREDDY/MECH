@@ -1,12 +1,8 @@
-"""Live check of workspace.describe containment against DesktopStorage.
+"""Live check of workspace.describe containment through the real sidecar.
 
-desktop_service.py is the reachable caller of describe_workspace, but the
-sidecar cannot boot from a repo checkout: it sets ROOT to ``frontend/`` and
-then does ``from storage.database import ...``, while the module actually lives
-at ``backend/storage/database.py``. That is a pre-existing packaging bug
-(untouched by this work, present in the committed original), so this script
-drives the same method through a correctly-paired sys.path instead of
-importing the sidecar directly.
+Drives frontend/scripts/desktop_service.py over its actual JSON-lines IPC
+protocol, the way electron/electron/ipc/pythonBridge.ts does. This is the
+reachable surface: the renderer's workspace.describe maps straight here.
 """
 import json
 import os
@@ -27,37 +23,14 @@ def check(name, cond, detail=""):
         errors.append(name)
 
 
-DRIVER = r'''
-import json, os, sys
-from pathlib import Path
-sys.path.insert(0, {backend!r})   # makes "from storage.database import ..." work
-sys.path.insert(0, {repo!r})      # makes "from backend.neuron_inspector import ..." work
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    req = json.loads(line)
-    try:
-        from storage.database import DesktopStorage, StorageError
-        store = DesktopStorage(Path({db!r}))
-        store.initialize()
-        data = store.describe_workspace(path=str(req["params"].get("path", "")))
-        print(json.dumps({{"ok": True, "data": data}}), flush=True)
-    except Exception as exc:
-        print(json.dumps({{"ok": False, "error": f"{{type(exc).__name__}}: {{exc}}"}}), flush=True)
-'''
-
-
 def call_many(requests, env_extra, db):
-    driver = DRIVER.format(backend=str(REPO_ROOT / "backend"),
-                           repo=str(REPO_ROOT), db=str(db))
     env = dict(os.environ)
     env.update(env_extra or {})
     payload = "".join(json.dumps(r) + "\n" for r in requests)
     proc = subprocess.run(
-        [sys.executable, "-c", driver],
+        [sys.executable, str(SERVICE), "--db", str(db)],
         input=payload, capture_output=True, text=True,
-        timeout=120, env=env, cwd=str(REPO_ROOT),
+        timeout=180, env=env, cwd=str(REPO_ROOT),
     )
     out = []
     for line in proc.stdout.strip().splitlines():
@@ -66,8 +39,20 @@ def call_many(requests, env_extra, db):
         except ValueError:
             pass
     if not out:
-        return [{"ok": False, "error": proc.stderr[-300:]}]
+        return [{"error": {"message": proc.stderr[-300:]}}]
     return out
+
+
+def ok(reply):
+    return isinstance(reply, dict) and "result" in reply and "error" not in reply
+
+
+def err(reply):
+    return isinstance(reply, dict) and isinstance(reply.get("error"), dict)
+
+
+def message(reply):
+    return (reply or {}).get("error", {}).get("message", "")
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -90,42 +75,43 @@ with tempfile.TemporaryDirectory() as tmp:
     print("=" * 62)
 
     results = call_many([
-        {"params": {"path": str(allowed)}},
-        {"params": {"path": str(outside)}},
-        {"params": {"path": str(allowed / ".." / "..")}},
-        {"params": {"path": "   "}},
-        {"params": {"path": str(allowed / "sub")}},
+        {"method": "workspace.describe", "params": {"path": str(allowed)}},
+        {"method": "workspace.describe", "params": {"path": str(outside)}},
+        {"method": "workspace.describe", "params": {"path": str(allowed / ".." / "..")}},
+        {"method": "workspace.describe", "params": {"path": "   "}},
+        {"method": "workspace.describe", "params": {"path": str(allowed / "sub")}},
     ], roots, db)
 
     r = results[0]
-    check("allowed root accepted", r.get("ok") is True, str(r)[:150])
-    if r.get("ok"):
-        data = r["data"]
+    check("allowed root accepted", ok(r), str(r)[:150])
+    if ok(r):
+        data = r["result"]
         check("counts only inside the root", data.get("fileCount") == 2,
               f"fileCount={data.get('fileCount')}")
         check("reports isDirectory", data.get("isDirectory") is True, str(data)[:110])
         check("reports countCapped", data.get("countCapped") is False, str(data)[:110])
 
-    check("outside root refused", results[1].get("ok") is False, str(results[1])[:150])
-    check("traversal refused", results[2].get("ok") is False, str(results[2])[:150])
-    check("empty path refused", results[3].get("ok") is False, str(results[3])[:150])
+    check("outside root refused", err(results[1]), str(results[1])[:150])
+    check("traversal refused", err(results[2]), str(results[2])[:150])
+    check("empty path refused", err(results[3]), str(results[3])[:150])
 
     r = results[4]
-    check("nested allowed path accepted", r.get("ok") is True, str(r)[:150])
-    if r.get("ok"):
-        check("nested count correct", r["data"].get("fileCount") == 1,
-              f"fileCount={r['data'].get('fileCount')}")
+    check("nested allowed path accepted", ok(r), str(r)[:150])
+    if ok(r):
+        check("nested count correct", r["result"].get("fileCount") == 1,
+              f"fileCount={r['result'].get('fileCount')}")
 
     # Default containment is home. A path *inside* home is legitimately
     # allowed — tempfile lives under it — so pick a root-sibling to prove the
     # boundary is real rather than trivially permissive.
     system_root = Path(os.environ.get("SystemRoot", "C:/Windows"))
-    results = call_many([{"params": {"path": str(system_root)}}], {}, db)
-    check("outside home refused by default", results[0].get("ok") is False,
-          str(results[0])[:170])
+    results = call_many(
+        [{"method": "workspace.describe", "params": {"path": str(system_root)}}],
+        {}, db)
+    check("outside home refused by default", err(results[0]), str(results[0])[:170])
     check("refusal names the home boundary",
-          "outside the allowed workspace roots" in str(results[0].get("error", "")),
-          str(results[0].get("error"))[:140])
+          "outside the allowed workspace roots" in message(results[0]),
+          message(results[0])[:140])
 
 print("=" * 62)
 if errors:
