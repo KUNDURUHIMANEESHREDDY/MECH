@@ -40,8 +40,19 @@ class PluginSandbox:
         'abs': abs,
         'enumerate': enumerate,
         'zip': zip,
+        # Exception types. A plugin's own error handling needs these, and a
+        # plugin cannot reach a dangerous builtin through an exception class.
         'Exception': Exception,
+        'BaseException': BaseException,
         'ValueError': ValueError,
+        'TypeError': TypeError,
+        'KeyError': KeyError,
+        'IndexError': IndexError,
+        'AttributeError': AttributeError,
+        'NotImplementedError': NotImplementedError,
+        'RuntimeError': RuntimeError,
+        'StopIteration': StopIteration,
+        'ZeroDivisionError': ZeroDivisionError,
     }
 
     # Importable modules. The MECH plugin SDK lives under

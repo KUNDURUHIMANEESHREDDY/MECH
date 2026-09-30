@@ -1,0 +1,7 @@
+{
+  "name": "live_probe",
+  "version": "1.0.0",
+  "entry": "plugin.py",
+  "description": "Round-trip probe used by the plugin integration check.",
+  "author": "MECH Platform Team"
+}

@@ -71,20 +71,34 @@ class PluginLoader:
 
         return plugins
 
-    def load_from_path(self, dotted_module_path: str) -> MechPlugin:
-        """Import a plugin from an arbitrary dotted Python module path.
+    #: Only modules inside the MECH plugin SDK may be imported by this path.
+    #: ``load_from_path`` executes third-party code, so it is not a general
+    #: "import anything on sys.path" primitive.
+    ALLOWED_MODULE_PREFIX = "backend.plugins.library."
 
-        The module must expose a ``register()`` function returning a MechPlugin.
+    def load_from_path(self, dotted_module_path: str) -> MechPlugin:
+        """Import a bundled library plugin by dotted module path.
+
+        Restricted to ``backend.plugins.library.*``. A caller-supplied path
+        previously reached ``importlib.import_module`` with no validation, which
+        meant any importable module on ``sys.path`` — including a file an
+        attacker had dropped anywhere on the path — would be executed.
 
         Args:
-            dotted_module_path: e.g. ``mylab.ioi_extension``
+            dotted_module_path: e.g. ``backend.plugins.library.ioi_experiment_logger``
 
         Returns:
             Instantiated MechPlugin.
 
         Raises:
-            PluginLoadError: If the module cannot be found or is malformed.
+            PluginLoadError: If the module is outside the allowlist, cannot be
+                found, or is malformed.
         """
+        if not dotted_module_path.startswith(self.ALLOWED_MODULE_PREFIX):
+            raise PluginLoadError(
+                f"Module '{dotted_module_path}' is outside the plugin library; "
+                f"only {self.ALLOWED_MODULE_PREFIX}* may be loaded this way."
+            )
         try:
             module = importlib.import_module(dotted_module_path)
         except ModuleNotFoundError as exc:

@@ -149,30 +149,116 @@ def test_install_name_cannot_traverse(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Runtime path — the sandbox must not be orphaned dead code
+# _resolve_source — install sources must be trusted roots
 # ---------------------------------------------------------------------------
 
 
-def test_service_enable_uses_sandboxed_loader():
-    """enable() must not route plugin code through a bare exec_module.
+def test_untrusted_directory_rejected(tmp_path):
+    from backend.plugins.service import _resolve_source
+
+    rogue = tmp_path / "rogue"
+    rogue.mkdir()
+    with pytest.raises(ValueError, match="not a trusted plugin source"):
+        _resolve_source(str(rogue))
+
+
+def test_trusted_root_allowed(tmp_path, monkeypatch):
+    from backend.plugins.service import _resolve_source
+
+    trusted = tmp_path / "trusted"
+    plugin_dir = trusted / "myplugin"
+    plugin_dir.mkdir(parents=True)
+    monkeypatch.setenv("MECH_PLUGIN_TRUSTED_ROOTS", str(trusted))
+    assert _resolve_source(str(plugin_dir)) == plugin_dir.resolve()
+
+
+def test_trusted_root_still_rejects_sibling(tmp_path, monkeypatch):
+    """A trusted root must not permit a sibling directory to be installed."""
+    from backend.plugins.service import _resolve_source
+
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    monkeypatch.setenv("MECH_PLUGIN_TRUSTED_ROOTS", str(trusted))
+    with pytest.raises(ValueError, match="not a trusted plugin source"):
+        _resolve_source(str(sibling))
+
+
+def test_sample_alias_still_resolves():
+    from backend.plugins.service import _resolve_source
+
+    directory = _resolve_source("sample:ioi_experiment_logger")
+    assert directory.is_dir()
+
+
+def test_sample_alias_traversal_rejected():
+    from backend.plugins.service import _resolve_source
+
+    with pytest.raises(ValueError, match="Unknown sample plugin"):
+        _resolve_source("sample:../../..")
+
+
+def test_remote_source_rejected():
+    from backend.plugins.service import _resolve_source
+
+    with pytest.raises(ValueError, match="Remote installs are not supported"):
+        _resolve_source("https://example.com/plugin.zip")
+
+
+# ---------------------------------------------------------------------------
+# load_from_path — must not import arbitrary modules
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("module", [
+    "os",
+    "subprocess",
+    "json",
+    "backend.api.dispatcher",
+    "",
+])
+def test_load_from_path_rejects_outside_library(module):
+    from backend.plugins.plugin_loader import PluginLoader, PluginLoadError
+
+    with pytest.raises(PluginLoadError, match="outside the plugin library"):
+        PluginLoader().load_from_path(module)
+
+
+def test_load_from_path_allows_library_plugin():
+    from backend.plugins.plugin_loader import PluginLoader
+
+    plugin = PluginLoader().load_from_path(
+        "backend.plugins.library.ioi_experiment_logger")
+    assert plugin.manifest.plugin_id == "mech.example.ioi_experiment_logger"
+
+
+# ---------------------------------------------------------------------------
+# Runtime path — plugin code must not run in the backend process
+# ---------------------------------------------------------------------------
+
+
+def test_service_enable_does_not_execute_plugin_in_process():
+    """enable() must not run plugin code in the backend process.
 
     The unpatched tree called PluginLoader.load_from_file -> exec_module, which
-    runs with full interpreter privileges. This asserts the service no longer
-    resolves to that unconfined loader.
+    executes with full interpreter privileges. Plugins now run in a bounded
+    worker process via start_remote_plugin, so _load_enabled must not resolve
+    to any in-process loader.
     """
     import inspect
 
     from backend.plugins import service as service_mod
 
     source = inspect.getsource(service_mod.PluginService._load_enabled)
-    # Assert on the call form (trailing paren) so the sandboxed loader's name,
-    # which contains the unconfined one as a prefix, is not a false positive.
-    assert ".load_from_file(" not in source, (
-        "_load_enabled must not execute plugin code via the unconfined "
-        "PluginLoader.load_from_file path"
-    )
-    assert "load_from_file_sandboxed" in source, (
-        "_load_enabled must go through the sandboxed loader"
+    # Assert on call forms (trailing paren) so a name that merely contains the
+    # in-process loader's name is not a false positive.
+    for forbidden in (".load_from_file(", ".load_from_file_sandboxed("):
+        assert forbidden not in source, (
+            f"_load_enabled must not execute plugin code in-process via {forbidden}"
+        )
+    assert "start_remote_plugin" in source, (
+        "_load_enabled must launch a bounded worker process"
     )
 
 
