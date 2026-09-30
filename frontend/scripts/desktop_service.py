@@ -6,58 +6,87 @@ import os
 import sys
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-# Path bootstrap. Two different roots are needed and the old code supplied
-# neither:
-#   "storage.database"        -> <repo>/backend/storage/database.py, so backend/
-#   "backend.neuron_inspector" -> <repo>/backend/neuron_inspector.py, so the repo root
-# Only frontend/ was added, so the process died at import with
-# ModuleNotFoundError: No module named 'storage'.
+if TYPE_CHECKING:  # pragma: no cover - import only for type checkers
+    from backend.neuron_inspector import GPT2Model
+
+# Path bootstrap.
 #
-# Roots are resolved from __file__ (resolved, so a symlinked launch still lands
-# on the real tree) rather than from the working directory, because Electron
+# The two imports below resolve against different roots:
+#   "backend.neuron_inspector" -> <repo>/backend/neuron_inspector.py  => repo root
+#   "storage.database"         -> <repo>/backend/storage/database.py => backend/
+# The original code added only frontend/, which is neither, so the process died
+# at import with ModuleNotFoundError: No module named 'storage'.
+#
+# Roots come from the resolved __file__, not the working directory: Electron
 # spawns this with an app-root cwd that differs from the script location.
-# MECH_APP_ROOT overrides the detection for packaged layouts, where the app root
-# is process.resourcesPath and the backend tree is copied alongside it.
+# resolve() also means a symlinked launch still lands on the real tree.
+#
+# Order matters. sys.path is searched left to right, so the repo root must come
+# before backend/ (or a stray frontend/ entry would shadow the backend package)
+# and frontend/ goes last because nothing imports from it.
 def _candidate_roots() -> list[Path]:
     script = Path(__file__).resolve()
-    # frontend/scripts/desktop_service.py -> frontend/ -> repo/
-    frontend = script.parents[1]
-    repo = frontend.parent
-    roots = [repo, repo / "backend", frontend]
+    frontend = script.parents[1]        # .../<repo>/frontend
+    repo = frontend.parent              # .../<repo>
 
+    roots: list[Path] = [repo, repo / "backend"]
+
+    # Packaged layout: electron-builder copies ../backend -> resources/backend
+    # and the app root is process.resourcesPath, so the tree is a sibling of
+    # the app root rather than a parent. MECH_APP_ROOT names that app root.
     override = os.environ.get("MECH_APP_ROOT", "").strip()
     if override:
         app_root = Path(override).expanduser().resolve()
-        # Packaged: resources/frontend + resources/backend
-        roots += [app_root.parent, app_root.parent / "backend", app_root,
-                  app_root / "backend"]
-    return roots
+        roots += [app_root.parent, app_root.parent / "backend",
+                  app_root, app_root / "backend"]
+
+    roots.append(frontend)
+
+    # Dedupe while preserving precedence: the first occurrence of a path wins.
+    seen: set[str] = set()
+    ordered: list[Path] = []
+    for root in roots:
+        key = str(root)
+        if key not in seen:
+            seen.add(key)
+            ordered.append(root)
+    return ordered
 
 
-for _root in _candidate_roots():
-    if _root.is_dir():
-        _entry = str(_root)
-        if _entry not in sys.path:
-            sys.path.insert(0, _entry)
+def _bootstrap_sys_path() -> list[Path]:
+    """Put the import roots on sys.path, highest precedence first.
 
-from storage.database import DesktopStorage, StorageError
+    Roots already present are *moved*, not skipped. A pre-existing entry at the
+    wrong precedence — from PYTHONPATH, a parent process, or a test harness —
+    would otherwise shadow the backend package, which is the exact failure this
+    bootstrap exists to prevent.
+    """
+    added: list[Path] = []
+    for root in reversed(_candidate_roots()):   # reversed => insert(0) keeps order
+        if not root.is_dir():
+            continue
+        entry = str(root)
+        while entry in sys.path:
+            sys.path.remove(entry)
+        sys.path.insert(0, entry)
+        added.append(root)
+    return added
 
-if False:  # TYPE_CHECKING-only anchor for the annotation below
-    from backend.neuron_inspector import GPT2Model
 
-else:
-    GPT2Model = None  # resolved lazily by NeuronInspectorController._get_gpt2
+_bootstrap_sys_path()
+
+from storage.database import DesktopStorage, StorageError  # noqa: E402
 
 
 class NeuronInspectorController:
     """Dispatches IPC requests — all real model inference via GPT2Model."""
 
     def __init__(self):
-        self._gpt2 = None
+        self._gpt2: "GPT2Model | None" = None
 
-    def _get_gpt2(self):
+    def _get_gpt2(self) -> "GPT2Model":
         """Import and construct the model on first neuron request.
 
         The import is deliberately deferred. backend.neuron_inspector pulls in

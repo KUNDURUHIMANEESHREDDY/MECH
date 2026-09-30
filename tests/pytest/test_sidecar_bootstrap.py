@@ -155,6 +155,55 @@ def test_sidecar_resolves_symlinked_script(tmp_path):
     assert proc.stdout.strip(), f"no response via symlink; stderr:\n{proc.stderr[-500:]}"
 
 
+def test_sys_path_precedence_is_deterministic():
+    """Repo root must outrank backend/, and frontend/ must come last.
+
+    sys.path is searched left to right, so inserting with a plain
+    sys.path.insert(0, ...) inside the root loop silently inverts the intended
+    order. Pin it here.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_ds_bootstrap", SIDECAR)
+    module = importlib.util.module_from_spec(spec)
+    # Execute only the bootstrap helpers, without running main().
+    source = SIDECAR.read_text(encoding="utf-8")
+    bootstrap = source.split("from storage.database import")[0]
+    exec(compile(bootstrap, str(SIDECAR), "exec"), module.__dict__)
+
+    roots = [str(p) for p in module._candidate_roots()]  # noqa: SLF001
+    assert len(roots) == len(set(roots)), f"duplicate roots: {roots}"
+
+    repo = str(REPO_ROOT)
+    backend = str(REPO_ROOT / "backend")
+    frontend = str(FRONTEND)
+
+    assert roots.index(repo) < roots.index(backend), \
+        f"repo root must precede backend/: {roots}"
+    assert roots.index(frontend) == len(roots) - 1, \
+        f"frontend/ must be last (lowest precedence): {roots}"
+
+    added = module._bootstrap_sys_path()  # noqa: SLF001
+    added_str = [str(p) for p in added]
+    if repo in sys.path and backend in sys.path:
+        assert sys.path.index(repo) < sys.path.index(backend), \
+            "sys.path order does not match _candidate_roots order"
+
+
+def test_no_dead_type_checking_scaffold():
+    """The TYPE_CHECKING guard must be real, not an `if False:` block."""
+    source = SIDECAR.read_text(encoding="utf-8")
+    assert "if False:" not in source, \
+        "use `if TYPE_CHECKING:` rather than a dead `if False:` block"
+    assert "if TYPE_CHECKING:" in source
+    # GPT2Model must not be bound to None at module scope; that reads as a real
+    # class that happens to be None.
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("GPT2Model ="):
+            pytest.fail(f"module-scope GPT2Model binding is misleading: {stripped}")
+
+
 def test_packaged_layout_resolves(tmp_path):
     """Simulate the packaged resource layout: resources/backend/...
 
