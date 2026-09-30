@@ -18,10 +18,17 @@ app = FastAPI(
     description="Mechanistic Interpretability Research Platform"
 )
 
-# Allow frontend (Vite). Extra dev origins via MECH_CORS_ORIGINS (comma-separated).
+# Allow the Vite dev server only. Extra dev origins via MECH_CORS_ORIGINS
+# (comma-separated).
+#
+# "null" and "file://" were previously allowed. Nothing in this repo serves the
+# frontend from a file:// origin -- UI_PREVIEW.html is unreferenced and Vite
+# serves over http -- so they bought nothing while letting any local HTML file
+# or sandboxed iframe make credentialed requests to an API that has no auth.
+# Removed.
 import os as _os
 
-_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173", "null", "file://"]
+_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _CORS_ORIGINS += [o.strip() for o in _os.environ.get("MECH_CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -84,9 +91,15 @@ except Exception:
 
 if __name__ == "__main__":
     logger.info("Starting MECH Platform...")
+    # Loopback only. This API has no authentication and now exposes plugin
+    # install/enable, so binding 0.0.0.0 put it on the LAN for anyone who could
+    # reach the port. Set MECH_BIND_HOST=0.0.0.0 deliberately if you need it
+    # (containers, shared dev machines) and understand the exposure.
+    _host = _os.environ.get("MECH_BIND_HOST", "127.0.0.1")
+    logger.info(f"Binding to {_host}:8000")
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host=_host,
         port=8000,
         reload=False,
         timeout_keep_alive=600,
