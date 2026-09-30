@@ -104,12 +104,16 @@ def _abort(proc: subprocess.Popen, reason: str) -> None:
 def start_remote_plugin(
     plugin_path: str | Path,
     timeout: float = 60.0,
+    limits: Optional[Dict[str, int]] = None,
 ) -> RemotePluginProxy:
     """Start a worker, load ``plugin_path`` in it, and return a proxy.
 
     Args:
         plugin_path: Absolute path to the plugin's single .py source file.
         timeout: Per-call timeout for the returned proxy, in seconds.
+        limits: Optional override of the OS resource limits, e.g.
+            ``{"cpu_seconds": 3}``. Tests use a small CPU ceiling rather than
+            waiting out the 120s production default.
 
     Raises:
         WorkerBootError: The worker failed to boot, was refused by its own
@@ -194,7 +198,8 @@ def start_remote_plugin(
                 f"could not apply containment to worker: "
                 f"{job.get('error', 'job object assignment refused')}")
 
-        proc.stdin.write(encode({"op": "load", "path": str(plugin_path)}))
+        proc.stdin.write(encode({"op": "load", "path": str(plugin_path),
+                                 "limits": limits or {}}))
         proc.stdin.flush()
 
         loaded_msg = _await("loaded")
@@ -218,6 +223,18 @@ def start_remote_plugin(
         except Exception:  # noqa: BLE001
             pass
         raise
+
+    # Restore blocking mode. The non-blocking flags set above live on the open
+    # file description, which the child inherited across fork/exec -- so the
+    # worker's stdin became non-blocking too and its readline() returned EOF
+    # immediately, killing the worker on the first hook call. This only showed
+    # up on Linux: os.set_blocking does not exist on Windows, so the call
+    # silently no-opped there and the bug stayed hidden.
+    for stream in (proc.stdin, proc.stdout):
+        try:
+            os.set_blocking(stream.fileno(), True)
+        except (AttributeError, OSError):
+            pass  # Windows: pipes are always blocking here.
 
     proxy = RemotePluginProxy(proc.stdin, proc.stdout, manifest, timeout=timeout)
     # Keep the handle so the caller can terminate the worker; the Windows Job

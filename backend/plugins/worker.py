@@ -32,6 +32,12 @@ for _p in (_REPO_ROOT, _BACKEND):
         sys.path.insert(0, _p)
 
 from backend.plugins.limits import apply_posix_limits  # noqa: E402
+
+# Names apply_posix_limits accepts, so a caller cannot smuggle an unrelated
+# keyword through the protocol.
+_LIMIT_KEYS = {
+    "cpu_seconds", "address_space_mb", "file_size_mb", "open_files", "processes",
+}
 from backend.plugins.plugin_sandbox import (  # noqa: E402
     PluginSandbox,
     SecurityViolation,
@@ -117,6 +123,18 @@ def main() -> int:
 
         if op == "load":
             load_path = str(message.get("path") or "")
+            # Re-apply with the caller's overrides before touching plugin code.
+            # Lowering a limit is always permitted; the defaults applied at boot
+            # stand unless the parent asks for something tighter.
+            requested = message.get("limits") or {}
+            if isinstance(requested, dict) and requested:
+                try:
+                    apply_posix_limits(**{k: int(v) for k, v in requested.items()
+                                          if k in _LIMIT_KEYS})
+                except (TypeError, ValueError) as exc:
+                    if not _write(stdout, failed("limits", f"bad limits: {exc}")):
+                        return 1
+                    continue
             try:
                 with open(load_path, "r", encoding="utf-8") as fh:
                     source = fh.read()

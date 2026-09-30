@@ -313,6 +313,50 @@ def test_limits_available_on_this_platform():
     assert info["defaults"]["cpu_seconds"] > 0
 
 
+def test_worker_pipes_are_blocking_after_handshake():
+    """The handshake's non-blocking flags must not leak into the child.
+
+    The parent sets O_NONBLOCK on the pipes to bound the boot handshake, but
+    that flag lives on the open file description, which the worker inherited
+    across fork/exec. A non-blocking stdin makes the worker's readline() return
+    EOF immediately, so the worker exits and the first hook call fails with
+    "plugin worker exited unexpectedly". This is a Linux-only symptom because
+    os.set_blocking does not exist on Windows, where it silently no-ops.
+
+    Asserted directly where the platform can report blocking state, which is
+    exactly the platform that was broken.
+    """
+    if not hasattr(os, "get_blocking"):
+        pytest.skip("platform cannot report pipe blocking state")
+
+    proxy = start_remote_plugin(ECHO)
+    try:
+        assert os.get_blocking(proxy._stdin.fileno()), (  # noqa: SLF001
+            "worker stdin left non-blocking; the worker will see EOF and exit")
+        assert os.get_blocking(proxy._stdout.fileno()), (  # noqa: SLF001
+            "worker stdout left non-blocking; replies may be missed")
+    finally:
+        try:
+            proxy._roundtrip({"op": "shutdown"})  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def test_worker_survives_repeated_hook_calls():
+    """A worker must stay alive across many calls, not just the first."""
+    proxy = start_remote_plugin(ECHO)
+    try:
+        for i in range(25):
+            result = proxy.on_experiment_planned({"name": f"probe-{i}"})
+            assert result is not None, f"call {i} returned nothing"
+            assert result["name"] == f"probe-{i}"
+    finally:
+        try:
+            proxy._roundtrip({"op": "shutdown"})  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def test_worker_reports_limits_in_handshake():
     """A worker that could not apply its limits must say so, not hide it."""
     proxy = start_remote_plugin(ECHO)
@@ -349,10 +393,12 @@ def test_infinite_loop_is_bounded(tmp_path):
         "    return Spin()\n",
         encoding="utf-8",
     )
-    proxy = start_remote_plugin(payload)
+    proxy = start_remote_plugin(payload, limits={"cpu_seconds": 2})
     started = time.monotonic()
     with pytest.raises(RemotePluginError):
         proxy.on_campaign_started({"campaign_id": "c"})
-    # The CPU limit is 120s by default; the worker should die well before the
-    # test itself gives up. Assert it failed fast rather than hanging forever.
-    assert time.monotonic() - started < 200
+    # The worker is capped at 2s of CPU, so the spin must be killed quickly.
+    # Using a small ceiling keeps this test fast instead of waiting out the
+    # 120s production default.
+    elapsed = time.monotonic() - started
+    assert elapsed < 60, f"CPU limit did not stop the spin promptly ({elapsed:.1f}s)"
