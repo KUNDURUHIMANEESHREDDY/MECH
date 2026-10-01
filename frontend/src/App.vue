@@ -37,7 +37,7 @@
 
       <div class="nav-status" role="status" aria-live="polite" data-testid="runtime-status">
         <span class="status-dot" :class="`status-${modelStatus}`" aria-hidden="true" />
-        <span class="nav-status__text">{{ modelName }}</span>
+        <span class="nav-status__text">{{ statusLabel }}</span>
       </div>
     </aside>
 
@@ -114,6 +114,24 @@ const loadErrors = reactive<Record<string, string>>({});
 const componentCache = new Map<string, ReturnType<typeof defineAsyncComponent>>();
 
 const GROUP_ORDER = ['Explore', 'Develop', 'Research', 'General'] as const;
+
+/**
+ * Label for the nav status pill.
+ *
+ * This used to render `modelName` unconditionally, so when the backend was
+ * unreachable the dot went red (modelStatus = 'offline') while the text still
+ * read "No model selected" -- reporting an infrastructure failure as a user
+ * choice, which is precisely the fabrication the rest of the app is careful to
+ * avoid. tests/playwright/trust.spec.js asserts the offline wording.
+ *
+ * Derived rather than assigned on error, so a transient outage does not
+ * permanently overwrite the model the user had selected.
+ */
+const statusLabel = computed(() => {
+  if (modelStatus.value === 'connecting') return 'Connecting to backend…';
+  if (modelStatus.value === 'offline') return 'Offline — backend unreachable';
+  return modelName.value;
+});
 
 const navGroups = computed(() =>
   GROUP_ORDER.map(name => ({
