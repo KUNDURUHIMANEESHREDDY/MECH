@@ -11,12 +11,12 @@ import json
 # Ensure project root is in path
 sys.path.insert(0, os.getcwd())
 
-from backend.datasets.dataset_manager import DatasetManager
+from backend.research_datasets.dataset_manager import DatasetManager
 
 def audit_datasets():
     print("Executing Golden Dataset Integrity Audit...")
-    manager = DatasetManager(data_dir="backend/datasets")
-    manifest_path = os.path.join("backend/datasets", "golden_manifest.json")
+    manager = DatasetManager(data_dir="backend/research_datasets")
+    manifest_path = os.path.join("backend/research_datasets", "golden_manifest.json")
 
     if not os.path.exists(manifest_path):
         print("FAIL: golden_manifest.json not found.")

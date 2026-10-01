@@ -14,13 +14,13 @@ import json
 # Ensure project root is in path
 sys.path.insert(0, os.getcwd())
 
-from backend.datasets.dataset_manager import DatasetManager
-from backend.datasets.dataset_certificate import DatasetCertificateEngine
-from backend.datasets.dataset_exporter import DatasetExporter
+from backend.research_datasets.dataset_manager import DatasetManager
+from backend.research_datasets.dataset_certificate import DatasetCertificateEngine
+from backend.research_datasets.dataset_exporter import DatasetExporter
 
 def promote_dataset(dataset_id: str, author: str):
     print(f"Executing Promotion Workflow for: {dataset_id}")
-    manager = DatasetManager(data_dir="backend/datasets")
+    manager = DatasetManager(data_dir="backend/research_datasets")
     cert_engine = DatasetCertificateEngine()
     exporter = DatasetExporter()
 
@@ -47,7 +47,7 @@ def promote_dataset(dataset_id: str, author: str):
 
     # 4. Issue Certificate
     cert = cert_engine.issue(meta)
-    cert_path = os.path.join("backend/datasets", dataset_id, "dataset_certificate.json")
+    cert_path = os.path.join("backend/research_datasets", dataset_id, "dataset_certificate.json")
     with open(cert_path, "w") as f:
         json.dump(cert.__dict__, f, indent=2)
     print(f"  - Certificate Issued: {cert_path}")

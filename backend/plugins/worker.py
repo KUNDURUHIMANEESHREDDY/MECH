@@ -22,6 +22,7 @@ import io
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +32,7 @@ for _p in (_REPO_ROOT, _BACKEND):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from backend.plugins.capabilities import install_capability_hook  # noqa: E402
 from backend.plugins.limits import apply_posix_limits  # noqa: E402
 
 # Names apply_posix_limits accepts, so a caller cannot smuggle an unrelated
@@ -123,6 +125,18 @@ def main() -> int:
 
         if op == "load":
             load_path = str(message.get("path") or "")
+            # Runtime capability limits go on before any plugin byte is read.
+            # The AST lint is static; this is the layer that actually watches.
+            try:
+                install_capability_hook(
+                    writable_roots=[Path(load_path).resolve().parent],
+                    allow_network=bool(message.get("allow_network")),
+                )
+            except Exception as exc:  # noqa: BLE001
+                if not _write(stdout, failed("capabilities", str(exc))):
+                    return 1
+                continue
+
             # Re-apply with the caller's overrides before touching plugin code.
             # Lowering a limit is always permitted; the defaults applied at boot
             # stand unless the parent asks for something tighter.

@@ -60,7 +60,7 @@ class KGEdge:
 class GraphStore:
     """Multi-relational graph store with persistent JSON storage."""
 
-    def __init__(self, storage_path: str = "backend/datasets/knowledge_graph_index.json") -> None:
+    def __init__(self, storage_path: str = "backend/research_datasets/knowledge_graph_index.json") -> None:
         self.storage_path = storage_path
         self.nodes: Dict[str, KGNode] = {}
         self.edges: Dict[str, KGEdge] = {}

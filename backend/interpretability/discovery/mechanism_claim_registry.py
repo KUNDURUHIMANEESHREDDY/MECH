@@ -76,7 +76,7 @@ class RegisteredMechanismClaim:
 class MechanismClaimRegistry:
     """Persistent storage & accumulation engine for scientific mechanism claims."""
 
-    def __init__(self, storage_dir: str = "backend/datasets") -> None:
+    def __init__(self, storage_dir: str = "backend/research_datasets") -> None:
         self.storage_dir = storage_dir
         self.storage_file = os.path.join(storage_dir, "claims_registry.json")
         self._claims: Dict[str, RegisteredMechanismClaim] = {}

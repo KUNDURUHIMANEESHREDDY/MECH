@@ -31,7 +31,7 @@ class SchedulerCheckpoint:
 class DistributedScheduler:
     """Manages experiment task queues, retries, and hardware-aware scheduling."""
 
-    def __init__(self, resource_manager: Optional[ResourceManager] = None, storage_dir: str = "backend/datasets/checkpoints") -> None:
+    def __init__(self, resource_manager: Optional[ResourceManager] = None, storage_dir: str = "backend/research_datasets/checkpoints") -> None:
         self.resource_manager = resource_manager or ResourceManager()
         self.storage_dir = storage_dir
         self.task_queue: List[ExperimentTask] = []

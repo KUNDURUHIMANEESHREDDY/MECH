@@ -12,9 +12,19 @@ seaborn>=0.12.0
 pandas>=2.0.0
 
 # ML / Interpretability
-torch>=2.0.0
-transformers>=4.30.0
-transformer-lens>=2.0.0
+#
+# transformer-lens is pinned below 3.0 on purpose. Version 4.0 removed
+# HookedTransformer outright (replaced by TransformerBridge), and 16 call sites
+# across backend/ use the 2.x API -- HookedTransformer.from_pretrained,
+# run_with_cache, run_with_hooks, hook_z. With the unbounded ">=2.0.0" that was
+# here before, a clean install resolved to 4.x and every neuron-inspection
+# import failed with:
+#     ImportError: cannot import name 'HookedTransformer' from 'transformer_lens'
+# Migrating to the v4 API is real work on the causal-intervention core and wants
+# its own change; this pin restores a working install without touching that code.
+torch>=2.2.0
+transformers>=4.43.0
+transformer-lens>=2.0.0,<3.0.0
 
 # Utilities
 psutil>=5.9.0

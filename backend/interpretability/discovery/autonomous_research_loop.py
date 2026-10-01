@@ -18,7 +18,7 @@ from backend.science.models.adapter_base import ModelAdapter
 from .algorithms import get_algorithm
 from .algorithms.base_algorithm import DiscoveryReport
 from .discovery_planner import AutonomousDiscoveryPlanner, ResearchGoal, MechanismClaim
-from backend.datasets.dataset_manager import DatasetManager
+from backend.research_datasets.dataset_manager import DatasetManager
 
 
 @dataclass
@@ -84,7 +84,7 @@ class AutonomousResearchLoop:
         max_iterations: int = 5,
     ) -> None:
         self.adapter = adapter
-        self.dataset_manager = dataset_manager or DatasetManager("backend/datasets")
+        self.dataset_manager = dataset_manager or DatasetManager("backend/research_datasets")
         self.planner = AutonomousDiscoveryPlanner(adapter=adapter, dataset_manager=self.dataset_manager)
         self.confidence_threshold = confidence_threshold
         self.max_iterations = max_iterations
