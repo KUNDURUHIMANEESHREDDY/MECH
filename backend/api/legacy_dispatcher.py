@@ -1505,6 +1505,10 @@ def _handle_features_label(p: Dict[str, Any]) -> Dict[str, Any]:
                 "feature_id": feat_id,
                 "label": f"Feature #{feat_id} (not inspected)",
                 "evidence_prompts": [],
+                # Explicitly empty, not merely absent: a consumer must be able
+                # to assert "no interpretation evidence" without treating a
+                # missing key as a null one.
+                "explanation_evidence": [],
                 "confidence_score": 0.0,
                 "label_measured": False,
                 "status": ev.get("status", "unavailable"),

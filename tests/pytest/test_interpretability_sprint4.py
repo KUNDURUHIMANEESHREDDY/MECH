@@ -120,11 +120,37 @@ def test_confidence_scorer_flags_assumed_inputs():
 
 
 def test_confidence_scorer_with_supplied_metrics():
+    """Two of three metrics supplied: the reason must name the third.
+
+    `inputs_assumed` stays True because `variance` was never given, so the
+    scorer's own default (0.04) is in the sum. The old blanket reason said
+    "inputs were not supplied", which is false here and hides which term is
+    fabricated.
+    """
     dispatcher = build_dispatcher()
     conf = dispatcher["interpretability/confidence/score"](
         {"evidence_count": 8, "reproducibility_score": 0.98})
-    assert conf["inputs_assumed"] is False
-    assert conf["confidence_score"] > 0.90
-    assert conf["reliability_rating"] == "High"
+    assert conf["inputs_assumed"] is True
+    assert conf["assumed_inputs"] == ["variance"]
+    assert "variance" in conf["reason"]
+    assert conf["evidence_count"] == 8
+    assert conf["reproducibility_score"] == 0.98
+    assert conf["provenance"] == "unavailable"
     # Still not evidence: a weighted sum is not a calibrated probability.
     assert conf["publication_eligible"] is False
+
+
+def test_confidence_scorer_with_every_metric_supplied():
+    """All three supplied means no default is in the arithmetic."""
+    dispatcher = build_dispatcher()
+    conf = dispatcher["interpretability/confidence/score"](
+        {"evidence_count": 8, "reproducibility_score": 0.98, "variance": 0.04})
+
+    assert conf["inputs_assumed"] is False
+    assert conf["assumed_inputs"] == []
+    assert conf["confidence_score"] > 0.90
+    assert conf["reliability_rating"] == "High"
+    assert conf["provenance"] == "reference"
+    # Still not evidence: nothing here attests to a run.
+    assert conf["publication_eligible"] is False
+    assert conf["validation_eligible"] is False

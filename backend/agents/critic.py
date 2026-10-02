@@ -167,9 +167,21 @@ class Critic:
                     "reason": "The reproduction pipeline did not return explicit live evidence.",
                 }
             observed = dict(run.get("observed_metrics", {}))
+            # The pipeline reports whether each metric was actually measured
+            # (e.g. circuit_minimality needs >= 10 usable prompts for its
+            # majority vote). That flag has to survive into the report: mapping
+            # an unmeasured 0.0 into observed_metrics made "not attempted" look
+            # like "attempted and scored zero", and earned it a fidelity_pct.
+            unmeasured = {
+                required: observed.get(f"{observed_key}_measured", True) is False
+                for required, observed_key in METRIC_MAP.items()
+            }
             try:
                 mapped = {}
                 for required, observed_key in METRIC_MAP.items():
+                    if unmeasured[required]:
+                        mapped[required] = None
+                        continue
                     value = float(observed[observed_key])
                     if not 0.0 <= value <= 1.0:
                         raise ValueError(f"{observed_key} outside [0, 1]")
@@ -204,23 +216,46 @@ class Critic:
             if isinstance(report, dict):
                 report = dict(report)
                 report.setdefault("provenance", "live")
-            fidelity = 0.0
-            try:
-                metrics = report.get("metrics", report.get("metric_results",
-                                                           []))
-                scored = [m.get("fidelity_pct", 0.0) for m in metrics
-                          if isinstance(m, dict)]
-                if scored:
-                    fidelity = round(sum(scored) / len(scored), 2)
-            except Exception:
-                pass
+            # Gate value is the mean fidelity_pct over *measured* metrics, on
+            # the same 0-100 scale the threshold is expressed in
+            # (CONFIDENCE_THRESHOLD * 100).
+            #
+            # This used to do `m.get("fidelity_pct", 0.0)` inside a bare
+            # `except Exception: pass`. Once unmeasured metrics correctly
+            # carry fidelity_pct=None, the sum raised TypeError, the bare
+            # except swallowed it, and the gate reported value=0.0 -- a
+            # permanent fail that silently contradicted the report's own
+            # overall_fidelity_pct and hid the error that caused it.
+            metrics = report.get("metric_results", []) if isinstance(report, dict) else []
+            scored = [
+                m["fidelity_pct"] for m in metrics
+                if isinstance(m, dict)
+                and isinstance(m.get("fidelity_pct"), (int, float))
+            ]
+            unmeasured_names = [
+                m.get("name") for m in metrics
+                if isinstance(m, dict) and m.get("measured") is False
+            ]
+            if scored:
+                fidelity: Optional[float] = round(sum(scored) / len(scored), 2)
+            else:
+                fidelity = None
+
             gate = {
-                "status": "completed",
-                "provenance": "live",
+                "status": "completed" if fidelity is not None else "unavailable",
+                "provenance": "live" if fidelity is not None else "unavailable",
                 "threshold": CONFIDENCE_THRESHOLD,
                 "metric": "overall_fidelity_pct",
                 "value": fidelity,
-                "passed": fidelity >= CONFIDENCE_THRESHOLD * 100,
+                "metrics_scored": len(scored),
+                "metrics_unmeasured": unmeasured_names,
+                # An unmeasurable gate cannot pass.
+                "passed": fidelity is not None and fidelity >= CONFIDENCE_THRESHOLD * 100,
+                "reason": (
+                    None if fidelity is not None else
+                    "No metric produced a fidelity score; the gate cannot be "
+                    "evaluated and does not pass."
+                ),
             }
             return {
                 "status": "completed",
@@ -233,6 +268,13 @@ class Critic:
                 "n_prompts": n_prompts,
                 "mock_mode": False,
                 "observed_metrics": mapped,
+                # Which of the above carry a real measurement. `mapped` only
+                # holds the validated metric set, so without this a caller
+                # cannot tell a measured value from a None.
+                "unmeasured_metrics": sorted(
+                    name for name, is_unmeasured in unmeasured.items()
+                    if is_unmeasured
+                ),
                 "report": report if isinstance(report, dict) else
                 {"report": report},
                 "gate": gate,

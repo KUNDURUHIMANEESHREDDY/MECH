@@ -8,7 +8,7 @@ experience replay with 'Why' provenance, and curriculum planning in a closed fee
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .campaign_embeddings import CampaignEmbeddingsEngine
 from .experience_replay import ResearchExperienceReplay
@@ -35,20 +35,17 @@ class MetaResearchEngine:
         self.policy_repository = PolicyRepository()
         self.campaign_embeddings = CampaignEmbeddingsEngine()
 
-        self.campaign_history: List[Dict[str, Any]] = [
-            {
-                "campaign_id": "camp_s6_ioi",
-                "topic": "IOI Circuit Discovery",
-                "hypotheses_tested": 127,
-                "discoveries_count": 41,
-                "failures_count": 73,
-                "published_count": 13,
-                "average_runtime_min": 8.4,
-                "average_confidence": 0.91,
-                "workflow": "SAE → Circuit Discovery → Causal Tracing",
-            }
-        ]
-        self.strategy_adaptation_factor: float = 1.05
+        # No seeded campaign. This used to ship a fabricated record for
+        # "camp_s6_ioi" -- 127 hypotheses tested, 41 discoveries, 13
+        # publications, average_confidence 0.91 -- describing a run that never
+        # happened. Because every aggregate in analyze_meta_performance() sums
+        # this list, that fiction was silently folded into the reported
+        # success rate and publication count. An engine that has run nothing
+        # must report nothing.
+        self.campaign_history: List[Dict[str, Any]] = []
+        # Also a literal, and also presented as a measured adaptation factor.
+        # Exposed as unmeasured until a loop can actually derive one.
+        self.strategy_adaptation_factor: Optional[float] = None
 
     def record_campaign_performance(
         self,
@@ -122,6 +119,12 @@ class MetaResearchEngine:
         total_hypotheses = sum(c.get("hypotheses_tested", 0) for c in self.campaign_history) or 1
         success_rate = round(total_discoveries / total_hypotheses, 4)
 
+        # `c.get("published_count", 1)` counted one publication for every
+        # campaign that had never recorded one, so the summary reported
+        # publications that did not happen. An absent key means zero.
+        published_count = sum(int(c.get("published_count") or 0)
+                              for c in self.campaign_history)
+
         return {
             "status": "Analyzed",
             "campaign_summary": {
@@ -129,13 +132,23 @@ class MetaResearchEngine:
                 "hypotheses_tested": total_hypotheses,
                 "discoveries_count": total_discoveries,
                 "rejected_count": sum(c.get("failures_count", 0) for c in self.campaign_history),
-                "published_count": sum(c.get("published_count", 1) for c in self.campaign_history),
-                "average_runtime_min": 8.4,
-                "average_confidence": 0.91,
-                "best_workflow": "SAE → Circuit Discovery → Causal Tracing",
-                "worst_workflow": "Attention Ranking → Attribution → Patch",
+                "published_count": published_count,
+                # These three were literals (8.4, 0.91, and two fixed workflow
+                # strings) presented as aggregates over the campaign history.
+                # Nothing here times a run or scores a confidence, so they are
+                # reported as unmeasured instead of invented.
+                "average_runtime_min": None,
+                "average_confidence": None,
+                "best_workflow": None,
+                "worst_workflow": None,
+                "metrics_measured": False,
+                "reason": (
+                    "Runtime, confidence, and workflow ranking are not "
+                    "aggregated from any recorded measurement in this loop."
+                ),
             },
             "overall_success_rate": success_rate,
+            "overall_success_rate_measured": total_campaigns > 0,
             "strategy_adaptation_factor": self.strategy_adaptation_factor,
             "curriculum": self.curriculum.generate_curriculum(),
             "latest_policy": self.policy_repository.get_latest_policy("circuit_discovery"),

@@ -6,8 +6,34 @@ def test_sprint4_end_to_end_deliverable():
     dispatcher = build_dispatcher()
 
     # AI 1: Autonomous Research Agent
+    #
+    # This asserted `status == "completed"`. It completed only because the
+    # publish step used to succeed unconditionally. All seven workflow steps
+    # now run live and report provenance "live", but the reproduction gate
+    # measures ~62% fidelity against an 0.85 threshold, so Scribe refuses to
+    # publish. `blocked` is the correct outcome: the system ran the science and
+    # the science did not clear the bar.
     agent_res = dispatcher["platform/autonomous/agent_run"]({"goal": "Investigate IOI Circuit in GPT-2"})
-    assert agent_res["status"] == "completed"
+    assert agent_res["status"] == "blocked"
+    assert agent_res["publication_eligible"] is False
+    assert agent_res["validation_eligible"] is False
+
+    # The block must be explained and attributable to the gate, not a shrug.
+    assert "gate" in str(agent_res["publication"]["reason"]).lower()
+
+    # Crucially, every step really did execute against live weights. A block
+    # that hides un-run steps would look identical from the outside.
+    steps = {n.get("node"): n for n in agent_res["trace"]}
+    assert set(steps) >= {"load", "reproduce", "inspect", "patch",
+                          "discover", "validate", "publish"}
+    for node, step in steps.items():
+        assert step["status"] in ("loaded", "completed", "ok"), node
+        assert step["provenance"] == "live", node
+
+    # The reproduction measurement is real and is what blocked publication.
+    repro = next(n for n in agent_res["trace"] if n["node"] == "reproduce")
+    assert repro["result"]["provenance"] == "live"
+    assert repro["result"]["observed_metrics"]["circuit_faithfulness"] > 0.0
 
     # AI 1: Typed Research Graph
     graph = dispatcher["platform/autonomous/graph_get"]({})

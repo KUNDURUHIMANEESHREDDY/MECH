@@ -146,17 +146,37 @@ def test_circuit_fidelity_reports_undefined_rather_than_guessing():
     assert out["reason"]
 
 
-def test_acdc_no_longer_reports_an_unreachable_fidelity():
-    """The 0.90-floored formula must not reappear in the algorithm."""
+def _executable_source(module) -> str:
+    """Module source with docstrings and comments stripped.
+
+    A naive `inspect.getsource` grep matches the comments explaining *why* a
+    formula was removed -- the very strings the test exists to forbid. Parse
+    the AST and keep only what actually executes.
+    """
+    import ast
     import inspect
 
+    tree = ast.parse(inspect.getsource(module))
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            body = getattr(node, "body", [])
+            if body and isinstance(body[0], ast.Expr) and \
+                    isinstance(body[0].value, ast.Constant) and \
+                    isinstance(body[0].value.value, str):
+                node.body = body[1:] or [ast.Pass()]
+    return ast.unparse(tree)
+
+
+def test_acdc_no_longer_reports_an_unreachable_fidelity():
+    """The 0.90-floored formula must not reappear in the algorithm."""
     from backend.interpretability.discovery.algorithms import acdc
 
-    source = inspect.getsource(acdc)
-    assert "0.90 +" not in source
-    assert "0.09 *" not in source
+    code = _executable_source(acdc)
+    assert "0.90" not in code
+    assert "0.09" not in code
     # It now delegates to a real measurement.
-    assert "circuit_fidelity" in source
+    assert "circuit_fidelity" in code
 
 
 # ── Path patching requires the ids it measures against ─────────────────────
@@ -197,10 +217,8 @@ def test_path_patching_declares_the_real_procedure():
 
 def test_path_patching_is_live_measurement_code():
     """No fabricated `0.5 + delta` confidence on edges."""
-    import inspect
-
     from backend.interpretability.discovery.algorithms import path_patching
 
-    source = inspect.getsource(path_patching)
-    assert "0.5 + delta" not in source
-    assert "path_effect" in source
+    code = _executable_source(path_patching)
+    assert "0.5" not in code
+    assert "path_effect" in code
