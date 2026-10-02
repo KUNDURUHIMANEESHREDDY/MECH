@@ -63,7 +63,7 @@ class Discoverer:
                 "field_provenance": field_map(
                     ("status", "result", "discovery_id"), "live"
                 ),
-                "result": res,
+                **res,
             }
         except Exception as exc:
             return {

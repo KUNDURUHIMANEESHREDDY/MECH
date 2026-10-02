@@ -42,6 +42,18 @@ class GPT2Adapter(ModelAdapter):
         "When Mary and John went":  [("to", 0.61), ("home", 0.22), ("back", 0.09)],
     }
 
+    # IOI name set used by reproducibility pipelines.
+    #
+    # Deliberately unused for answer synthesis. A `_match_ioi_prompt` parser
+    # existed here that parsed "When {a} and {b} went to the store, {a} gave a
+    # drink to" and returned the indirect object with logit 8.2. Three tests
+    # demanded it. It was removed rather than merged: returning a correct IOI
+    # answer from a mock makes the fixture indistinguishable from a real
+    # forward pass on the exact benchmark the platform reports a score for.
+    # The name list stays for callers that construct prompts, which is honest;
+    # only answer synthesis is refused.
+    _IOI_NAMES = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank"]
+
     def __init__(self, variant: str = "small", mock_mode: bool = False) -> None:
         super().__init__(_gpt2_spec(variant, mock_mode))
         self._hooks: List[Any] = []
@@ -140,6 +152,13 @@ class GPT2Adapter(ModelAdapter):
         # prefixes below are recognised -- deliberately no name-parsing
         # heuristic, because synthesising a plausible IOI answer for arbitrary
         # names would be a fake result dressed as a finding.
+        #
+        # Rejected on this branch: a `_match_ioi_prompt` regex that parsed
+        # "When Xavier and Yolanda ... gave a drink to" and returned
+        # "Yolanda" with logit 8.2. Three tests demanded it. It would have made
+        # the mock indistinguishable from a real forward pass on exactly the
+        # benchmark the platform claims to measure, which is a worse failure
+        # than an honest fixture.
         for prefix, tokens in self._KNOWN_TOP_TOKENS.items():
             if prefix in prompt:
                 return {

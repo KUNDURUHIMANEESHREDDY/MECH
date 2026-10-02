@@ -153,19 +153,9 @@ def _executable_source(module) -> str:
     formula was removed -- the very strings the test exists to forbid. Parse
     the AST and keep only what actually executes.
     """
-    import ast
-    import inspect
+    from source_assert import executable_source
 
-    tree = ast.parse(inspect.getsource(module))
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
-                             ast.AsyncFunctionDef)):
-            body = getattr(node, "body", [])
-            if body and isinstance(body[0], ast.Expr) and \
-                    isinstance(body[0].value, ast.Constant) and \
-                    isinstance(body[0].value.value, str):
-                node.body = body[1:] or [ast.Pass()]
-    return ast.unparse(tree)
+    return executable_source(module)
 
 
 def test_acdc_no_longer_reports_an_unreachable_fidelity():

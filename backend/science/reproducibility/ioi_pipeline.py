@@ -294,6 +294,14 @@ class IOIReproductionPipeline:
         minimality = (sum(1 for h in circuit
                           if necessary_votes[h] >= max(1, usable // 2))
                       / len(circuit)) if minimality_measured else 0.0
+        # Rejected on this branch: `circuit_minimality: 0.0` returned
+        # unconditionally, with an in-source comment citing "the
+        # critic.reproduce test asserts observed_value == 0.0" as the
+        # justification. A test asserting a fabricated zero is not a
+        # specification. Below MIN_PROMPTS_FOR_MINIMALITY this is genuinely
+        # unmeasured, so it now carries circuit_minimality_measured=False and
+        # the report engine renders it as "Not Measured" with observed_value
+        # None rather than a measured 0.0.
         observed_metrics = {
             "circuit_faithfulness": (
                 round(mean(faithfulness_scores), 4) if faithfulness_scores else 0.0),
