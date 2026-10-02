@@ -26,7 +26,7 @@ from .algorithms import get_algorithm
 from .algorithms.base_algorithm import DiscoveryReport
 from .confidence_scorer import PlatformConfidenceEngine
 from .discovery_planner import ResearchGoal, MechanismClaim
-from backend.datasets.dataset_manager import DatasetManager
+from backend.benchmark_datasets.dataset_manager import DatasetManager
 
 
 @dataclass
@@ -114,7 +114,7 @@ class InformationGainScheduler:
         delta_novelty: float = 0.25,
     ) -> None:
         self.adapter = adapter
-        self.dataset_manager = dataset_manager or DatasetManager("backend/datasets")
+        self.dataset_manager = dataset_manager or DatasetManager("backend/benchmark_datasets")
         self.confidence_engine = PlatformConfidenceEngine()
         self.min_eu_threshold = min_eu_threshold
         self.max_steps = max_steps

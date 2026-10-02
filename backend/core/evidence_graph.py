@@ -10,6 +10,9 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
+# One vocabulary for provenance, defined once at the boundary.
+from .evidence_boundary import PROVENANCE_VALUES
+
 EVIDENCE_DIR = os.environ.get("MECH_EVIDENCE_DIR", "backend/storage/evidence")
 
 # Numeric step-result keys promoted to Evidence nodes by from_run().
@@ -77,6 +80,30 @@ def _step_allows_evidence(step: Dict[str, Any]) -> bool:
     result = step.get("result")
     return (discovery_is_live(result) if node == "discover"
             else validation_is_live(result))
+
+
+def _step_provenance(step: Dict[str, Any]) -> str:
+    """Provenance declared by the step that produced an evidence value.
+
+    Reads the result's own provenance, then the step's. Anything absent or
+    unrecognised becomes "unavailable" -- never "live". Defaulting to live here
+    is how a seeded measurement became a live-labelled evidence node.
+    """
+    for holder in (step.get("result"), step):
+        if not isinstance(holder, dict):
+            continue
+        raw = holder.get("provenance")
+        if raw is None:
+            nested = holder.get("discovery_provenance")
+            raw = nested
+        if raw is None:
+            continue
+        label = str(raw).strip().lower()
+        if label in PROVENANCE_VALUES:
+            return label
+        return "unavailable"
+    return "unavailable"
+
 
 
 class TraceableEvidenceGraph:
@@ -169,21 +196,35 @@ class TraceableEvidenceGraph:
             if _step_allows_evidence(step):
                 for key, value in _iter_evidence(step):
                     ev_id = f"{node_id}_ev_{key.replace('.', '_')}"
-                    evidence_provenance = "live"
-                    result = step.get("result")
-                    if isinstance(result, dict):
-                        evidence_provenance = str(
-                            result.get("provenance", evidence_provenance)
-                        ).lower()
+                    # Provenance is derived, never defaulted to live. This used
+                    # to initialise `evidence_provenance = "live"` and only
+                    # overwrite it when a result happened to carry a
+                    # provenance key -- so a step whose result omitted the key
+                    # silently produced a live-labelled evidence node. Steps
+                    # other than discover/validate skip the scientific
+                    # eligibility gate entirely, which is how a seeded
+                    # measurement could reach the graph labelled live.
+                    evidence_provenance = _step_provenance(step)
+                    node_payload = {
+                        "value": value,
+                        "provenance": evidence_provenance,
+                        "field_provenance": {"value": evidence_provenance},
+                    }
+                    # An unattested "live" is not evidence. Only a step that
+                    # both declares live and passes its eligibility gate may
+                    # produce a live-labelled node.
+                    if evidence_provenance == "live":
+                        node_payload["attested"] = False
+                        node_payload["reason"] = (
+                            "Declared live by the producing step but not "
+                            "attested with a RunAttestation; treated as "
+                            "unverified."
+                        )
                     graph.add_node(
                         ev_id,
                         "Evidence",
                         f"{key} = {value}",
-                        {
-                            "value": value,
-                            "provenance": evidence_provenance,
-                            "field_provenance": {"value": evidence_provenance},
-                        },
+                        node_payload,
                     )
                     graph.add_edge(node_id, ev_id, "yields")
             prev = node_id

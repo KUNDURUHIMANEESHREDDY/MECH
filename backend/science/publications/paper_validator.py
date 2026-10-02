@@ -24,9 +24,20 @@ class PaperValidator:
             
         if not results.get("dataset_certificate"):
             errors.append("Missing dataset hash/certificate. Integrity cannot be verified.")
-            
-        if not results.get("model_fingerprint"):
+
+        # A fingerprint that exists but was never attested proves nothing: the
+        # adapter was in mock_mode, or the weights could not be hashed.
+        fingerprint = results.get("model_fingerprint")
+        if not fingerprint:
             errors.append("Missing model fingerprint.")
+        elif not (isinstance(fingerprint, dict)
+                  and fingerprint.get("attested") is True):
+            reason = (fingerprint.get("attestation_reason")
+                      if isinstance(fingerprint, dict) else "not a fingerprint")
+            errors.append(
+                f"Model fingerprint is not attested, so the results cannot be "
+                f"bound to specific weights. Reason: {reason or 'unknown'}"
+            )
             
         # 3. Component Checks
         if not results.get("statistical_results"):

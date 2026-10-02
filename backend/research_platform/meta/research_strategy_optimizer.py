@@ -27,11 +27,26 @@ class ResearchStrategyOptimizer:
         sequence = self.domain_strategies.get(domain, ["Run SAE Inspection", "Run Causal Tracing"])
         score = self.strategy_scores.get(domain, 0.85)
 
+        # The score is a literal in a dict, not the output of a meta-learning
+        # analysis. It previously reported "historical_effectiveness_score"
+        # with reasoning claiming it was "derived from meta-learning empirical
+        # success analysis" -- no analysis exists, and several steps in these
+        # sequences (SAE inspection, path patching) are not implemented at all.
+        assumed = domain not in self.strategy_scores
         return {
             "domain": domain,
             "recommended_workflow": sequence,
-            "historical_effectiveness_score": score,
-            "reasoning": f"Strategy for '{domain}' derived from meta-learning empirical success analysis.",
+            "historical_effectiveness_score": None if assumed else score,
+            "score_is_assumed": True,
+            "reasoning": (
+                f"No effectiveness was ever measured for '{domain}'. This is a "
+                "static template sequence, and several of its steps (SAE "
+                "inspection, attribution patching) are not implemented in this "
+                "repository."
+            ),
+            "provenance": "reference",
+            "validation_eligible": False,
+            "publication_eligible": False,
         }
 
     def update_strategy(self, domain: str, new_sequence: List[str], observed_effectiveness: float) -> Dict[str, Any]:

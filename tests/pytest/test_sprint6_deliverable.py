@@ -101,23 +101,53 @@ def test_epic6_multi_agent_evolution():
 
 
 def test_epic7_scientific_skill_library_quality_scores():
+    """Catalogue entries must not masquerade as measured skills.
+
+    `execute_skill` previously reported output_state="Success", six extracted
+    circuit nodes, and reproducibility_verified=True without running anything,
+    so an agent could read a fabricated circuit discovery out of a lookup.
+    """
     library = ScientificSkillLibrary()
     skills = library.list_skills()
     assert len(skills) >= 1
-    assert skills[0]["success_rate"] > 0.90
-    assert skills[0]["cross_model_score"] > 0.80
+    # The metric values are catalogue defaults; what matters is that they say so.
+    assert skills[0]["measured"] is False
+    assert skills[0]["provenance"] == "reference"
+    assert skills[0]["publication_eligible"] is False
 
-    res = library.execute_skill(skill_id="skill_circuit_discovery", input_params={"target_layer": 8})
-    assert res["status"] == "Executed"
-    assert res["quality_metrics"]["success_rate"] > 0.90
+    res = library.execute_skill(skill_id="skill_circuit_discovery",
+                                input_params={"target_layer": 8})
+    assert res["status"] == "unavailable"
+    assert res["executed"] is False
+    assert res["execution_result"] is None
+    assert res["publication_eligible"] is False
+    assert "not an executable pipeline" in res["reason"]
+    assert res["quality_metrics"]["metrics_measured"] is False
+    assert res["quality_metrics"]["provenance"] == "reference"
 
 
 def test_epic8_research_experience_replay_why_provenance():
+    """The seeded trajectory is illustrative, not recorded history.
+
+    It previously "remembered" that an SAE checkpoint was available, that the
+    IOI benchmark scored 0.94, and that a logit boost was confirmed, and then
+    recommended a policy on that basis. None of those are measurable here.
+    """
     replay = ResearchExperienceReplay()
     rep = replay.replay_campaign("camp_s6_ioi")
     assert rep["status"] == "ReplayCompleted"
     assert len(rep["divergence_points"]) >= 1
     assert rep["divergence_points"][0]["why_provenance"] is not None
+
+    assert rep["recorded"] is False
+    assert rep["provenance"] == "reference"
+    assert rep["validation_eligible"] is False
+    # No policy advice is drawn from a trajectory that did not happen.
+    assert rep["policy_insight"] is None
+    assert "Illustrative trajectory" in rep["reason"]
+    for s in rep["trajectory"]:
+        assert s["recorded"] is False
+        assert s["publication_eligible"] is False
 
     step = replay.record_trajectory_step(
         campaign_id="camp_custom",

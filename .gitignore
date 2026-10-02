@@ -24,7 +24,10 @@ test-results/.last-run.json
 # Per-run evidence records accumulate at runtime (see MECH_EVIDENCE_DIR)
 backend/storage/evidence/
 # Knowledge-graph runtime accumulation (see MECH_KG_PATH for isolation)
-# NOTE: backend/datasets/knowledge_graph_index.json stays tracked as baseline
+# NOTE: backend/benchmark_datasets/knowledge_graph_index.json stays tracked as baseline
+# The package is deliberately NOT named `datasets`: that name shadowed HuggingFace
+# `datasets` whenever backend/ was on sys.path. Do not reintroduce it.
+backend/datasets/
 
 # Plugin runtime state: installed copies, registry, audit trails.
 # Plugin *sources* (library/, samples) stay tracked; installed state does not.

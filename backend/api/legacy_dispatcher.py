@@ -850,6 +850,24 @@ def _handle_repository_metrics(p: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "error", "error": str(exc)[:300]}
 
 
+def _prime_cache(p: Dict[str, Any]) -> None:
+    """Run the request's prompt so cache-backed inspectors see it.
+
+    The GPT-2 engine keeps one prompt's activations at a time. Inspectors that
+    report tokens, shapes, or attention must populate that cache from the
+    requested prompt or they answer "Run a prompt first" or, worse, describe
+    whichever prompt ran previously.
+    """
+    prompt = p.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return
+    try:
+        if _gpt2_engine.is_available():
+            _gpt2_engine.run_prompt(prompt)
+    except Exception:
+        pass
+
+
 @route("inspectors:neuron")
 def _handle_inspectors_neuron(p: Dict[str, Any]) -> Dict[str, Any]:
     layer = int(p.get("layer", 8))
@@ -857,6 +875,11 @@ def _handle_inspectors_neuron(p: Dict[str, Any]) -> Dict[str, Any]:
     if _gpt2_engine.is_available():
         try:
             res = _gpt2_engine.neuron_detail(layer, n_idx)
+            # The engine echoes these back as strings; normalise to the ints
+            # the handler parsed so callers get one consistent type.
+            if isinstance(res, dict):
+                res["layer"] = layer
+                res["neuron_index"] = n_idx
             res["neuron_id"] = f"L{layer}_N{n_idx}"
             return res
         except Exception as exc:
@@ -872,7 +895,15 @@ def _handle_inspectors_attention(p: Dict[str, Any]) -> Dict[str, Any]:
     head = int(p.get("head", 9))
     if _gpt2_engine.is_available():
         try:
-            return _gpt2_engine.attention_head(layer, head)
+            _prime_cache(p)
+            res = _gpt2_engine.attention_head(layer, head)
+            if isinstance(res, dict):
+                res.setdefault("layer", layer)
+                res.setdefault("head", head)
+                # Keep the requested indices even if the engine omitted them.
+                res["layer"] = layer
+                res["head"] = head
+            return res
         except Exception as exc:
             return {"status": "error", "error": str(exc)[:300]}
     return {"status": "error", "error": "torch/transformers not available"}
@@ -883,6 +914,7 @@ def _handle_inspectors_residual(p: Dict[str, Any]) -> Dict[str, Any]:
     layer = int(p.get("layer", 8))
     if _gpt2_engine.is_available():
         try:
+            _prime_cache(p)
             res = _gpt2_engine.activations(layer)
             if res.get("status") == "error":
                 return res
@@ -1178,8 +1210,14 @@ def _handle_sae_load(p: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _sae_feature_evidence(feat_id: Any) -> Dict[str, Any]:
-    """SAEInspector evidence for a feature (mock-fallback content when no
-    live adapter interpreter is available — see Tier-2 in the audit)."""
+    """SAEInspector evidence for a feature.
+
+    No SAE encoder is loaded, so this reports an absent analysis rather than
+    fabricated activations. The previous version returned hardcoded neuron
+    weights (0.85, 0.62) and example activations (4.2, 3.8) for every feature,
+    from which it computed `max_act` and `n_examples` -- statistics that read
+    as though an encoder had been run.
+    """
     from backend.interpretability.sae.inspector import SAEInspector
     insp = SAEInspector().inspect_feature(int(feat_id))
     examples = ((insp.get("feature_report") or {})
@@ -1193,8 +1231,14 @@ def _sae_feature_evidence(feat_id: Any) -> Dict[str, Any]:
         "connected_neurons": insp.get("connected_neurons", []),
         "dataset_examples": [e.get("prompt", "") for e in examples
                              if isinstance(e, dict)],
-        "statistics": {"max_act": max(acts) if acts else 0.0,
+        "statistics": {"max_act": max(acts) if acts else None,
                        "n_examples": len(examples)},
+        "status": insp.get("status", "unavailable"),
+        "provenance": insp.get("provenance", "unavailable"),
+        "inspected": insp.get("inspected", False),
+        "validation_eligible": False,
+        "publication_eligible": False,
+        "reason": insp.get("reason", SAEInspector.NOT_IMPLEMENTED_REASON),
     }
 
 
@@ -1295,20 +1339,75 @@ def _handle_search_activations(p: Dict[str, Any]) -> Any:
 @route("interpretability/circuits/discover")
 def _handle_circuits_discover(p: Dict[str, Any]) -> Dict[str, Any]:
     res = _ioi_pipeline.run()
-    metrics = res.get("observed_metrics", res) if isinstance(res, dict) else {}
+
+    # A blocked or unavailable pipeline must not be laundered into a numeric
+    # score. Previously the absent `observed_metrics` fell through to the
+    # envelope itself, which yielded empty nodes and `circuit_score: 0.0` --
+    # a plausible-looking measurement of nothing. Propagate the block instead,
+    # and report no score at all rather than a fabricated zero.
+    if not isinstance(res, dict) or res.get("status") != "completed":
+        reason = (res.get("reason") if isinstance(res, dict) else None) \
+            or "IOI pipeline did not return a completed measurement."
+        return {
+            "circuit_id": p.get("circuit_id", "c_ioi"),
+            "status": (res.get("status", "unavailable")
+                       if isinstance(res, dict) else "unavailable"),
+            "provenance": (res.get("provenance", "unavailable")
+                           if isinstance(res, dict) else "unavailable"),
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": reason,
+            "reference_only_discovery": res.get("reference_only_discovery")
+            if isinstance(res, dict) else None,
+            "prompt": p.get("prompt", ""),
+            "target_token": p.get("target_token", ""),
+        }
+
+    metrics = res.get("observed_metrics", res)
     nodes = metrics.get("discovered_nodes", []) or []
     edges = metrics.get("discovered_edges", []) or []
     if isinstance(nodes, (set, frozenset)):
         nodes = sorted(nodes, key=repr)
     if isinstance(edges, (set, frozenset)):
         edges = [list(e) for e in edges]
-    score = metrics.get("circuit_faithfulness",
-                        metrics.get("functional_recovery", 0.0))
+    score = metrics.get("circuit_faithfulness")
+    if score is None:
+        score = metrics.get("functional_recovery")
+    if score is None:
+        # Completed, but nothing measured a faithfulness number. Say so rather
+        # than emitting a 0.0 that reads as "measured, and it was zero".
+        return {
+            "circuit_id": p.get("circuit_id", "c_ioi"),
+            "status": "unavailable",
+            "provenance": res.get("provenance", "unavailable"),
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": ("Pipeline completed but reported no faithfulness or "
+                       "functional-recovery measurement."),
+            "nodes": list(nodes),
+            "edges": [list(e) if isinstance(e, (list, tuple)) else e
+                      for e in edges],
+            "prompt": p.get("prompt", ""),
+            "target_token": p.get("target_token", ""),
+        }
     try:
         score = round(float(score), 4)
-    except Exception:
-        score = 0.0
+    except (TypeError, ValueError):
+        score = None
+    if score is None:
+        return {
+            "circuit_id": p.get("circuit_id", "c_ioi"),
+            "status": "unavailable",
+            "provenance": res.get("provenance", "unavailable"),
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": "Reported faithfulness value was not numeric.",
+            "prompt": p.get("prompt", ""),
+            "target_token": p.get("target_token", ""),
+        }
     return {"circuit_id": p.get("circuit_id", "c_ioi"),
+            "status": "completed",
+            "provenance": res.get("provenance", "live"),
             "circuit_score": score,
             "nodes": list(nodes),
             "edges": [list(e) if isinstance(e, (list, tuple)) else e
@@ -1397,14 +1496,38 @@ def _handle_features_label(p: Dict[str, Any]) -> Dict[str, Any]:
     feat_id = p.get("feature_id", 1402)
     try:
         ev = _sae_feature_evidence(feat_id)
+        # If the feature was not actually analysed, say so. Reporting a label
+        # with confidence 0.0 derived from an empty example list still looks
+        # like a labelling result, and the arithmetic (max_act / 5.0) would
+        # silently become a confidence once any example appeared.
+        if not ev.get("inspected"):
+            return {
+                "feature_id": feat_id,
+                "label": f"Feature #{feat_id} (not inspected)",
+                "evidence_prompts": [],
+                "confidence_score": 0.0,
+                "label_measured": False,
+                "status": ev.get("status", "unavailable"),
+                "provenance": ev.get("provenance", "unavailable"),
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": ev.get("reason"),
+            }
         examples = ev.get("dataset_examples", [])
         top = examples[0] if examples else ""
-        max_act = (ev.get("statistics") or {}).get("max_act", 0.0) or 0.0
+        max_act = (ev.get("statistics") or {}).get("max_act") or 0.0
         return {"feature_id": feat_id,
                 "label": f"Feature #{feat_id} fires on: {top[:80]}",
                 "evidence_prompts": examples,
                 "confidence_score": round(min(0.99, max_act / 5.0), 2),
-                "confidence_basis": "max example activation / 5.0 (heuristic)"}
+                "label_measured": True,
+                "confidence_basis": "max example activation / 5.0 (heuristic)",
+                "status": "completed",
+                "provenance": "live",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": ("Confidence is a heuristic rescaling of the largest "
+                           "example activation, not a calibrated probability.")}
     except Exception as exc:
         return {"status": "error", "error": str(exc)[:300]}
 
@@ -1435,9 +1558,35 @@ def _handle_mechanistic_reports(p: Dict[str, Any]) -> Dict[str, Any]:
         circ = _handle_circuits_discover(
             {"prompt": prompt, "target_token": p.get("target_token", "")})
         nodes = circ.get("nodes", []) if isinstance(circ, dict) else []
-        score = circ.get("circuit_score", 0.0) if isinstance(circ, dict) else 0.0
+
+        # Do not narrate a mechanism that was not measured. Previously the
+        # report read "reaches faithfulness 0.0 via 0 nominated heads" when the
+        # pipeline had in fact returned nothing -- prose asserting a negative
+        # result that no experiment established.
+        if not isinstance(circ, dict) or circ.get("status") != "completed" \
+                or circ.get("circuit_score") is None:
+            reason = (circ.get("reason") if isinstance(circ, dict) else None) \
+                or "No circuit measurement is available for this prompt."
+            return {
+                "report": rep.get("title", "IOI Circuit Report"),
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": reason,
+                "explanation_text": (
+                    f"Explanation: no mechanistic circuit was measured for "
+                    f"this prompt. {reason} No faithfulness or head set is "
+                    f"reported, because none was measured."),
+                "circuit_components": nodes,
+                "experiment_id": exp_id,
+            }
+
+        score = circ["circuit_score"]
         top = ", ".join(nodes[:3])
         return {"report": rep.get("title", "IOI Circuit Report"),
+                "status": "completed",
+                "provenance": circ.get("provenance", "live"),
                 "explanation_text": (
                     f"Explanation: IOI circuit reaches faithfulness {score} "
                     f"via {len(nodes)} nominated heads including {top}. "
@@ -1493,9 +1642,20 @@ def _handle_evidence_rank(p: Dict[str, Any]) -> Any:
 def _handle_confidence_score(p: Dict[str, Any]) -> Dict[str, Any]:
     from backend.interpretability.discovery.confidence_scorer import (
         PlatformConfidenceEngine)
+    # Pass None when the caller omitted a metric, rather than substituting an
+    # optimistic default. Hardcoding evidence_count=8 / reproducibility=0.98
+    # here produced a "High" reliability rating for a request that supplied no
+    # evidence at all, which is what the scorer's `inputs_assumed` flag is for.
+    evidence_count = p.get("evidence_count")
+    reproducibility = p.get("reproducibility_score")
+    variance = p.get("variance")
     return PlatformConfidenceEngine().score_confidence(
-        evidence_count=int(p.get("evidence_count", 8)),
-        reproducibility_score=float(p.get("reproducibility_score", 0.98)))
+        evidence_count=int(evidence_count) if evidence_count is not None else None,
+        reproducibility_score=(float(reproducibility)
+                               if reproducibility is not None else None),
+        variance=float(variance) if variance is not None else None,
+    )
+
 
 
 @route("platform/workflow/create")

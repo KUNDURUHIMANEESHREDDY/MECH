@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from backend.science.models.adapter_base import ModelAdapter
 from .algorithms import get_algorithm
 from .algorithms.base_algorithm import DiscoveryReport
-from backend.datasets.dataset_manager import DatasetManager
+from backend.benchmark_datasets.dataset_manager import DatasetManager
 
 
 @dataclass
@@ -84,7 +84,7 @@ class AutonomousDiscoveryPlanner:
 
     def __init__(self, adapter: Optional[ModelAdapter] = None, dataset_manager: Optional[DatasetManager] = None) -> None:
         self.adapter = adapter
-        self.dataset_manager = dataset_manager or DatasetManager("backend/datasets")
+        self.dataset_manager = dataset_manager or DatasetManager("backend/benchmark_datasets")
 
     def plan(self, goal: ResearchGoal) -> PipelinePlan:
         """Analyzes a research goal and automatically builds an optimal multi-stage algorithm pipeline."""

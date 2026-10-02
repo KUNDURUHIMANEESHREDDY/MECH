@@ -184,6 +184,18 @@ class ScientificValidator:
         # 2. Capture Model Fingerprint
         fingerprint = self.model_engine.capture(adapter)
 
+        # Fail closed: a certificate binds these hashes to a published claim,
+        # so an unattested fingerprint (mock_mode adapter, or weights that
+        # could not be hashed) must never reach the certificate or manifest.
+        if not fingerprint.attested:
+            reason = fingerprint.attestation_reason or "model identity unattested"
+            self.audit.log("Artifacts", "fingerprint", "FAIL", reason)
+            raise ValueError(
+                "Cannot generate validation artifacts: the model fingerprint is "
+                f"not attested, so the evidence chain cannot be bound to real "
+                f"weights. Reason: {reason}"
+            )
+
         # 3. Assemble Results for Certificate
         primary_res = benchmark_results[0] if benchmark_results else {}
         stats = primary_res.get("stats")

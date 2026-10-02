@@ -38,7 +38,15 @@ def test_sprint2_deliverable_workflow():
     assert neuron_res["layer"] == 8
     assert attn_res["head"] == 9
     assert res_res["layer"] == 8
+    # SAE inspection is not implemented: no encoder is loaded, so the feature
+    # is reported as uninspected rather than given hardcoded neuron weights and
+    # example activations.
     assert sae_res["feature"]["feature_id"] == 1402
+    assert sae_res["status"] == "unavailable"
+    assert sae_res["inspected"] is False
+    assert sae_res["publication_eligible"] is False
+    assert "not implemented" in sae_res["reason"]
+    assert sae_res["connected_neurons"] == []
 
     # 4. Patch Activation at Layer 8 and Continue Inference to Prediction
     patch_res = dispatcher["runtime/patch"]({
@@ -60,4 +68,7 @@ def test_sprint2_deliverable_workflow():
     report_svc = ReportService()
     report = report_svc.generate_report(experiment_id="exp_sprint2_accept", title="Sprint 2 Acceptance Report")
     assert report["experiment_id"] == "exp_sprint2_accept"
-    assert "Layer 8 Pause" in report["markdown"]
+    # The report must not narrate a measurement it never made. It previously
+    # opened with a hardcoded "Layer 8 Pause" story regardless of inputs.
+    assert "Layer 8 Pause" not in report["markdown"]
+    assert "Sprint 2 Acceptance Report" in report["markdown"]

@@ -84,13 +84,16 @@ class MetaResearchEngine:
         refl_res = self.reflection_engine.generate_reflection_report(campaign_id=campaign_id)
         strat_res = self.strategy_optimizer.recommend_strategy(domain="circuit_discovery")
 
-        # Save immutable versioned policy to PolicyRepository
+        # Save immutable versioned policy to PolicyRepository.
+        # success_rate=0.94 was a literal: nothing in this loop measured an
+        # effectiveness rate, and the strategy it saves is a static template
+        # whose own score `recommend_strategy` now reports as unmeasured.
         new_pol = self.policy_repository.save_policy(
             domain="circuit_discovery",
             workflow=strat_res["recommended_workflow"],
-            success_rate=0.94,
-            average_cost_usd=3.85,
-            average_runtime_min=8.2,
+            success_rate=None,
+            average_cost_usd=None,
+            average_runtime_min=None,
         )
 
         return {
@@ -101,6 +104,15 @@ class MetaResearchEngine:
             "recommended_strategy": strat_res,
             "saved_policy_version": new_pol["version"],
             "policy_id": new_pol["policy_id"],
+            "policy_metrics_measured": False,
+            "provenance": "unavailable",
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": (
+                "This loop replays an illustrative trajectory and applies a "
+                "static strategy template. No effectiveness, cost, or runtime "
+                "was measured, so the saved policy carries no metrics."
+            ),
             "loop_state": "Ready for Next Autonomous Campaign Execution",
         }
 

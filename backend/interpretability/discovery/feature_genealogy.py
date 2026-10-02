@@ -1,13 +1,19 @@
-"""Feature Genealogy Engine."""
+"""Feature Genealogy Engine.
+
+NOT IMPLEMENTED. The lineage returned here is a fixed fixture: the parent,
+child, and depth values do not depend on ``feature_id`` or on any activation.
+It previously reported a Lineage Overlap of 0.88 and confidence 0.95 for every
+feature, which reads like a computed DAG.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 from .discovery_result import DiscoveryResultDTO
 
 
 class FeatureGenealogyEngine:
-    """Models DAG hierarchy and feature lineage (Parents ➔ Derived ➔ Merged Features)."""
+    """Reference fixture only. No lineage was inferred from activations."""
 
     def get_genealogy(self, feature_id: int = 1402) -> Dict[str, Any]:
         genealogy = {
@@ -17,17 +23,26 @@ class FeatureGenealogyEngine:
             "merged_from": [102, 304],
             "lineage_depth": 3,
         }
-        dto = DiscoveryResultDTO(
+        res = DiscoveryResultDTO(
             discovery_id=f"gen_{feature_id}",
             discovery_type="FeatureGenealogy",
             title=f"Lineage DAG for Feature #{feature_id}",
-            evidence=[{"metric": "Lineage Overlap", "value": 0.88}],
-            confidence=0.95,
+            evidence=[],
+            confidence=0.0,
             related_features=[102, 304, feature_id, 2804, 3102],
-        )
-        res = dto.to_dict()
+        ).to_dict()
         res["genealogy"] = genealogy
         res["genealogy_field_provenance"] = {
             key: "reference" for key in genealogy
         }
+        res["status"] = "unavailable"
+        res["provenance"] = "reference"
+        res["genealogy_measured"] = False
+        res["validation_eligible"] = False
+        res["publication_eligible"] = False
+        res["reason"] = (
+            "Feature genealogy is not implemented. These lineage values are "
+            "fixed fixtures and are identical for every feature_id; no parent "
+            "or child relationship was inferred from activations."
+        )
         return res

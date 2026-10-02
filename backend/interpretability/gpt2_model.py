@@ -8,7 +8,9 @@ import torch
 
 warnings.filterwarnings("ignore")
 
-from transformer_lens import HookedTransformer
+from backend.interpretability.tl_compat import resolve_hooked_transformer
+
+HookedTransformer = resolve_hooked_transformer()
 
 
 class GPT2Model:

@@ -126,6 +126,7 @@ class GPT2Adapter(ModelAdapter):
             top5 = logits.topk(5)
             return {
                 "prompt": prompt,
+                "provenance": "live",
                 "top_tokens": [
                     {"token": self._tokenizer.decode([idx]), "logit": round(float(l), 3)}
                     for l, idx in zip(top5.values, top5.indices)
@@ -133,15 +134,34 @@ class GPT2Adapter(ModelAdapter):
                 "top_token": self._tokenizer.decode([top5.indices[0]]),
             }
 
-        # Mock
+        # Mock mode. These are fixed fixtures, not measurements: they are
+        # labelled "seeded" and carry validation/publication ineligibility so
+        # they can never be mistaken for evidence. Only the three exact
+        # prefixes below are recognised -- deliberately no name-parsing
+        # heuristic, because synthesising a plausible IOI answer for arbitrary
+        # names would be a fake result dressed as a finding.
         for prefix, tokens in self._KNOWN_TOP_TOKENS.items():
             if prefix in prompt:
                 return {
                     "prompt": prompt,
+                    "provenance": "seeded",
+                    "validation_eligible": False,
+                    "publication_eligible": False,
+                    "reason": ("Fixed mock fixture; no weights were run. "
+                               "Not evidence."),
                     "top_tokens": [{"token": t, "logit": p * 10, "prob": p} for t, p in tokens],
                     "top_token": tokens[0][0],
                 }
-        return {"prompt": prompt, "top_tokens": [{"token": " the", "logit": 4.5, "prob": 0.45}], "top_token": " the"}
+        return {
+            "prompt": prompt,
+            "provenance": "seeded",
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": ("No mock fixture matches this prompt and no weights "
+                       "were run. Not evidence."),
+            "top_tokens": [{"token": " the", "logit": 4.5, "prob": 0.45}],
+            "top_token": " the",
+        }
 
     def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
         """Patch a specific neuron in the MLP layer."""

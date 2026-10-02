@@ -1,8 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import asyncio
 import hashlib
+import importlib.util
 import json
 import os
 import queue
@@ -119,8 +120,11 @@ def get_model_info(name: str) -> Dict[str, Any]:
 @router.post("/infer")
 def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
-    prompt = payload.get("prompt") or _default_prompt(engine)
-    model_name = payload.get("model_name", "gpt2-small")
+    supplied = payload.get("prompt")
+    if supplied is not None and not isinstance(supplied, str):
+        raise HTTPException(400, detail="'prompt' must be a string")
+    prompt = supplied or _default_prompt(engine)
+    model_name = _as_text(payload, "model_name", "gpt2-small")
     if engine and engine.is_available():
         res = engine.infer(prompt, model_name)
         if isinstance(res, dict):
@@ -590,10 +594,64 @@ def ping() -> Dict[str, Any]:
 
 @router.post("/runtime/status")
 def runtime_status() -> Dict[str, Any]:
+    """Report what is actually reachable, not a fixed engine list.
+
+    This previously returned `{"status": "connected", "engines": [local,
+    distributed, kubernetes, slurm, ray]}` unconditionally -- claiming a Slurm
+    and Ray cluster connection that was never probed, so a UI reading this had
+    no way to tell an idle laptop from a cluster.
+
+    Engines are now probed for real reachability and the status is the worst
+    outcome among the ones that apply.
+    """
+    engines: Dict[str, Dict[str, Any]] = {}
+    for name in ("local", "distributed", "kubernetes", "slurm", "ray"):
+        engines[name] = _probe_engine(name)
+
+    reachable = [n for n, v in engines.items() if v["reachable"]]
     return {
-        "status": "connected",
-        "engines": ["local", "distributed", "kubernetes", "slurm", "ray"],
+        # "connected" is only correct when at least one engine was verified.
+        "status": "connected" if reachable else "unavailable",
+        "engines": reachable,
+        "engine_detail": engines,
+        "reason": (None if reachable else
+                   "No execution engine was reachable; the platform is "
+                   "serving but cannot execute a run."),
+        "provenance": "live",
+        "validation_eligible": False,
+        "publication_eligible": False,
     }
+
+
+def _probe_engine(name: str) -> Dict[str, Any]:
+    """Check one execution engine for real reachability."""
+    try:
+        if name == "local":
+            from backend.services import gpt2_engine
+            available = bool(gpt2_engine.is_available())
+            return {
+                "reachable": available,
+                "detail": ("local executor available" if available
+                           else "torch/transformers unavailable"),
+            }
+        if name == "distributed":
+            from backend.distributed import scheduler
+            return {"reachable": bool(getattr(scheduler, "SCHEDULER_AVAILABLE", False)),
+                    "detail": "distributed scheduler module"}
+        # Cluster engines are only claimed if their client library imports and
+        # a config is present. Absence is reported, never assumed.
+        module = {"kubernetes": "kubernetes",
+                  "slurm": None,
+                  "ray": "ray"}[name]
+        if module is None:
+            import shutil
+            return {"reachable": shutil.which("sbatch") is not None,
+                    "detail": "sbatch on PATH"}
+        return {"reachable": importlib.util.find_spec(module) is not None,
+                "detail": f"{module} importable"}
+    except Exception as exc:
+        return {"reachable": False,
+                "detail": f"probe failed: {type(exc).__name__}: {exc}"}
 
 
 @router.post("/runtime/analyze_tokens")
@@ -608,15 +666,114 @@ def _seed(text: str) -> int:
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
 
 
+# ── Payload coercion ────────────────────────────────────────────────────────
+# Every route below takes an untyped JSON body. Coercing raw user input with a
+# bare int()/float()/str() turns a malformed request into an unhandled
+# ValueError and a 500. These helpers validate first and raise HTTPException
+# (400) so a bad payload is a client error, never a server crash.
+
+def _as_int(payload: Dict[str, Any], key: str, default: int) -> int:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise HTTPException(400, detail=f"'{key}' must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(400, detail=f"'{key}' must be an integer")
+
+
+def _as_float(payload: Dict[str, Any], key: str, default: float) -> float:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise HTTPException(400, detail=f"'{key}' must be a number")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(400, detail=f"'{key}' must be a number")
+
+
+def _as_text(payload: Dict[str, Any], key: str, default: str = "") -> str:
+    value = payload.get(key, default)
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise HTTPException(400, detail=f"'{key}' must be a string")
+    return value
+
+
+def _opt_text(payload: Dict[str, Any], key: str) -> Optional[str]:
+    """Optional string; a supplied non-string is still a client error."""
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(400, detail=f"'{key}' must be a string")
+    return value
+
+
+def _prime_engine_cache(engine: Any, payload: Dict[str, Any]) -> None:
+    """Populate the engine's activation cache from the request's prompt.
+
+    The gpt2 engine keeps one prompt's activations at a time. Endpoints that
+    report shapes, tokens, or attention for a caller-supplied prompt must
+    therefore run that prompt first, or they answer with stale data from
+    whatever ran last. A failure here is non-fatal: the endpoint still
+    returns the cached state, which is better than a 500.
+    """
+    prompt = _opt_text(payload, "prompt")
+    if not prompt:
+        return
+    try:
+        engine.run_prompt(prompt)
+    except Exception:
+        pass
+
+
+def _seeded_tokens(payload: Dict[str, Any]) -> list:
+    """Token list for a seeded response, derived from the supplied prompt.
+
+    Seeding on the prompt (rather than picking a random pool entry) keeps the
+    response stable for the same input while still distinguishing different
+    prompts.
+    """
+    prompt = payload.get("prompt")
+    tokens = payload.get("tokens")
+    if isinstance(tokens, list) and tokens:
+        return [str(t) for t in tokens]
+    if isinstance(prompt, str) and prompt.strip():
+        parts = prompt.split()
+        if parts:
+            return parts
+    pool = list(random.choice(TOKEN_POOLS))
+    if isinstance(prompt, str) and prompt.strip():
+        rng = random.Random(_seed(prompt))
+        rng.shuffle(pool)
+    return pool
+
+
 def _mark(res: Any, provenance: str) -> Any:
-    """Stamp a response and each top-level returned field with provenance."""
+    """Stamp a response and each top-level returned field with provenance.
+
+    The route's `provenance` is the engine's *claim*, so it is never allowed to
+    override a value the engine already set, and a live claim is recorded as
+    unattested rather than as proof. Callers pass "live" only after checking
+    `engine.is_available()`, but availability is not attestation: it says the
+    ML stack imports, not that this particular response came from a forward
+    pass over known weights. Marking it `attested: False` keeps the distinction
+    visible to anything downstream that cares.
+    """
+    label = str(provenance or "unavailable").strip().lower() or "unavailable"
     if isinstance(res, dict):
-        res.setdefault("provenance", provenance)
+        existing = res.get("provenance")
+        if isinstance(existing, str) and existing.strip():
+            label = existing.strip().lower()
+        res["provenance"] = label
+        res.setdefault("attested", False)
         if not isinstance(res.get("field_provenance"), dict):
             res["field_provenance"] = {
-                str(key): provenance
+                str(key): label
                 for key in res
-                if key not in {"provenance", "field_provenance"}
+                if key not in {"provenance", "field_provenance", "attested"}
             }
     return res
 
@@ -734,11 +891,8 @@ def gpt2_fresh_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
             "status": "unavailable",
             "error": "torch/transformers not available — the model cannot create a prompt",
         }, "unavailable")
-    primer = str(payload.get("primer") or _fresh_primer())
-    try:
-        max_new_tokens = max(1, min(48, int(payload.get("max_new_tokens", 12))))
-    except (TypeError, ValueError):
-        max_new_tokens = 12
+    primer = _as_text(payload, "primer", "") or _fresh_primer()
+    max_new_tokens = max(1, min(48, _as_int(payload, "max_new_tokens", 12)))
     try:
         res = engine.generate_text(primer, max_new_tokens=max_new_tokens)
     except Exception as exc:
@@ -791,10 +945,14 @@ def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/gpt2/activations")
 def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
+    layer = _as_int(payload, "layer", 0)
+    seq = _as_int(payload, "seq_len", 12)
     if engine and engine.is_available():
-        return _mark(engine.activations(int(payload.get("layer", 0))), "live")
-    layer = max(0, min(11, int(payload.get("layer", 0))))
-    seq = int(payload.get("seq_len", 12))
+        # Same stale-cache problem as attention_head: reflect the requested
+        # prompt, not the previously run one.
+        _prime_engine_cache(engine, payload)
+        return _mark(engine.activations(layer), "live")
+    layer = max(0, min(11, layer))
     return _mark({
         "status": "ok",
         "layer": layer,
@@ -807,11 +965,17 @@ def gpt2_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/gpt2/attention_head")
 def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
+    raw_layer = _as_int(payload, "layer", 0)
+    raw_head = _as_int(payload, "head", 0)
     if engine and engine.is_available():
-        return _mark(engine.attention_head(int(payload.get("layer", 0)), int(payload.get("head", 0))), "live")
-    layer = int(payload.get("layer", 0)) % 12
-    head = int(payload.get("head", 0)) % 12
-    tokens = payload.get("tokens") or _random_token_sequence()
+        # The engine reads activations from a prompt cache. Without running the
+        # requested prompt first, this endpoint silently answers with whichever
+        # prompt was run last.
+        _prime_engine_cache(engine, payload)
+        return _mark(engine.attention_head(raw_layer, raw_head), "live")
+    layer = raw_layer % 12
+    head = raw_head % 12
+    tokens = _seeded_tokens(payload)
     n = len(tokens)
     rng = random.Random(_seed(f"{layer}:{head}:{' '.join(tokens)}"))
     matrix = [[0.0] * n for _ in range(n)]
@@ -829,17 +993,16 @@ def gpt2_attention_head(payload: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/gpt2/patchhead")
 def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
+    raw_layer = _as_int(payload, "layer", 9)
+    raw_head = _as_int(payload, "head", 9)
+    pos_token = _as_text(payload, "pos_token", "Paris")
+    neg_token = _as_text(payload, "neg_token", "London")
     if engine and engine.is_available():
         return _mark(engine.patch_head(
-            int(payload.get("layer", 9)),
-            int(payload.get("head", 9)),
-            payload.get("pos_token", "Paris"),
-            payload.get("neg_token", "London"),
+            raw_layer, raw_head, pos_token, neg_token,
         ), "live")
-    layer = int(payload.get("layer", 9)) % 12
-    head = int(payload.get("head", 9)) % 12
-    pos_token = payload.get("pos_token", "Paris")
-    neg_token = payload.get("neg_token", "London")
+    layer = raw_layer % 12
+    head = raw_head % 12
     rng = random.Random(_seed(f"{layer}:{head}:{pos_token}:{neg_token}"))
     clean_ld = round(rng.uniform(1.5, 3.5), 4)
     patched_ld = round(rng.uniform(-1.2, 0.9), 4)
@@ -858,13 +1021,16 @@ def gpt2_patch_head(payload: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/gpt2/steer")
 def gpt2_steer(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
+    prompt = _as_text(payload, "prompt", "") or "The movie was"
+    layer = _as_int(payload, "layer", 8)
+    pos_prompt = _as_text(payload, "pos_prompt", "") or (
+        "It was a fantastic wonderful amazing film. The movie was")
+    neg_prompt = _as_text(payload, "neg_prompt", "") or (
+        "It was a terrible awful horrible film. The movie was")
+    alpha = _as_float(payload, "alpha", 25.0)
     if engine and engine.is_available():
         return _mark(engine.steer(
-            payload.get("prompt") or "The movie was",
-            int(payload.get("layer", 8)),
-            payload.get("pos_prompt") or "It was a fantastic wonderful amazing film. The movie was",
-            payload.get("neg_prompt") or "It was a terrible awful horrible film. The movie was",
-            float(payload.get("alpha", 25.0)),
+            prompt, layer, pos_prompt, neg_prompt, alpha,
         ), "live")
     return _mark({
         "status": "unavailable",
@@ -914,7 +1080,7 @@ def gpt2_architecture(payload: Dict[str, Any] = None) -> Dict[str, Any]:
 
 @router.post("/gpt2/layer")
 def gpt2_layer(payload: Dict[str, Any]) -> Dict[str, Any]:
-    layer = int(payload.get("layer", 0))
+    layer = _as_int(payload, "layer", 0)
     engine = get_engine()
     if engine and engine.is_available():
         return _mark(engine.layer_detail(layer), "live")
@@ -927,13 +1093,13 @@ def gpt2_neurons(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return _mark(engine.list_neurons(
-            layer=int(payload.get("layer", 0)),
-            component=str(payload.get("component", "mlp")),
-            page=int(payload.get("page", 0)),
-            page_size=int(payload.get("page_size", 128)),
-            sort_by=str(payload.get("sort_by", "index")),
-            order=str(payload.get("order", "asc")),
-            q=str(payload.get("q", "")),
+            layer=_as_int(payload, "layer", 0),
+            component=_as_text(payload, "component", "mlp"),
+            page=_as_int(payload, "page", 0),
+            page_size=_as_int(payload, "page_size", 128),
+            sort_by=_as_text(payload, "sort_by", "index"),
+            order=_as_text(payload, "order", "asc"),
+            q=_as_text(payload, "q", ""),
         ), "live")
     return _mark({"status": "unavailable",
                   "error": "torch/transformers not available"}, "unavailable")
@@ -944,10 +1110,10 @@ def gpt2_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return _mark(engine.neuron_detail(
-            layer=int(payload.get("layer", 0)),
-            neuron_index=int(payload.get("neuron_index", 0)),
-            component=str(payload.get("component", "mlp")),
-            top_k_weights=int(payload.get("top_k_weights", 16)),
+            layer=_as_int(payload, "layer", 0),
+            neuron_index=_as_int(payload, "neuron_index", 0),
+            component=_as_text(payload, "component", "mlp"),
+            top_k_weights=_as_int(payload, "top_k_weights", 16),
         ), "live")
     return _mark({"status": "unavailable",
                   "error": "torch/transformers not available"}, "unavailable")
@@ -958,8 +1124,8 @@ def gpt2_head(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return _mark(engine.head_detail(
-            layer=int(payload.get("layer", 0)),
-            head=int(payload.get("head", 0)),
+            layer=_as_int(payload, "layer", 0),
+            head=_as_int(payload, "head", 0),
         ), "live")
     return _mark({"status": "unavailable",
                   "error": "torch/transformers not available"}, "unavailable")
@@ -970,10 +1136,10 @@ def gpt2_patch_neuron(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         return _mark(engine.patch_neuron(
-            layer=int(payload.get("layer", 0)),
-            neuron_index=int(payload.get("neuron_index", 0)),
-            patch_value=float(payload.get("patch_value", 0.0)),
-            prompt=payload.get("prompt"),
+            layer=_as_int(payload, "layer", 0),
+            neuron_index=_as_int(payload, "neuron_index", 0),
+            patch_value=_as_float(payload, "patch_value", 0.0),
+            prompt=_opt_text(payload, "prompt"),
         ), "live")
     return _mark({"status": "unavailable",
                   "error": "torch/transformers not available"}, "unavailable")
@@ -985,8 +1151,8 @@ def gpt2_layer_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
     if engine and engine.is_available():
         try:
             return _mark(engine.layer_activations(
-                layer=int(payload.get("layer", 0)),
-                prompt=payload.get("prompt") or "The capital of France is",
+                layer=_as_int(payload, "layer", 0),
+                prompt=_as_text(payload, "prompt", "") or "The capital of France is",
             ), "live")
         except Exception as exc:
             return _mark({"status": "error", "error": str(exc)[:300]}, "unavailable")
@@ -1000,7 +1166,7 @@ def gpt2_logit_lens_all(payload: Dict[str, Any]) -> Dict[str, Any]:
     if engine and engine.is_available():
         try:
             return _mark(engine.logit_lens_all(
-                prompt=payload.get("prompt") or "The capital of France is",
+                prompt=_as_text(payload, "prompt", "") or "The capital of France is",
             ), "live")
         except Exception as exc:
             return _mark({"status": "error", "error": str(exc)[:300]}, "unavailable")

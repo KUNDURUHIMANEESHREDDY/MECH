@@ -222,3 +222,168 @@ def parse_head(label: str) -> Optional[Tuple[int, int]]:
         return int(layer_s), int(head_s)
     except Exception:
         return None
+
+
+def path_patch(clean: str, corrupted: str, io_id: int, subj_id: int,
+               sender: Tuple[int, int],
+               receivers: List[Tuple[int, int]]) -> Dict[str, Any]:
+    """Isolate the direct causal path from `sender` to each receiver.
+
+    The canonical path-patching procedure (Wang et al. 2022) needs *two
+    simultaneous interventions* on the corrupted run:
+
+    1. Freeze the sender -- its output is forced to the clean-run value, so it
+       cannot contribute its ordinary, non-path effect.
+    2. Swap the receiver's input -- the receiver reads the clean-run value that
+       arrived at its position from the sender.
+
+    The change in logit difference relative to the plain corrupted baseline is
+    then attributable to the sender->receiver route itself.
+
+    Doing only step 2, as the previous implementation did, leaves the sender
+    free to contribute normally, so the measurement conflates the direct path
+    with the sender's total effect and overstates every edge it reports. That
+    is why the two hooks must be installed together.
+    """
+    s_layer, s_head = sender
+    engine = _engine()
+    import torch
+    _, _, hd = dims()
+
+    # --- clean run: capture the sender's output and each receiver's input ---
+    sender_out: Dict[str, Any] = {}
+    receiver_in: Dict[int, Any] = {}
+    hooks = []
+    with _MEASURE_LOCK:
+        def sender_hook(_mod: Any, _inp: Any, out: Any) -> Any:
+            sender_out["value"] = out[0][:, -1, :].detach().clone()
+            return out
+
+        def make_receiver_hook(layer: int) -> Any:
+            def hook(_mod: Any, inp: Any) -> Any:
+                receiver_in[layer] = inp[0][:, -1, :].detach().clone()
+                return inp
+            return hook
+
+        hooks.append(engine._model.transformer.h[s_layer].attn.c_proj
+                     .register_forward_hook(sender_hook))
+        for layer, _head in receivers:
+            hooks.append(engine._model.transformer.h[layer].attn.c_proj
+                         .register_forward_pre_hook(make_receiver_hook(layer)))
+        try:
+            with torch.no_grad():
+                engine._model(**_inputs(engine, clean))
+        finally:
+            for handle in hooks:
+                handle.remove()
+
+    clean_sender = sender_out.get("value")
+    if clean_sender is None:
+        raise RuntimeError("path patching: sender output was not captured")
+
+    corr_base = baseline(corrupted, io_id, subj_id)["logit_diff"]
+    clean_base = baseline(clean, io_id, subj_id)["logit_diff"]
+    denom = clean_base - corr_base
+
+    rows = []
+    for r_layer, r_head in receivers:
+        cached_in = receiver_in.get(r_layer)
+        if cached_in is None:
+            continue
+        forward = _path_patched_forward(
+            engine, corrupted, io_id, subj_id,
+            s_layer=s_layer, s_head=s_head, clean_sender=clean_sender, hd=hd,
+            r_layer=r_layer, r_head=r_head, cached_receiver_in=cached_in)
+        patched_diff = forward["logit_diff"]
+        rows.append({
+            "receiver": head_label(r_layer, r_head),
+            "patched_logit_diff": patched_diff,
+            "path_effect": (None if not denom
+                            else round((patched_diff - corr_base) / denom, 4)),
+            "top1": forward["top1"],
+        })
+
+    return {
+        "method": "path_patching",
+        "sender": head_label(*sender),
+        "receivers": rows,
+        "clean_logit_diff": clean_base,
+        "corrupted_logit_diff": corr_base,
+        "denominator": denom,
+        "sender_frozen": True,
+        "receiver_input_swapped": True,
+        "isolates_direct_path": True,
+    }
+
+
+def _path_patched_forward(engine: Any, prompt: str, io_id: int, subj_id: int,
+                          *, s_layer: int, s_head: int, clean_sender: Any,
+                          hd: int, r_layer: int, r_head: int,
+                          cached_receiver_in: Any) -> Dict[str, Any]:
+    """One corrupted forward pass with the sender frozen and receiver swapped."""
+    import torch
+    hooks = []
+    s_slice = slice(s_head * hd, (s_head + 1) * hd)
+
+    with _MEASURE_LOCK:
+        def freeze_sender(_mod: Any, _inp: Any, out: Any) -> Any:
+            x = out[0].clone()
+            src = clean_sender.to(x.device).to(x.dtype)
+            x[:, -1, s_slice] = src[:, -1, s_slice]
+            return (x,) + tuple(out[1:])
+
+        def swap_receiver(_mod: Any, inp: Any) -> Any:
+            x = inp[0].clone()
+            src = cached_receiver_in.to(x.device).to(x.dtype)
+            x[:, -1, :] = src[:, -1, :]
+            return (x,) + tuple(inp[1:])
+
+        hooks.append(engine._model.transformer.h[s_layer].attn.c_proj
+                     .register_forward_hook(freeze_sender))
+        hooks.append(engine._model.transformer.h[r_layer].attn.c_proj
+                     .register_forward_pre_hook(swap_receiver))
+        try:
+            with torch.no_grad():
+                out = engine._model(**_inputs(engine, prompt))
+            logits = out.logits[0, -1].detach().cpu()
+            return {
+                "logit_diff": _logit_diff(engine, logits, io_id, subj_id),
+                "top1": engine._decode(int(torch.argmax(logits))),
+            }
+        finally:
+            for handle in hooks:
+                handle.remove()
+
+
+def circuit_fidelity(clean: str, corrupted: str, io_id: int, subj_id: int,
+                     retained: Set[Tuple[int, int]]) -> Dict[str, Any]:
+    """Fraction of the clean-minus-corrupted logit gap recovered by `retained`.
+
+    This is ACDC's headline metric, and it is a real measurement: the retained
+    heads are injected into the corrupted run and the resulting logit
+    difference is compared against the gap the clean model achieves. It
+    replaces a rescaling of the pruning ratio that could not report failure.
+    """
+    clean_base = baseline(clean, io_id, subj_id)["logit_diff"]
+    corr_base = baseline(corrupted, io_id, subj_id)["logit_diff"]
+    denom = clean_base - corr_base
+    if not retained or not denom:
+        return {
+            "fidelity": None,
+            "measured": False,
+            "denominator": denom,
+            "reason": ("fidelity is undefined without both a retained circuit "
+                       "and a non-zero clean-minus-corrupted logit gap"),
+        }
+    _, caps = capture(clean)
+    recovered = inject(corrupted, io_id, subj_id, caps, retained)["logit_diff"]
+    return {
+        "fidelity": round((recovered - corr_base) / denom, 4),
+        "measured": True,
+        "clean_logit_diff": clean_base,
+        "corrupted_logit_diff": corr_base,
+        "recovered_logit_diff": recovered,
+        "denominator": denom,
+        "retained_heads": sorted(head_label(*h) for h in retained),
+    }
+

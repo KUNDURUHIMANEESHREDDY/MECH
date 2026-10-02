@@ -212,11 +212,32 @@ class TestBenchmarks:
 
 class TestRuntime:
     def test_runtime_status(self):
+        """Runtime status must report probed reachability, not a fixed list.
+
+        This previously asserted "connected" plus five engine names that were
+        returned unconditionally -- including Slurm and Ray, on a laptop with
+        neither installed. The status now follows what the probes found.
+        """
         r = client.post("/api/v1/runtime/status", json={})
         assert r.status_code == 200
         body = r.json()
-        assert body["status"] == "connected"
+
+        assert body["status"] in ("connected", "unavailable")
         assert "engines" in body
+        assert isinstance(body["engines"], list)
+        assert "engine_detail" in body
+
+        # "connected" may only be claimed when an engine actually verified.
+        if body["status"] == "connected":
+            assert body["engines"], "connected with no reachable engine"
+        else:
+            assert not body["engines"]
+            assert body["reason"]
+
+        # Every reported engine must carry a probed detail, not a bare name.
+        for name in body["engine_detail"]:
+            assert "reachable" in body["engine_detail"][name]
+            assert "detail" in body["engine_detail"][name]
 
     def test_tokenize(self):
         r = client.post(

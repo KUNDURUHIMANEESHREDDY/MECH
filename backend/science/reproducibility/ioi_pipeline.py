@@ -35,33 +35,71 @@ REFERENCE_ONLY_DISCOVERED_EDGES = (
 REFERENCE_ONLY_FAITHFULNESS = 0.880
 REFERENCE_ONLY_PATCH_HEAD = (9, 9)
 
+# Minimality is a majority-vote statistic over per-head ablations. Below this
+# many usable prompts the vote is noise, and a ratio computed from it looks like
+# a finding ("0.9 -- 90% of heads necessary") while measuring nothing. It is
+# reported as unmeasured instead.
+MIN_PROMPTS_FOR_MINIMALITY = 10
+
 
 def _field_map(fields, provenance: str):
     return {str(field): provenance for field in fields}
 
 
+# IOI prompt frames. A single template measures one syntactic pattern, so any
+# result from it is really a statement about that frame and not about
+# indirect-object identification generally. The pipeline cycles through these so
+# a finding can be checked for consistency across surface forms.
+#
+# Every frame keeps the ABB corruption: the clean prompt's giver is the subject,
+# and the corrupted prompt's giver is the indirect object, so the target
+# becomes distributionally wrong in the corrupted run.
+_IOI_FRAMES = (
+    {"lead": "When ", "place": "store", "verb": "gave", "item": "drink"},
+    {"lead": "Then ", "place": "park", "verb": "gave", "item": "ball"},
+    {"lead": "After that, ", "place": "library", "verb": "offered",
+     "item": "book"},
+    {"lead": "While ", "place": "kitchen", "verb": "passed", "item": "towel"},
+    {"lead": "Yesterday ", "place": "market", "verb": "bought", "item": "apple"},
+    {"lead": "Later, ", "place": "garden", "verb": "sent", "item": "letter"},
+    {"lead": "One day ", "place": "school", "verb": "showed", "item": "photo"},
+    {"lead": "Finally, ", "place": "beach", "verb": "handed", "item": "shell"},
+)
+
+
+def _build_prompt(frame: Dict[str, str], subject: str, io: str,
+                  corrupted: bool) -> str:
+    """Render one IOI prompt. `corrupted` swaps the giver to the indirect object."""
+    giver = io if corrupted else subject
+    return (f"{frame['lead']}{subject} and {io} went to the "
+            f"{frame['place']}, {giver} {frame['verb']} a {frame['item']} to")
+
+
 def _make_high_fidelity_ioi_prompts(n: int = 100, seed: int = 42) -> List[Dict[str, str]]:
     rng = random.Random(seed)
     prompts = []
-    for _ in range(n):
+    for index in range(n):
+        # Rotate deterministically rather than sampling, so every template is
+        # exercised evenly at any n. Without this, small n would cover only a
+        # couple of frames and the result would be frame-specific.
+        frame = _IOI_FRAMES[index % len(_IOI_FRAMES)]
         names = rng.sample(_NAMES, 3)
         a, b, c = names[0], names[1], names[2]
 
-        # Clean (IOI pattern)
-        clean = f"When {a} and {b} went to the store, {a} gave a drink to"
-        target = f" {b}"
-
-        # Corrupted (ABB pattern - Subject is the same as Indirect Object)
-        corrupted = f"When {a} and {b} went to the store, {b} gave a drink to"
-
         prompts.append({
-            "text": clean,
-            "corrupted_text": corrupted,
+            "text": _build_prompt(frame, a, b, corrupted=False),
+            "corrupted_text": _build_prompt(frame, a, b, corrupted=True),
             "subject": a,
             "indirect_object": b,
-            "target": target
+            "target": f" {b}",
+            "template": frame["lead"].strip().rstrip(",") or frame["lead"],
+            "frame_id": index % len(_IOI_FRAMES),
+            "place": frame["place"],
+            "verb": frame["verb"],
+            "item": frame["item"],
         })
     return prompts
+
 
 
 class IOIReproductionPipeline:
@@ -188,7 +226,21 @@ class IOIReproductionPipeline:
         rec_diffs: List[float] = []
         necessary_votes: Dict[Tuple[int, int], int] = {h: 0 for h in circuit}
         usable = 0
+        # Per-template tallies. A single aggregate hides whether a result holds
+        # across surface forms or only on the frame that happened to work.
+        per_template: Dict[int, Dict[str, Any]] = {}
         for p in prompts:
+            frame_id = int(p.get("frame_id", 0))
+            bucket = per_template.setdefault(frame_id, {
+                "frame_id": frame_id,
+                "template": p.get("template", ""),
+                "place": p.get("place", ""),
+                "verb": p.get("verb", ""),
+                "item": p.get("item", ""),
+                "n": 0, "usable": 0, "correct": 0,
+                "faithfulness": [], "recovery": [],
+            })
+            bucket["n"] += 1
             io_id = token_ids[p["indirect_object"]]
             subj_id = token_ids[p["subject"]]
             assert io_id is not None and subj_id is not None
@@ -204,21 +256,44 @@ class IOIReproductionPipeline:
             clean_diffs.append(clean_diff)
             corr_diffs.append(corr_diff)
             rec_diffs.append(rec_diff)
+            if clean_base["top1"].strip() == p["indirect_object"]:
+                bucket["correct"] += 1
             if denom > 0.2 and clean_diff > 0.2:
                 usable += 1
-                faithfulness_scores.append(
-                    max(0.0, min(1.0, (rec_diff - corr_diff) / denom)))
-                recovery_scores.append(
-                    max(0.0, min(1.0, rec_diff / clean_diff)))
+                bucket["usable"] += 1
+                faith = max(0.0, min(1.0, (rec_diff - corr_diff) / denom))
+                recov = max(0.0, min(1.0, rec_diff / clean_diff))
+                faithfulness_scores.append(faith)
+                recovery_scores.append(recov)
+                bucket["faithfulness"].append(faith)
+                bucket["recovery"].append(recov)
                 for head in circuit:
                     single = lm.ablate(p["text"], io_id, subj_id, {head})
                     if abs(single - clean_diff) >= 0.10 * abs(clean_diff):
                         necessary_votes[head] += 1
 
+        per_template_report = []
+        for frame_id in sorted(per_template):
+            b = per_template[frame_id]
+            per_template_report.append({
+                **{k: v for k, v in b.items()
+                   if k not in ("faithfulness", "recovery")},
+                "circuit_faithfulness": (
+                    round(mean(b["faithfulness"]), 4) if b["faithfulness"] else None),
+                "functional_recovery": (
+                    round(mean(b["recovery"]), 4) if b["recovery"] else None),
+                "patch_success_rate": (
+                    round(100.0 * b["correct"] / b["n"], 2) if b["n"] else 0.0),
+            })
+        templates_with_usable = [
+            t for t in per_template_report if t["circuit_faithfulness"] is not None
+        ]
+
         n = len(prompts)
+        minimality_measured = bool(circuit) and usable >= MIN_PROMPTS_FOR_MINIMALITY
         minimality = (sum(1 for h in circuit
                           if necessary_votes[h] >= max(1, usable // 2))
-                      / len(circuit)) if circuit and usable else 0.0
+                      / len(circuit)) if minimality_measured else 0.0
         observed_metrics = {
             "circuit_faithfulness": (
                 round(mean(faithfulness_scores), 4) if faithfulness_scores else 0.0),
@@ -227,6 +302,19 @@ class IOIReproductionPipeline:
             "functional_recovery": (
                 round(mean(recovery_scores), 4) if recovery_scores else 0.0),
             "circuit_minimality": round(minimality, 4),
+            "circuit_minimality_measured": minimality_measured,
+            "n_templates": len(per_template_report),
+            "templates_with_usable_prompts": len(templates_with_usable),
+            "cross_template_consistent": (
+                # Consistent only if at least two distinct frames produced a
+                # usable measurement and they broadly agree. A result from one
+                # frame alone is a claim about that frame.
+                len(templates_with_usable) >= 2
+                and (max(t["circuit_faithfulness"] for t in templates_with_usable)
+                     - min(t["circuit_faithfulness"] for t in templates_with_usable))
+                < 0.25
+            ),
+            "per_template": per_template_report,
             "full_logit_diff": round(mean(clean_diffs), 4) if clean_diffs else 0.0,
             "ablated_logit_diff": round(mean(corr_diffs), 4) if corr_diffs else 0.0,
             "isolated_logit_diff": round(mean(rec_diffs), 4) if rec_diffs else 0.0,
@@ -238,10 +326,13 @@ class IOIReproductionPipeline:
             "field_provenance": _field_map(
                 ("circuit_faithfulness", "patch_success_rate",
                  "functional_recovery", "circuit_minimality",
+                 "circuit_minimality_measured",
+                 "n_templates", "templates_with_usable_prompts",
+                 "cross_template_consistent", "per_template",
                  "full_logit_diff", "ablated_logit_diff",
                  "isolated_logit_diff", "discovered_nodes",
                  "discovered_edges"),
-                "live",
+                "live" if minimality_measured else "unavailable",
             ),
         }
 
@@ -257,7 +348,10 @@ class IOIReproductionPipeline:
                 "(injection-recovered logit-diff ratio).",
                 "circuit_minimality measured as the fraction of circuit "
                 "heads individually necessary (>=10% single-ablation "
-                "effect) on usable prompts.",
+                "effect) on usable prompts."
+                + ("" if minimality_measured else
+                   f" Not reported: only {usable} usable prompts, below the "
+                   f"{MIN_PROMPTS_FOR_MINIMALITY} needed for a majority vote."),
                 f"live run over {n} prompts; mock_mode=False.",
             ],
         )

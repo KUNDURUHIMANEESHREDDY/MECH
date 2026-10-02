@@ -1,0 +1,6 @@
+--- a/pytest.ini
++++ b/pytest.ini
+@@ -3,3 +3,4 @@
+ python_files = test_*.py
+ addopts = --basetemp=.pytest-tmp
++pythonpath = . backend

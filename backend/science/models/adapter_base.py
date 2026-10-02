@@ -67,6 +67,11 @@ class ModelAdapter(ABC):
         self._model = None
         self._tokenizer = None
         self._manager = None
+        #: True when this adapter fabricates its output instead of running a
+        #: model. Subclasses that never execute weights must set this, because
+        #: downstream provenance checks treat it as "not a measurement".
+        self.simulated = False
+        self.simulation_reason: str = ""
         if not spec.mock_mode:
             self._load_model()
 

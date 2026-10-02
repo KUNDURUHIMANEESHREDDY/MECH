@@ -43,7 +43,15 @@ class ActivationCache:
     output_schema="DiscoveryReport"
 ))
 class ACDCAlgorithm(DiscoveryAlgorithm):
-    """Real ACDC algorithm with activation caching, greedy edge pruning, and graph reconstruction."""
+    """Greedy reverse-topological edge pruning over cached activations.
+
+    What is real: activation capture, the pruning sweep, and the resulting
+    component set -- these come from the adapter.
+
+    What is not: the fidelity number ACDC is judged by. Recovering the clean
+    logit difference with the pruned circuit was never run, so no fidelity is
+    reported and no confidence is claimed. See `run()`.
+    """
 
     def build_activation_cache(self, clean_prompt: str, corrupted_prompt: str, num_layers: int, num_heads: int) -> ActivationCache:
         """Populates clean and corrupted activation caches for all layers and heads."""
@@ -160,7 +168,40 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
         edges.append({"source": last_node, "target": "P_0", "weight": 1.0, "confidence": 1.0})
 
         circuit_score = round(len(retained_components) / max(1, len(candidate_edges)), 3)
-        logit_recovery_fidelity = round(min(0.99, 0.90 + (0.09 * (1.0 - circuit_score))), 3)
+        # Real fidelity: inject the retained heads into the corrupted run and
+        # compare the recovered logit difference against the clean-minus-
+        # corrupted gap. The previous expression
+        # (0.90 + 0.09 * (1 - circuit_score)) was a rescaling of the pruning
+        # ratio into a number named "logit recovery fidelity" that could not
+        # fall below 0.90 -- so it reported success no matter how little of the
+        # circuit survived.
+        #
+        # This requires the live engine, because the generic adapter's
+        # `patch_activation` takes a single site and cannot restore a whole
+        # circuit at once. When the live engine is absent, fidelity is
+        # honestly unmeasured rather than approximated.
+        logit_recovery_fidelity: Optional[float] = None
+        fidelity_detail: Dict[str, Any] = {
+            "measured": False,
+            "reason": "live engine unavailable; circuit-level injection is not "
+                      "expressible with a single-site adapter",
+        }
+        if dataset.get("io_id") is not None and dataset.get("subject_id") is not None:
+            try:
+                from backend.interpretability.discovery.live_measure import (
+                    circuit_fidelity,
+                )
+                detail = circuit_fidelity(
+                    clean_prompt, corrupted_prompt,
+                    int(dataset["io_id"]), int(dataset["subject_id"]),
+                    set(retained_components))
+                fidelity_detail = detail
+                logit_recovery_fidelity = detail.get("fidelity")
+            except Exception as exc:
+                fidelity_detail = {
+                    "measured": False,
+                    "reason": f"fidelity measurement failed: {exc}",
+                }
         runtime_ms = (time.time() - t0) * 1000
 
         # Component List for Discovery Evaluation
@@ -179,6 +220,10 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                 "patch_threshold": threshold,
                 "total_evaluations": total_evaluations,
                 "logit_recovery_fidelity": logit_recovery_fidelity,
+                "logit_recovery_fidelity_measured":
+                    bool(fidelity_detail.get("measured")),
+                "logit_recovery_fidelity_detail": fidelity_detail,
+                "pruning_ratio": round(len(retained_components) / max(1, len(candidate_edges)), 3),
                 "component_list": component_list # Added for Phase 39.2
             },
             evidence={
@@ -188,15 +233,26 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                 "baseline_logit_diff": round(baseline_diff, 4),
                 "activation_cache_size": len(cache.head_activations),
             },
-            confidence=min(0.99, logit_recovery_fidelity),
+            # Confidence was previously the fabricated fidelity, which could
+            # not fall below 0.90. Nothing here calibrates a confidence in the
+            # recovered circuit, so none is claimed. The graph score is the
+            # pruning ratio, which is what was actually measured.
+            confidence=0.0,
             graph={
                 "nodes": nodes,
                 "edges": edges,
-                "score": logit_recovery_fidelity
+                "score": circuit_score,
+                "score_meaning": "pruning_ratio_retained_over_candidate"
             },
             provenance={
+                **self.provenance_block(),
                 "search_space": config.search_space,
                 "metric": "greedy_reverse_topological_edge_pruning",
-                "paper_citation": "Conmy et al. 2023: Automatic Circuit Discovery"
+                "paper_citation": "Conmy et al. 2023: Automatic Circuit Discovery",
+                "logit_recovery_fidelity": (
+                    (f"measured at {logit_recovery_fidelity} of the "
+                     "clean-minus-corrupted logit gap")
+                    if fidelity_detail.get("measured") else
+                    f"not measured: {fidelity_detail.get('reason')}"),
             }
         )

@@ -38,8 +38,15 @@ def test_sprint3_deliverable_full_workflow():
 
     # 3. AI 3: Circuit Discovery & Causal Tracing
     circ = dispatcher["interpretability/circuits/discover"]({"prompt": prompt, "target_token": target_token})
-    assert 0.5 < circ["circuit_score"] <= 1.0
-    assert len(circ["nodes"]) >= 4
+    if circ.get("status") == "completed":
+        assert 0.0 <= circ["circuit_score"] <= 1.0
+        assert len(circ["nodes"]) >= 4
+    else:
+        # Blocked pipelines must not emit a fabricated faithfulness score.
+        assert circ["status"] in ("unavailable", "blocked", "error")
+        assert circ["publication_eligible"] is False
+        assert circ["reason"]
+        assert "circuit_score" not in circ
 
     trace = dispatcher["interpretability/causal/trace"]({
         "clean_prompt": prompt,

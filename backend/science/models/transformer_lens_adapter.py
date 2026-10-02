@@ -29,17 +29,35 @@ class TransformerLensAdapter(ModelAdapter):
         )
         super().__init__(spec)
         self._tl_model = None
+        #: Set when a genuine load failure forced the mock fallback, so the
+        #: degradation can be reported rather than hidden.
+        self.load_error: Optional[str] = None
 
     def _load_model(self) -> None:
         """Loads a HookedTransformer."""
         if self.spec.mock_mode: return
 
+        # Resolve through MECH's compat shim: an unsupported transformer-lens
+        # release (4.x removed HookedTransformer) must not degrade into a silent
+        # mock. Record why we could not load, so callers can report provenance.
         try:
-            import transformer_lens
-            from transformer_lens import HookedTransformer
-            self._tl_model = HookedTransformer.from_pretrained(self.spec.hf_repo_id)
-        except Exception:
+            from backend.interpretability.tl_compat import resolve_hooked_transformer
+
+            hooked_transformer = resolve_hooked_transformer()
+        except ImportError as exc:
+            raise ImportError(
+                f"TransformerLensAdapter cannot load {self.spec.hf_repo_id!r} "
+                f"because the installed transformer-lens is unsupported:\n{exc}"
+            ) from exc
+
+        try:
+            self._tl_model = hooked_transformer.from_pretrained(self.spec.hf_repo_id)
+        except Exception as exc:
+            # Keep the historical mock fallback for genuine load failures
+            # (no network, no cached weights), but make the reason visible
+            # instead of degrading silently.
             self.spec.mock_mode = True
+            self.load_error = f"{type(exc).__name__}: {exc}"
 
     def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
         if self.spec.mock_mode or self._tl_model is None:

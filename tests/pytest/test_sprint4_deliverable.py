@@ -25,7 +25,9 @@ def test_sprint4_end_to_end_deliverable():
     assert exec_res["slurm_job"]["status"] == "QUEUED"
     assert exec_res["tensor_cache"]["cached"] is True
     assert exec_res["cost_tracking"]["within_budget"] is True
-    assert exec_res["learned_prediction"]["predicted_gpu_utilization_pct"] > 90.0
+    # GPU utilisation was a constant reported under a "predicted_" name.
+    assert exec_res["learned_prediction"]["gpu_utilization_is_estimate"] is True
+    assert exec_res["learned_prediction"]["validation_eligible"] is False
     assert exec_res["locality"]["allocated_tier"] in ["GPU_VRAM", "NVMe_CACHE"]
     assert exec_res["backend_job"]["status"] in ["Pending", "Running", "Completed"]
 
@@ -34,27 +36,48 @@ def test_sprint4_end_to_end_deliverable():
     assert bench["throughput_tok_per_sec"] > 1000.0
 
     # AI 3: Autonomous Discovery Engine & Research Framework
+    #
+    # This previously asserted a wall of successes for any input: lifecycle
+    # Publication, a Confirmed hypothesis, 6 benchmarks, IOI accuracy > 0.9,
+    # a "Validated" mechanism and a "SuccessfullyReplicated" paper -- none of
+    # which depended on a measurement. The orchestrator now runs live causal
+    # discovery and stops at Validation.
     disc_res = dispatcher["interpretability/discovery/run"]({"hypothesis_statement": "L8_N402 mediates IOI capital retrieval"})
-    assert disc_res["lifecycle"]["state"] == "Publication"
-    assert disc_res["test_result"]["outcome_state"] == "Confirmed"
-    assert disc_res["benchmark_suite"]["total_benchmarks"] == 6
-    assert disc_res["ioi_eval"]["ioi_accuracy"] > 0.9
-    assert len(disc_res["induction_heads"]) >= 3
-    assert disc_res["superposition"]["superposition_degree"] > 0.3
-    assert disc_res["universality"]["is_universal"] is True
-    assert disc_res["calibrated_confidence"]["is_calibrated"] is True
-    assert disc_res["quality_score"]["overall_quality_score"] > 0.85
-    assert disc_res["regression"]["status"] == "Passing"
-    assert disc_res["registered_mechanism"]["status"] == "Validated"
-    assert disc_res["paper_replication"]["status"] == "SuccessfullyReplicated"
 
-    # AI 3: Cross-Model Circuit Alignment
+    assert disc_res["lifecycle"]["state"] != "Publication"
+
+    if disc_res.get("status") == "completed" and disc_res.get("provenance") == "live":
+        # Live measurements must be real, structural measurements.
+        assert disc_res["method"]
+        assert disc_res["model_id"]
+        assert isinstance(disc_res["heads"], list)
+        assert isinstance(disc_res["head_effects"], list)
+        assert disc_res["n_prompts"] >= 1
+        assert isinstance(disc_res["faithfulness"], (int, float))
+    else:
+        assert disc_res["status"] in ("unavailable", "blocked", "error")
+        assert disc_res["validation_eligible"] is False
+        assert disc_res["publication_eligible"] is False
+        assert disc_res["reason"]
+
+    # The synthetic finding fields must not be present at all any more.
+    for removed in ("test_result", "ioi_eval", "induction_heads",
+                    "superposition", "universality", "calibrated_confidence",
+                    "quality_score", "regression", "registered_mechanism",
+                    "paper_replication", "benchmark_suite"):
+        assert removed not in disc_res, (
+            f"{removed} is a synthetic field and must not be returned as a "
+            "discovery result")
+
+    # AI 3: Cross-Model Circuit Alignment -- unmeasured, so must say so
     align = dispatcher["interpretability/circuits/cross_model"]({
         "source_model": "GPT-2 Small",
         "target_model": "Gemma-2B",
     })
-    assert align["alignment"]["causal_similarity"] > 0.85
+    assert align["alignment_measured"] is False
+    assert align["publication_eligible"] is False
 
-    # AI 3: Feature Genealogy DAG
+    # AI 3: Feature Genealogy DAG -- reference fixture, not an inferred lineage
     gen = dispatcher["interpretability/features/genealogy"]({"feature_id": 1402})
-    assert len(gen["genealogy"]["parents"]) == 2
+    assert gen["genealogy_measured"] is False
+    assert gen["publication_eligible"] is False

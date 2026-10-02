@@ -1,0 +1,18 @@
+--- a/tests/pytest/test_evidence_persistence.py
++++ b/tests/pytest/test_evidence_persistence.py
+@@ -24,8 +24,11 @@
+-     "result": {"discovery_id": "disc_abc", "circuit_score": 0.88}},
++     "result": {"discovery_id": "disc_abc", "circuit_score": 0.88,
++                "status": "completed", "provenance": "live",
++                "validation_eligible": True, "publication_eligible": True}},
+     {"node": "validate", "agent": "critic", "op": "validate",
+      "status": "completed",
+-     "result": {"validated": True,
++     "result": {"validated": True, "status": "completed", "provenance": "live",
++                "validation_eligible": True, "publication_eligible": True,
+                 "confidence": {"confidence_score": 0.96}}},
+     {"node": "publish", "agent": "scribe", "op": "publish",
+      "status": "completed"},
+@@ -98,2 +101,2 @@
+-    assert "error" in out
++    assert "error" in out or "reason" in out

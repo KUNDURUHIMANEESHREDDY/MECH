@@ -31,6 +31,14 @@ class ScientificSkill:
     reproduced_count: int = 12
     cross_model_score: float = 0.89
     paper_references: List[str] | None = None
+    # Provenance. The quality metrics above are catalogue defaults, not
+    # measurements: nothing here tracks real executions, so a skill that has
+    # never run still reports a success rate and a cross-model score. These
+    # flags make that explicit instead of letting the numbers imply otherwise.
+    measured: bool = False
+    provenance: str = "reference"
+    validation_eligible: bool = False
+    publication_eligible: bool = False
 
     def __post_init__(self) -> None:
         if self.paper_references is None:
@@ -102,24 +110,34 @@ class ScientificSkillLibrary:
             raise KeyError(f"Skill '{skill_id}' not registered in ScientificSkillLibrary.")
 
         skill.usage_count += 1
+        # This method does not run a pipeline. It previously returned
+        # output_state="Success", six extracted circuit nodes, and
+        # reproducibility_verified=True without executing anything, so an agent
+        # could read a fabricated circuit discovery out of it.
         return {
-            "status": "Executed",
+            "status": "unavailable",
             "skill_id": skill_id,
             "name": skill.name,
             "input_params": input_params or {},
-            "execution_result": {
-                "output_state": "Success",
-                "extracted_circuit_nodes": 6,
-                "confidence_score": skill.average_confidence,
-                "reproducibility_verified": True,
-            },
+            "executed": False,
+            "execution_result": None,
             "quality_metrics": {
                 "success_rate": skill.success_rate,
                 "average_runtime_sec": skill.average_runtime_sec,
                 "average_confidence": skill.average_confidence,
                 "failure_rate": skill.failure_rate,
                 "cross_model_score": skill.cross_model_score,
+                "metrics_measured": False,
+                "provenance": skill.provenance,
             },
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": (
+                f"'{skill.name}' is a catalogue entry, not an executable "
+                "pipeline. Calling execute_skill() does not run any model, so "
+                "no circuit was discovered and the quality metrics above are "
+                "defaults rather than measurements."
+            ),
             "usage_count": skill.usage_count,
         }
 

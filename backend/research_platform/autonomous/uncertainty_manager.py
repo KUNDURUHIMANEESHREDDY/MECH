@@ -56,12 +56,31 @@ class UncertaintyManagerEngine:
         sample_size: int = 5,
         variance: float = 0.02,
         custom_policy: UncertaintyPolicy | Dict[str, Any] | None = None,
+        evidence_missing: bool = False,
     ) -> Dict[str, Any]:
         pol = custom_policy if isinstance(custom_policy, UncertaintyPolicy) else (UncertaintyPolicy.from_dict(custom_policy) if custom_policy else self.policy)
         interval = uncertainty_interval or [0.88, 0.95]
         interval_width = round(interval[1] - interval[0], 4)
 
-        if confidence_score < pol.rejection_confidence:
+        if evidence_missing:
+            # Validation returned nothing usable. Absence of evidence is not
+            # evidence of absence, so neither reject nor publish: the correct
+            # response is to go and gather evidence.
+            decision = "Validation unavailable"
+            action = "More experiments"
+            priority = 5
+            info_gain = 0.85
+            est_compute = 1.50
+            est_duration = 600
+            planner_request = {
+                "target": "planner",
+                "reason": "Validation returned no usable confidence evidence",
+                "recommended_additional_samples": max(1, pol.min_samples - sample_size),
+                "priority": priority,
+                "expected_information_gain": info_gain,
+                "estimated_compute_gpu_hours": est_compute,
+            }
+        elif confidence_score < pol.rejection_confidence:
             decision = "Reject hypothesis"
             action = "Reject"
             priority = 1
@@ -126,6 +145,7 @@ class UncertaintyManagerEngine:
             "confidence_score": confidence_score,
             "uncertainty_interval": interval,
             "interval_width": interval_width,
+            "evidence_missing": bool(evidence_missing),
             "decision": decision,
             "action": action,
             "priority": priority,

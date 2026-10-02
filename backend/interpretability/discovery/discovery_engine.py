@@ -81,6 +81,15 @@ class DiscoveryEngine:
         the orchestrator stops at evidence collection and exposes no synthetic
         result fields.
         """
+        # Validate before anything else. An empty or non-string hypothesis
+        # previously flowed into the run and produced an ordinary-looking
+        # result, or raised an opaque TypeError from a slice operation.
+        if not isinstance(hypothesis_statement, str) or not hypothesis_statement.strip():
+            raise ValueError(
+                "hypothesis_statement must be a non-empty string; got "
+                f"{type(hypothesis_statement).__name__}"
+            )
+
         disc_id = f"disc_{hash(hypothesis_statement) & 0xffffffff:08x}"
         lifecycle = DiscoveryLifecycleState(discovery_id=disc_id,
                                             title=hypothesis_statement[:50])
@@ -91,7 +100,15 @@ class DiscoveryEngine:
         except Exception:
             LiveIOIDiscovery = None  # type: ignore[assignment]
         if LiveIOIDiscovery is not None and LiveIOIDiscovery.available():
-            result = LiveIOIDiscovery().run(hypothesis_statement)
+            try:
+                result = LiveIOIDiscovery().run(hypothesis_statement)
+            except Exception as exc:
+                # Record the failure before propagating. A raising executor
+                # must not strand the discovery mid-run with no record of why
+                # it stopped.
+                lifecycle.record_failure(
+                    f"live discovery executor raised: {exc}")
+                raise
             if (isinstance(result, dict)
                     and result.get("status") == "completed"
                     and result.get("provenance") == "live"):

@@ -4,6 +4,12 @@ from .database import ExperimentRecord, SessionRecord, ReportRecord
 from .dependency_graph import ResearchDependencyGraph
 from .dto import CoreExperimentDTO, CoreDiscoveryDTO
 from .event_schema import ResearchEvent
+from .evidence_boundary import (
+    BOUNDARY,
+    EvidenceBoundary,
+    EvidenceResult,
+    RunAttestation,
+)
 from .evidence_graph import TraceableEvidenceGraph
 from .experiment_templates import ExperimentTemplatesSystem
 from .provenance_viewer import ProvenanceViewerEngine
@@ -19,6 +25,7 @@ __all__ = [
     "ResearchDependencyGraph",
     "CoreExperimentDTO", "CoreDiscoveryDTO",
     "ResearchEvent",
+    "BOUNDARY", "EvidenceBoundary", "EvidenceResult", "RunAttestation",
     "TraceableEvidenceGraph",
     "ExperimentTemplatesSystem",
     "ProvenanceViewerEngine",

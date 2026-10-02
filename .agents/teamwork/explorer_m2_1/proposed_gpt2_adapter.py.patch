@@ -1,0 +1,66 @@
+--- a/backend/science/models/gpt2_adapter.py
++++ b/backend/science/models/gpt2_adapter.py
+@@ -10,7 +10,7 @@
+ import hashlib
+ import math
+ import random
+-from typing import Any, Dict, List, Optional
++from typing import Any, Dict, List, Optional, Tuple
+ 
+ from .adapter_base import (
+     ActivationResult, AttentionPattern, ModelAdapter, ModelSpec, PatchResult
+@@ -32,15 +32,38 @@
+     return round((seed % 1000) / 200.0 - 2.5, 4)
+ 
+ 
++def _build_known_top_tokens() -> Dict[str, List[Tuple[str, float]]]:
++    """Build canonical mock top tokens covering landmark benchmarks and IOI name pairs."""
++    tokens: Dict[str, List[Tuple[str, float]]] = {}
++    ioi_names = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank", "John", "Mary"]
++    for a in ioi_names:
++        for b in ioi_names:
++            if a != b:
++                # Clean IOI prompt: indirect object b is the target completion
++                tokens[f"When {a} and {b} went to the store, {a} gave a drink to"] = [
++                    (f" {b}", 0.82), (f" {a}", 0.11), (" the", 0.04)
++                ]
++                tokens[f"{a} and {b} went to the store, {a} gave a drink to"] = [
++                    (f" {b}", 0.82), (f" {a}", 0.11), (" the", 0.04)
++                ]
++                # Corrupted IOI prompt: subject completion
++                tokens[f"When {a} and {b} went to the store, {b} gave a drink to"] = [
++                    (f" {a}", 0.82), (f" {b}", 0.11), (" the", 0.04)
++                ]
++                tokens[f"{a} and {b} went to the store, {b} gave a drink to"] = [
++                    (f" {a}", 0.82), (f" {b}", 0.11), (" the", 0.04)
++                ]
++    tokens["The Eiffel Tower is in"] = [("Paris", 0.82), ("France", 0.11), ("the", 0.04)]
++    tokens["Mary gave John the"] = [("book", 0.51), ("ball", 0.18), ("gift", 0.14)]
++    tokens["When Mary and John went"] = [("to", 0.61), ("home", 0.22), ("back", 0.09)]
++    return tokens
++
++
+ class GPT2Adapter(ModelAdapter):
+     """Adapter for GPT-2 model family with real HuggingFace integration."""
+ 
+     # Canonical top tokens for known prompts (for mock reproducibility)
+-    _KNOWN_TOP_TOKENS = {
+-        "The Eiffel Tower is in":  [("Paris", 0.82), ("France", 0.11), ("the", 0.04)],
+-        "Mary gave John the":      [("book", 0.51), ("ball", 0.18), ("gift", 0.14)],
+-        "When Mary and John went":  [("to", 0.61), ("home", 0.22), ("back", 0.09)],
+-    }
++    _KNOWN_TOP_TOKENS = _build_known_top_tokens()
+ 
+     def __init__(self, variant: str = "small", mock_mode: bool = False) -> None:
+         super().__init__(_gpt2_spec(variant, mock_mode))
+@@ -134,8 +157,8 @@
+                 "top_token": self._tokenizer.decode([top5.indices[0]]),
+             }
+ 
+-        # Mock
+-        for prefix, tokens in self._KNOWN_TOP_TOKENS.items():
++        # Mock: sort by prefix length descending to match specific templates first
++        for prefix, tokens in sorted(self._KNOWN_TOP_TOKENS.items(), key=lambda x: len(x[0]), reverse=True):
+             if prefix in prompt:
+                 return {
+                     "prompt": prompt,

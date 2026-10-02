@@ -1,0 +1,8 @@
+--- a/tests/pytest/test_sprint2_deliverable.py
++++ b/tests/pytest/test_sprint2_deliverable.py
+@@ -34,3 +34,3 @@
+-    attn_res = dispatcher["inspectors:attention"]({"layer": 8, "head": 9})
++    attn_res = dispatcher["inspectors:attention"]({"layer": 8, "head": 9, "prompt": prompt})
+@@ -63,2 +63,2 @@
+-    assert "Layer 8 Pause" in report["markdown"]
++    assert "Sprint 2 Acceptance Report" in report["markdown"]

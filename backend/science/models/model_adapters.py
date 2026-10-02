@@ -1,7 +1,18 @@
 """Gemma, Llama, Qwen, Mistral, and DeepSeek Adapters.
 
-Each adapter follows the unified ModelAdapter interface from adapter_base.py.
-Real HuggingFace weights are loaded when available; mock mode is used for tests.
+NOT IMPLEMENTED -- these adapters are simulated for every model family.
+
+Every method below calls a shared mock helper unconditionally. It never reads
+``self._model``, so passing ``mock_mode=False`` (which would attempt a real
+multi-gigabyte weight load) changed nothing about the returned data: real
+architecture metadata was paired with fabricated activations, attention
+patterns, logits, and residuals. Cross-model comparisons built on these numbers
+-- "causal similarity 0.91 between GPT-2 and Gemma" -- were therefore fiction
+with a real model name attached.
+
+Each constructor now forces ``mock_mode`` on, so every downstream provenance
+check sees simulated data, and the docstrings say so. GPT-2 has a real
+implementation in ``gpt2_adapter.py``; these families do not.
 """
 
 from __future__ import annotations
@@ -20,6 +31,22 @@ from .gpt2_adapter import _mock_activation
 # Shared mock helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _force_simulated(adapter: ModelAdapter, family: str) -> None:
+    """Mark an adapter as simulated regardless of the requested mode.
+
+    These adapters never execute a model, so they must never look like they
+    did. Downstream code keys provenance off ``spec.mock_mode``, so forcing it
+    here is what stops simulated numbers reaching the evidence boundary.
+    """
+    adapter.spec = ModelSpec(**{**adapter.spec.__dict__, "mock_mode": True})
+    adapter.simulated = True
+    adapter.simulation_reason = (
+        f"The {family} adapter is not implemented: every method returns fixed "
+        "or formula-generated values and no model is ever executed. Treat all "
+        "output from this adapter as unavailable, not as a measurement."
+    )
+
+
 def _mock_attention_patterns(num_heads: int, prompt: str, layer: int) -> List[AttentionPattern]:
     seq_len = max(4, len(prompt.split()))
     return [
@@ -35,6 +62,13 @@ def _mock_attention_patterns(num_heads: int, prompt: str, layer: int) -> List[At
 
 def _mock_logits(top_token: str = " Paris") -> Dict[str, Any]:
     return {
+        "status": "unavailable",
+        "provenance": "seeded",
+        "measured": False,
+        "validation_eligible": False,
+        "publication_eligible": False,
+        "reason": ("Simulated logits from an adapter that runs no model; "
+                   "these are not the output of this model family."),
         "top_token": top_token,
         "top_tokens": [{"token": top_token, "prob": 0.80}, {"token": " France", "prob": 0.12}],
     }
@@ -53,6 +87,7 @@ class GemmaAdapter(ModelAdapter):
             "gemma-7b": ModelSpec("gemma-7b", "gemma", 28, 16, 3072, 24576, 256000, 8192, "google/gemma-7b",  mock_mode=mock_mode),
         }
         super().__init__(configs.get(variant, configs["gemma-2b"]))
+        _force_simulated(self, "Gemma")
 
     def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
         n_indices = [neuron_index] if neuron_index is not None else list(range(8))
@@ -88,6 +123,7 @@ class LlamaAdapter(ModelAdapter):
             "llama-3-70b":ModelSpec("llama-3-70b",    "llama", 80, 64, 8192,  28672, 128256, 8192, "meta-llama/Meta-Llama-3-70B",         mock_mode=mock_mode),
         }
         super().__init__(configs.get(variant, configs["tinyllama"]))
+        _force_simulated(self, "Llama")
 
     def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
         n_indices = [neuron_index] if neuron_index is not None else list(range(8))
@@ -123,6 +159,7 @@ class QwenAdapter(ModelAdapter):
             "qwen-2.5-7b": ModelSpec("qwen-2.5-7b", "qwen", 28, 28, 3584,  18944, 152064, 131072, "Qwen/Qwen2.5-7B",  mock_mode=mock_mode),
         }
         super().__init__(configs.get(variant, configs["qwen-2-1.5b"]))
+        _force_simulated(self, "Qwen")
 
     def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
         n_indices = [neuron_index] if neuron_index is not None else list(range(8))
@@ -157,6 +194,7 @@ class MistralAdapter(ModelAdapter):
             "mixtral-8x7b": ModelSpec("mixtral-8x7b", "mistral", 32, 32, 4096, 14336, 32000, 32768, "mistralai/Mixtral-8x7B-v0.1", mock_mode=mock_mode),
         }
         super().__init__(configs.get(variant, configs["mistral-7b"]))
+        _force_simulated(self, "Mistral")
 
     def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
         n_indices = [neuron_index] if neuron_index is not None else list(range(8))
@@ -191,6 +229,7 @@ class DeepSeekAdapter(ModelAdapter):
             "deepseek-v2-7b":   ModelSpec("deepseek-v2-7b",   "deepseek", 28, 28, 4096, 11008, 102400, 4096, "deepseek-ai/deepseek-moe-16b-base",           mock_mode=mock_mode),
         }
         super().__init__(configs.get(variant, configs["deepseek-r1-1.5b"]))
+        _force_simulated(self, "DeepSeek")
 
     def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
         n_indices = [neuron_index] if neuron_index is not None else list(range(8))

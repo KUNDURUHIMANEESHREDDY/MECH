@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# A required status check cannot pass if one of its dependencies is skipped,
+# which is how the live-weight job below is made mandatory rather than
+# optional. The evidence invariants in docs/roadmap.md depend on real weights,
+# so a run that cannot execute GPT-2 must not report success.
 jobs:
   frontend:
     runs-on: ubuntu-latest
@@ -37,10 +41,84 @@ jobs:
       # CPU torch first so requirements.txt keeps it (no CUDA wheels on CI).
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
       - run: pip install -r requirements.txt -r requirements-dev.txt
+      # Import smoke test: catches the /api/v2 and namespace-collision class of
+      # defect, where a broken import used to be swallowed at startup.
+      - run: python -c "import backend.main; print('backend.main imports')"
+      - run: python -c "import sys; sys.path.insert(0,'backend'); import datasets; assert 'site-packages' in datasets.__file__, datasets.__file__"
       - run: python -m pytest tests/pytest -q
+
+  # Mandatory live-weight evidence. Separated from `backend` so that a failure
+  # here is legible: it means the platform cannot reproduce its own science on
+  # real weights, which is not the same failure as a broken unit test.
+  live-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-gpt2-${{ runner.os }}-v1
+      - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # Prove the weights really load. Without this the "live" tests below can
+      # pass vacuously against a seeded fallback.
+      - name: Verify GPT-2 weights load
+        run: |
+          python - <<'PY'
+          from backend.services import gpt2_engine
+          assert gpt2_engine.is_available(), "GPT-2 stack unavailable"
+          status = gpt2_engine.load()
+          assert status.get("status") == "loaded", status
+          # A real forward pass, so a stubbed engine cannot satisfy this.
+          result = gpt2_engine.run_prompt("The capital of France is")
+          assert result.get("status") in ("completed", "ok"), result
+          assert result.get("str_tokens"), result
+          print("gpt2 weights loaded:", status)
+          PY
+
+      # The closed validation loop end to end: live pipeline, reproducibility
+      # report, then the 0.85 fidelity gate.
+      - name: Live validation loop
+        run: python -m pytest tests/pytest/test_validation_loop.py -v
+
+      # The model fingerprint must hash real weights, and drift detection must
+      # actually be able to fail.
+      - name: Attestation must hash real weights
+        run: |
+          python - <<'PY'
+          from backend.science.reproducibility.model_fingerprint import (
+              ModelFingerprintEngine,
+          )
+          from backend.science.models.gpt2_adapter import GPT2Adapter
+
+          adapter = GPT2Adapter(variant="small", mock_mode=False)
+          fp = ModelFingerprintEngine().capture(adapter)
+          assert fp.attested, fp.attestation_reason
+          assert "mock" not in fp.weights_sha256
+          assert len(fp.weights_sha256.split(":", 1)[1]) == 64
+          assert fp.parameter_count > 100_000_000, fp.parameter_count
+          print("weights sha256:", fp.weights_sha256)
+          print("parameters:", fp.parameter_count)
+          PY
+
+      - name: Evidence boundary refuses unproven live claims
+        run: python -m pytest tests/pytest/test_evidence_boundary.py -v
+
+  # Every other job must have passed before this one reports success.
+  required:
+    needs: [frontend, backend, live-evidence]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "frontend, backend, and live-evidence all passed"
 
   e2e:
     runs-on: ubuntu-latest
+    needs: [frontend]
     defaults:
       run:
         working-directory: frontend

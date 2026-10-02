@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,15 @@ from typing import Any
 
 class StorageError(Exception):
     """Raised when desktop storage receives invalid data."""
+
+
+DEFAULT_DB_PATH = Path(__file__).resolve().parent / "mech.db"
+
+
+def get_default_db_path() -> Path:
+    """Resolve the SQLite path from MECH_STORAGE_DB, else backend/storage/mech.db."""
+    env_path = os.environ.get("MECH_STORAGE_DB")
+    return Path(env_path) if env_path else DEFAULT_DB_PATH
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -339,6 +349,24 @@ class DesktopStorage:
         connection.row_factory = sqlite3.Row
         return connection
 
+    def checkpoint_wal(self) -> tuple[int, int, int]:
+        """Flush the WAL into the main DB and truncate the -wal file.
+
+        Returns SQLite's ``(busy, log_pages, checkpointed)`` triple. ``busy``
+        is non-zero when another connection holds a lock; that is a normal
+        outcome, not an error, so callers get the numbers instead of an
+        exception.
+        """
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        except sqlite3.OperationalError:
+            return (1, 0, 0)
+        if row is None:
+            return (0, 0, 0)
+        return (int(row[0]), int(row[1]), int(row[2]))
+
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -401,3 +429,13 @@ class DesktopStorage:
             "projectPath": row["project_path"],
             "openedAt": row["opened_at"],
         }
+
+
+def checkpoint_wal(db_path: Path | str | None = None) -> tuple[int, int, int]:
+    """Checkpoint the WAL for the default (or given) database.
+
+    Returns ``(busy, log_pages, checkpointed)``. Never raises for lock
+    contention -- a busy result is a legitimate outcome that shutdown should
+    tolerate rather than crash on.
+    """
+    return DesktopStorage(db_path or get_default_db_path()).checkpoint_wal()

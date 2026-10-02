@@ -11,6 +11,7 @@ Step 7  Patch one head, measure logit difference
 Step 8  One IOI experiment
 """
 
+import os
 import sys
 import warnings
 warnings.filterwarnings("ignore")
@@ -19,11 +20,21 @@ warnings.filterwarnings("ignore")
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+# Resolve HookedTransformer through MECH's compat shim so an unsupported
+# transformer-lens release reports the supported range instead of a bare
+# AttributeError. See backend/interpretability/tl_compat.py.
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from backend.interpretability.tl_compat import resolve_hooked_transformer
+
 import torch
-from transformer_lens import HookedTransformer
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+HookedTransformer = resolve_hooked_transformer()
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 

@@ -1,5 +1,11 @@
 [
   {
+    "fixture": true,
+    "measured": false,
+    "provenance": "reference",
+    "validation_eligible": false,
+    "publication_eligible": false,
+    "fixture_notice": "HAND-WRITTEN FIXTURE, NOT A RESULT. The timestamps, p-values, effect sizes, and quality scores below are literals typed by hand on 2023-10-27; no experiment produced them. The benchmark_database.json schema is a plain list, so this notice is attached to every record rather than wrapping them in an object that would break BenchmarkingOrchestrator.",
     "timestamp": "2023-10-27T10:00:00.000000",
     "model": "gpt2-small",
     "benchmark": "IOI",
@@ -9,6 +15,12 @@
     "effect_size": 3.4
   },
   {
+    "fixture": true,
+    "measured": false,
+    "provenance": "reference",
+    "validation_eligible": false,
+    "publication_eligible": false,
+    "fixture_notice": "HAND-WRITTEN FIXTURE, NOT A RESULT. See the first record's notice.",
     "timestamp": "2023-10-27T10:05:00.000000",
     "model": "gpt2-small",
     "benchmark": "Induction",
@@ -18,6 +30,12 @@
     "effect_size": 4.1
   },
   {
+    "fixture": true,
+    "measured": false,
+    "provenance": "reference",
+    "validation_eligible": false,
+    "publication_eligible": false,
+    "fixture_notice": "HAND-WRITTEN FIXTURE, NOT A RESULT. See the first record's notice. The gemma-2b adapter runs no model, so this could not have been measured.",
     "timestamp": "2023-10-27T10:10:00.000000",
     "model": "gemma-2b",
     "benchmark": "IOI",
@@ -27,6 +45,12 @@
     "effect_size": 2.8
   },
   {
+    "fixture": true,
+    "measured": false,
+    "provenance": "reference",
+    "validation_eligible": false,
+    "publication_eligible": false,
+    "fixture_notice": "HAND-WRITTEN FIXTURE, NOT A RESULT. See the first record's notice. SAE encoding is not implemented and no encoder weights are loaded.",
     "timestamp": "2023-10-27T10:15:00.000000",
     "model": "llama-3-8b",
     "benchmark": "SAE",
@@ -36,6 +60,12 @@
     "effect_size": 5.2
   },
   {
+    "fixture": true,
+    "measured": false,
+    "provenance": "reference",
+    "validation_eligible": false,
+    "publication_eligible": false,
+    "fixture_notice": "HAND-WRITTEN FIXTURE, NOT A RESULT. See the first record's notice. ACDC fidelity is not measured in this repository.",
     "timestamp": "2023-10-27T10:20:00.000000",
     "model": "qwen-7b",
     "benchmark": "ACDC",

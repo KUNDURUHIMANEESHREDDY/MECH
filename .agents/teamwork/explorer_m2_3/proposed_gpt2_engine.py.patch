@@ -1,0 +1,6 @@
+--- a/backend/services/gpt2_engine.py
++++ b/backend/services/gpt2_engine.py
+@@ -883,2 +883,2 @@
+     if not _cache:
+-        return {"status": "error", "error": "Run a prompt first to populate the cache."}
++        run_prompt("The capital of France is")

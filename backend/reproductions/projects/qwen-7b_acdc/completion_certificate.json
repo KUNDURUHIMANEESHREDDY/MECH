@@ -1,4 +1,10 @@
 {
+  "fixture": true,
+  "measured": false,
+  "provenance": "reference",
+  "validation_eligible": false,
+  "publication_eligible": false,
+  "fixture_notice": "HAND-WRITTEN FIXTURE, NOT A RESULT. No experiment produced this file. The completion percentage, peer-review verdict, satisfied milestones and signature are all literals, and research_manifest_hash is 'unknown' precisely because there is no manifest. ACDC is in any case not implemented in this repository. Do not cite, publish, or aggregate this as evidence.",
   "project_name": "ACDC",
   "completion": "95.8%",
   "is_complete": true,

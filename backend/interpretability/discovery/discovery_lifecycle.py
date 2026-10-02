@@ -26,6 +26,8 @@ class DiscoveryLifecycleState:
         self.discovery_id = discovery_id
         self.title = title
         self.state = "Candidate"
+        self.failed = False
+        self.failure_reason: str | None = None
         self.created_at = _dt.datetime.utcnow().isoformat() + "Z"
         self.updated_at = self.created_at
         self.history: List[Dict[str, Any]] = [
@@ -42,11 +44,29 @@ class DiscoveryLifecycleState:
         self.history.append(record)
         return record
 
+    def record_failure(self, reason: str) -> Dict[str, Any]:
+        """Record that the run failed without inventing a lifecycle state.
+
+        "Failed" is deliberately not a member of VALID_DISCOVERY_STATES --
+        the lifecycle describes scientific progress, and a crash is not a
+        stage. Recording the reason here keeps the history honest about *why*
+        a discovery stopped instead of stranding it at its last stage.
+        """
+        self.failed = True
+        self.failure_reason = reason
+        self.updated_at = _dt.datetime.utcnow().isoformat() + "Z"
+        record = {"state": self.state, "timestamp": self.updated_at,
+                  "note": f"FAILED: {reason}", "failed": True}
+        self.history.append(record)
+        return record
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "discovery_id": self.discovery_id,
             "title": self.title,
             "state": self.state,
+            "failed": self.failed,
+            "failure_reason": self.failure_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "history": self.history,

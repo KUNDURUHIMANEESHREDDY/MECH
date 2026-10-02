@@ -40,6 +40,19 @@ def _first_score(result: Any, keys: Any) -> float:
     return 0.0
 
 
+def _blocked_report(reason: str) -> Dict[str, Any]:
+    """Uniform block envelope for a report that cannot claim live provenance."""
+    return {
+        "status": "blocked",
+        "provenance": "unavailable",
+        "field_provenance": field_map(
+            ("status", "result", "reason"), "unavailable"),
+        "validation_eligible": False,
+        "publication_eligible": False,
+        "reason": reason,
+    }
+
+
 class Scribe:
     """Publishes mechanistic reports from run traces."""
 
@@ -86,16 +99,37 @@ class Scribe:
                     "error": str(exc)[:500]}
 
     def report(self, experiment_id: str, title: str,
-               provenance: str = "unavailable") -> Dict[str, Any]:
+               trace: Optional[List[Dict[str, Any]]] = None,
+               reproducibility: Optional[Dict[str, Any]] = None,
+               gate: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Generate a report whose provenance is *derived*, never asserted.
+
+        Provenance used to be a caller-supplied string that was passed straight
+        into ReportService and echoed back, so `report(experiment_id="fake",
+        title="Fake", provenance="live")` produced a live-labelled artifact with
+        no evidence chain behind it. The caller can no longer choose the label:
+        it is computed from the trace, and a trace that does not clear the
+        publication gate blocks the report outright.
+        """
+        if trace is None:
+            return _blocked_report(
+                "A run trace is required; a report cannot claim live provenance "
+                "without one.")
+        reason = publication_block_reason(trace, reproducibility, gate)
+        if reason:
+            return _blocked_report(reason)
+
         try:
             from backend.services.report_service import ReportService
             res = ReportService().generate_report(
                 experiment_id=experiment_id, title=title,
-                provenance=provenance)
+                provenance="live")
             return {
                 "status": "completed",
-                "provenance": provenance,
-                "field_provenance": field_map(("status", "result"), provenance),
+                "provenance": "live",
+                "field_provenance": field_map(("status", "result"), "live"),
+                "validation_eligible": True,
+                "publication_eligible": True,
                 "result": res,
             }
         except Exception as exc:
@@ -124,9 +158,12 @@ class Scribe:
             }
 
         exp_id = f"exp_{abs(hash(goal)) % 10000:04d}"
+        # Provenance is derived from the trace inside report(), not asserted here.
         rep = self.report(experiment_id=exp_id,
                           title=f"Mechanistic Report: {goal[:60]}",
-                          provenance="live")
+                          trace=trace,
+                          reproducibility=reproducibility,
+                          gate=gate)
         ev = self.evidence(run_id=run_id or exp_id, goal=goal, trace=trace)
         if rep.get("status") != "completed" or ev.get("status") != "completed":
             return {

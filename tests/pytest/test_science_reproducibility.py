@@ -90,18 +90,42 @@ def test_report_engine_needs_investigation():
 # ── IOI Pipeline ──────────────────────────────────────────────────────────────
 
 def test_ioi_pipeline_runs():
+    """The IOI pipeline must either measure or say it could not.
+
+    It fails closed when the model does not return the required comparison
+    tokens. The assertions below therefore hold only on a completed run; a
+    blocked run must expose no metrics and must state a reason, rather than
+    carrying an `observed_metrics` block of placeholder numbers.
+    """
     pipeline = IOIReproductionPipeline(mock_mode=True)
     result = pipeline.run(n_prompts=20, seed=42)
     assert result["pipeline"] == "IOIReproductionPipeline-HighFidelity"
-    assert result["observed_metrics"]["n_samples"] == 20
-    assert "circuit_faithfulness" in result["observed_metrics"]
-    assert result["reproducibility_report"]["overall_tier"] in ("Gold", "Silver", "Bronze", "Needs Investigation")
+
+    if result.get("status") == "completed":
+        assert result["observed_metrics"]["n_samples"] == 20
+        assert "circuit_faithfulness" in result["observed_metrics"]
+        assert result["reproducibility_report"]["overall_tier"] in (
+            "Gold", "Silver", "Bronze", "Needs Investigation")
+    else:
+        assert result["status"] in ("unavailable", "blocked", "error")
+        assert result["provenance"] != "live"
+        assert result["validation_eligible"] is False
+        assert result["publication_eligible"] is False
+        assert result["reason"]
+        # No placeholder metrics masquerading as a completed measurement.
+        assert not isinstance(result.get("observed_metrics"), dict)
 
 
-def test_ioi_pipeline_generates_manifest():
+def test_ioi_pipeline_generates_manifest_only_when_completed():
+    """A manifest identifies a real run; a blocked pipeline has none."""
     pipeline = IOIReproductionPipeline(mock_mode=True)
     result = pipeline.run(n_prompts=10)
-    assert result["manifest_id"].startswith("manifest_ioi")
+
+    if result.get("status") == "completed":
+        assert result["manifest_id"].startswith("manifest_ioi")
+    else:
+        assert "manifest_id" not in result
+        assert result["reason"]
 
 
 # ── Induction Heads Pipeline ──────────────────────────────────────────────────

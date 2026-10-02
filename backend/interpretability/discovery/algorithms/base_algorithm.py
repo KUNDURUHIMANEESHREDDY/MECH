@@ -49,8 +49,36 @@ class DiscoveryReport:
 class DiscoveryAlgorithm(ABC):
     """Abstract interface for a mechanistic discovery algorithm."""
 
+    #: False in any subclass that does not implement the method its name and
+    #: paper citation advertise. The reported graph and confidence then
+    #: describe a simulation, not a measurement, and must say so.
+    implements_published_method: bool = True
+
+    #: Why the published method is not implemented, for subclasses that set the
+    #: flag above to False.
+    not_implemented_reason: str = ""
+
     def __init__(self, adapter: ModelAdapter) -> None:
         self.adapter = adapter
+
+    def provenance_block(self) -> Dict[str, Any]:
+        """Provenance for a DiscoveryReport derived from this algorithm's state."""
+        block: Dict[str, Any] = {
+            "algorithm": self.__class__.__name__,
+            "implements_published_method": self.implements_published_method,
+        }
+        if not self.implements_published_method:
+            block.update({
+                "status": "unavailable",
+                "measured": False,
+                "provenance": "reference",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": self.not_implemented_reason or (
+                    f"{self.__class__.__name__} does not implement the method "
+                    "it is named for; its output is a simulation."),
+            })
+        return block
 
     @abstractmethod
     def run(self, dataset: Dict[str, Any], config: Optional[DiscoveryAlgorithmConfig] = None) -> DiscoveryReport:

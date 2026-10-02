@@ -12,26 +12,37 @@ def test_sprint5_ai_scientist_end_to_end_deliverable():
     assert campaign["status"] == "ScientificCampaignCompleted"
     assert campaign["society"]["participating_agents_count"] == 7
     assert campaign["debate"]["counter_evidence_evaluated"] is True
-    assert campaign["validation"]["validated"] is True
 
     # 2. AI 1: Scientific Reasoning & Uncertainty Manager
-    assert campaign["critique"]["critique_passed"] is True
-    assert campaign["governance"]["approved"] is True
-    assert campaign["recommendation"]["expected_information_gain"] > 0.8
-    assert campaign["literature"]["novelty_score"] > 0.8
-    assert campaign["uncertainty_decision"]["action"] == "Publish"
-    assert campaign["uncertainty_decision"]["ready_for_publication"] is True
+    #
+    # The campaign previously asserted a full chain of successes for every
+    # input: validated=True, peer review "Accept", novelty > 0.8,
+    # consensus > 0.9 and ready_for_publication=True -- none of which depend on
+    # any live measurement. With no live validator connected the campaign must
+    # report absent evidence rather than manufacture confidence.
+    decision = campaign["uncertainty_decision"]
+    if decision["evidence_missing"]:
+        assert decision["ready_for_publication"] is False
+        assert decision["action"] == "More experiments"
+        assert campaign["validation"]["validated"] is False
+    else:
+        assert decision["ready_for_publication"] is (decision["action"] == "Publish")
+
     assert len(campaign["roadmap"]["phases"]) == 4
-    assert campaign["consensus"]["consensus_confidence"] > 0.9
 
     # 3. API v2: Scientific Validation Layer
     val = dispatcher["api/v2/validation/validate_discovery"]({
         "discovery_id": "disc_s5_1",
         "hypothesis_statement": "L8_N402 mediates IOI capital retrieval",
     })
-    assert val["validated"] is True
-    assert val["reproduction"]["reproducibility_score"] > 0.9
-    assert val["peer_review"]["decision"] == "Accept"
+    if val.get("validated") is True:
+        assert val.get("provenance") == "live"
+        assert val["publication_eligible"] is True
+    else:
+        assert val["provenance"] != "live"
+        assert val["validation_eligible"] is False
+        assert val["publication_eligible"] is False
+        assert val["reason"]
 
     # 4. API v2: Traceable Evidence Graph
     graph = dispatcher["api/v2/evidence_graph/get"]({})

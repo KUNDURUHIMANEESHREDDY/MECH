@@ -7,10 +7,17 @@ import math
 from typing import Any, Dict, List
 
 
-class LearnedRuntimeOptimizer:
-    """Predicts runtime, memory, GPU utilization, cost, and failure probability per-model
+# GPU utilisation has never been modelled here; this constant is reported as an
+# estimate rather than under a "predicted_" name so it is not read as a
+# learned prediction.
+_GPU_UTILIZATION_ESTIMATE_PCT = 92.5
 
-    with confidence bounds, continuously learning from empirical execution outcomes.
+
+class LearnedRuntimeOptimizer:
+    """Predicts runtime, memory, cost, and failure probability per-model
+
+    with confidence bounds, continuously learning from empirical execution
+    outcomes. GPU utilisation is a fixed estimate, not a prediction.
     """
 
     def __init__(self) -> None:
@@ -57,9 +64,15 @@ class LearnedRuntimeOptimizer:
             "num_prompts": num_prompts,
             "predicted_runtime_sec": predicted_runtime,
             "predicted_memory_vram_gb": predicted_vram,
-            "predicted_gpu_utilization_pct": 92.5,
+            # Not a prediction: a constant, previously reported under a
+            # "predicted_" name so it read as a learned estimate.
+            "gpu_utilization_estimate_pct": _GPU_UTILIZATION_ESTIMATE_PCT,
+            "gpu_utilization_is_estimate": True,
             "predicted_cost_usd": predicted_cost,
             "prediction_confidence": confidence,
+            "prediction_basis": "analytic model fitted to recorded run history",
+            "validation_eligible": False,
+            "publication_eligible": False,
             "runtime_std_dev": std_dev_runtime,
             "runtime_interval": runtime_interval,
             "vram_interval": vram_interval,

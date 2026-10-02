@@ -61,7 +61,7 @@ class ScientificPaperManuscript:
 class ScientificPublicationEngine:
     """Engine that compiles discovery campaigns and claims into peer-reviewed research papers."""
 
-    def __init__(self, output_dir: str = "backend/datasets/publications") -> None:
+    def __init__(self, output_dir: str = "backend/benchmark_datasets/publications") -> None:
         self.output_dir = output_dir
 
     def generate_replication_paper(

@@ -1,0 +1,150 @@
+{
+  "nodes": [
+    {
+      "node_id": "paper_wang2022",
+      "node_type": "Paper",
+      "label": "Wang et al. (2022) IOI Paper",
+      "properties": {
+        "title": "Interpretability in the Wild: a Circuit for Indirect Object Identification",
+        "year": 2022
+      },
+      "created_at": "2026-09-27T03:11:59.952627Z"
+    },
+    {
+      "node_id": "claim_ioi_01",
+      "node_type": "MechanismClaim",
+      "label": "IOI Name Mover Circuit",
+      "properties": {
+        "confidence": 0.962,
+        "status": "Validated"
+      },
+      "created_at": "2026-09-27T03:11:59.952627Z"
+    },
+    {
+      "node_id": "circuit_ioi",
+      "node_type": "Circuit",
+      "label": "Indirect Object Identification Subgraph",
+      "properties": {
+        "num_heads": 3,
+        "logit_diff": 3.55
+      },
+      "created_at": "2026-09-27T03:11:59.952627Z"
+    },
+    {
+      "node_id": "head_l9h9",
+      "node_type": "AttentionHead",
+      "label": "GPT-2 L9H9 Name Mover Head",
+      "properties": {
+        "layer": 9,
+        "head": 9,
+        "model": "GPT2-S"
+      },
+      "created_at": "2026-09-27T03:11:59.952627Z"
+    },
+    {
+      "node_id": "head_l10h0",
+      "node_type": "AttentionHead",
+      "label": "GPT-2 L10H0 Name Mover Head",
+      "properties": {
+        "layer": 10,
+        "head": 0,
+        "model": "GPT2-S"
+      },
+      "created_at": "2026-09-27T03:11:59.952627Z"
+    },
+    {
+      "node_id": "feature_sae_4096",
+      "node_type": "SAEFeature",
+      "label": "SAE Feature #4096 (Proper Nouns)",
+      "properties": {
+        "sparsity": 0.0012,
+        "model": "GPT2-S"
+      },
+      "created_at": "2026-09-27T03:11:59.952627Z"
+    },
+    {
+      "node_id": "camp_ioi_01",
+      "node_type": "Campaign",
+      "label": "IOI Discovery Campaign",
+      "properties": {
+        "status": "Completed"
+      },
+      "created_at": "2026-09-27T03:11:59.952627Z"
+    },
+    {
+      "node_id": "exp_acdc_01",
+      "node_type": "Experiment",
+      "label": "ACDC Edge Pruning Run",
+      "properties": {
+        "algorithm": "acdc",
+        "fidelity": 0.972
+      },
+      "created_at": "2026-09-27T03:11:59.952627Z"
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e1",
+      "source_id": "paper_wang2022",
+      "target_id": "claim_ioi_01",
+      "edge_type": "cites",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-27T03:11:59.962807Z"
+    },
+    {
+      "edge_id": "e2",
+      "source_id": "claim_ioi_01",
+      "target_id": "circuit_ioi",
+      "edge_type": "references",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-27T03:11:59.962807Z"
+    },
+    {
+      "edge_id": "e3",
+      "source_id": "circuit_ioi",
+      "target_id": "head_l9h9",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-27T03:11:59.962807Z"
+    },
+    {
+      "edge_id": "e4",
+      "source_id": "circuit_ioi",
+      "target_id": "head_l10h0",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-27T03:11:59.962807Z"
+    },
+    {
+      "edge_id": "e5",
+      "source_id": "head_l9h9",
+      "target_id": "feature_sae_4096",
+      "edge_type": "activates",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-27T03:11:59.962807Z"
+    },
+    {
+      "edge_id": "e6",
+      "source_id": "exp_acdc_01",
+      "target_id": "claim_ioi_01",
+      "edge_type": "supports",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-27T03:11:59.962807Z"
+    },
+    {
+      "edge_id": "e7",
+      "source_id": "camp_ioi_01",
+      "target_id": "exp_acdc_01",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "properties": {},
+      "created_at": "2026-09-27T03:11:59.962807Z"
+    }
+  ]
+}

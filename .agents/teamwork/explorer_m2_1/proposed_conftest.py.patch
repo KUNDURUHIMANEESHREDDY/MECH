@@ -1,0 +1,18 @@
+--- a/tests/pytest/conftest.py
++++ b/tests/pytest/conftest.py
+@@ -1,3 +1,3 @@
+-"""Pytest configuration. Ensures the ``backend/`` directory is on sys.path so
+-``from api.dispatcher import build_dispatcher`` resolves correctly.
++"""Pytest configuration. Ensures the repo root and ``backend/`` directory are on sys.path so
++both ``backend.xyz`` and ``from api.dispatcher import build_dispatcher`` resolve correctly.
+ """
+@@ -7,4 +7,8 @@
+ HERE = os.path.dirname(os.path.abspath(__file__))
+-BACKEND_DIR = os.path.abspath(os.path.join(HERE, "..", "..", "backend"))
++REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
++BACKEND_DIR = os.path.abspath(os.path.join(REPO_ROOT, "backend"))
++
++if REPO_ROOT not in sys.path:
++    sys.path.insert(0, REPO_ROOT)
+ if BACKEND_DIR not in sys.path:
+     sys.path.insert(0, BACKEND_DIR)

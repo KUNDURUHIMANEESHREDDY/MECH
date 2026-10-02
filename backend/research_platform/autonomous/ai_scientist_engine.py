@@ -9,7 +9,7 @@ consensus engine, literature integrator, and research governance.
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from backend.core.capability_registry import CapabilityRegistry
 from backend.core.evidence_graph import TraceableEvidenceGraph
@@ -26,6 +26,44 @@ from .research_program_manager import LongTermResearchProgramManager
 from .research_roadmap_generator import ResearchRoadmapGenerator
 from .scientific_consensus_engine import ScientificConsensusEngine
 from .uncertainty_manager import UncertaintyManagerEngine, UncertaintyPolicy
+
+
+# Fallbacks used only when validation returns nothing usable. The score is 0.0
+# rather than an optimistic default so a missing measurement can never be
+# mistaken for a passing one; `evidence_missing` routes the decision to
+# "More experiments" instead.
+_NO_CONFIDENCE_SCORE = 0.0
+
+
+def _extract_confidence(val_res: Any) -> tuple[Dict[str, Any], bool]:
+    """Pull a usable confidence block out of a validation response.
+
+    Returns ``(confidence, evidence_missing)``. ``evidence_missing`` is True
+    when the response could not supply a numeric score and a well-formed
+    two-element interval, meaning the campaign has no validation evidence.
+    """
+    block = val_res.get("confidence") if isinstance(val_res, dict) else None
+    if not isinstance(block, dict):
+        block = {}
+
+    raw_score = block.get("confidence_score")
+    if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
+        return ({"confidence_score": _NO_CONFIDENCE_SCORE,
+                 "uncertainty_interval": None}, True)
+    confidence_score = float(raw_score)
+
+    raw_interval = block.get("uncertainty_interval")
+    if (isinstance(raw_interval, (list, tuple)) and len(raw_interval) == 2
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                    for v in raw_interval)):
+        interval: Optional[List[float]] = [float(raw_interval[0]),
+                                           float(raw_interval[1])]
+    else:
+        interval = None
+
+    missing = interval is None
+    return ({"confidence_score": confidence_score,
+             "uncertainty_interval": interval}, missing)
 
 
 class AIScientistEngine:
@@ -83,12 +121,21 @@ class AIScientistEngine:
         )
 
         # 6. Uncertainty Manager decision logic with Configurable Policy
+        # Validation is an external call and may return nothing usable ({} ,
+        # None, a bare string, a truncated interval). Blind nested indexing
+        # turned every one of those into an AttributeError/TypeError/
+        # IndexError that killed the campaign. Extract defensively instead,
+        # and treat an unusable response as *absent evidence* rather than as
+        # a score: defaulting a missing measurement optimistically would let
+        # the campaign reach "Publish" with no validation behind it.
+        confidence, evidence_missing = _extract_confidence(val_res)
         uncertainty_decision = self.uncertainty_manager.evaluate_uncertainty(
-            confidence_score=val_res["confidence"]["confidence_score"],
-            uncertainty_interval=val_res["confidence"]["uncertainty_interval"],
-            sample_size=5,
+            confidence_score=confidence["confidence_score"],
+            uncertainty_interval=confidence["uncertainty_interval"],
+            sample_size=0 if evidence_missing else 5,
             variance=0.02,
             custom_policy=policy,
+            evidence_missing=evidence_missing,
         )
 
         # 7. Closed-Loop Planner Integration (Uncertainty ➔ Planner Loop)

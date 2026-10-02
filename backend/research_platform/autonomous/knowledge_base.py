@@ -16,14 +16,27 @@ class KnowledgeBaseEngine:
                 "entity": "Neuron L8_N402",
                 "property": "Function",
                 "value": "Indirect Object Identifier",
-                "confidence": 0.94,
+                "confidence": 0.0,
+                "provenance": "reference",
+                "measured": False,
+                "reason": (
+                    "Reference entry. No ablation was run to establish this "
+                    "neuron's function, so no confidence is claimed."
+                ),
             },
             {
                 "id": "fact_2",
                 "entity": "SAE Feature #1402",
                 "property": "Firing Pattern",
                 "value": "Fires on name tokens in double-clause prompts",
-                "confidence": 0.96,
+                "confidence": 0.0,
+                "provenance": "reference",
+                "measured": False,
+                "reason": (
+                    "Reference entry. SAE encoding is not implemented and no "
+                    "encoder weights are loaded, so this firing pattern was "
+                    "never observed."
+                ),
             },
         ]
 

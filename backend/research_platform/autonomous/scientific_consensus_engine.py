@@ -17,14 +17,69 @@ class ScientificConsensusEngine:
     """Combines evidence across multiple experiments and reviewers to resolve findings."""
 
     def synthesize_consensus(self, experimental_outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Legacy method for combining experiment results."""
-        conflicts_resolved = 1 if len(experimental_outcomes) > 1 else 0
+        """Summarise agreement across supplied outcomes.
+
+        This previously returned the fixed sentence "L8_N402 acts as primary
+        Indirect Object Identifier across IOI prompts" at confidence 0.94 for
+        *any* input -- including an empty list, where `conflicts_resolved` was
+        simply `1 if len(...) > 1 else 0`. A consensus engine that emits a
+        specific mechanistic conclusion irrespective of the evidence is the
+        single most dangerous shape this codebase can have, because every
+        downstream consumer reads it as a reviewed finding.
+
+        It now reports what the supplied outcomes actually agree on, and
+        states no mechanism it was not given.
+        """
+        outcomes = [o for o in (experimental_outcomes or []) if isinstance(o, dict)]
+        if not outcomes:
+            return {
+                "outcomes_analyzed": 0,
+                "conflicts_resolved": 0,
+                "unified_consensus_statement": None,
+                "consensus_confidence": 0.0,
+                "agreement": None,
+                "provenance": "unavailable",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": ("No experimental outcomes were supplied, so there "
+                           "is nothing to reach consensus over. This method "
+                           "previously returned a fixed mechanistic claim at "
+                           "confidence 0.94 regardless of its input."),
+            }
+
+        # Report the distribution of whatever verdict field the caller used,
+        # rather than asserting a conclusion of our own.
+        verdicts: Dict[str, int] = {}
+        for outcome in outcomes:
+            key = str(outcome.get("verdict")
+                      or outcome.get("outcome_state")
+                      or outcome.get("status")
+                      or "unspecified").lower()
+            verdicts[key] = verdicts.get(key, 0) + 1
+
+        total = len(outcomes)
+        top_verdict, top_count = max(verdicts.items(), key=lambda kv: kv[1])
+        unanimous = top_count == total
+
         return {
-            "outcomes_analyzed": len(experimental_outcomes),
-            "conflicts_resolved": conflicts_resolved,
-            "unified_consensus_statement": "L8_N402 acts as primary Indirect Object Identifier across IOI prompts.",
-            "consensus_confidence": 0.94,
+            "outcomes_analyzed": total,
+            "verdict_distribution": verdicts,
+            "majority_verdict": top_verdict,
+            "unanimous": unanimous,
+            "agreement_fraction": round(top_count / total, 4),
+            "conflicts_resolved": total - top_count,
+            # No mechanism is synthesised here; the callers' own claims are the
+            # only statements available, and this method cannot verify them.
+            "unified_consensus_statement": None,
+            "consensus_confidence": 0.0,
+            "provenance": "reference",
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": ("Consensus here means agreement between the supplied "
+                       "verdicts, not a verified mechanism. This engine does "
+                       "not synthesise mechanistic claims."),
         }
+
 
     def generate_peer_review_report(self, review_result: PeerReviewResult, output_dir: str = "benchmark_report") -> str:
         """Generates a detailed peer_review_report.md with reasoning traces and scorecards."""
