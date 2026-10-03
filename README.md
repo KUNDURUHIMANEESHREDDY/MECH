@@ -356,7 +356,7 @@ so an unsupported install fails with the supported range and the exact fix rathe
 `ImportError`. `tests/pytest/test_dependency_contract.py` guards the pins, including a
 negative control that proves the check rejects a simulated 4.x install.
 
-> **Resolved:** `backend/datasets/` was renamed to `backend/benchmark_datasets/`. The package
+> **Resolved:** `backend/datasets/` was renamed to `backend/research_datasets/`. The package
 > no longer shadows HuggingFace `datasets` when `backend/` is on `sys.path`, and
 > `tests/pytest/test_dependency_contract.py` now guards this as a hard regression test.
 
@@ -407,41 +407,63 @@ Remaining in this area:
 - [ ] Migrate to the TransformerLens 4.x `TransformerBridge` API and drop the `<3.0` pin.
       This is a real rewrite — the code uses hook-name conventions
       (`run_with_cache`, `hook_z`) whose v4 equivalents differ.
-- [ ] Fix the `backend/datasets/` → HuggingFace `datasets` shadowing (see [1.4](#14-fix-the-datasets-package-shadowing)).
+- [x] ~~Fix the `backend/datasets/` → HuggingFace `datasets` shadowing.~~ **done** — see [1.4](#14-fix-the-datasets-package-shadowing).
 
-### 1.4 Fix the `datasets` package shadowing
+### 1.4 Fix the `datasets` package shadowing ✅
 
-MECH ships `backend/datasets/`, which is importable as the top-level name `datasets` whenever
+MECH shipped `backend/datasets/`, which is importable as the top-level name `datasets` whenever
 `backend/` is on `sys.path` — which is exactly what `tests/pytest/conftest.py` does. Any
-dependency doing `import datasets` (including transformer-lens) then resolves to MECH's package
-and fails with `No module named 'datasets.arrow_dataset'`.
+dependency doing `import datasets` (including transformer-lens) then resolved to MECH's package
+and failed with `No module named 'datasets.arrow_dataset'`.
 
-- [ ] Rename `backend/datasets/` (e.g. `backend/benchmark_datasets/`) and update importers.
-- [ ] Or have `conftest.py` append `backend/` rather than prepending it, so installed packages win.
-- [ ] The `xfail` control in `test_dependency_contract.py` flips to XPASS when fixed.
+- [x] Renamed `backend/datasets/` → **`backend/research_datasets/`** and updated every importer.
+- [x] Also fixed six modules that built the old path *as a string* and silently recreated the
+      directory at runtime — `graph_store.py`, `circuit_discovery.py`,
+      `mechanism_claim_registry.py`, `research_campaign_manager.py`,
+      `scientific_publication_engine.py`, and `distributed/scheduler.py`. Renaming the package
+      alone would not have stuck; each of these re-created `backend/datasets/` on first use.
+- [x] `backend/datasets/` is gitignored, with a note not to reintroduce the name.
+- [x] `tests/pytest/test_dependency_contract.py` guards this as a hard regression test.
 
-### 2. Get CI green
+Verified causally: with the shadowing present, 7 dependency-contract tests were red because the
+collision was suppressing the transformer-lens version checks. After the rename all 7 pass.
 
-The suite is currently red and CI cannot be trusted.
+The rename target is `research_datasets`, not `benchmark_datasets` — an earlier draft of this
+document recorded the latter, which was itself drift.
 
-- **Vitest fails outright**: `frontend/tests/vitest/desktopWindowState.test.js:3` imports
-  `../../src/stores/desktop`, but `frontend/src/stores/` is an empty directory left over from
-  the removed Desktop OS shell. Delete the test (or restore the store).
-- **Pytest is 186 passed / 27 failed / 2 collection errors.** Most failures share one root
-  cause: the code was hardened to **fail closed**, but the tests still assert the old
-  synthetic-success contract. Typical examples — `test_ioi_pipeline_runs` expects
-  `observed_metrics`, `test_sprint4_deliverable` expects lifecycle state `Publication`, both
-  now correctly return `blocked` / `Validation` with `provenance: unavailable`.
-  **Decide, then align the tests to the fail-closed contract.**
+### 2. Get CI green ✅ Python done
 
-### 3. Fix four confirmed defects
+**Python: 387 passed, 7 skipped, 0 failed.** The suite was red at 186 passed / 27 failed /
+2 collection errors. Almost every failure shared one root cause: the code had been hardened to
+**fail closed** while the tests still asserted the old synthetic-success contract.
 
-| File | Defect |
-|------|--------|
-| `backend/benchmarking/benchmark_tasks.py:382,466` | `logger.warning(...)` is called but `logging` is never imported → `NameError` on the fallback path. |
-| `backend/reasoning/__init__.py:3` | Imports `journey_tracer` and `neuron_debugger`; the directory contains only `__init__.py`. `import backend.reasoning` raises `ModuleNotFoundError`. |
-| `backend/main.py:93` | Imports `backend.api.runtime_api`, which does not exist; a bare `except: pass` hides it so `/api/v2` silently vanishes. |
-| `backend/interpretability/algorithms/registry.py:23` | Uses `List` without importing it → `NameError` when listing algorithms. |
+The resolution was to align the tests to the contract, not to relax the code. Two tests in
+particular were pinning the *desired scientific outcome* rather than the mechanism — one asserted
+the IOI reproduction passes at ≥85% fidelity, which live gpt2-small does not do. Those now assert
+that the comparison is computed correctly and that underperformance is reported as failure.
+
+Note that green here is not a claim of scientific correctness: most tests exercise the
+provenance and contract layer. The tests that load real GPT-2 weights and run forward passes are
+marked `@needs_weights` and skip without them.
+
+**Vitest is green too** (11 passed, 6 skipped). `desktopWindowState.test.js` previously imported
+`../../src/stores/desktop` at module scope; that directory is empty, left over from the removed
+Desktop OS shell, so collection threw and took the whole frontend CI job with it. The import is
+now guarded and the six specs are `skipIf`'d, which keeps the intended behaviour visible for
+whoever implements the store instead of leaving a broken suite behind. Swap the guard for a
+static import when the store lands.
+
+### 3. Four confirmed defects ✅ all resolved
+
+Each was re-verified against the tree before being closed, because the snapshot some of these
+came from predates other fixes. Two were already resolved; two were real and are now fixed.
+
+| File | Defect | Resolution |
+|------|--------|------------|
+| `backend/benchmarking/benchmark_tasks.py` | `logger.warning(...)` called without importing `logging` → `NameError` on the fallback path. | **Already gone.** The last `logger` call was in `_run_real`, removed when the reference-derived fallback was deleted. The module contains no `logger` token at all, so there was no unused import to add either. |
+| `backend/reasoning/__init__.py:3` | Imports `journey_tracer` and `neuron_debugger`; neither module exists, so `import backend.reasoning` raised `ModuleNotFoundError`. | **Fixed.** The package now imports cleanly and resolves the five names lazily, raising `ImportError` with a named reason only if something actually uses one. Nothing referenced these symbols. |
+| `backend/main.py:93` | `backend.api.runtime_api` does not exist and a bare `except: pass` let `/api/v2` vanish silently. | **Already fixed.** A `find_spec` check now logs a WARNING stating the 404 means *capability absent, not degraded*, and a module that exists but fails to import is logged with a traceback. The module still does not exist, so `/api/v2` is genuinely absent — now explicitly, not silently. |
+| `backend/interpretability/algorithms/registry.py:23` | Used `List` without importing it. | **Fixed** to `list[str]`. This one was *latent*, not immediate: the module has `from __future__ import annotations`, so the annotation was never evaluated at import and the module loaded fine. It would only have raised under `typing.get_type_hints()`. The sibling registry already used PEP 585 lowercase; this file had been missed by that migration. |
 
 ### 4. Turn the IOI screen into a real circuit
 
@@ -450,11 +472,18 @@ does not separate S1/S2/S3. Real IOI circuit discovery needs: corrupted-prompt p
 multi-template averaging, and a path-patching pass. The injection-recovery machinery in
 `live_discovery.py` already exists and is the right foundation.
 
-### 5. Make benchmarks statistically meaningful
+### 5. Make benchmarks statistically meaningful — partly done
 
-The live IOI benchmark runs on 6 prompts and reports `score: 1.0`. Port the full
-100-template panel and report a confidence interval. Bootstrap rather than the current
-closed-form CI.
+- [x] ~~Closed-form CI applied to an aggregate.~~ Replaced with a **Wilson** interval over the
+      pipelines' real per-prompt boolean outcomes. The old formula assumed a proportion it did
+      not have trial counts for, and is unreliable exactly where these sit (p≈0.9 overruns the
+      boundary; a 0.0 control yields a zero-width interval implying false precision).
+- [x] ~~The executor derived every result from the published reference value.~~ IOI and
+      induction-heads now run their reproduction pipelines. Benchmarks without an implementation
+      raise rather than returning a reference-derived score.
+- [ ] Still to do: the HTTP endpoint still requests 6 prompts where the pipeline default is 100
+      across eight frames. The CI on six prompts is wide enough that it says almost nothing about
+      the underlying rate — the Wilson interval on a 6-prompt IOI run spans roughly 44–97%.
 
 ### 6. Implement or delete the stubs
 
@@ -483,8 +512,8 @@ verify the build, then ship the installers the roadmap promises.
 
 | Suite | Command | Status |
 |-------|---------|--------|
-| Python | `pytest tests/pytest -q` | **186 passed, 27 failed, 2 collection errors** |
-| Frontend unit | `npm run test:js` | **8 passed, 1 file failed to load** |
+| Python | `pytest tests/pytest -q` | **387 passed, 7 skipped, 0 failed** |
+| Frontend unit | `npm run test:js` | **11 passed, 6 skipped, 0 failed** |
 | Playwright (offline) | `npx playwright test` | 4 specs, run in CI |
 | Playwright (live backend) | `trust-online.spec.js` | Not in CI |
 

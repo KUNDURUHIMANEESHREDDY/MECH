@@ -20,7 +20,14 @@ class AlgorithmRegistry:
     def get(self, name: str) -> Optional[Any]:
         return self._algorithms.get(name)
 
-    def list_algorithms(self) -> List[str]:
+    # Was `List[str]`, with no `List` in scope. It did not raise at import
+    # because this module has `from __future__ import annotations`, which
+    # leaves annotations unevaluated strings -- so the NameError was latent
+    # rather than immediate, surfacing only if something called
+    # typing.get_type_hints() on this method. The sibling registry
+    # (discovery/algorithms/registry.py) already uses PEP 585 lowercase, so this
+    # file had simply been missed by that migration.
+    def list_algorithms(self) -> list[str]:
         return list(self._algorithms.keys())
 
 
