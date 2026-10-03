@@ -91,6 +91,14 @@ class CircuitExplorer:
     """Circuit-centric exploration starting from circuit → components → tokens."""
 
     def list_circuits(self) -> List[Dict[str, Any]]:
+        """The published circuit reference catalogue.
+
+        `_CIRCUITS` holds figures transcribed from Wang et al. 2022. That is
+        legitimate reference material, but the three metrics were not named as
+        published values, so a caller could read "faithfulness: 0.86" as
+        something this system measured on this model. They are now labelled
+        with their source and marked as not measured here.
+        """
         return [
             {
                 "circuit_id": cid,
@@ -104,6 +112,15 @@ class CircuitExplorer:
                 "node_count": len(c["nodes"]),
                 "edge_count": len(c["edges"]),
                 "provenance": "reference",
+                "measured_here": False,
+                "metrics_source": (
+                    f"{c['paper']} (arXiv:{c['arxiv_id']}), transcribed"
+                ),
+                "metrics_reason": (
+                    "These are the published reference values for this circuit. "
+                    "They were not re-measured on this model, so they describe "
+                    "the paper and not this system's results."
+                ),
                 "field_provenance": _reference_fields(
                     "circuit_id", "name", "paper", "arxiv_id", "description",
                     "faithfulness", "completeness", "minimality", "node_count", "edge_count",
@@ -145,6 +162,18 @@ class CircuitExplorer:
         )
         result = asdict(graph)
         result["provenance"] = "reference"
+        # Same distinction as list_circuits: published values, not local
+        # measurements. The node importance scores are likewise transcribed.
+        result["measured_here"] = False
+        result["metrics_source"] = (
+            f"{c['paper']} (arXiv:{c['arxiv_id']}), transcribed"
+        )
+        result["metrics_reason"] = (
+            "Transcribed from the source paper. This circuit was not discovered "
+            "or measured by this system; no forward pass produced these values."
+        )
+        result["validation_eligible"] = False
+        result["publication_eligible"] = False
         result["field_provenance"] = _reference_fields(
             "circuit_id", "circuit_name", "paper_reference", "arxiv_id",
             "model_id", "description", "nodes", "edges", "faithfulness",
