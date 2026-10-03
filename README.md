@@ -307,8 +307,8 @@ about the project.
 | SAE / feature dictionaries | Config-only. Weights are never fetched; feature indices and activations are hardcoded (`interpretability/sae/loader.py:61`). |
 | Tuned lens | No trained translators; the "affine translation" is `+0.12` on a number. |
 | Causal tracing / attribution patching | Closed-form linear formulas, not measured gradients (`interpretability/causal/causal_tracing.py:19`). |
-| Path patching | Self-documented as simulated (`discovery/algorithms/path_patching.py:76`). |
-| ACDC fidelity | Analytic formula that can never fall below 0.90 (`discovery/algorithms/acdc.py:163`). |
+| Path patching | Was self-documented as simulated. **Now real** — it uses `live_measure.path_patch` (frozen sender plus swapped receiver in one pass) and refuses rather than reporting edges it cannot justify. |
+| ACDC fidelity | **Now real, measured end to end.** The analytic formula that could never fall below 0.90 is gone; fidelity comes from `live_measure.circuit_fidelity` over the pruned circuit. See §4 for a head-vs-neuron bug that made the earlier version measure MLP neurons while labelling them `L{layer}H{head}`. |
 | Non-GPT-2 models (Gemma, Llama, Qwen, Mistral, DeepSeek) | Unconditional mocks; `mock_mode` is accepted but never read (`science/models/model_adapters.py`). |
 | `benchmark_database.json`, `*_certificate.json`, `ioi_benchmark.py` | Hand-written fixtures. Each JSON record now carries `fixture: true`, `measured: false`, `provenance: "reference"`, eligibility `false`, and a `fixture_notice`. **Never quote these.** |
 | `backend/discovery/*` (13 modules) | Random grids via `np.random`. |

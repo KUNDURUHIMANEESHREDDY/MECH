@@ -497,10 +497,89 @@ class GPT2Adapter(ModelAdapter):
             layer=layer, neuron_index=neuron_index, patch_value=patch_value,
         )
 
+    def capture_head_outputs(self, prompt: str) -> Dict[int, Dict[int, List[float]]]:
+        """Capture every attention head's output vector in one forward pass.
+
+        Returns ``{layer: {head_index: [floats]}}`` for the last token position.
+
+        GPT-2 concatenates all head outputs into one tensor before projecting, so
+        the input to ``attn.c_proj`` is exactly the concatenated per-head outputs
+        and head ``h`` occupies the slice
+        ``[h * d_head : (h + 1) * d_head]`` where ``d_head = d_model / num_heads``.
+
+        This exists because there was no way to get a real head vector. ACDC
+        worked around that by passing a *head* index to APIs whose parameter is
+        ``neuron_index``, which silently indexed something else entirely:
+
+          * ``get_activations(layer, neuron_index=head)`` reads
+            ``hidden_states[layer][0, tok, :][head]`` -- a dimension of the
+            residual stream (d_model = 768), not a head.
+          * ``patch_activation(layer, neuron_index=head)`` writes
+            ``transformer.h[layer].mlp`` output at index ``head`` -- MLP neuron
+            ``head`` out of 3072, not a head out of 12.
+
+        Both succeeded and returned plausible numbers, because 768 and 3072 are
+        both larger than 12. That is what made the bug survivable: ACDC appeared
+        to run on real weights while measuring neither the heads it named nor a
+        consistent quantity across candidates. Pruning on that signal is pruning
+        on noise.
+
+        Raises `LiveUnavailable` without weights rather than returning zeros.
+        """
+        if self.spec.mock_mode or self._model is None:
+            raise LiveUnavailable(
+                "capture_head_outputs requires loaded weights: per-head output "
+                "vectors are a forward-pass measurement and have no fixture."
+            )
+
+        import torch
+
+        captured: Dict[int, Any] = {}
+        hooks = []
+
+        def make_hook(layer: int):
+            def hook(_module, inp, _out):
+                captured[layer] = inp[0].detach()
+            return hook
+
+        for layer in range(self.spec.num_layers):
+            hooks.append(
+                self._model.transformer.h[layer].attn.c_proj.register_forward_hook(
+                    make_hook(layer)
+                )
+            )
+
+        try:
+            self._forward_with_hooks(prompt)
+        finally:
+            for handle in hooks:
+                handle.remove()
+
+        d_head = self.spec.d_model // self.spec.num_heads
+        out: Dict[int, Dict[int, List[float]]] = {}
+        for layer, merged in captured.items():
+            last = merged[0, -1, :]
+            out[layer] = {
+                head: [round(float(v), 6) for v in last[head * d_head:(head + 1) * d_head]]
+                for head in range(self.spec.num_heads)
+            }
+        return out
+
     def patch_head_output(
-        self, prompt: str, layer: int, head_index: int, patch_vector: Optional[List[float]] = None
+        self, prompt: str, layer: int, head_index: int,
+        patch_vector: Optional[List[float]] = None,
+        score_token_id: Optional[int] = None,
     ) -> PatchResult:
-        """Patch the output of a specific attention head (head-level causal intervention)."""
+        """Patch the output of a specific attention head (head-level causal intervention).
+
+        `score_token_id` selects which token's logit `original_logit` /
+        `patched_logit` / `delta` refer to. Without it they report the logit of
+        whatever token the *unpatched* run predicted, which is the wrong quantity
+        for any clean/corrupted comparison: the interesting question is what
+        happened to a token the unpatched run was not predicting. Path-patching
+        a head into a corrupted run needs the target token's score, so ACDC
+        passes it.
+        """
         if not self.spec.mock_mode and self._model is not None:
             import torch
             inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
@@ -508,7 +587,8 @@ class GPT2Adapter(ModelAdapter):
             with torch.no_grad():
                 orig_logits = self._model(**inputs).logits[0, -1, :]
             orig_top = orig_logits.topk(1)
-            original_logit = float(orig_top.values[0])
+            scored_index = orig_top.indices[0] if score_token_id is None else score_token_id
+            original_logit = float(orig_logits[scored_index])
             top_token_before = self._tokenizer.decode([orig_top.indices[0]])
 
             # GPT-2 Attention head output patching via attn.c_proj pre-hook.
@@ -539,7 +619,7 @@ class GPT2Adapter(ModelAdapter):
             try:
                 with torch.no_grad():
                     patched_logits = self._model(**inputs).logits[0, -1, :]
-                patched_logit_for_orig_token = float(patched_logits[orig_top.indices[0]])
+                patched_logit_for_orig_token = float(patched_logits[scored_index])
                 top_token_after = self._tokenizer.decode([torch.argmax(patched_logits)])
 
                 return PatchResult(

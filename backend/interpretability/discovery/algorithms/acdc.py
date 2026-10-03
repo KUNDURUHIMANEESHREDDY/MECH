@@ -37,7 +37,7 @@ class ActivationCache:
     authors="Arthur Conmy, Ian Mavor, Aengus Lynch, et al.",
     year=2023,
     supported_models=["gpt2", "gemma", "llama", "mistral"],
-    required_capabilities=["patch_activation", "get_logits", "get_activations"],
+    required_capabilities=["patch_head_output", "capture_head_outputs", "get_logits"],
     estimated_runtime="10s-5m",
     search_space="attention_heads, mlps",
     output_schema="DiscoveryReport"
@@ -45,38 +45,112 @@ class ActivationCache:
 class ACDCAlgorithm(DiscoveryAlgorithm):
     """Greedy reverse-topological edge pruning over cached activations.
 
-    What is real: activation capture, the pruning sweep, and the resulting
-    component set -- these come from the adapter.
+    The intervention is head-level throughout: the clean run's output vector for
+    a candidate head is written into the corrupted run, and the recovery of the
+    target token's logit is measured. Edge weights and confidences in the
+    reported graph are those measured recoveries.
 
-    What is not: the fidelity number ACDC is judged by. Recovering the clean
-    logit difference with the pruned circuit was never run, so no fidelity is
-    reported and no confidence is claimed. See `run()`.
+    What is real: activation capture, the pruning sweep, the resulting component
+    set, and the per-edge recovery fractions -- all from the adapter.
+
+    What is not, when it does not run: the whole-circuit fidelity. Recovering the
+    clean logit difference with the entire pruned circuit at once needs
+    multi-site injection, which the single-head adapter primitive cannot express,
+    so fidelity is reported as unmeasured rather than approximated. See `run()`.
+
+    Two behaviours were removed rather than fixed, because both replaced a
+    measurement with an assumption:
+
+    * When nothing survived pruning, the search result was overridden with L9H9
+      and L10H0 under the comment "ensure top critical heads are retained" --
+      the published answer, substituted for the answer the search gave.
+    * Every retained edge carried `confidence: 0.95` and the edge completing the
+      circuit carried `confidence: 1.0`.
     """
 
+    def __init__(self, adapter: Any = None) -> None:
+        super().__init__(adapter)
+        # Populated by build_activation_cache; kept on the instance because the
+        # sweep needs the vectors and re-capturing per candidate would cost 144
+        # extra forward passes.
+        self._head_vectors: Dict[Tuple[int, int], List[float]] = {}
+        self._capture_error: Optional[str] = None
+
     def build_activation_cache(self, clean_prompt: str, corrupted_prompt: str, num_layers: int, num_heads: int) -> ActivationCache:
-        """Populates clean and corrupted activation caches for all layers and heads."""
+        """Capture the clean prompt's real per-head output vectors.
+
+        Previously this called ``get_activations(layer=layer, neuron_index=head)``
+        and stored the result as ``head_activations[(layer, head)]``. That call
+        reads ``hidden_states[layer][0, tok, :][head]`` -- dimension ``head`` of
+        the residual stream, which is 768-wide, so it succeeded and returned a
+        plausible float. It was not an attention head. Nothing downstream could
+        tell, because the value was a real activation of *something*.
+
+        Now it uses ``capture_head_outputs``, which hooks ``attn.c_proj`` and
+        slices head ``h``'s actual output vector (64 dims) out of the
+        concatenated per-head tensor. ``mlp_activations`` is left empty rather
+        than filled with a stand-in, because MLP activations are not what this
+        algorithm sweeps and a proxy would invite the same confusion again.
+        """
         clean_logits = self.adapter.get_logits(clean_prompt)
         corrupted_logits = self.adapter.get_logits(corrupted_prompt)
 
         head_acts: Dict[Tuple[int, int], float] = {}
-        mlp_acts: Dict[int, float] = {}
+        vectors: Dict[Tuple[int, int], List[float]] = {}
+        try:
+            captured = self.adapter.capture_head_outputs(clean_prompt)
+        except Exception as exc:
+            self._capture_error = f"{type(exc).__name__}: {exc}"
+            captured = {}
 
-        for layer in range(num_layers):
-            for head in range(num_heads):
-                acts = self.adapter.get_activations(clean_prompt, layer=layer, neuron_index=head)
-                if acts:
-                    head_acts[(layer, head)] = acts[0].activation_value
-            # MLP activation proxy
-            mlp_a = self.adapter.get_activations(clean_prompt, layer=layer, neuron_index=0)
-            if mlp_a:
-                mlp_acts[layer] = mlp_a[0].activation_value
+        for layer, heads in captured.items():
+            for head, vector in heads.items():
+                key = (layer, head)
+                vectors[key] = vector
+                head_acts[key] = sum(v * v for v in vector) ** 0.5
 
+        self._head_vectors = vectors
         return ActivationCache(
             clean_logits=clean_logits,
             corrupted_logits=corrupted_logits,
             head_activations=head_acts,
-            mlp_activations=mlp_acts
+            mlp_activations={},
         )
+
+    def _score_tokens(
+        self, clean_prompt: str, corrupted_prompt: str, target_id: int
+    ) -> tuple:
+        """Logit of `target_id` at the final position for both prompts.
+
+        A dedicated forward pass rather than `get_logits`, which returns only a
+        top-k. The target of an IOI pair is often not in the top 5 of the
+        corrupted run -- that is the whole point of the corrupted prompt -- so a
+        top-k lookup could not score it.
+        """
+        import torch
+
+        scores = []
+        for prompt in (clean_prompt, corrupted_prompt):
+            inputs = self.adapter._tokenizer(prompt, return_tensors="pt").to(
+                self.adapter._model.device
+            )
+            with torch.no_grad():
+                logits = self.adapter._model(**inputs).logits[0, -1, :]
+            scores.append(float(logits[target_id]))
+        return scores[0], scores[1]
+
+    def _target_token_id(self, target_token: str) -> Optional[int]:
+        """Resolve the continuation token to a single id, or None if ambiguous.
+
+        Returning None is a legitimate outcome: the logit difference is undefined
+        for a target that is not one token, and ACDC says so rather than
+        silently scoring the first piece.
+        """
+        try:
+            ids = self.adapter._tokenizer(target_token)["input_ids"]
+        except Exception:
+            return None
+        return ids[0] if len(ids) == 1 else None
 
     def run(self, dataset: Dict[str, Any], config: Optional[DiscoveryAlgorithmConfig] = None) -> DiscoveryReport:
         """Runs greedy reverse-topological edge pruning ACDC search."""
@@ -95,6 +169,8 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
         num_heads = self.adapter.spec.num_heads if self.adapter else 12
 
         # 1. Populate Activation Cache
+        self._capture_error = None
+        self._head_vectors = {}
         cache = self.build_activation_cache(clean_prompt, corrupted_prompt, num_layers, num_heads)
 
         # 2. Define Search Candidate Edges in Reverse Topological Order
@@ -105,41 +181,89 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
 
         pruned_components: Set[Tuple[int, int]] = set()
         retained_components: Set[Tuple[int, int]] = set()
+        recoveries: Dict[Tuple[int, int], float] = {}
 
-        # Clean Logit Diff Baseline Metric
-        baseline_diff = 1.0
-        if cache.clean_logits.get("top_tokens") and cache.corrupted_logits.get("top_tokens"):
-            clean_val = cache.clean_logits["top_tokens"][0].get("logit", 1.0)
-            corr_val = cache.corrupted_logits["top_tokens"][0].get("logit", 0.0)
-            baseline_diff = max(0.1, abs(clean_val - corr_val))
+        # Baseline metric: the target token's logit on the clean prompt minus the
+        # same token's logit on the corrupted prompt. That is the gap the circuit
+        # is supposed to explain.
+        #
+        # It used to be `abs(clean_top_logit - corrupted_top_logit)`, comparing
+        # whichever token each prompt happened to rank first. On the IOI pair
+        # those are different tokens (" Mary" and " John"), so the "difference"
+        # was between two unrelated quantities, and dividing by it scaled every
+        # candidate's effect by a meaningless number. Whatever the pruning
+        # selected, the divisor did not mean anything.
+        target_id = self._target_token_id(target_token)
+        baseline_note: Optional[str] = None
+        baseline_diff = 0.0
+        clean_score: Optional[float] = None
+        corr_score: Optional[float] = None
+        if target_id is None:
+            baseline_note = (
+                f"target_token {target_token!r} is not a single token, so the "
+                f"logit difference is undefined; no pruning was performed"
+            )
+        else:
+            clean_score, corr_score = self._score_tokens(
+                clean_prompt, corrupted_prompt, target_id
+            )
+            baseline_diff = clean_score - corr_score
+            if abs(baseline_diff) < 1e-6:
+                baseline_note = (
+                    "the clean and corrupted prompts give the target token "
+                    "identical logits, so there is no gap to explain and no "
+                    "candidate can be ranked; no pruning was performed"
+                )
 
         # 3. Greedy Reverse-Topological Search Loop
+        #
+        # The intervention is now a genuine head-level patch: the clean run's
+        # output vector for that head is written into the corrupted run, and the
+        # recovery of the target logit is measured.
+        #
+        # It previously called `patch_activation(layer=layer, neuron_index=head,
+        # patch_value=clean_act_val)`. That writes
+        # `transformer.h[layer].mlp` output at index `head` -- MLP neuron `head`
+        # of 3072 -- so every candidate "head" was an MLP neuron, the patch
+        # succeeded (3072 > 12), and a plausible delta came back. The component
+        # set this loop selected was therefore chosen on MLP noise while being
+        # labelled L{layer}H{head}, and the fidelity number later computed over
+        # it via `circuit_fidelity` was real -- a real measurement of a
+        # noise-selected circuit. That combination is worse than either failure
+        # alone, because the output looked valid.
         total_evaluations = 0
-        for layer, head in candidate_edges:
-            total_evaluations += 1
-            clean_act_val = cache.head_activations.get((layer, head), 0.5)
+        if target_id is not None and baseline_note is None:
+            for layer, head in candidate_edges:
+                total_evaluations += 1
+                vector = self._head_vectors.get((layer, head))
+                if vector is None:
+                    pruned_components.add((layer, head))
+                    continue
 
-            # Test patching clean activation into corrupted run
-            patch_res = self.adapter.patch_activation(
-                prompt=corrupted_prompt,
-                layer=layer,
-                neuron_index=head,
-                patch_value=clean_act_val
-            )
+                patch_res = self.adapter.patch_head_output(
+                    prompt=corrupted_prompt,
+                    layer=layer,
+                    head_index=head,
+                    patch_vector=vector,
+                    score_token_id=target_id,
+                )
+                recovery = (patch_res.patched_logit - corr_score) / baseline_diff
+                recoveries[(layer, head)] = round(recovery, 4)
 
-            delta = abs(patch_res.delta)
-            relative_effect = delta / baseline_diff
+                # If the recovered fraction is BELOW threshold, this head is not
+                # carrying the effect and can be pruned.
+                if abs(recovery) < threshold:
+                    pruned_components.add((layer, head))
+                else:
+                    retained_components.add((layer, head))
+        else:
+            total_evaluations = 0
 
-            # If effect is BELOW threshold, component can be safely PRUNED
-            if relative_effect < threshold:
-                pruned_components.add((layer, head))
-            else:
-                retained_components.add((layer, head))
-
-        # Ensure top critical heads (L9H9, L10H0, L5H1) are retained in minimal circuit
-        if not retained_components:
-            retained_components.add((max(0, num_layers - 3), 9 % num_heads))
-            retained_components.add((max(0, num_layers - 2), 0 % num_heads))
+        # An empty retained set is reported as empty. It previously injected
+        # L9H9 and L10H0 "to ensure the top critical heads are retained", with a
+        # comment naming them -- i.e. when the search found nothing, the search's
+        # answer was replaced by the published answer. A circuit that measures no
+        # surviving head is a finding.
 
         # 4. Construct Reconstructed Graph
         nodes = [{"id": "T_0", "type": "Token", "label": clean_prompt}]
@@ -154,18 +278,37 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                 "type": "Head",
                 "label": f"L{layer}H{head} (Retained)"
             })
-            act_val = cache.head_activations.get((layer, head), 0.8)
+            # Edge weight and confidence are the measured recovery fraction for
+            # this head. They were a literal `weight: min(0.99, act_val)` (the
+            # head's L2 norm, so ~0.6, carrying no meaning as an edge weight) and
+            # a literal `confidence: 0.95` on every edge.
+            measured = recoveries.get((layer, head))
             edges.append({
                 "source": last_node,
                 "target": node_id,
-                "weight": round(min(0.99, act_val), 3),
-                "confidence": 0.95
+                "weight": measured,
+                "confidence": measured,
+                "measured_from": "clean-to-corrupted head-output patch recovery",
             })
             last_node = node_id
 
         # Prediction Output Node
         nodes.append({"id": "P_0", "type": "Prediction", "label": target_token})
-        edges.append({"source": last_node, "target": "P_0", "weight": 1.0, "confidence": 1.0})
+        # Was `weight: 1.0, confidence: 1.0` -- an assertion of total certainty
+        # on the edge completing the circuit, from no measurement. The whole-graph
+        # recovery is measured below by the fidelity path; until it runs, this
+        # edge is unmeasured and says so.
+        edges.append({
+            "source": last_node,
+            "target": "P_0",
+            "weight": None,
+            "confidence": None,
+            "reason": (
+                "Whole-circuit recovery is measured by the fidelity pass, not "
+                "here. The previous value of 1.0 was a literal, on the one edge "
+                "that would most reward a fabricated circuit."
+            ),
+        })
 
         circuit_score = round(len(retained_components) / max(1, len(candidate_edges)), 3)
         # Real fidelity: inject the retained heads into the corrupted run and

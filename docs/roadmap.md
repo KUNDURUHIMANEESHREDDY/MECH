@@ -343,10 +343,70 @@ Applied so far:
 - [x] ~~ACDC fidelity — analytic formula that can never drop below 0.90.~~
       **done** — `logit_recovery_fidelity` was `0.90 + 0.09 * (1 - circuit_score)`,
       a rescaled pruning ratio reported under a name asserting recovered logits,
-      and it doubled as the algorithm's confidence. It is now `None` with
-      `logit_recovery_fidelity_measured: false`; the graph score is the pruning
-      ratio under its own name; confidence is 0.0 because nothing here
-      calibrates one.
+      and it doubled as the algorithm's confidence. It is now measured, via
+      `live_measure.circuit_fidelity` over the pruned circuit (see 2.9a for the
+      separate bug that made the *pruning* itself meaningless).
+- [x] **2.9a ACDC swept heads through an MLP-neuron API — the worst bug found.**
+      ACDC iterated `(layer, head)` pairs and called
+      `patch_activation(layer=layer, neuron_index=head, patch_value=...)`.
+      `patch_activation` is an *MLP* intervention: it hooks
+      `transformer.h[layer].mlp` and writes `output[0, -1, neuron_index]`. So
+      `head=9` wrote **MLP neuron 9 of 3072**. The patch succeeded — 3072 > 12 —
+      and returned a plausible delta, so nothing downstream could detect it.
+
+      The same substitution appeared twice more in the same file:
+      `get_activations(layer=layer, neuron_index=head)` reads
+      `hidden_states[layer][0, tok, :][head]`, a dimension of the 768-wide
+      residual stream; and the "baseline" divided every candidate's effect by
+      `abs(clean_top_logit - corrupted_top_logit)`, which on an IOI pair compares
+      two *different* tokens (" Mary" vs " John") and so divides by a difference
+      between unrelated quantities.
+
+      Why it mattered more than an obvious mock: the *fidelity* path was real.
+      `circuit_fidelity` performs genuine head-level patching over whatever
+      component set it is given. So the platform was computing a **real fidelity
+      number for a circuit selected by MLP noise** — 0.80-style figures that
+      looked valid and were measured over the wrong set.
+
+      Fixed by adding `GPT2Adapter.capture_head_outputs` (hooks `attn.c_proj` and
+      slices each head's real 64-dim output vector out of the concatenated
+      per-head tensor), switching the sweep to `patch_head_output` with a new
+      `score_token_id` so the target token is scored rather than whatever the
+      unpatched run predicted, and measuring the baseline as the target token's
+      clean-minus-corrupted logit difference.
+
+      Measured on the IOI pair: 144 real head-level evaluations, 26 heads
+      retained, `logit_recovery_fidelity` **0.8035**, and 17 distinct edge
+      confidences spanning −0.625 … 0.396 — including negatives, i.e. heads that
+      *hurt* the target when patched in. Previously every edge carried a literal
+      `confidence: 0.95` and the final edge a literal `1.0`.
+
+      Two substitutions were removed rather than fixed:
+      * When nothing survived pruning, ACDC added L9H9 and L10H0 under the
+        comment "ensure top critical heads are retained" — the published answer
+        replacing the search's. An empty retained set is now reported as empty;
+        `test_acdc_search.py` asserted `retained_components >= 1` and was pinning
+        that substitution, so it now asserts 0 and that no head node appears.
+      * The edge completing the circuit carried `weight: 1.0, confidence: 1.0` —
+        an assertion of total certainty on the one edge that would most reward a
+        fabricated circuit. Now `None`, with whole-circuit recovery left to the
+        fidelity pass that actually measures it.
+
+      Regression tests in `tests/pytest/test_acdc_head_intervention_semantics.py`
+      are behavioural, watching tensors during real forward passes rather than
+      grepping: a head patch must zero exactly one head slice of the `c_proj`
+      input and leave the other eleven bit-identical; an MLP-neuron patch must
+      write the sentinel to the MLP and move no head output; and the two must
+      disagree for the same index. Two of those tests failed on first run and the
+      failures were instructive — one had encoded wrong physics by assuming a head
+      patch cannot move the MLP (it must, via the residual stream), and one
+      captured the pre-patch value because PyTorch runs hooks in registration
+      order.
+
+      `causal_scrubbing.py` carries the identical bug at
+      `causal_scrubbing.py:80,85` and is not yet fixed. `path_patching.py` was
+      checked and is already correct — it uses `live_measure.path_patch` and
+      refuses rather than approximating.
 - [x] ~~Non-GPT-2 adapters — unconditional mocks.~~ **done** — the five adapters
       ignored `mock_mode` entirely and fabricated regardless of it. Each
       constructor now calls `_force_simulated`, forcing `spec.mock_mode = True`
