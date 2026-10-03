@@ -467,6 +467,47 @@ Applied so far:
       single-prompt dataset cannot be scrubbed and that each edge weight equals the
       mean of its own recorded samples (which the old clamped logit ratio would not
       have satisfied).
+
+- [x] **2.9c `circuit_discovery` fabricated a whole circuit when no model was connected.**
+      With no adapter, `discover_circuit` returned a complete synthetic result: a
+      `Neuron` node labelled `L8_N402 (IOI)`, edges weighted `0.88` and `0.95` with
+      confidences `0.94` and `0.98`, `confidence: 0.95` and `runtime_ms: 150.0`.
+      `graph.score` was `0.945` — exactly `(0.94 + 0.98) / 2`, so even the summary
+      statistic was derived from the fabrication rather than measured — and
+      `provenance` was `{}`, so nothing anywhere marked the record synthetic.
+
+      The shape was the problem more than any single number. A caller reading
+      `result["confidence"]` got `0.95`; a caller rendering `result["graph"]` drew a
+      plausible IOI circuit containing a named neuron. `L8_N402` is a specific
+      invented claim about a specific neuron.
+
+      Now returns the explicit record the audit proposed —
+      `status: "unavailable"`, `provenance: "unavailable"`, eligibility `false`,
+      every score `None`, empty graph, and a `reason` — keeping the same keys as a
+      real report so consumers need no special case. The bare `{"error": str(e)}`
+      returns from the dataset-load and run paths are gone too: a dict with no
+      `status`, no `confidence` and no `provenance` cannot be distinguished from a
+      result with no score.
+
+- [x] **2.9d The provenance label was unreadable by the evidence policy — including
+      in the fixes above.**
+      `evidence_policy.provenance_of` resolves a report's `provenance` dict by
+      checking `source`, `kind`, `type` and `status` in that order, returning
+      `"unavailable"` when it finds none. The convention in
+      `DiscoveryAlgorithm.provenance_block` nested the label under `provenance`
+      instead, so a run carrying `{"provenance": "live", …}` reported
+      `provenance_of(...) == "unavailable"` **to the very policy meant to gate it**.
+
+      This was invisible for the unimplemented case — `"reference"` is not `"live"`
+      either way, so the broken shape produced no wrong *unavailable* verdict, only
+      an unusable *live* one. That asymmetry is why it survived, and it was
+      introduced by the ACDC and causal-scrubbing changes in 2.9a/2.9b.
+
+      Fixed at the shared source (`provenance_block`) with a `source` key, kept
+      alongside the nested `provenance` key for human readers. Verified:
+      `provenance_of` on a live ACDC discovery report now returns `"live"`, having
+      returned `"unavailable"`. `tests/pytest/test_circuit_discovery_no_fabrication.py`
+      pins all five readable shapes and the one unreadable shape that caused it.
 - [x] ~~Non-GPT-2 adapters — unconditional mocks.~~ **done** — the five adapters
       ignored `mock_mode` entirely and fabricated regardless of it. Each
       constructor now calls `_force_simulated`, forcing `spec.mock_mode = True`

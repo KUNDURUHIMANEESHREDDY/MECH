@@ -389,6 +389,26 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
             },
             provenance={
                 **self.provenance_block(),
+                # A plain string, deliberately. `evidence_policy.provenance_of`
+                # resolves a dict provenance by looking for `source`/`kind`/
+                # `type`/`status` inside it, and falls back to "unavailable" if
+                # none is present. An earlier version of this file wrote
+                # {"provenance": "live", ...}, which that reader cannot see: it
+                # found no recognised key and reported the record as unverified.
+                # A live run was therefore invisible to the evidence gate while
+                # appearing to carry a provenance label. Same shape as
+                # GPT2Adapter.get_logits, which returns `"provenance": "live"`.
+                # "live" means measurements were taken from loaded weights, which
+                # is true whenever the sweep ran -- and every retained edge's
+                # confidence is a measured recovery fraction, not a constant. It
+                # does not mean the whole-circuit fidelity was computed; that is
+                # tracked separately by `logit_recovery_fidelity_measured` and
+                # spelled out in `logit_recovery_fidelity` below. Conflating the
+                # two made a run that measured 144 heads report `unavailable`.
+                "source": "live" if total_evaluations else "unavailable",
+                "provenance": "live" if total_evaluations else "unavailable",
+                "measured": bool(total_evaluations),
+                "candidates_evaluated": total_evaluations,
                 "search_space": config.search_space,
                 "metric": "greedy_reverse_topological_edge_pruning",
                 "paper_citation": "Conmy et al. 2023: Automatic Circuit Discovery",

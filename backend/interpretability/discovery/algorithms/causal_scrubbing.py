@@ -185,6 +185,8 @@ class CausalScrubbingAlgorithm(DiscoveryAlgorithm):
             confidence=None,
             graph={"nodes": [], "edges": [], "score": None},
             provenance={
+                "source": "unavailable",
+                "provenance": "unavailable",
                 "measured": False,
                 "reason": reason,
                 # Always false, including when the reason *is* the equivalence
@@ -436,7 +438,13 @@ class CausalScrubbingAlgorithm(DiscoveryAlgorithm):
                     if behavior_preservation is not None else None,
             },
             provenance={
+                # Plain string, for the reason documented in acdc.py: the
+                # evidence policy resolves a dict provenance via
+                # source/kind/type/status and reports "unavailable" when it finds
+                # none, so a nested {"provenance": "live"} is unreadable.
+                "source": "live",
                 "provenance": "live",
+                "measured": True,
                 "search_space": config.equivalence_class,
                 "metric": (
                     "target-token logit preservation, normalised by the "

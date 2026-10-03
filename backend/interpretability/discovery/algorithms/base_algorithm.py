@@ -62,13 +62,31 @@ class DiscoveryAlgorithm(ABC):
         self.adapter = adapter
 
     def provenance_block(self) -> Dict[str, Any]:
-        """Provenance for a DiscoveryReport derived from this algorithm's state."""
+        """Provenance for a DiscoveryReport derived from this algorithm's state.
+
+        The `source` key is load-bearing, not decorative. `evidence_policy.
+        provenance_of` reads a report's `provenance` dict by looking for
+        `source`, `kind`, `type` or `status`, in that order, and returns
+        "unavailable" if it finds none. A block that nests the label under
+        `provenance` is therefore invisible to the evidence gate.
+
+        That is why a live ACDC run reported `provenance_of(...) == "unavailable"`
+        while carrying `"provenance": "live"` in the very same dict: the reader
+        found no key it recognised and defaulted. The nested key is kept too,
+        because it is what a human reads, but `source` is what the policy sees.
+
+        For the unimplemented case the answer happens to coincide -- "reference"
+        is not "live" either way -- so the shape had been wrong without ever
+        producing a wrong *unavailable* verdict, only an unusable live one. That
+        asymmetry is why it survived.
+        """
         block: Dict[str, Any] = {
             "algorithm": self.__class__.__name__,
             "implements_published_method": self.implements_published_method,
         }
         if not self.implements_published_method:
             block.update({
+                "source": "reference",
                 "status": "unavailable",
                 "measured": False,
                 "provenance": "reference",
