@@ -176,6 +176,18 @@ class AutonomousPaperReplicator:
         )
 
         # 4. Register or Update Claim in Mechanism Claim Registry
+        #
+        # `supporting_experiments` was `len(paper_spec.claimed_circuit_components)
+        # * 10` -- a count of circuit components multiplied by ten and recorded as
+        # a number of experiments. Three components became "30 supporting
+        # experiments". Nothing about it corresponded to work performed; it was a
+        # visual proxy for "sounds like a lot", written into a field that means
+        # an experiment was run and came out in favour.
+        #
+        # The honest count of experiments supporting this replication is 1: the
+        # replication just performed, whose result is `fidelity_score`. The
+        # component count is recorded separately, under a name that says what it
+        # is, so the information is not lost.
         claim_status = "Validated" if fidelity_score >= 90.0 else "Partially_Replicated"
         claim_obj = RegisteredMechanismClaim(
             claim_id=f"claim_{paper_spec.paper_id}",
@@ -185,10 +197,14 @@ class AutonomousPaperReplicator:
             confidence=round(fidelity_score / 100.0, 3),
             replications=1,
             models=[paper_spec.target_model],
-            supporting_experiments=len(paper_spec.claimed_circuit_components) * 10,
+            supporting_experiments=1,
             contradicting_experiments=0,
             literature=[f"{paper_spec.authors[0]}: {paper_spec.title}"],
-            algorithms_used=paper_spec.required_algorithms
+            algorithms_used=paper_spec.required_algorithms,
+            evidence_summary={
+                "circuit_components_replicated": len(paper_spec.claimed_circuit_components),
+                "fidelity_match_percentage": fidelity_score,
+            },
         )
         self.claim_registry.register(claim_obj)
 

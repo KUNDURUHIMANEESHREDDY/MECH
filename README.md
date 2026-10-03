@@ -583,8 +583,85 @@ fabricated metric looked like a finding and was reachable by callers with weight
       induction-heads pipeline already measures the same behaviour properly.
 - [x] **Logit lens — replaced with a real forward pass.** See [Honest negative results](#honest-negative-results)
       above for the measured numbers and what the previous version fabricated.
+- [x] **An engine that confirmed every discovery it was asked about.** `DiscoveryReproductionEngine`
+      — whose stated purpose is to *attempt to reproduce or falsify* — returned
+      `reproduced_cleanly: True`, `falsified: False`, `falsification_attempts: 3` and
+      `reproducibility_score: 0.96` for **every** `discovery_id`, having attempted nothing. The most
+      consequential fabrication in the package, because of what it claimed rather than how
+      plausible it looked: a caller polling it would conclude every discovery had survived
+      scrutiny. It had no callers. Now raises.
+- [x] **Fabricated confidence defaults across the evidence and claim stores.** Four instances,
+      all manufacturing confidence:
+
+      | Location | Was | Now |
+      |---|---|---|
+      | `GraphNode.confidence_score` | `1.0` — total certainty, in the evidence store | `None` |
+      | `MechanismRegistry` seed entry | `0.96`, `replication_score: 0.985`, `evidence_count: 5`, `status: "Validated"` | all `None`/`0`, `status: "Registered"`, `provenance: seeded` |
+      | `register_mechanism` defaults | `0.95` / `0.90` / `0.85`, `replication_score: 0.95`, `evidence_count: 1`, `status: "Validated"` | all absent; `status: "Registered"` |
+      | seeded knowledge-graph `SUPPORTS` edge | `confidence_score: 0.95` | removed; whole seeded subgraph labelled |
+
+      `register_mechanism` was the damaging one: it did not merely default a score, it set
+      `status: "Validated"` unconditionally, so a single call turned an unevidenced claim into a
+      validated mechanism. `status: "Validated"` is a claim *about evidence*, and the function's
+      entire contribution was the absence of evidence. Registration is bookkeeping; `Registered`
+      is the only statement it can support.
+
+      Note that `0.95` was the same magic number the validation layer had been explicitly
+      prevented from defaulting to earlier in this effort — the two ends of the codebase were
+      making opposite claims about it.
+
+      **Deliberately not changed:** `critic.is_confident` and `society._confidence_of` default a
+      *missing* confidence to `0.0`. That direction is conservative — `0.0` fails critic's `0.85`
+      threshold — so it cannot manufacture a positive verdict, which is what the defaults above
+      did. `tests/pytest/test_confidence_defaults_are_not_fabricated.py` pins that behaviour so it
+      is not later "improved" into an optimistic default.
+- [x] **`RegisteredMechanismClaim` manufactured its own evidence.** Its defaults were
+      `status="Validated"`, `confidence=0.95`, `replications=1`, `supporting_experiments=1`, so
+      constructing a claim with only an id and title produced one that was already validated at
+      0.95 confidence with a replication and a supporting experiment in hand.
+      `supporting_experiments=1` was the sharpest edge: it asserted an experiment had been run
+      and had come out in favour, when the only thing that had happened was the constructor.
+      The `from_dict` path was worse — same defaults, so every stored record missing those fields
+      was silently promoted the moment it was read back.
+      Now `Hypothesized` / `None` / `0` / `0`. `contradicting_experiments=0` is left alone, since
+      zero is a true statement about a claim that has just been written down.
+- [x] **The seeded claims carried invented evidence counts.** `claim_ioi_name_mover` and
+      `claim_induction_heads` claimed `confidence=0.962/0.941`, `replications=14/22` and
+      `supporting_experiments=103/145`. There is no record of 103 experiments, and the IOI circuit
+      has been discovered once on this platform. These are transcriptions of Wang et al. and
+      Olsson et al., so they are now seeded as `status="Reported"` — the claim is in the
+      literature, which is checkable against the citation — with no counts. The citations stay,
+      because they are the provenance.
+- [x] **Confidence was stepped by a constant per event.** `record_replication` applied
+      `min(0.99, c + (1 − c) × 0.05)` per success and `−0.05` per failure to a field starting at
+      0.95 and capped at 0.99 — so it moved by a constant regardless of what the event was, and
+      twenty consecutive successes could only reach 0.99. Confidence is now
+      `supporting / (supporting + contradicting)`, and `None` while no experiment is recorded.
+      `score_delta` is removed; it had no callers.
+
+      Disclosed rather than hidden: that ratio is not weighted by sample size, so three successes
+      and thirty both give `1.000`. It is a base rate, not a certainty, and the raw counts travel
+      with it. A Wilson or Laplace-smoothed interval is the right next step — deliberately not
+      done inside a fabrication fix, since it changes what the number means.
+- [x] **`supporting_experiments = len(components) * 10`.** The autonomous paper replicator
+      multiplied a circuit-component count by ten and recorded it as a number of experiments:
+      three components became "30 supporting experiments". It is now `1` (the replication just
+      performed), with the component count moved to `evidence_summary.circuit_components_replicated`
+      under a name that says what it is.
 - [ ] Still open: tuned lens, attribution patching, path patching, plus the honest-SAE work
       described in `backend/science/reproducibility/sae_pipeline.py`.
+- [ ] **Known, not yet fixed — the rest of the optimistic-confidence defaults.** The pattern above
+      recurs elsewhere and is inventoried rather than left to be rediscovered. Optimistic
+      (manufacture confidence, should become `None`): `scientific_skill_library.py` `average_confidence
+      = 0.94`, `uncertainty_manager.py` `confidence_score = 0.92` / `publication_confidence = 0.85`
+      / `rejection_confidence = 0.60`, `discovery_result.py` `confidence = 0.90`,
+      `discovery_quality_score.py` `confidence = 0.92`, `experience_replay.py` `confidence = 0.90`,
+      `knowledge_base.py` `store_fact(confidence = 0.9)`, `feature_dictionary.py` `confidence = 1.0`,
+      and a `confidence = 0.95` default in a `__init__.py`. Conservative (safe, leave):
+      `auto_hypothesis_tester.py`, `representation_engine.py`, `feature_labeler.py`,
+      `discovery_quality_score.py:15`. Each needs its consumers checked individually — making a
+      field `Optional` breaks any arithmetic done on it, which is exactly how `record_replication`
+      broke when the claim defaults were fixed.
 
 Also removed from `benchmark_runner.py`, which was fabricating alongside the pipelines:
 

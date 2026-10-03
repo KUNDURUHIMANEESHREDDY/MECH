@@ -20,7 +20,14 @@ class GraphNode:
     label: str
     metadata: Dict[str, Any] = field(default_factory=dict)
     provenance_manifest_id: Optional[str] = None
-    confidence_score: float = 1.0 # 0.0 to 1.0
+    # Optional, and defaulting to None rather than 1.0. This is the evidence
+    # store, and 1.0 is a claim of certainty: every node added without an
+    # explicit confidence was asserting total, measured confidence in a
+    # mechanistic claim. Nothing measured it -- `add_node` accepts the field but
+    # never computes it, so the default was the only value most nodes ever had.
+    # None means unmeasured, which is the honest state and is distinguishable
+    # from a measured 1.0.
+    confidence_score: Optional[float] = None  # 0.0 to 1.0 when measured
     created_at: str = field(default_factory=lambda: _dt.datetime.now(_dt.timezone.utc).isoformat())
 
 
@@ -52,7 +59,7 @@ class MechanisticKnowledgeGraph:
         label: str,
         metadata: Optional[Dict[str, Any]] = None,
         provenance_manifest_id: Optional[str] = None,
-        confidence_score: float = 1.0,
+        confidence_score: Optional[float] = None,
         node_id: Optional[str] = None,
     ) -> GraphNode:
         if node_id is None:
@@ -140,28 +147,65 @@ class MechanisticKnowledgeGraph:
         self.edges.clear()
 
     def _seed_mock_data(self) -> None:
-        """Seed initial knowledge graph for UI dev."""
+        """Seed a placeholder knowledge graph so the UI has something to render.
+
+        Everything here is a *transcription of Wang et al. 2022*, not a result
+        MECH produced: the paper node is theirs, the circuit is theirs, and the
+        three heads (L9H9, L10H0, L7H3) are from their published list.
+
+        It is seeded because an empty graph gives the explorer nothing to draw.
+        Every node and edge therefore carries the standard fixture markers
+        (`provenance: seeded`, and ineligibility for validation and publication)
+        so that nothing downstream can mistake this for a measured circuit.
+
+        The `SUPPORTS` edge previously carried `confidence_score: 0.95`. Nothing
+        measured that. It was a typed-in number on a graph whose whole purpose is
+        to hold evidence, which is worse than having no score: a consumer
+        filtering on confidence would have ranked this placeholder above real
+        measurements. The number is gone rather than labelled, because there is no
+        measurement it could be a label *for*. Recorded for the record: 0.95 is
+        the same value the validation layer was explicitly prevented from
+        defaulting to earlier, so the two ends of the codebase were making
+        opposite claims about the same magic number.
+        """
         if self.nodes:
             return
-            
-        paper = self.add_node("Paper", "IOI Paper (Wang et al.)", node_id="paper_ioi")
-        circuit = self.add_node("Circuit", "IOI Circuit", node_id="circuit_ioi")
-        
+
+        # Marks every seeded node and edge. See the docstring: this content is a
+        # paper transcription, and must never read as MECH evidence.
+        seeded = {
+            "provenance": "seeded",
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "source": "Wang et al. 2022, transcribed for UI development",
+        }
+
+        paper = self.add_node("Paper", "IOI Paper (Wang et al.)", node_id="paper_ioi",
+                              metadata=dict(seeded))
+        circuit = self.add_node("Circuit", "IOI Circuit (from published paper)",
+                                node_id="circuit_ioi", metadata=dict(seeded))
+
         # Heads
-        nmh1 = self.add_node("AttentionHead", "L9H9 (Name Mover)", node_id="head_L9H9", metadata={"layer": 9, "head": 9})
-        nmh2 = self.add_node("AttentionHead", "L10H0 (Name Mover)", node_id="head_L10H0", metadata={"layer": 10, "head": 0})
-        s2i = self.add_node("AttentionHead", "L7H3 (S2 Inhibition)", node_id="head_L7H3", metadata={"layer": 7, "head": 3})
-        
+        nmh1 = self.add_node("AttentionHead", "L9H9 (Name Mover)", node_id="head_L9H9",
+                             metadata={**seeded, "layer": 9, "head": 9})
+        nmh2 = self.add_node("AttentionHead", "L10H0 (Name Mover)", node_id="head_L10H0",
+                             metadata={**seeded, "layer": 10, "head": 0})
+        s2i = self.add_node("AttentionHead", "L7H3 (S2 Inhibition)", node_id="head_L7H3",
+                            metadata={**seeded, "layer": 7, "head": 3})
+
         # Evidence
-        ev1 = self.add_node("Evidence", "Path Patching -> NMH", node_id="ev_path_nmh")
-        
+        ev1 = self.add_node("Evidence", "Path Patching -> NMH", node_id="ev_path_nmh",
+                            metadata=dict(seeded))
+
         # Edges
-        self.add_edge(paper.id, circuit.id, "DESCRIBES")
-        self.add_edge(circuit.id, nmh1.id, "MEMBER_OF")
-        self.add_edge(circuit.id, nmh2.id, "MEMBER_OF")
-        self.add_edge(circuit.id, s2i.id, "MEMBER_OF")
-        
-        self.add_edge(s2i.id, nmh1.id, "INHIBITS", weight=-1.0)
-        self.add_edge(s2i.id, nmh2.id, "INHIBITS", weight=-1.0)
-        
-        self.add_edge(ev1.id, circuit.id, "SUPPORTS", metadata={"confidence_score": 0.95})
+        self.add_edge(paper.id, circuit.id, "DESCRIBES", metadata=dict(seeded))
+        self.add_edge(circuit.id, nmh1.id, "MEMBER_OF", metadata=dict(seeded))
+        self.add_edge(circuit.id, nmh2.id, "MEMBER_OF", metadata=dict(seeded))
+        self.add_edge(circuit.id, s2i.id, "MEMBER_OF", metadata=dict(seeded))
+
+        self.add_edge(s2i.id, nmh1.id, "INHIBITS", weight=-1.0, metadata=dict(seeded))
+        self.add_edge(s2i.id, nmh2.id, "INHIBITS", weight=-1.0, metadata=dict(seeded))
+
+        # No confidence_score. This edge asserts that path patching supports the
+        # circuit, which is true of the paper and unmeasured here.
+        self.add_edge(ev1.id, circuit.id, "SUPPORTS", metadata=dict(seeded))

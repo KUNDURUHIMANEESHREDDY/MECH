@@ -52,18 +52,31 @@ class MechanismRegistry:
     def __init__(self) -> None:
         init_prov = ProvenanceRecord(id="prov_mech_ioi")
         self.mechanisms: Dict[str, Dict[str, Any]] = {
+            # Placeholder so the registry is not empty on first read. Every score
+            # here was invented: `replication_score: 0.985`, `confidence_score:
+            # 0.96`, `evidence_count: 5` and `status: "Validated"` described a
+            # paper-derived circuit as though this platform had validated it five
+            # times over. Nothing was measured, and the scores are now absent
+            # rather than plausible.
+            #
+            # The circuit itself is Wang et al.'s, transcribed -- not a MECH
+            # result. `provenance: seeded` and the two ineligibility flags stop a
+            # consumer ranking this above a real measurement.
             "mech_ioi": {
                 "id": "mech_ioi",
                 "name": "Name Recognition & IOI Circuit",
-                "evidence_count": 5,
-                "replication_score": 0.985,
+                "evidence_count": 0,
+                "replication_score": None,
                 "known_paper": "Wang et al. (2022)",
-                "confidence_score": 0.96,
-                "confidence": 0.96,
-                "scientific_quality_score": 0.92,
-                "expected_impact_score": 0.88,
-                "status": "Validated",
-                "provenance": asdict(init_prov),
+                "confidence_score": None,
+                "confidence": None,
+                "scientific_quality_score": None,
+                "expected_impact_score": None,
+                "status": "Registered",
+                "provenance": "seeded",
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "provenance_record": asdict(init_prov),
             }
         }
 
@@ -71,24 +84,53 @@ class MechanismRegistry:
         self,
         mechanism_id: str,
         name: str,
-        confidence_score: float = 0.95,
-        scientific_quality_score: float = 0.90,
-        expected_impact_score: float = 0.85,
+        confidence_score: float | None = None,
+        scientific_quality_score: float | None = None,
+        expected_impact_score: float | None = None,
         provenance: ProvenanceRecord | Dict[str, Any] | None = None,
         confidence: float | None = None,
+        evidence_count: int = 0,
     ) -> Dict[str, Any]:
+        """Record that a mechanism has been *registered*.
+
+        Registration is bookkeeping, not evidence. Nothing here measures anything,
+        so this method does not assert that it did.
+
+        Previously every entry created here claimed, unconditionally:
+
+            evidence_count: 1
+            replication_score: 0.95
+            status: "Validated"
+
+        with `confidence_score` defaulting to 0.95 and the two quality scores to
+        0.90 and 0.85. So calling this function turned an unevidenced claim about
+        a circuit into a validated one carrying a 0.95 replication score, in one
+        line, with no measurement performed anywhere. `status: "Validated"` was
+        the worst of it: it is a claim about evidence, and the function's entire
+        contribution was the absence of evidence.
+
+        Now the scores default to None -- absent, meaning unmeasured -- and
+        status is "Registered", which is the one statement here that is actually
+        true. Callers that have measured something pass the number in; callers
+        that have not are recorded as not having.
+
+        Pass `evidence_count` for the number of evidence items actually attached.
+        It defaults to 0 because registering a name attaches no evidence.
+        """
         conf = confidence if confidence is not None else confidence_score
         prov_obj = provenance if isinstance(provenance, ProvenanceRecord) else ProvenanceRecord.from_dict(provenance)
         entry = {
             "id": mechanism_id,
             "name": name,
-            "evidence_count": 1,
-            "replication_score": 0.95,
+            "evidence_count": evidence_count,
+            # No replication was run by calling this, so there is no score.
+            "replication_score": None,
             "confidence_score": conf,
             "confidence": conf,  # Legacy alias for test compatibility
             "scientific_quality_score": scientific_quality_score,
             "expected_impact_score": expected_impact_score,
-            "status": "Validated",
+            # True statement about what happened, rather than about the evidence.
+            "status": "Registered",
             "registered_at": _dt.datetime.utcnow().isoformat() + "Z",
             "provenance": asdict(prov_obj),
         }
