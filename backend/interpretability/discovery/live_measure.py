@@ -18,8 +18,12 @@ import threading
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
-class LiveUnavailable(Exception):
-    """Raised when no live model is connected; callers must fail closed."""
+# `LiveUnavailable` was defined here and is raised across the discovery layer.
+# It now lives in adapter_base so the model adapters can raise the same type
+# without importing this module -- discovery sits above models, not below. The
+# name is re-exported so existing `except LiveUnavailable` clauses are
+# unaffected.
+from backend.science.models.adapter_base import LiveUnavailable  # noqa: E402,F401
 
 
 _MEASURE_LOCK = threading.RLock()

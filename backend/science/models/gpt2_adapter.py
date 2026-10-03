@@ -13,7 +13,8 @@ import random
 from typing import Any, Dict, List, Optional
 
 from .adapter_base import (
-    ActivationResult, AttentionPattern, ModelAdapter, ModelSpec, PatchResult
+    ActivationResult, AttentionPattern, LiveUnavailable, ModelAdapter, ModelSpec,
+    PatchResult,
 )
 
 
@@ -264,6 +265,188 @@ class GPT2Adapter(ModelAdapter):
                        "were run. Not evidence."),
             "top_tokens": [{"token": " the", "logit": 4.5, "prob": 0.45}],
             "top_token": " the",
+        }
+
+    def mlp_patch_logits(
+        self,
+        clean_prompt: str,
+        target_prompt: str,
+        layer: int,
+    ) -> Dict[str, Any]:
+        """Causal-mediation measurement: patch one layer's whole MLP output.
+
+        Runs three forward passes and returns the last-position logits of each:
+
+        1. ``clean_prompt`` with a capture hook on ``h[layer].mlp``
+        2. ``target_prompt`` unmodified
+        3. ``target_prompt`` with ``h[layer].mlp`` output replaced by the value
+           captured from pass 1
+
+        A caller recovers a clean/corrupted logit difference in pass 3 to get
+        the fraction of the effect that flows through that layer's MLP. This is
+        the intervention Hanna et al. use to localise greater-than computation,
+        and it is why the method exists: the previous greater-than pipeline
+        reported a patch effect from a hardcoded ``{7: 0.82, 8: 0.91, 9: 0.78}``
+        table keyed to the paper's own answer, so its "measurement" could never
+        disagree with the paper it was reproducing.
+
+        Raises ``LiveUnavailable`` rather than returning numbers when no weights
+        are loaded. There is no fixture for this measurement.
+        """
+        if self.spec.mock_mode or self._model is None:
+            raise LiveUnavailable(
+                "mlp_patch_logits requires loaded weights: it is a forward-pass "
+                "measurement and has no fixture."
+            )
+
+        import torch
+
+        blocks = self._model.transformer.h
+        if not 0 <= layer < len(blocks):
+            raise ValueError(
+                f"layer {layer} out of range for a model with {len(blocks)} blocks"
+            )
+
+        clean_inputs = self._tokenizer(clean_prompt, return_tensors="pt").to(
+            self._model.device
+        )
+        target_inputs = self._tokenizer(target_prompt, return_tensors="pt").to(
+            self._model.device
+        )
+
+        captured: Dict[str, Any] = {}
+
+        def capture_hook(_module, _inp, output):
+            captured["mlp"] = output.detach()
+            return output
+
+        mlp = blocks[layer].mlp
+        handle = mlp.register_forward_hook(capture_hook)
+        try:
+            with torch.no_grad():
+                clean_logits = self._model(**clean_inputs).logits[0, -1, :]
+        finally:
+            handle.remove()
+
+        if "mlp" not in captured:
+            raise LiveUnavailable("MLP capture hook did not fire; no value to patch.")
+        donor = captured["mlp"]
+
+        # A patch is only valid where the two sequences line up positionally.
+        # Clean and target are normally the same length (both are
+        # "The event lasted from NNNN to NN"), but silently broadcasting a
+        # misaligned donor would produce a plausible number describing the
+        # wrong computation.
+        clean_len = clean_inputs["input_ids"].shape[1]
+        target_len = target_inputs["input_ids"].shape[1]
+        if clean_len != target_len:
+            raise LiveUnavailable(
+                f"cannot patch across unequal sequence lengths "
+                f"(clean={clean_len}, target={target_len}); the positions would "
+                f"not correspond"
+            )
+
+        with torch.no_grad():
+            target_logits = self._model(**target_inputs).logits[0, -1, :]
+
+        def patch_hook(_module, _inp, _output):
+            return donor
+
+        handle = mlp.register_forward_hook(patch_hook)
+        try:
+            with torch.no_grad():
+                patched_logits = self._model(**target_inputs).logits[0, -1, :]
+        finally:
+            handle.remove()
+
+        return {
+            "clean_logits": clean_logits,
+            "target_logits": target_logits,
+            "patched_logits": patched_logits,
+            "provenance": "live",
+        }
+
+    def logit_lens(self, prompt: str) -> Dict[str, Any]:
+        """Apply the model's own unembedding to every intermediate residual state.
+
+        This is the logit lens proper: take the hidden state after each block,
+        push it through the model's final layer norm and unembedding matrix, and
+        read off what token the model would predict if it stopped there. Nothing
+        about the result is assumed -- in particular the argmax at each layer can
+        and does disagree with the final layer, which is the interesting part.
+
+        Returns per-layer ``top_token``, ``top_logit``, Shannon ``entropy`` (in
+        nats, over the full vocabulary) and the residual ``norm``.
+
+        Raises `LiveUnavailable` without weights rather than reporting a
+        fabricated sweep. The previous implementation of the logit-lens pipeline
+        returned `expected if progress > 0.60 else " the"` -- the correct answer
+        hardcoded in for every layer past 60% depth, which made the sweep converge
+        by construction, with entropy from `3.5 * exp(-2 * layer / n)` and a
+        convergence layer of `int(n_layers * 0.65)` that is always the same
+        integer regardless of the model or the prompt.
+        """
+        if self.spec.mock_mode or self._model is None:
+            raise LiveUnavailable(
+                "logit_lens requires loaded weights: it is a forward-pass "
+                "measurement and has no fixture."
+            )
+
+        import torch
+
+        outputs = self._forward_with_hooks(prompt)
+        final_norm = self._model.transformer.ln_f
+        unembed = self._model.lm_head
+        final_logits = outputs.logits[0, -1, :]
+
+        def _entropy_and_top(logits):
+            # log_softmax, not softmax-then-log. GPT-2's intermediate states
+            # produce logit spans of ~70, and float32 softmax underflows roughly
+            # 50,000 of the 50,257 probabilities to exact zero. Taking log of a
+            # clamped zero and multiplying by that zero is a NaN waiting to
+            # happen; working in log space keeps the zeros finite.
+            logp = torch.log_softmax(logits, dim=-1)
+            entropy = float(-(logp.exp() * logp).sum())
+            top = int(torch.argmax(logits))
+            return entropy, top, float(logits[top])
+
+        layers: List[Dict[str, Any]] = []
+        with torch.no_grad():
+            # Every intermediate state goes through the lens proper: final layer
+            # norm, then unembed.
+            for index, hidden in enumerate(outputs.hidden_states[:-1]):
+                vector = hidden[0, -1, :]
+                entropy, top, top_logit = _entropy_and_top(unembed(final_norm(vector)))
+                layers.append({
+                    "layer": index,
+                    "top_token": self._tokenizer.decode([top]),
+                    "top_logit": round(top_logit, 4),
+                    "entropy": round(entropy, 4),
+                    "norm": round(float(vector.norm()), 4),
+                })
+
+            # The last entry is the model's own output, read from `logits`
+            # rather than recomputed. transformers collects the final hidden
+            # state into `hidden_states` before `ln_f` is applied in some
+            # versions and after it in others, so pushing it through the lens
+            # again can silently disagree with the real forward pass -- it did,
+            # by 84 logits. Taking the value the model actually produced makes
+            # the last row a genuine check on every row above it.
+            entropy, top, top_logit = _entropy_and_top(final_logits)
+            layers.append({
+                "layer": len(outputs.hidden_states) - 1,
+                "top_token": self._tokenizer.decode([top]),
+                "top_logit": round(top_logit, 4),
+                "entropy": round(entropy, 4),
+                "norm": round(float(outputs.hidden_states[-1][0, -1, :].norm()), 4),
+                "is_model_output": True,
+            })
+
+        return {
+            "prompt": prompt,
+            "provenance": "live",
+            "layers": layers,
+            "final_top_token": layers[-1]["top_token"],
         }
 
     def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:

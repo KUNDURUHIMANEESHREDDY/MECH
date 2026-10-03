@@ -90,11 +90,25 @@ class ValidationBenchmarkScheduler:
                             pipeline="ioi"),
         GoldenBenchmarkTask("bm_ind", "Induction Head Sequence Repeater", "GPT2-S", 0.940, 2100.0, 6.8,
                             pipeline="induction_heads"),
-        # No pipeline exists for these three, so they report NOT_RUN. Each
-        # previously produced `baseline * 0.995` and was scored PASS against a
-        # `baseline * 0.95` threshold, so the suite reported a 100% pass rate
-        # without running anything.
-        GoldenBenchmarkTask("bm_gt", "Greater-Than Comparative Circuit", "GPT2-M", 0.860, 1800.0, 5.4),
+        # Greater-than now has a real pipeline that measures whether the model
+        # performs the comparison at all before attempting to localise a
+        # circuit, and raises with the measured evidence if it does not. So this
+        # reports NOT_RUN *with a reason* instead of the vaguer "no pipeline
+        # exists" the arithmetic and SAE entries still get.
+        #
+        # target_model was "GPT2-M". The pipeline measures gpt2-small, so the
+        # declaration did not describe this system's measurement. Corrected to
+        # match; the published baseline is retained as reference data and is
+        # marked incomparable rather than silently rescored.
+        GoldenBenchmarkTask("bm_gt", "Greater-Than Comparative Circuit", "GPT2-S", 0.860, 1800.0, 5.4,
+                            pipeline="greater_than"),
+        # No pipeline exists for these two. Each previously produced
+        # `baseline * 0.995` and was scored PASS against a `baseline * 0.95`
+        # threshold, so the suite reported a 100% pass rate without running
+        # anything. Both now have pipeline modules that exist but raise: the
+        # arithmetic one returned hardcoded accuracies of 0.45 and 0.85 to every
+        # caller, and the SAE one drew its whole feature bank from a seeded RNG
+        # while claiming OpenWebText in its dataset manifest.
         GoldenBenchmarkTask("bm_arith", "Multi-Digit Arithmetic Circuit", "Llama3-8B", 0.910, 3400.0, 14.2),
         GoldenBenchmarkTask("bm_sae", "SAE Feature Dictionary Recovery", "GPT2-S", 0.895, 1500.0, 4.8),
     ]
@@ -253,6 +267,32 @@ class ValidationBenchmarkScheduler:
                     "Measured on live weights. The registry baseline is a "
                     "different quantity (mean attention to previous-token "
                     "copies under a different procedure)."
+                ),
+            }
+
+        if pipeline == "greater_than":
+            from backend.science.reproducibility.greater_than_pipeline import (
+                GreaterThanCircuitPipeline,
+            )
+            # Raises LiveUnavailable when the model does not perform the
+            # comparison, carrying the measured evidence. The caller's except
+            # path turns that into NOT_RUN with the reason intact.
+            result = GreaterThanCircuitPipeline(mock_mode=False).run()
+            metrics = result["observed_metrics"]
+            return {
+                "fidelity": metrics.get("mlp_importance_score"),
+                "runtime_ms": round((_time.perf_counter() - started) * 1000, 2),
+                # The published baseline was obtained on a different model and
+                # under a setup this harness does not reproduce, so no verdict is
+                # issued against it.
+                "baseline_is_comparable": False,
+                "reference_same_harness": None,
+                "reason": (
+                    "Measured on live weights. The dominant MLP layer was "
+                    f"derived from the measurement (layer "
+                    f"{metrics.get('dominant_layer')}); Hanna et al. report "
+                    "mid-layer concentration. The registry baseline comes from a "
+                    "different model and setup, so it is not rescored."
                 ),
             }
 

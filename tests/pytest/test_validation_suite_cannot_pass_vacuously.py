@@ -98,7 +98,37 @@ def test_every_benchmark_declares_whether_it_can_be_measured():
     # The two implemented ones are named; the rest are explicitly None.
     assert pipelines["bm_ioi"] == "ioi"
     assert pipelines["bm_ind"] == "induction_heads"
-    assert pipelines["bm_gt"] is None
+    # Greater-than now names a real pipeline. It measures whether the model
+    # performs the comparison at all and raises LiveUnavailable with the
+    # evidence if it does not, so bm_gt reports NOT_RUN with a measured reason
+    # rather than a fabricated fidelity.
+    assert pipelines["bm_gt"] == "greater_than"
+    # Arithmetic and SAE have no measurement of any kind. They must keep saying
+    # so explicitly -- this line previously read `bm_gt is None`, which pinned a
+    # specific state rather than the discipline the docstring describes, and so
+    # had to be rewritten the moment an implementation landed.
+    assert pipelines["bm_arith"] is None
+    assert pipelines["bm_sae"] is None
+
+
+def test_benchmarks_without_a_pipeline_have_no_module_returning_numbers():
+    """A None pipeline must not correspond to a module that invents a result.
+
+    `bm_arith` and `bm_sae` declare no measurement, but their modules exist. Both
+    used to return hardcoded values anyway -- 0.45/0.85 and a bank of RNG-drawn
+    features -- and `benchmark_runner` wrote those into reports. Declaring
+    `pipeline=None` was never sufficient on its own.
+    """
+    from science.reproducibility.arithmetic_pipeline import ArithmeticPipeline
+    from science.reproducibility.sae_pipeline import SAEReproductionPipeline
+
+    for pipeline in (ArithmeticPipeline(model_manager=None),
+                     SAEReproductionPipeline(mock_mode=False)):
+        with pytest.raises(Exception) as excinfo:
+            pipeline.run()
+        assert "not implemented" in str(excinfo.value).lower(), (
+            f"{type(pipeline).__name__} must refuse, not return a value"
+        )
 
 
 # ── The dashboard must not report a pass rate it cannot compute ────────────

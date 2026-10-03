@@ -31,6 +31,17 @@ class AttentionPattern:
     attn_entropy: float
 
 
+class LiveUnavailable(RuntimeError):
+    """No live model is available, so the measurement cannot be made.
+
+    Callers must fail closed on this rather than substituting a value. It lives
+    here, in the shared adapter layer, because both the model adapters and the
+    discovery layer need it -- defining it in either one inverted the import
+    direction. ``live_measure`` re-exports this name, so existing
+    ``except LiveUnavailable`` handlers are unaffected.
+    """
+
+
 @dataclass
 class PatchResult:
     original_logit: float
