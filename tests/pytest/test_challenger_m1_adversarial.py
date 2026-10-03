@@ -394,12 +394,35 @@ def test_windows_process_tree_termination():
         assert not is_pid_running(grandchild_pid), f"Grandchild PID {grandchild_pid} was orphaned!"
 
 
-def test_backend_graceful_shutdown_on_process_signal():
-    """Start an actual backend instance via subprocess on an ephemeral port (8019),
+def _free_port() -> int:
+    """Ask the OS for an unused port, then release it.
 
-    send a graceful shutdown signal (CTRL_BREAK_EVENT), and verify lifespan teardown.
+    The test used a hardcoded 8019. If a previous run's backend survived, or
+    anything else on the machine held the port, the health check below would be
+    answered by *that* process and the shutdown assertions would inspect
+    someone else's output.
     """
-    port = 8019
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def test_backend_graceful_shutdown_on_process_signal():
+    """Start a real backend, signal it, and verify lifespan teardown.
+
+    Two fixes for intermittent failure, neither of which is a retry:
+
+    * Output goes to a temp file rather than ``stdout=PIPE``. The previous
+      version piped stdout and then waited up to 45s for /health *without ever
+      draining the pipe*. Once the OS buffer (64KB on Windows) filled, the
+      server blocked on write, and the failure surfaced as ``stdout`` being
+      ``None`` or the shutdown never being logged. Under full-suite load, with
+      the heavy GPU tests competing for the machine, that buffer is far easier
+      to fill -- which is why this only failed when the whole suite ran.
+    * The port is allocated rather than hardcoded, so the health check cannot be
+      satisfied by a leftover process.
+    """
+    port = _free_port()
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{ROOT};{BACKEND_DIR}"
     env["PYTHONUNBUFFERED"] = "1"
@@ -418,30 +441,44 @@ def test_backend_graceful_shutdown_on_process_signal():
 
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
 
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(ROOT),
-        env=env,
-        creationflags=creationflags,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-
+    proc = None
+    log_path = None
     try:
+        with tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".log", delete=False, encoding="utf-8",
+            errors="replace",
+        ) as log_file:
+            log_path = log_file.name
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(ROOT),
+                env=env,
+                creationflags=creationflags,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+
         import urllib.request
-        deadline = time.time() + 45.0
+        deadline = time.time() + 60.0
         ready = False
         while time.time() < deadline:
+            if proc.poll() is not None:
+                break
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1.0) as resp:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/health", timeout=1.0
+                ) as resp:
                     if resp.status == 200:
                         ready = True
                         break
             except Exception:
                 time.sleep(0.5)
 
-        assert ready, "Backend failed to become healthy on ephemeral port within 30s"
+        assert ready, (
+            f"Backend failed to become healthy on port {port} within 60s"
+            + (f"; it exited with code {proc.returncode}. Output:\n{_read_log(log_path)}"
+               if proc.poll() is not None else "")
+        )
 
         # Send graceful shutdown signal
         if sys.platform == "win32":
@@ -449,7 +486,8 @@ def test_backend_graceful_shutdown_on_process_signal():
         else:
             proc.send_signal(signal.SIGTERM)
 
-        stdout, _ = proc.communicate(timeout=10.0)
+        proc.wait(timeout=15.0)
+        stdout = _read_log(log_path)
 
         assert "MECH Platform backend shutting down..." in stdout or "Shutting down" in stdout, (
             f"Expected shutdown logs in stdout, got:\n{stdout}"
@@ -458,9 +496,24 @@ def test_backend_graceful_shutdown_on_process_signal():
             f"Expected WAL checkpoint logs in stdout, got:\n{stdout}"
         )
     finally:
-        if proc.poll() is None:
+        if proc is not None and proc.poll() is None:
             proc.kill()
-            proc.wait()
+            proc.wait(timeout=5.0)
+        if log_path:
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
+
+
+def _read_log(path) -> str:
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return ""
 
 
 if __name__ == "__main__":

@@ -17,8 +17,7 @@
     "test:js:watch": "vitest",
     "test:py": "cd .. && pytest tests/pytest -q",
     "test:e2e": "playwright test",
-    "test": "npm run test:js && npm run test:py",
-    "lint": "eslint src/"
+    "test": "npm run test:js && npm run test:py"
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
