@@ -481,9 +481,15 @@ multi-template averaging, and a path-patching pass. The injection-recovery machi
 - [x] ~~The executor derived every result from the published reference value.~~ IOI and
       induction-heads now run their reproduction pipelines. Benchmarks without an implementation
       raise rather than returning a reference-derived score.
-- [ ] Still to do: the HTTP endpoint still requests 6 prompts where the pipeline default is 100
-      across eight frames. The CI on six prompts is wide enough that it says almost nothing about
-      the underlying rate — the Wilson interval on a 6-prompt IOI run spans roughly 44–97%.
+- [x] ~~Only 6 prompts were used.~~ **Already correct** — I had this wrong in an earlier draft of
+      this section. `n` is resolved as `n_samples or task.dataset_size`, and no caller anywhere
+      passes an `n_samples_override`, so every task uses its full `dataset_size` (IOI 100,
+      induction-heads 200, up to 500). The `6` came from a recorded result emitted by the
+      reference-derived path that has since been deleted, not from a live request.
+- [ ] Still to do: the CI is a Wilson interval over per-prompt booleans, which is the right
+      shape, but it is computed per task with **no pooling across seeds**. The pipeline exposes
+      `run_stability_audit(n_seeds=5)`; until a run reports across seeds rather than one sample,
+      a single 100-prompt draw is still one draw.
 
 ### 6. Implement or delete the stubs
 
@@ -493,13 +499,46 @@ remove them — a stub that returns `0.94` is worse than an honest `unavailable`
 
 ### 7. Frontend cleanup
 
-- Tailwind is registered in `vite.config.mts` but **no CSS file imports it**, so no utility
-  class resolves. `NeuralExplorerView.vue` and `TransformerExplorer.vue` are styled *entirely*
-  with utilities and have no `<style>` block — they currently render unstyled.
-- `frontend/desktop.css` is ~95 % dead (5 surviving class references).
-- ~28 of 34 files in `src/services/` are unreferenced; `react`, `react-dom`, `reactflow`,
-  `lucide-react`, `@vitejs/plugin-react` and `@vitejs/plugin-vue-jsx` are installed but unused.
-- `npm run lint` fails: `eslint` is not a dependency and no config exists.
+Measured, not estimated — the figures in earlier drafts of this section were wrong:
+
+- [x] ~~**Tailwind is registered but never loaded**, so two live routes rendered unstyled.~~
+      **Fixed.** `vite.config.mts` passed `tailwindcss()` to the plugin chain and `tailwindcss` was
+      a dependency, but **none of the three CSS files imported it**, so no utility class resolved.
+      `NeuralExplorerView.vue` and `TransformerExplorer.vue` are styled entirely with utilities and
+      declare **no `<style>` block of their own**, and both are reachable via
+      `App.vue` → `desktop/routeRegistry.ts` — so they were genuinely broken, not merely
+      unstyled-in-theory.
+
+      Imported theme + utilities into `src/styles.css`, but deliberately **not preflight**:
+      preflight globally resets margins, borders and heading sizes, and `styles.css` is 62KB of
+      hand-written design system carrying its own reset at lines 48–49 (`* { box-sizing: border-box }`,
+      `html, body, #root { margin: 0 }`). Loading preflight would have risked the whole app to fix
+      two views.
+
+      Verified rather than assumed: **232/232** class tokens across both views now resolve in the
+      built CSS (142+61 static, 21+8 from `:class` bindings, including arbitrary values such as
+      `bg-[var(--primary)]/40`); no preflight marker appears in the output; the existing reset
+      survives; `build:renderer` and `npm run test:js` both pass.
+- **A React-flavoured file inside the Vue app.** Every Vue component imports icons from
+  `lucide-vue-next`, but `panelRegistry.ts` imports `LucideIcon` and eight icon values from
+  `lucide-react`. Both packages are declared dependencies. The file is currently unreferenced, so
+  it does not break the build — but importing it would pull a second framework's icon components
+  into a Vue tree.
+- **Seven dead React/JSX files.** `useNeuronUMAP.ts`, `useLayerTensors.ts`, `useModel.ts`,
+  `LayoutManager.ts`, `useAppStore.ts`, `useSocietyStore.ts` and `panelRegistry.ts` — all
+  import from `react`; **none is imported by anything**. There are zero `.jsx`/`.tsx` files in the
+  project. `vite.config.mts` nonetheless registers `react()` and `vueJsx()`, and `react`,
+  `react-dom`, `reactflow`, `lucide-react`, `@vitejs/plugin-react`, `@vitejs/plugin-vue-jsx` and
+  `@testing-library/react` are all declared.
+- `src/services/`: **20 of 31** files unreferenced (not "28 of 34").
+- `src/desktop.css`: **28 % dead** — 47 of 65 classes are referenced (not "~95 % dead").
+- ~~`npm run lint` fails.~~ **Fixed** — the script claimed a check the repo could not perform
+  (`eslint` was neither a dependency nor configured) and CI never called it. Removed rather than
+  left failing. Wiring up a real linter needs a dependency, a config, and a baseline.
+
+Removing the React stack is the bulk of the cleanup, but it edits `package-lock.json` and the
+Electron build — and the Electron build has never completed (see §8), so there is no artifact to
+regression-test against. It is worth doing as its own change with the packaging work, not blind.
 
 ### 8. Packaging
 

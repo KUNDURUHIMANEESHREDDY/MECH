@@ -3,6 +3,26 @@
    Clean, minimal aesthetic with only black and white.
    ========================================================================== */
 
+/* Tailwind utilities, loaded without preflight.
+
+   `@tailwindcss/vite` is registered in vite.config.mts and `tailwindcss` is a
+   dependency, but until now nothing ever imported it, so no utility class
+   resolved anywhere in the app. Two live routes -- NeuralExplorerView.vue and
+   TransformerExplorer.vue, both reachable via App.vue -> desktop/routeRegistry.ts
+   -- are styled entirely with utilities and declare no <style> block of their
+   own, so they rendered completely unstyled.
+
+   Preflight is deliberately NOT imported. This file already carries its own
+   reset (`* { box-sizing: border-box }`, `html, body, #root { margin: 0 }`) and
+   is 62KB of hand-written design system; Tailwind's global preflight would
+   override margins, borders and list styling across the whole app, which is a
+   far larger blast radius than the two views being fixed. Importing theme +
+   utilities gives those views their classes without touching anything else.
+   The gate is the existing reset, not a preference: add preflight only if the
+   hand-written reset is retired first. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
 /* ── Tokens ───────────────────────────────────────────────────────── */
 :root {
   --bg: #ffffff;
