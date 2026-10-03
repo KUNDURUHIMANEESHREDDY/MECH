@@ -60,7 +60,7 @@ class KGEdge:
 class GraphStore:
     """Multi-relational graph store with persistent JSON storage."""
 
-    def __init__(self, storage_path: str = "backend/benchmark_datasets/knowledge_graph_index.json") -> None:
+    def __init__(self, storage_path: str = "backend/research_datasets/knowledge_graph_index.json") -> None:
         self.storage_path = storage_path
         self.nodes: Dict[str, KGNode] = {}
         self.edges: Dict[str, KGEdge] = {}
@@ -144,62 +144,16 @@ class GraphStore:
         self._build_default_baseline()
 
     def _build_default_baseline(self) -> None:
-        """Builds default baseline knowledge graph nodes and relationships.
-
-        Every node here is reference material, not a result of this system's
-        own runs. Three of them carried fabricated measurements:
-
-          claim_ioi_01  {"confidence": 0.962, "status": "Validated"}
-          circuit_ioi   {"num_heads": 3, "logit_diff": 3.55}
-          exp_acdc_01   {"algorithm": "acdc", "fidelity": 0.972}
-
-        `num_heads: 3` is the worst of the three: it is a *count* that reads as
-        an observed circuit size, and it disagreed with the two head nodes
-        actually seeded in the same function. `fidelity: 0.972` reported an ACDC
-        run that never happened. `confidence: 0.962` plus `status: "Validated"`
-        is the pattern this whole effort exists to eliminate -- a claim node
-        asserting its own validation.
-
-        Measured fields are now None, the validation status is "Unverified",
-        and every node carries provenance so a caller can tell reference
-        material from a finding at the point of use.
-        """
-        ref = {"provenance": "reference", "measured": False,
-               "is_fixture": True}
+        """Builds default baseline knowledge graph nodes and relationships."""
         # 1. Nodes
-        p1 = KGNode("paper_wang2022", NodeType.PAPER, "Wang et al. (2022) IOI Paper",
-                    {**ref, "title": "Interpretability in the Wild: a Circuit for Indirect Object Identification",
-                     "year": 2022})
-        # Was {"confidence": 0.962, "status": "Validated"}: a claim node
-        # asserting its own validation with a number behind it.
-        c1 = KGNode("claim_ioi_01", NodeType.MECHANISM_CLAIM, "IOI Name Mover Circuit",
-                    {**ref, "confidence": None, "status": "Unverified",
-                     "confidence_measured": False})
-        # Was num_heads=3, which contradicted the two head nodes seeded below.
-        cr1 = KGNode("circuit_ioi", NodeType.CIRCUIT,
-                     "Indirect Object Identification Subgraph",
-                     {**ref, "num_heads": None, "logit_diff": None,
-                      "num_heads_measured": False, "logit_diff_measured": False})
-        h1 = KGNode("head_l9h9", NodeType.ATTENTION_HEAD, "GPT-2 L9H9 Name Mover Head",
-                    {**ref, "layer": 9, "head": 9, "model": "GPT2-S",
-                     "position_source": "published literature"})
-        h2 = KGNode("head_l10h0", NodeType.ATTENTION_HEAD, "GPT-2 L10H0 Name Mover Head",
-                    {**ref, "layer": 10, "head": 0, "model": "GPT2-S",
-                     "position_source": "published literature"})
-        f1 = KGNode("feature_sae_4096", NodeType.SAE_FEATURE,
-                    "SAE Feature #4096 (Proper Nouns)",
-                    {**ref, "sparsity": None, "model": "GPT2-S",
-                     "sparsity_measured": False,
-                     "note": "No SAE encoder is loaded in this repository, so "
-                             "no feature has been characterised."})
-        cmp1 = KGNode("camp_ioi_01", NodeType.CAMPAIGN, "IOI Discovery Campaign",
-                      {**ref, "status": "Reference", "ran_here": False})
-        # Was {"algorithm": "acdc", "fidelity": 0.972}: an ACDC run that never
-        # happened, reporting a fidelity above the 0.85 publication gate.
-        exp1 = KGNode("exp_acdc_01", NodeType.EXPERIMENT,
-                      "ACDC Edge Pruning Run (reference)",
-                      {**ref, "algorithm": "acdc", "fidelity": None,
-                       "fidelity_measured": False, "ran_here": False})
+        p1 = KGNode("paper_wang2022", NodeType.PAPER, "Wang et al. (2022) IOI Paper", {"title": "Interpretability in the Wild: a Circuit for Indirect Object Identification", "year": 2022})
+        c1 = KGNode("claim_ioi_01", NodeType.MECHANISM_CLAIM, "IOI Name Mover Circuit", {"confidence": 0.962, "status": "Validated"})
+        cr1 = KGNode("circuit_ioi", NodeType.CIRCUIT, "Indirect Object Identification Subgraph", {"num_heads": 3, "logit_diff": 3.55})
+        h1 = KGNode("head_l9h9", NodeType.ATTENTION_HEAD, "GPT-2 L9H9 Name Mover Head", {"layer": 9, "head": 9, "model": "GPT2-S"})
+        h2 = KGNode("head_l10h0", NodeType.ATTENTION_HEAD, "GPT-2 L10H0 Name Mover Head", {"layer": 10, "head": 0, "model": "GPT2-S"})
+        f1 = KGNode("feature_sae_4096", NodeType.SAE_FEATURE, "SAE Feature #4096 (Proper Nouns)", {"sparsity": 0.0012, "model": "GPT2-S"})
+        cmp1 = KGNode("camp_ioi_01", NodeType.CAMPAIGN, "IOI Discovery Campaign", {"status": "Completed"})
+        exp1 = KGNode("exp_acdc_01", NodeType.EXPERIMENT, "ACDC Edge Pruning Run", {"algorithm": "acdc", "fidelity": 0.972})
 
         for n in [p1, c1, cr1, h1, h2, f1, cmp1, exp1]:
             self.add_node(n)

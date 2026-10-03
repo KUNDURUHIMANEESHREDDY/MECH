@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -326,23 +327,101 @@ class DesktopStorage:
             )
         return cursor.rowcount > 0
 
+    #: Hard ceiling on the walk, so a huge tree cannot stall the sidecar.
+    MAX_WORKSPACE_FILES = 10_000
+    #: Wall-clock budget for the walk. The file cap alone does not bound a
+    #: deep tree of empty directories.
+    MAX_WORKSPACE_SECONDS = 2.0
+
+    def _workspace_roots(self) -> list[Path]:
+        """Directories ``describe_workspace`` is allowed to inspect.
+
+        Defaults to the user's home directory, which is where the default
+        ``workspacePath`` setting points. Override with
+        ``MECH_WORKSPACE_ROOTS`` (os.pathsep-separated) to scope it further.
+        """
+        configured = os.environ.get("MECH_WORKSPACE_ROOTS", "")
+        roots = [entry.strip() for entry in configured.split(os.pathsep) if entry.strip()]
+        if not roots:
+            roots = [str(Path.home())]
+        resolved = []
+        for root in roots:
+            try:
+                resolved.append(Path(root).expanduser().resolve())
+            except OSError:
+                continue
+        return resolved
+
     def describe_workspace(self, path: str) -> dict[str, Any]:
-        workspace_path = self._require_path(path, "workspace path")
-        candidate = Path(workspace_path)
+        """Summarise a workspace directory, bounded to an allowed root.
+
+        The path arrives from the renderer, so it is contained before use:
+        without this, ``workspace.describe`` with ``{"path": "/"}`` walks the
+        whole filesystem and reports a file count for any directory, which is a
+        usable enumeration oracle. Containment also means a legitimate
+        ``..``-containing path is accepted only if it still lands in a root.
+        """
+        if not isinstance(path, str) or not path.strip():
+            raise StorageError("workspace path is required")
+
+        try:
+            candidate = Path(path).expanduser().resolve()
+        except (OSError, RuntimeError) as exc:
+            raise StorageError(f"workspace path is not resolvable: {exc}") from exc
+
+        roots = self._workspace_roots()
+        if not any(candidate == root or root in candidate.parents for root in roots):
+            raise StorageError(
+                f"'{candidate}' is outside the allowed workspace roots"
+            )
+
+        exists = candidate.exists()
+        is_directory = exists and candidate.is_dir()
         file_count = 0
-        if candidate.exists() and candidate.is_dir():
-            for child in candidate.rglob("*"):
-                if child.is_file():
-                    file_count += 1
-                    if file_count >= 10_000:
-                        break
+        count_capped = False
+
+        if is_directory:
+            file_count, count_capped = self._count_files_bounded(candidate)
 
         return {
-            "path": workspace_path,
-            "exists": candidate.exists(),
-            "name": candidate.name or workspace_path,
+            "path": str(candidate),
+            "exists": exists,
+            "isDirectory": is_directory,
+            "name": candidate.name or str(candidate),
             "fileCount": file_count,
+            "countCapped": count_capped,
         }
+
+    def _count_files_bounded(self, root: Path) -> tuple[int, bool]:
+        """Count files under ``root`` without following symlinks out of it.
+
+        Uses an explicit stack rather than ``rglob``: rglob materialises a Path
+        for every entry and follows directory symlinks, so a link pointing at
+        ``C:\\`` would be traversed. ``followlinks=False`` on the ``stat`` call
+        keeps the count inside the root the caller already authorised.
+        """
+        deadline = time.monotonic() + self.MAX_WORKSPACE_SECONDS
+        stack = [root]
+        count = 0
+        while stack:
+            if time.monotonic() > deadline:
+                return count, True
+            current = stack.pop()
+            try:
+                entries = list(os.scandir(current))
+            except (OSError, PermissionError):
+                continue
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=False):
+                        count += 1
+                        if count >= self.MAX_WORKSPACE_FILES:
+                            return count, True
+                except OSError:
+                    continue
+        return count, False
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)

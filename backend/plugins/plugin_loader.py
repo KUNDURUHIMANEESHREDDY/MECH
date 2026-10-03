@@ -71,20 +71,34 @@ class PluginLoader:
 
         return plugins
 
-    def load_from_path(self, dotted_module_path: str) -> MechPlugin:
-        """Import a plugin from an arbitrary dotted Python module path.
+    #: Only modules inside the MECH plugin SDK may be imported by this path.
+    #: ``load_from_path`` executes third-party code, so it is not a general
+    #: "import anything on sys.path" primitive.
+    ALLOWED_MODULE_PREFIX = "backend.plugins.library."
 
-        The module must expose a ``register()`` function returning a MechPlugin.
+    def load_from_path(self, dotted_module_path: str) -> MechPlugin:
+        """Import a bundled library plugin by dotted module path.
+
+        Restricted to ``backend.plugins.library.*``. A caller-supplied path
+        previously reached ``importlib.import_module`` with no validation, which
+        meant any importable module on ``sys.path`` — including a file an
+        attacker had dropped anywhere on the path — would be executed.
 
         Args:
-            dotted_module_path: e.g. ``mylab.ioi_extension``
+            dotted_module_path: e.g. ``backend.plugins.library.ioi_experiment_logger``
 
         Returns:
             Instantiated MechPlugin.
 
         Raises:
-            PluginLoadError: If the module cannot be found or is malformed.
+            PluginLoadError: If the module is outside the allowlist, cannot be
+                found, or is malformed.
         """
+        if not dotted_module_path.startswith(self.ALLOWED_MODULE_PREFIX):
+            raise PluginLoadError(
+                f"Module '{dotted_module_path}' is outside the plugin library; "
+                f"only {self.ALLOWED_MODULE_PREFIX}* may be loaded this way."
+            )
         try:
             module = importlib.import_module(dotted_module_path)
         except ModuleNotFoundError as exc:
@@ -98,6 +112,66 @@ class PluginLoader:
                 f"Module '{dotted_module_path}' has no register() → MechPlugin entry point."
             )
         return plugin
+
+    def load_from_file_sandboxed(self, filepath: str | Path) -> MechPlugin:
+        """Execute a plugin file under the sandbox, then bind it via register().
+
+        ``load_from_file`` uses ``importlib`` and therefore executes the file
+        with the backend process's full privileges, which makes the install-time
+        AST scan the *only* gate. This variant re-runs the AST gate and then
+        executes under a restricted global namespace, so a bypass that slipped
+        past installation still has no ``__builtins__`` to work with.
+
+        Args:
+            filepath: Absolute path to a single plugin .py file.
+
+        Returns:
+            Instantiated MechPlugin.
+
+        Raises:
+            PluginLoadError: If the file is missing, fails the AST gate, or
+                does not yield a MechPlugin from register().
+        """
+        from .plugin_sandbox import PluginSandbox, SecurityViolation
+
+        filepath = Path(filepath)
+        if not filepath.is_file():
+            raise PluginLoadError(f"Plugin file not found: {filepath}")
+
+        try:
+            source = filepath.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise PluginLoadError(
+                f"Plugin source is unreadable: {filepath} ({exc})") from exc
+
+        try:
+            # __file__ is supplied so a plugin can resolve data files next to
+            # its own source. The sandbox forbids referencing it dynamically
+            # (it is not in FORBIDDEN_ATTRS), but the name must exist or any
+            # plugin that uses it raises NameError at import time.
+            namespace = PluginSandbox.execute(source, {"__file__": str(filepath)})
+        except SecurityViolation as exc:
+            raise PluginLoadError(
+                f"Plugin '{filepath}' rejected by sandbox: {exc}") from exc
+
+        register_fn = namespace.get("register")
+        if register_fn is None or not callable(register_fn):
+            raise PluginLoadError(
+                f"Plugin file '{filepath}' has no register() → MechPlugin entry point."
+            )
+
+        try:
+            instance = register_fn()
+        except Exception as exc:  # noqa: BLE001
+            raise PluginLoadError(
+                f"register() in '{filepath}' raised: {exc}") from exc
+
+        if not isinstance(instance, MechPlugin):
+            raise PluginLoadError(
+                f"register() in '{filepath}' returned {type(instance)!r}, "
+                f"expected a MechPlugin subclass."
+            )
+        return instance
 
     def load_from_file(self, filepath: str | Path) -> MechPlugin:
         """Import a plugin from an absolute .py file path (no package required).

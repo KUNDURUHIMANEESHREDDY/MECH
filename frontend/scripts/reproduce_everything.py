@@ -24,7 +24,7 @@ import time
 sys.path.insert(0, os.getcwd())
 
 from backend.benchmarks.benchmark_runner import BenchmarkRunner, ExecutionMode
-from backend.benchmark_datasets.dataset_manager import DatasetManager
+from backend.research_datasets.dataset_manager import DatasetManager
 
 def main():
     parser = argparse.ArgumentParser(description="One-Click Reproduction Suite")
@@ -39,7 +39,7 @@ def main():
 
     # 1. Dataset Verification
     print("\n[1/4] Verifying Golden Datasets...")
-    manager = DatasetManager(data_dir="backend/benchmark_datasets")
+    manager = DatasetManager(data_dir="backend/research_datasets")
     try:
         datasets = manager.list_datasets()
         print(f"  - Found {len(datasets)} validated datasets.")

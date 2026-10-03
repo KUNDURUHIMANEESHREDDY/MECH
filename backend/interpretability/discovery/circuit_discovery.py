@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.science.models.adapter_base import ModelAdapter
 from .algorithms import get_algorithm
-from backend.benchmark_datasets.dataset_manager import DatasetManager
+from backend.research_datasets.dataset_manager import DatasetManager
 
 
 class CircuitDiscoveryEngine:
@@ -16,10 +16,13 @@ class CircuitDiscoveryEngine:
 
     def __init__(self, adapter: Optional[ModelAdapter] = None) -> None:
         self.adapter = adapter
-        # Point at the benchmark datasets directory relative to this file
+        # Point at the research datasets directory relative to this file.
+        # Renamed from "datasets" to "research_datasets": a backend/datasets/
+        # package shadowed HuggingFace's `datasets` whenever backend/ was on
+        # sys.path, which is how the desktop app launches the backend.
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         self.dataset_manager = DatasetManager(
-            os.path.join(base_dir, "benchmark_datasets"))
+            os.path.join(base_dir, "research_datasets"))
 
     def discover_circuit(self, dataset_name: str = "ioi", prompt_id: str = "ioi_0001", algorithm_name: str = "acdc") -> Dict[str, Any]:
         """Discovers a circuit using the specified registered algorithm and dataset."""

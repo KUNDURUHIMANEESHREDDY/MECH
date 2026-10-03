@@ -1,15 +1,25 @@
 'use strict';
 
-// The Python backend is an HTTP FastAPI server on :8000 (prefix /api/v1).
-// All handlers proxy to it; the old JSON-lines stdio sidecar no longer exists.
+// The Python backend is an HTTP FastAPI server on :8000. All handlers proxy to
+// it; the old JSON-lines stdio sidecar no longer exists.
+//
+// The prefix is /api. It was /api/v1, which the backend never served: main.py
+// mounts the dispatcher at /api (and an optional v2 at /api/v2), so every
+// proxied call 404'd. electron/main.js uses 127.0.0.1 rather than localhost to
+// avoid IPv6 name resolution failing on Windows.
 
-const BACKEND = 'http://localhost:8000/api/v1';
+const BACKEND = 'http://127.0.0.1:8000/api';
 
 async function callBackend(method, payload = {}) {
+  // The body must be the payload itself, not {method, payload}. The dispatcher
+  // endpoints declare `payload: Dict[str, Any]`, which FastAPI binds as the
+  // request body, so a wrapped envelope made payload.get("prompt") return ""
+  // and every field silently fall back to its default. Endpoints that take no
+  // body (ping, runtime/status) ignore it either way.
   const res = await fetch(`${BACKEND}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ method, payload }),
+    body: JSON.stringify(payload ?? {}),
   });
   if (!res.ok) throw new Error(`backend ${method} -> HTTP ${res.status}`);
   const json = await res.json();

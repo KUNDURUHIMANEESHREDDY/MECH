@@ -17,6 +17,7 @@ example under ``backend/plugins/library/``. There is no remote install path.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -27,6 +28,7 @@ from .plugin_hooks import PluginHookBus
 from .plugin_loader import PluginLoader, PluginLoadError
 from .plugin_manager import PluginManager
 from .plugin_registry import PluginNotFoundError, PluginRegistry
+from .runner import start_remote_plugin, stop_remote_plugin
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{1,63}$")
 _SAMPLE_PREFIX = "sample:"
@@ -61,10 +63,18 @@ def _read_source_dir(directory: Path) -> tuple[Dict[str, Any], str]:
         p for p in directory.glob("*.py")
         if p.is_file() and p.name != "manifest.json"
     )
+    base = directory.resolve()
     entry = manifest.get("entry")
     if isinstance(entry, str) and entry.strip():
-        chosen = directory / entry.strip()
-        if not chosen.is_file():
+        # ``entry`` is attacker-controlled manifest data. Resolve it and
+        # require containment, so ``../`` or an absolute path cannot read a
+        # .py file outside the plugin directory.
+        chosen = (base / entry.strip()).resolve()
+        if not chosen.is_relative_to(base):
+            raise ValueError(
+                "manifest 'entry' must name a .py file inside the plugin directory"
+            )
+        if chosen.suffix != ".py" or not chosen.is_file():
             raise ValueError(f"manifest entry '{entry}' was not found")
     elif len(candidates) == 1:
         chosen = candidates[0]
@@ -81,6 +91,25 @@ def _read_source_dir(directory: Path) -> tuple[Dict[str, Any], str]:
         raise ValueError("plugin source must define a register() entry point")
     manifest["name"] = name
     return manifest, source
+
+
+def _trusted_roots() -> list:
+    """Directories a plugin may be installed from.
+
+    The bundled ``library/`` is always trusted. Additional roots must be opted
+    into with ``MECH_PLUGIN_TRUSTED_ROOTS`` (os.pathsep-separated), so a plugin
+    cannot be sourced from an arbitrary location the operator never sanctioned.
+    """
+    roots = [_library_dir().resolve()]
+    configured = os.environ.get("MECH_PLUGIN_TRUSTED_ROOTS", "")
+    for entry in configured.split(os.pathsep):
+        entry = entry.strip()
+        if entry:
+            try:
+                roots.append(Path(entry).expanduser().resolve())
+            except OSError:
+                continue
+    return roots
 
 
 def _resolve_source(source: str) -> Path:
@@ -100,6 +129,15 @@ def _resolve_source(source: str) -> Path:
     candidate = Path(raw).expanduser().resolve()
     if not candidate.is_dir():
         raise ValueError(f"'{raw}' is not an existing local directory.")
+    # Containment: only the bundled library and explicitly trusted roots may
+    # be installed from. Without this, POST /api/plugins/install could read a
+    # manifest.json and a .py file from any directory the backend can see.
+    if not any(root == candidate or root in candidate.parents
+               for root in _trusted_roots()):
+        raise ValueError(
+            f"'{candidate}' is not a trusted plugin source. Add its parent to "
+            f"MECH_PLUGIN_TRUSTED_ROOTS to allow it."
+        )
     return candidate
 
 
@@ -111,6 +149,9 @@ class PluginService:
         self._loader = PluginLoader()
         self._registry = PluginRegistry.global_instance()
         self._bus: Optional[PluginHookBus] = None
+        # plugin_id -> (proxy, worker process), so disable/uninstall can
+        # actually reap the worker instead of leaking one per enable cycle.
+        self._workers: Dict[str, Any] = {}
 
     # -- runtime ------------------------------------------------------
     def bus(self) -> PluginHookBus:
@@ -119,10 +160,18 @@ class PluginService:
         return self._bus
 
     def _load_enabled(self, name: str) -> MechPlugin:
+        """Load an installed plugin and register it.
+
+        The plugin executes in a separate worker process bounded by OS-level
+        resource limits (see :mod:`backend.plugins.limits`). The returned object
+        is a :class:`~backend.plugins.proxy.RemotePluginProxy`, which satisfies
+        the ``MechPlugin`` interface by forwarding each hook over a JSON channel.
+        Plugin code never runs in the backend process.
+        """
         info = self._manager.registry.get(name)
         if info is None:
             raise ValueError(f"No installed plugin named '{name}'.")
-        plugin = self._loader.load_from_file(info["path"])
+        plugin = start_remote_plugin(info["path"])
         manifest = plugin.manifest
         # Pin the SDK plugin_id on first load; later loads must present the
         # same id, so a swapped-in file cannot silently take another name.
@@ -136,6 +185,9 @@ class PluginService:
             info["plugin_id"] = manifest.plugin_id
             self._manager.save_registry()
         self._registry.register(plugin, allow_override=True)
+        # start_remote_plugin returns the proxy; the worker Popen is tracked
+        # separately so _unregister_runtime can terminate it.
+        self._workers[name] = (plugin, getattr(plugin, "_proc", None))
         return plugin
 
     def restore_enabled(self) -> List[str]:
@@ -229,16 +281,25 @@ class PluginService:
 
     def _unregister_runtime(self, name: str) -> None:
         plugin_id = self._runtime_id(name)
+        removed = False
         if plugin_id:
             try:
                 self._registry.unregister(plugin_id)
-                return
+                removed = True
             except PluginNotFoundError:
                 pass
-        try:
-            self._registry.unregister(name)
-        except PluginNotFoundError:
-            pass
+        if not removed:
+            try:
+                self._registry.unregister(name)
+            except PluginNotFoundError:
+                pass
+        # Terminate the worker. Registry.unregister calls on_unload over the
+        # channel, then the process itself must be reaped or every enable cycle
+        # leaks a worker.
+        worker = self._workers.pop(name, None)
+        if worker is not None:
+            proxy, proc = worker
+            stop_remote_plugin(proxy, proc)
 
     def disable(self, name: str) -> Dict[str, Any]:
         with _lock:

@@ -14,13 +14,13 @@ import json
 # Ensure project root is in path
 sys.path.insert(0, os.getcwd())
 
-from backend.benchmark_datasets.dataset_manager import DatasetManager
-from backend.benchmark_datasets.dataset_diff_engine import DatasetDiffEngine
-from backend.benchmark_datasets.dataset_exporter import DatasetExporter
+from backend.research_datasets.dataset_manager import DatasetManager
+from backend.research_datasets.dataset_diff_engine import DatasetDiffEngine
+from backend.research_datasets.dataset_exporter import DatasetExporter
 
 def run_audit():
     print("Starting Phase 39.13: Dataset Evolution & Bundle Audit...")
-    manager = DatasetManager(data_dir="backend/benchmark_datasets")
+    manager = DatasetManager(data_dir="backend/research_datasets")
     diff_engine = DatasetDiffEngine()
     exporter = DatasetExporter()
 

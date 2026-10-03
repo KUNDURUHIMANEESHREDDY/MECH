@@ -17,7 +17,7 @@ sys.path.insert(0, os.getcwd())
 
 from backend.science.models.adapter_registry import ModelAdapterRegistry
 from backend.science.reproducibility.scientific_validator import ScientificValidator
-from backend.benchmark_datasets.dataset_manager import DatasetManager
+from backend.research_datasets.dataset_manager import DatasetManager
 
 def run_audit():
     print("Starting Scientific Reproducibility Audit (v39.8)...")
@@ -25,7 +25,7 @@ def run_audit():
     # 1. Initialize Engines
     registry = ModelAdapterRegistry()
     validator = ScientificValidator()
-    ds_manager = DatasetManager(data_dir="backend/benchmark_datasets")
+    ds_manager = DatasetManager(data_dir="backend/research_datasets")
 
     # 2. Load Immutable Dataset
     print("\n[1/5] Loading Golden Dataset (Triple-SHA Verification)...")

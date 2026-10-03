@@ -47,7 +47,7 @@ class TransformerLensEnvironmentError(TransformerLensUnavailable):
 
     A broken or incomplete environment rather than a version problem. This was
     once routinely caused by MECH's own ``backend/datasets/`` package shadowing
-    HuggingFace ``datasets``; that package is now ``backend/benchmark_datasets/``
+    HuggingFace ``datasets``; that package is now ``backend/research_datasets/``
     and the shadowing is fixed.
     """
 
@@ -99,7 +99,7 @@ def resolve_hooked_transformer() -> Any:
         # Note: MECH's dataset package used to be named `backend/datasets/`,
         # which shadowed HuggingFace `datasets` whenever `backend/` was on
         # sys.path and surfaced here as "No module named 'datasets.arrow_dataset'".
-        # That package is now `backend/benchmark_datasets/`, so this specific
+        # That package is now `backend/research_datasets/`, so this specific
         # cause is fixed; a missing `datasets` now means the real dependency is
         # absent.
         raise TransformerLensEnvironmentError(

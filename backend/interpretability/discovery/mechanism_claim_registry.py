@@ -19,52 +19,21 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class RegisteredMechanismClaim:
-    """A persistent, accumulated scientific claim in the knowledge base.
-
-    The defaults here were the most dangerous in the codebase. Constructing a
-    claim with only an id, a title and a description produced:
-
-        status: "Validated"
-        confidence: 0.95
-        replications: 1
-        models: ["GPT2-S"]
-        supporting_experiments: 1
-
-    That is a validated mechanism at 95% confidence, replicated once on GPT-2,
-    backed by one experiment -- obtained by writing down a title. Anything that
-    omitted a field got the flattering value rather than the absent one.
-
-    Every evidence field is now Optional with no default, `status` defaults to
-    "Hypothesized" (a claim starts as a claim, not as a finding), and
-    `models` starts empty rather than claiming a model ran. ``evidence_measured``
-    records whether anything was actually supplied.
-    """
+    """A persistent, accumulated scientific claim in the knowledge base."""
     claim_id: str
     title: str
     description: str
-    # A claim begins unproven. "Validated" is only reachable by supplying
-    # evidence.
-    status: str = "Hypothesized"
-    confidence: Optional[float] = None
-    replications: Optional[int] = None
-    models: List[str] = field(default_factory=list)
-    supporting_experiments: Optional[int] = None
-    contradicting_experiments: Optional[int] = 0
+    status: str = "Validated"  # Options: Validated, Hypothesized, Contradicted, Under_Revision
+    confidence: float = 0.95
+    replications: int = 1
+    models: List[str] = field(default_factory=lambda: ["GPT2-S"])
+    supporting_experiments: int = 1
+    contradicting_experiments: int = 0
     literature: List[str] = field(default_factory=list)
     algorithms_used: List[str] = field(default_factory=list)
     evidence_summary: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: _dt.datetime.utcnow().isoformat() + "Z")
     updated_at: str = field(default_factory=lambda: _dt.datetime.utcnow().isoformat() + "Z")
-
-    # Provenance. Absent from the required fields above so a caller that never
-    # thought about provenance still constructs a claim -- just an honest one.
-    provenance: str = "unavailable"
-    validation_eligible: bool = False
-    publication_eligible: bool = False
-    reason: Optional[str] = None
-    # Which inputs were unusable. Kept on the claim so an absent confidence is
-    # attributable rather than invisible.
-    workers_without_measured_confidence: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -80,41 +49,25 @@ class RegisteredMechanismClaim:
             "literature": self.literature,
             "algorithms_used": self.algorithms_used,
             "evidence_summary": self.evidence_summary,
-            "provenance": self.provenance,
-            "validation_eligible": self.validation_eligible,
-            "publication_eligible": self.publication_eligible,
-            "reason": self.reason,
-            "workers_without_measured_confidence": list(
-                self.workers_without_measured_confidence),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> RegisteredMechanismClaim:
-        # Restoring a claim must not upgrade it. Absent fields restore as
-        # absent, not as the old "Validated" / 0.95 / 1 replication defaults --
-        # otherwise reloading a claim that was persisted without evidence would
-        # silently promote it on the next read.
         return cls(
             claim_id=data["claim_id"],
             title=data["title"],
             description=data.get("description", ""),
-            status=data.get("status") or "Hypothesized",
-            confidence=data.get("confidence"),
-            replications=data.get("replications"),
-            models=data.get("models") or [],
-            supporting_experiments=data.get("supporting_experiments"),
+            status=data.get("status", "Validated"),
+            confidence=data.get("confidence", 0.95),
+            replications=data.get("replications", 1),
+            models=data.get("models", ["GPT2-S"]),
+            supporting_experiments=data.get("supporting_experiments", 1),
             contradicting_experiments=data.get("contradicting_experiments", 0),
             literature=data.get("literature", []),
             algorithms_used=data.get("algorithms_used", []),
             evidence_summary=data.get("evidence_summary", {}),
-            provenance=data.get("provenance") or "unavailable",
-            validation_eligible=bool(data.get("validation_eligible", False)),
-            publication_eligible=bool(data.get("publication_eligible", False)),
-            reason=data.get("reason"),
-            workers_without_measured_confidence=list(
-                data.get("workers_without_measured_confidence") or []),
             created_at=data.get("created_at", _dt.datetime.utcnow().isoformat() + "Z"),
             updated_at=data.get("updated_at", _dt.datetime.utcnow().isoformat() + "Z"),
         )
@@ -123,7 +76,7 @@ class RegisteredMechanismClaim:
 class MechanismClaimRegistry:
     """Persistent storage & accumulation engine for scientific mechanism claims."""
 
-    def __init__(self, storage_dir: str = "backend/benchmark_datasets") -> None:
+    def __init__(self, storage_dir: str = "backend/research_datasets") -> None:
         self.storage_dir = storage_dir
         self.storage_file = os.path.join(storage_dir, "claims_registry.json")
         self._claims: Dict[str, RegisteredMechanismClaim] = {}

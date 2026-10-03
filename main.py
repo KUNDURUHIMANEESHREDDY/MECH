@@ -14,6 +14,7 @@ Run either of these; both now serve the same application:
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -31,10 +32,19 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
     )
-    logger.info("Starting MECH Platform backend on http://127.0.0.1:8000 ...")
+
+    # Loopback only. This API has no authentication and exposes plugin
+    # install/enable, so binding 0.0.0.0 put it on the LAN for anyone who could
+    # reach the port. MECH_BIND_HOST makes the wider bind a deliberate choice
+    # (containers, shared dev machines) rather than an accident.
+    #
+    # Adopted from security/plugin-and-path-hardening, which added the env
+    # override; the loopback default and the shim above are from this branch.
+    host = os.environ.get("MECH_BIND_HOST", "127.0.0.1")
+    logger.info("Starting MECH Platform backend on http://%s:8000 ...", host)
     uvicorn.run(
         "backend.main:app",
-        host="127.0.0.1",
+        host=host,
         port=8000,
         reload=False,
         timeout_keep_alive=600,

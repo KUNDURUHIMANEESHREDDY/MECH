@@ -228,20 +228,20 @@ def test_compat_probe_detects_a_4x_install():
 
 
 def test_backend_datasets_shadows_huggingface_datasets():
-    """Guard the package-name collision fixed by the benchmark_datasets rename.
+    """Guard the package-name collision fixed by the research_datasets rename.
 
     A ``backend/datasets/`` package would be importable as the top-level name
     ``datasets`` whenever ``backend/`` is on sys.path, which is exactly what
     tests/pytest/conftest.py does. Any dependency that does ``import datasets``
     -- including transformer-lens -- would then resolve to MECH's package
     instead of HuggingFace's, which hides the compat probe rather than failing
-    it. The package now lives at ``backend/benchmark_datasets/``.
+    it. The package now lives at ``backend/research_datasets/``.
     """
     import importlib.util
 
     assert not (REPO_ROOT / "backend" / "datasets").exists(), (
         "backend/datasets/ was restored; it shadows HuggingFace datasets. "
-        "Use backend/benchmark_datasets/ instead."
+        "Use backend/research_datasets/ instead."
     )
 
     spec = importlib.util.find_spec("datasets")

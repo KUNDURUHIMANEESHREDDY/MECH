@@ -12,12 +12,23 @@ seaborn>=0.12.0
 pandas>=2.0.0
 
 # ML / Interpretability
-# UPPER BOUNDS ARE LOAD-BEARING. transformer-lens 4.0 removed HookedTransformer,
-# which three code paths depend on (backend/interpretability/gpt2_model.py,
-# gpt2_steps.py, backend/science/models/transformer_lens_adapter.py).
-# transformer-lens 2.x in turn declares `transformers>=4.57` with no upper
-# bound, so transformers must be capped here or pip will happily pair 2.x with
-# an incompatible 5.x. Verified working combination:
+#
+# UPPER BOUNDS ARE LOAD-BEARING. transformer-lens 4.0 removed HookedTransformer
+# outright (replaced by TransformerBridge), and 16 call sites across backend/
+# use the 2.x API -- HookedTransformer.from_pretrained, run_with_cache,
+# run_with_hooks, hook_z. With an unbounded ">=2.0.0" a clean install resolved
+# to 4.x and every neuron-inspection import failed with:
+#     ImportError: cannot import name 'HookedTransformer' from 'transformer_lens'
+# Migrating to the v4 API is real work on the causal-intervention core and wants
+# its own change; this pin restores a working install without touching that code.
+#
+# The transformers bound is also load-bearing, in the other direction:
+# transformer-lens 2.x declares `transformers>=4.57` with no upper bound, so
+# without `<5.0` pip will happily pair tl 2.x with an incompatible 5.x. (That
+# half was found on this branch; the transformer-lens half was found
+# independently on security/plugin-and-path-hardening.)
+#
+# Verified working combination:
 #   torch 2.14.0+cu126 | transformers 4.57.6 | transformer-lens 2.18.0
 # `backend/interpretability/tl_compat.py` turns a bad install into an
 # actionable error instead of a bare AttributeError.

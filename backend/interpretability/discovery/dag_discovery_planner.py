@@ -28,7 +28,7 @@ from backend.science.models.adapter_base import ModelAdapter
 from .algorithms import get_algorithm
 from .algorithms.base_algorithm import DiscoveryReport
 from .discovery_planner import ResearchGoal, MechanismClaim
-from backend.benchmark_datasets.dataset_manager import DatasetManager
+from backend.research_datasets.dataset_manager import DatasetManager
 
 
 @dataclass
@@ -84,7 +84,7 @@ class DynamicDAGPlanner:
 
     def __init__(self, adapter: Optional[ModelAdapter] = None, dataset_manager: Optional[DatasetManager] = None) -> None:
         self.adapter = adapter
-        self.dataset_manager = dataset_manager or DatasetManager("backend/benchmark_datasets")
+        self.dataset_manager = dataset_manager or DatasetManager("backend/research_datasets")
 
     def build_dag(self, goal: ResearchGoal) -> DynamicDiscoveryDAG:
         """Constructs an optimal DAG based on node prerequisites and Expected Information Gain."""

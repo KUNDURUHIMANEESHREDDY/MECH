@@ -103,7 +103,7 @@ class ResearchCampaign:
 class ResearchCampaignManager:
     """Persistent Manager & Scientist Workspace Service managing research campaigns."""
 
-    def __init__(self, storage_dir: str = "backend/benchmark_datasets/campaigns") -> None:
+    def __init__(self, storage_dir: str = "backend/research_datasets/campaigns") -> None:
         self.storage_dir = storage_dir
         self.storage_file = os.path.join(storage_dir, "campaigns_index.json")
         self._campaigns: Dict[str, ResearchCampaign] = {}
