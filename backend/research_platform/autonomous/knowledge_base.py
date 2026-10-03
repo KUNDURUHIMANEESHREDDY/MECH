@@ -40,7 +40,20 @@ class KnowledgeBaseEngine:
             },
         ]
 
-    def store_fact(self, entity: str, prop: str, value: Any, confidence: float = 0.9) -> Dict[str, Any]:
+    def store_fact(self, entity: str, prop: str, value: Any, confidence: float | None = None) -> Dict[str, Any]:
+        """Store a fact about the world.
+
+        `confidence` defaults to None, not 0.9. Storing a fact used to assert
+        0.9 confidence in it for any caller that did not supply a value, which
+        is the common case for a fact recorded as a side effect of something
+        else happening.
+
+        Note that `confidence` describes how much the *fact* is believed. It is
+        not a substitute for the fact being measured, and a high value on an
+        invented fact is the worst case rather than the best: the one production
+        caller passed `confidence=0.95` for a hardcoded neuron, which is fixed
+        separately.
+        """
         fact = {
             "id": f"fact_{len(self.facts) + 1}",
             "entity": entity,

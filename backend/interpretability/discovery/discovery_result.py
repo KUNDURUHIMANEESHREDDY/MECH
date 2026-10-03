@@ -1,6 +1,13 @@
 """Standardized DiscoveryResult DTO.
 
 Common data transfer object returned by all autonomous discovery algorithms.
+
+`confidence` and `uncertainty` default to None rather than 0.90 / 0.10. The old
+pair was self-consistent -- uncertainty was exactly `1 - confidence` -- which
+made it look deliberate rather than invented, but constructing a discovery
+without measuring it still asserted 0.90 confidence in it. A caller that omitted
+the arguments got a DTO claiming to be 90% sure of a discovery nobody had
+measured. None means unmeasured, and is distinguishable from a measured 0.90.
 """
 
 from __future__ import annotations
@@ -18,8 +25,8 @@ class DiscoveryResultDTO:
         discovery_type: str,
         title: str,
         evidence: List[Dict[str, Any]],
-        confidence: float = 0.90,
-        uncertainty: float = 0.10,
+        confidence: float | None = None,
+        uncertainty: float | None = None,
         provenance: Dict[str, Any] | None = None,
         artifacts: List[str] | None = None,
         related_features: List[int] | None = None,

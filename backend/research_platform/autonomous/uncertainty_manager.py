@@ -51,18 +51,53 @@ class UncertaintyManagerEngine:
 
     def evaluate_uncertainty(
         self,
-        confidence_score: float = 0.92,
+        confidence_score: float | None = None,
         uncertainty_interval: List[float] | None = None,
-        sample_size: int = 5,
-        variance: float = 0.02,
+        sample_size: int | None = None,
+        variance: float | None = None,
         custom_policy: UncertaintyPolicy | Dict[str, Any] | None = None,
         evidence_missing: bool = False,
     ) -> Dict[str, Any]:
-        pol = custom_policy if isinstance(custom_policy, UncertaintyPolicy) else (UncertaintyPolicy.from_dict(custom_policy) if custom_policy else self.policy)
-        interval = uncertainty_interval or [0.88, 0.95]
-        interval_width = round(interval[1] - interval[0], 4)
+        """Apply the threshold policy to a measurement.
 
-        if evidence_missing:
+        Every input defaults to None, meaning *not supplied*. They previously
+        defaulted to plausible values -- `confidence_score=0.92`,
+        `uncertainty_interval=[0.88, 0.95]`, `sample_size=5`, `variance=0.02` --
+        and with all four defaults the branch chain reached:
+
+            0.92 >= publication_confidence (0.85)
+            interval width 0.07 <= max_interval_width (0.15)
+            -> "Enough evidence" / "Publish"
+
+        So calling this method with no arguments at all returned a publish
+        decision on four invented numbers. That is the exact outcome the
+        `evidence_missing` branch exists to prevent, reachable simply by omitting
+        arguments -- and the four defaults were individually too small to look
+        wrong in review while composing into a confident publication.
+
+        Omitting any input now routes to the same missing-evidence branch, so
+        absence cannot be read as confidence. Note the policy thresholds
+        themselves (`publication_confidence=0.85`, `rejection_confidence=0.60`)
+        are deliberately left alone: those are decision rules in a class
+        documented as "threshold policy", not claims about the world.
+
+        Callers must pass what they measured. The production caller
+        (`ai_scientist_engine`) already passes all four explicitly.
+        """
+        pol = custom_policy if isinstance(custom_policy, UncertaintyPolicy) else (UncertaintyPolicy.from_dict(custom_policy) if custom_policy else self.policy)
+        interval = list(uncertainty_interval) if uncertainty_interval else None
+        interval_width = (
+            round(interval[1] - interval[0], 4) if interval and len(interval) >= 2 else None
+        )
+        missing = (
+            evidence_missing
+            or confidence_score is None
+            or interval_width is None
+            or sample_size is None
+            or variance is None
+        )
+
+        if missing:
             # Validation returned nothing usable. Absence of evidence is not
             # evidence of absence, so neither reject nor publish: the correct
             # response is to go and gather evidence.
@@ -75,11 +110,15 @@ class UncertaintyManagerEngine:
             planner_request = {
                 "target": "planner",
                 "reason": "Validation returned no usable confidence evidence",
-                "recommended_additional_samples": max(1, pol.min_samples - sample_size),
+                "recommended_additional_samples": max(1, pol.min_samples - (sample_size or 0)),
                 "priority": priority,
                 "expected_information_gain": info_gain,
                 "estimated_compute_gpu_hours": est_compute,
             }
+        # Everything below this point is only reachable when `missing` is False,
+        # which guarantees confidence_score, interval_width, sample_size and
+        # variance are all supplied. The comparisons are therefore safe even
+        # though the annotations admit None.
         elif confidence_score < pol.rejection_confidence:
             decision = "Reject hypothesis"
             action = "Reject"
@@ -145,7 +184,7 @@ class UncertaintyManagerEngine:
             "confidence_score": confidence_score,
             "uncertainty_interval": interval,
             "interval_width": interval_width,
-            "evidence_missing": bool(evidence_missing),
+            "evidence_missing": bool(missing),
             "decision": decision,
             "action": action,
             "priority": priority,

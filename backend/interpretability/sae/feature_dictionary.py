@@ -28,7 +28,12 @@ class SAEFeature:
     top_examples: List[Dict[str, Any]] = field(default_factory=list)
     neuronpedia_url: Optional[str] = None
     provenance: Dict[str, Any] = field(default_factory=dict)
-    confidence: float = 1.0
+    # None, not 1.0. The other quantitative fields on this dataclass
+    # (`firing_freq`, `max_activation`) correctly default to 0.0, and this one
+    # stood out claiming *total* confidence. `_load_feature_detail` constructs
+    # features without passing confidence, so every feature that method returned
+    # -- from an acknowledged mock -- reported confidence 1.0.
+    confidence: float | None = None
 
 
 class FeatureProxy:
@@ -79,7 +84,21 @@ class FeatureDictionary:
             layer=self.layer,
             model_id=self.model_id,
             label=f"Feature {index}",
-            description=f"Automated interpretation for feature {index}"
+            description=f"Automated interpretation for feature {index}",
+            # No SAE is loaded and no interpretation was performed, so this
+            # feature carries no confidence and is marked as a placeholder. It
+            # used to inherit confidence=1.0 from the dataclass default.
+            confidence=None,
+            provenance={
+                "provenance": "unavailable",
+                "measured": False,
+                "reason": (
+                    "Mock feature record. _load_feature_detail does not call "
+                    "Neuronpedia and no SAE is loaded, so there is nothing behind "
+                    "this feature. The docstring acknowledges the mock; the "
+                    "record now says so too."
+                ),
+            },
         )
 
     def get_feature(self, feature_id: str) -> SAEFeature:

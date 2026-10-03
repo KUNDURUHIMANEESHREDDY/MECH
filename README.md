@@ -648,20 +648,72 @@ fabricated metric looked like a finding and was reachable by callers with weight
       three components became "30 supporting experiments". It is now `1` (the replication just
       performed), with the component count moved to `evidence_summary.circuit_components_replicated`
       under a name that says what it is.
+- [x] **The remaining optimistic-confidence defaults.** Same shape as above — a parameter default
+      standing in for a measurement — but here the fabricated defaults *composed into a decision*,
+      which is worse than a wrong number sitting in a field:
+
+      - **`evaluate_uncertainty` published on nothing.** Four defaults: `confidence_score=0.92`,
+        `uncertainty_interval=[0.88, 0.95]`, `sample_size=5`, `variance=0.02`. With all four, the
+        branch chain reached `0.92 ≥ 0.85` and `width 0.07 ≤ 0.15` and returned **"Enough
+        evidence" / "Publish"**. So calling it with *no arguments* published on four invented
+        numbers — exactly the outcome the `evidence_missing` branch exists to prevent, reachable by
+        omitting arguments. Each default was unremarkable alone; together they composed into a
+        publication. All four now default to `None` and route to the existing missing-evidence
+        branch.
+      - **`compute_quality_score` graded itself A+.** Six defaults (`0.90 / 0.95 / 0.92 / 0.94 /
+        0.88 / 0.89`) produced `overall_quality_score ≈ 0.91` and `quality_grade: "A+"` from a call
+        supplying no evidence. All six now default to `None`; when any is absent the score returns
+        unscored (`None`, `measured: false`) and names exactly which dimensions are missing.
+      - `DiscoveryResultDTO` `confidence=0.90` / `uncertainty=0.10` → `None`. The pair was
+        self-consistent (`uncertainty == 1 − confidence`), which made it look deliberate rather
+        than invented.
+      - `SAEFeature.confidence = 1.0` → `None`. The neighbouring `firing_freq` and
+        `max_activation` correctly defaulted to `0.0`; this one stood out claiming total
+        confidence, and `_load_feature_detail` never passed it — so every feature that acknowledged
+        mock reported `1.0`. The mock record now carries `provenance: unavailable` too.
+      - `KnowledgeBaseEngine.store_fact(confidence=0.9)` → `None`.
+
+      **Deliberately left alone:** `UncertaintyPolicy.publication_confidence = 0.85` and
+      `rejection_confidence = 0.60`, and `QualityScoreWeights.novelty = 0.25` and friends. These
+      are *policy* — a rule for when to publish, a weighting that sums to 1.0 — in classes
+      documented as threshold policy and weights. They are not claims about the world, and
+      changing them would weaken a policy rather than fix a fabrication. Both are pinned by tests
+      so they are not later confused with the fabricated inputs sitting beside them. This is why
+      the guard for the rest is AST-based: `QualityScoreWeights.novelty` and
+      `compute_quality_score(novelty=…)` are the same name in two different roles, and a regex
+      cannot tell them apart.
+- [x] **A live fabricated knowledge graph.** `knowledge_graph/graph_store.py` builds a baseline
+      from `__init__`, so unlike the seeded explorer graph this one was present in every freshly
+      constructed graph. It asserted `confidence: 0.962` / `status: "Validated"` on a claim,
+      `logit_diff: 3.55` on a circuit, `fidelity: 0.972` on an experiment, `sparsity: 0.0012` on
+      an SAE feature, and then wired them so that **the fabricated experiment SUPPORTS the
+      fabricated claim**. Read end to end, the subgraph asserted that an ACDC run at 0.972 fidelity
+      validated the IOI Name Mover circuit at 0.962 confidence. Nothing was run. Now `status:
+      "Reported"` with every invented measurement removed and the whole baseline marked seeded
+      and ineligible. Note the persisted `research_datasets/knowledge_graph_index.json` on disk was
+      written before this fix and still holds the old values; it is gitignored runtime state, and
+      deleting it re-seeds from the corrected baseline.
+- [x] **The autonomous engine wrote a hardcoded scientific claim.** `execute_goal` stored
+      `entity="GPT-2 L8_N402"`, `prop="Circuit Mediation"`,
+      `value="IOI Indirect Object Name Retrieval"` at `confidence=0.95` on *every* call, for every
+      goal, varying with neither. It then recorded memory asserting `"Executed goal cleanly.
+      Identified 2 candidate hypotheses"` — a fixed string whose "2" contradicted the
+      `len(hypotheses)` the same method reports three lines later — plus an invented
+      `utility_score=0.92`. It now stores only what it actually knows (the goal, the real
+      hypothesis count, the real plan id) and makes no success or quality claim.
 - [ ] Still open: tuned lens, attribution patching, path patching, plus the honest-SAE work
       described in `backend/science/reproducibility/sae_pipeline.py`.
-- [ ] **Known, not yet fixed — the rest of the optimistic-confidence defaults.** The pattern above
-      recurs elsewhere and is inventoried rather than left to be rediscovered. Optimistic
-      (manufacture confidence, should become `None`): `scientific_skill_library.py` `average_confidence
-      = 0.94`, `uncertainty_manager.py` `confidence_score = 0.92` / `publication_confidence = 0.85`
-      / `rejection_confidence = 0.60`, `discovery_result.py` `confidence = 0.90`,
-      `discovery_quality_score.py` `confidence = 0.92`, `experience_replay.py` `confidence = 0.90`,
-      `knowledge_base.py` `store_fact(confidence = 0.9)`, `feature_dictionary.py` `confidence = 1.0`,
-      and a `confidence = 0.95` default in a `__init__.py`. Conservative (safe, leave):
-      `auto_hypothesis_tester.py`, `representation_engine.py`, `feature_labeler.py`,
-      `discovery_quality_score.py:15`. Each needs its consumers checked individually — making a
-      field `Optional` breaks any arithmetic done on it, which is exactly how `record_replication`
-      broke when the claim defaults were fixed.
+- [ ] **Known, not yet fixed — hardcoded confidences in returned dicts.** A separate family this
+      pass did not reach, because these are function *return values* rather than defaults, and each
+      needs its own call path checked: `acdc.py:162,168` (`0.95`, and `1.0` on the final edge to a
+      hardcoded `"P_0"`), `attribution_patching.py:121` (`1.0` to `"Output"`),
+      `transcoders.py:92,102`, `circuit_discovery.py:51,59,60` (also fabricates node names
+      `T_0`/`N_L8_N402`/`P_0`), `discovery_planner.py:230,231`, `dag_discovery_planner.py:199`,
+      `feature_auto_interpreter.py:64`, `training_dynamics_engine.py:60-62`, `debate_engine.py:18`,
+      `hypothesis_generator.py:18,25`. Worth noting that `causal_scrubbing.py:105`,
+      `feature_universality.py:86` and `attribution_patching.py:115` already derive their
+      confidence from real measurements — so the pattern is only partly adopted, which is why the
+      hardcoded ones are invisible in review.
 
 Also removed from `benchmark_runner.py`, which was fabricating alongside the pipelines:
 

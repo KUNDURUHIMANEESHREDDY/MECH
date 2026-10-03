@@ -55,14 +55,36 @@ class DiscoveryQualityScoreEngine:
 
     def compute_quality_score(
         self,
-        novelty: float = 0.90,
-        reproducibility: float = 0.95,
-        confidence: float = 0.92,
-        benchmark_performance: float = 0.94,
-        interpretability: float = 0.88,
-        cross_model_support: float = 0.89,
+        novelty: float | None = None,
+        reproducibility: float | None = None,
+        confidence: float | None = None,
+        benchmark_performance: float | None = None,
+        interpretability: float | None = None,
+        cross_model_support: float | None = None,
         custom_weights: QualityScoreWeights | Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
+        """Score a discovery across six weighted dimensions.
+
+        Every dimension defaults to None, meaning *not measured*. They previously
+        defaulted to `0.90 / 0.95 / 0.92 / 0.94 / 0.88 / 0.89`, which meant
+        `compute_quality_score()` called with no arguments at all returned:
+
+            overall_quality_score  ~0.91
+            scientific_quality_score ~0.94
+            expected_impact_score    ~0.89
+            quality_grade            "A+"
+
+        An A+ grade, from six numbers nobody measured, produced by a function
+        whose only argument is the caller's choice to supply none. Each default
+        was individually unremarkable; together they composed into a top grade.
+
+        When any dimension is absent the score cannot be computed, and this
+        returns the same shape with every score `None` and `quality_grade`
+        `None`, plus a `reason`. That keeps the documented return shape intact
+        while making an unmeasured discovery unscored rather than graded.
+
+        There were no callers of this method, so the signature change is free.
+        """
         w = custom_weights if isinstance(custom_weights, QualityScoreWeights) else (QualityScoreWeights.from_dict(custom_weights) if custom_weights else self.weights)
 
         dimensions = {
@@ -73,6 +95,26 @@ class DiscoveryQualityScoreEngine:
             "interpretability": interpretability,
             "cross_model_support": cross_model_support,
         }
+
+        absent = sorted(name for name, value in dimensions.items() if value is None)
+        if absent:
+            return {
+                "overall_quality_score": None,
+                "confidence_score": None,
+                "scientific_quality_score": None,
+                "expected_impact_score": None,
+                "dimensions": dimensions,
+                "weights": asdict(w),
+                "quality_grade": None,
+                "provenance": "unavailable",
+                "measured": False,
+                "reason": (
+                    "Not scored: no measurement supplied for "
+                    + ", ".join(absent)
+                    + ". A quality grade computed from default values would be a "
+                    "grade of nothing."
+                ),
+            }
 
         weighted_sum = (
             novelty * w.novelty
@@ -95,4 +137,7 @@ class DiscoveryQualityScoreEngine:
             "dimensions": dimensions,
             "weights": asdict(w),
             "quality_grade": "A+" if overall >= 0.90 else "A",
+            "provenance": "live",
+            "measured": True,
+            "reason": None,
         }
