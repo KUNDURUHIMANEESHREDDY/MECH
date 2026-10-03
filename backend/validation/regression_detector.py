@@ -44,36 +44,53 @@ class RegressionDetector:
     """Quantitative regression detection engine."""
 
     def analyze_results(self, results: List[GoldenBenchmarkResult]) -> List[RegressionEvent]:
-        """Analyzes benchmark execution results to detect performance/fidelity regressions."""
+        """Analyzes benchmark execution results to detect performance/fidelity regressions.
+
+        A benchmark that did not produce a current value cannot have regressed.
+        `current_fidelity` and `current_runtime_ms` are None for benchmarks with
+        no implementation, and subtracting None from the baseline raised
+        TypeError. Those are now skipped rather than treated as zero, which
+        would have manufactured a 100% regression for every unrun benchmark.
+        """
         events: List[RegressionEvent] = []
 
         for idx, r in enumerate(results):
             # 1. Fidelity Regression Test (> 3.0% drop)
-            fid_diff_pct = ((r.current_fidelity - r.published_baseline_fidelity) / r.published_baseline_fidelity) * 100.0
-            if fid_diff_pct < -3.0:
-                events.append(RegressionEvent(
-                    event_id=f"reg_fid_{idx + 1:02d}",
-                    benchmark_id=r.benchmark_id,
-                    benchmark_name=r.name,
-                    metric_type="Fidelity",
-                    baseline_value=r.published_baseline_fidelity,
-                    current_value=r.current_fidelity,
-                    percentage_change=fid_diff_pct,
-                    severity="HIGH" if fid_diff_pct < -5.0 else "MEDIUM"
-                ))
+            if (r.current_fidelity is not None
+                    and r.published_baseline_fidelity):
+                fid_diff_pct = (
+                    (r.current_fidelity - r.published_baseline_fidelity)
+                    / r.published_baseline_fidelity
+                ) * 100.0
+                if fid_diff_pct < -3.0:
+                    events.append(RegressionEvent(
+                        event_id=f"reg_fid_{idx + 1:02d}",
+                        benchmark_id=r.benchmark_id,
+                        benchmark_name=r.name,
+                        metric_type="Fidelity",
+                        baseline_value=r.published_baseline_fidelity,
+                        current_value=r.current_fidelity,
+                        percentage_change=fid_diff_pct,
+                        severity="HIGH" if fid_diff_pct < -5.0 else "MEDIUM"
+                    ))
 
             # 2. Runtime Latency Regression Test (> 20.0% slow-down)
-            rt_diff_pct = ((r.current_runtime_ms - r.published_baseline_runtime_ms) / r.published_baseline_runtime_ms) * 100.0
-            if rt_diff_pct > 20.0:
-                events.append(RegressionEvent(
-                    event_id=f"reg_rt_{idx + 1:02d}",
-                    benchmark_id=r.benchmark_id,
-                    benchmark_name=r.name,
-                    metric_type="Runtime Latency",
-                    baseline_value=r.published_baseline_runtime_ms,
-                    current_value=r.current_runtime_ms,
-                    percentage_change=rt_diff_pct,
-                    severity="MEDIUM"
-                ))
+            if (r.current_runtime_ms is not None
+                    and r.published_baseline_runtime_ms):
+                rt_diff_pct = (
+                    (r.current_runtime_ms - r.published_baseline_runtime_ms)
+                    / r.published_baseline_runtime_ms
+                ) * 100.0
+                if rt_diff_pct > 20.0:
+                    events.append(RegressionEvent(
+                        event_id=f"reg_rt_{idx + 1:02d}",
+                        benchmark_id=r.benchmark_id,
+                        benchmark_name=r.name,
+                        metric_type="Runtime Latency",
+                        baseline_value=r.published_baseline_runtime_ms,
+                        current_value=r.current_runtime_ms,
+                        percentage_change=rt_diff_pct,
+                        severity="MEDIUM"
+                    ))
 
         return events

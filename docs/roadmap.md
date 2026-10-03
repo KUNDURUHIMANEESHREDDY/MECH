@@ -148,7 +148,8 @@ the directory at runtime (`GraphStore`, `CircuitDiscoveryEngine`, `MechanismClai
 ### 2.1 Real IOI circuit discovery
 
 The current screen is a single-prompt, single-direction zero-ablation. It does not
-separate S1/S2/S3 and does not reproduce the published circuit.
+separate S1/S2/S3, and the recovery metric it reports is not the same quantity as the
+published circuit's — see below before drawing any conclusion from the two numbers.
 
 - [x] ~~Average over many name pairs instead of one template.~~ **done** — all 100
       prompts shared one frame (`When A and B went to the store, A gave a drink to`),
@@ -161,23 +162,85 @@ separate S1/S2/S3 and does not reproduce the published circuit.
 - [ ] Add corrupted-prompt patching so the *IOI-specific* signal separates from generic
       token-identity effects (this is why L0/L2 heads dominate the current screen).
 - [ ] Add a path-patching pass. `live_discovery.py` already has injection recovery — build on it.
-- [ ] Report faithfulness of the recovered circuit, not just head ranking.
+- [x] ~~Report faithfulness of the recovered circuit, not just head ranking.~~ **done** —
+      `_run_live` measures `(rec_diff - corrupted) / (clean - corrupted)` for the discovered
+      circuit: the fraction of the corrupted-to-clean logit-diff gap that injecting the
+      circuit recovers.
+
+#### The 0.86 baseline is not the same measurement
+
+`paper_registry.py` carries a published `circuit_faithfulness` of 0.86 (Wang et al. 2022).
+Measuring **the published circuit itself** through this pipeline's harness gives
+**0.60–0.71**, not 0.86, across prompt sets. The two numbers are therefore not
+like-for-like, and reporting "MECH does not reproduce IOI" on the strength of
+0.70 < 0.86 was an invalid comparison — a claim previously repeated in this file
+and in session summaries.
+
+What was true, and is now measured on every run:
+
+| quantity | value |
+|---|---|
+| discovered circuit, this harness | ~0.72 |
+| published circuit, **same harness, same prompts** | ~0.60 |
+| ratio | **~1.21** |
+| registry's published 0.86 | not comparable |
+
+`observed_metrics` now carries `reference_circuit_faithfulness_same_harness`,
+`faithfulness_vs_reference_circuit`, and `published_baseline_is_comparable: false`
+with the reason attached. `Critic.reproduce` hoists the ratio to
+`calibrated_vs_published_circuit`, and the gate records
+`reference_basis_is_like_for_like: false` so `passed: false` cannot be misread as a
+like-for-like failure.
+
+The remaining gap is methodological, not a failure to find the circuit: this
+harness measures head-set sufficiency, whereas the paper's figure comes from its
+own path-patching procedure over a specific edge set. Closing that means
+implementing the path-patching pass above, then re-deriving the reference through
+the same code rather than citing a number from elsewhere.
+
+#### What discovery actually returns
+
+Worth recording, because the discovery is real (`discovery_provenance: live`, 10
+heads, 16 edges, discovered per run) and it is *not* the published set:
+
+| | |
+|---|---|
+| discovered (typical) | `L0H10 L0H8 L11H10 L1H3 L5H1 L6H9 L7H9 L8H10 L8H3 L8H6` |
+| published (`REFERENCE_ONLY_DISCOVERED_HEADS`) | `L0H1 L0H10 L10H0 L10H7 L5H1 L5H5 L7H3 L8H6 L9H6 L9H9` |
+| overlap | 3 of 10 — `L0H10 L5H1 L8H6` |
+
+Yet the discovered set scores **higher** than the published set under the same
+harness (0.724 vs 0.598, ratio 1.21). Two readings, both consistent with the data:
+either the published head list is one sufficient set among several, or this
+harness's discovery objective rewards redundancy over parsimony. Distinguishing them
+needs the minimality statistic, which is gated at 10 usable prompts and therefore
+not yet available at `n_prompts=6`. That gate is the blocker, and it is why the
+minimality threshold is not negotiable.
+
 
 ### 2.2 Statistically meaningful benchmarks
 
 - [x] ~~The live endpoint uses 6 samples and reports `score: 1.0`.~~
-      **partly done** — `MIN_PROMPTS_FOR_MINIMALITY = 10` now gates the majority-vote
-      minimality statistic, which was producing a confident `0.9 / passed=True` from six
-      prompts. Below the threshold it reports `0.0`, `circuit_minimality_measured: false`,
-      and the explanation states how many usable prompts there were. The six-sample
-      *accuracy* endpoint is still unaddressed.
+      **done** — `MIN_PROMPTS_FOR_MINIMALITY = 10` gates the majority-vote minimality
+      statistic, and below the threshold it now reports `observed_value: None` with
+      `circuit_minimality_measured: false` and a `Not Measured` tier. Reporting `0.0`
+      made "not attempted" indistinguishable from "attempted and scored zero", and the
+      unmeasured metric was dragging `overall_fidelity_pct` down with it — that average
+      now excludes unmeasured metrics and says how many were excluded.
 - [ ] Port the full 100-template IOI panel (the pipeline default is now 100 across eight
       frames; the HTTP endpoint still requests 6).
-- [ ] Bootstrap confidence intervals instead of the closed-form `1.96·√(p(1−p)/n)`.
+- [x] ~~Bootstrap confidence intervals instead of the closed-form `1.96·√(p(1−p)/n)`.~~
+      **done differently** — the closed form was being applied to an *aggregate* metric
+      with no trial counts behind it, and it is unreliable exactly where these benchmarks
+      sit (at p≈0.9 it overruns the boundary; a 0.0 control yields a zero-width interval
+      implying false precision). A **Wilson** interval is now computed from the pipelines'
+      real per-prompt boolean outcomes (`correct`/`trials`), `confidence_interval_derived`
+      records whether trials were available, and `confidence_interval_target` names what
+      the interval bounds — for induction-heads that is the behavioural accuracy, not the
+      headline score, which is a mean attention fraction.
 - [ ] Add result persistence so the Benchmark dashboard can show history.
 
 ### 2.3 Implement or delete the stubs
-
 Each of these currently returns a convincing-looking number without measuring anything.
 
 - [ ] Sparse autoencoders — weights are never fetched (`sae/loader.py:61`).
@@ -188,6 +251,35 @@ Each of these currently returns a convincing-looking number without measuring an
 - [ ] Non-GPT-2 adapters (Gemma, Llama, Qwen, Mistral, DeepSeek) — unconditional mocks.
 - [ ] Delete or clearly quarantine the fixture files: `benchmark_database.json`,
       `*_certificate.json`, `ioi_benchmark.py`. **They read as results and are not.**
+
+#### The continuous validation suite could not fail
+
+`ValidationBenchmarkScheduler.execute_validation_suite` executed nothing. It computed
+`current_fid = published_baseline_fidelity * 0.995`, `current_rt = baseline * 1.01`,
+`current_vram = baseline * 1.0`, then scored `PASS` against a `baseline * 0.95`
+threshold. Since 0.995 > 0.95, **every benchmark passed on every run.**
+`HealthDashboardEngine.run_continuous_validation` turned that into
+`pass_rate: 100.0` and wrote it into the knowledge graph as a `Continuous Validation
+Run` experiment node.
+
+Now each benchmark with an implemented pipeline is executed and scored on what it
+measured; the rest report `NOT_RUN` with the reason. Current state:
+
+| benchmark | status | fidelity |
+|---|---|---|
+| IOI | MEASURED | 0.724 |
+| Induction heads | MEASURED | 0.670 |
+| Greater-Than, Arithmetic, SAE | NOT_RUN | — |
+
+`MEASURED` is a distinct status from `PASS`: the pipelines ran, but their published
+baselines are not the same measurement (see 2.1), so issuing a pass/fail verdict
+would be spurious. Consequently `overall_pass_rate` is now `None` with
+`pass_rate_measured: false`, rather than 100% or 0% — both of which were lies about
+the same suite. `benchmarks_unscored: 5` says what the number is hiding.
+
+`RegressionDetector` also assumed `current_fidelity` was always a float and raised
+`TypeError` on an unrun benchmark; it now skips those rather than treating a missing
+value as zero, which would have manufactured a 100% regression for each.
 
 ### 2.4 Provenance attestation ✅ model half done
 

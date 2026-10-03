@@ -25,7 +25,7 @@ class ContinuousHealthReport:
     platform_health_score: float
     # Optional: absent until the same work has actually been run twice.
     reproducibility_score: Optional[float]
-    overall_pass_rate: float
+    overall_pass_rate: Optional[float]
     total_benchmarks_run: int
     passed_benchmarks: int
     failed_benchmarks: int
@@ -37,6 +37,12 @@ class ContinuousHealthReport:
     # Declared after the required fields: a defaulted field cannot precede
     # non-defaulted ones in a dataclass.
     reproducibility_reason: Optional[str] = None
+    # False when no benchmark could be scored, in which case overall_pass_rate
+    # is None rather than 0.0.
+    pass_rate_measured: bool = False
+    # Benchmarks that ran without a comparable baseline, plus those with no
+    # implementation. Neither a pass nor a failure.
+    benchmarks_unscored: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -47,7 +53,11 @@ class ContinuousHealthReport:
                 if self.reproducibility_score is not None else None
             ),
             "reproducibility_measured": self.reproducibility_score is not None,
-            "overall_pass_rate": round(self.overall_pass_rate, 1),
+            "overall_pass_rate": (round(self.overall_pass_rate, 1)
+                                  if self.overall_pass_rate is not None
+                                  else None),
+            "pass_rate_measured": self.pass_rate_measured,
+            "benchmarks_unscored": self.benchmarks_unscored,
             "total_benchmarks_run": self.total_benchmarks_run,
             "passed_benchmarks": self.passed_benchmarks,
             "failed_benchmarks": self.failed_benchmarks,
@@ -85,8 +95,20 @@ class HealthDashboardEngine:
 
         total_bm = len(bm_results)
         passed_bm = sum(1 for r in bm_results if r.status == "PASS")
-        failed_bm = total_bm - passed_bm
-        pass_rate = (passed_bm / max(1, total_bm)) * 100.0
+        failed_bm = sum(1 for r in bm_results if r.status == "REGRESSION")
+        # Benchmarks that ran but could not be scored against their published
+        # baseline, and benchmarks with no implementation at all. Neither is a
+        # pass or a failure, and folding them into one of those two is how
+        # "100% healthy" and "0% healthy" both become lies about the same suite.
+        unscored_bm = sum(1 for r in bm_results
+                          if r.status in ("MEASURED", "NOT_RUN"))
+        scorable_bm = passed_bm + failed_bm
+        # A pass rate over a suite where nothing is scorable is undefined, not
+        # 0% and not 100%.
+        pass_rate: Optional[float] = (
+            (passed_bm / scorable_bm) * 100.0 if scorable_bm else None
+        )
+        pass_rate_measured = pass_rate is not None
 
         health_score = max(0.0, 100.0 - (len(regressions) * 5.0))
 
@@ -105,13 +127,28 @@ class HealthDashboardEngine:
             "each benchmark once, so no reproducibility score can be derived."
         )
 
-        # Push Validation Run to Scientific Knowledge Graph automatically
+        # Push Validation Run to Scientific Knowledge Graph automatically.
+        # The node records what was actually measured. It used to carry
+        # pass_rate=100.0 from a suite that computed baseline*0.995 and scored
+        # it PASS against baseline*0.95, so every benchmark passed without any
+        # of them running.
         val_run_id = f"val_run_{int(time.time())}"
         val_node = KGNode(
             node_id=val_run_id,
             node_type="Experiment",
             label="Continuous Validation Run",
-            properties={"pass_rate": pass_rate, "health_score": health_score}
+            properties={
+                # None when nothing was scorable, rather than a round number
+                # that reads as a measurement.
+                "pass_rate": pass_rate,
+                "pass_rate_measured": pass_rate_measured,
+                "benchmarks_total": total_bm,
+                "benchmarks_passed": passed_bm,
+                "benchmarks_failed": failed_bm,
+                "benchmarks_unscored": unscored_bm,
+                "health_score": health_score,
+                "measured_by": self.scheduler.__class__.__name__,
+            }
         )
         self.graph_store.add_node(val_node)
 
@@ -119,6 +156,8 @@ class HealthDashboardEngine:
             platform_health_score=health_score,
             reproducibility_score=reproducibility_score,
             overall_pass_rate=pass_rate,
+            pass_rate_measured=pass_rate_measured,
+            benchmarks_unscored=unscored_bm,
             total_benchmarks_run=total_bm,
             passed_benchmarks=passed_bm,
             failed_benchmarks=failed_bm,

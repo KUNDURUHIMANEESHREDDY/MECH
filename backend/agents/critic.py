@@ -241,6 +241,35 @@ class Critic:
             else:
                 fidelity = None
 
+            # Like-for-like calibration, when the pipeline supplied one.
+            #
+            # `fidelity` above compares each metric against the registry's
+            # published constant. For IOI that constant is not the same
+            # measurement this harness makes -- running the *published* circuit
+            # through this harness gives a materially lower number than the
+            # published 0.86. So the pipeline also measures the published
+            # circuit through identical code and reports the ratio. That ratio
+            # is the answerable question: is the discovered circuit as good as
+            # the published one, measured the same way?
+            same_harness_ref = observed.get(
+                "reference_circuit_faithfulness_same_harness")
+            discovered_faith = mapped.get("circuit_faithfulness")
+            calibrated: Optional[Dict[str, Any]] = None
+            if (isinstance(same_harness_ref, (int, float))
+                    and same_harness_ref > 0
+                    and isinstance(discovered_faith, (int, float))):
+                ratio = discovered_faith / same_harness_ref
+                calibrated = {
+                    "metric": "circuit_faithfulness",
+                    "discovered": round(discovered_faith, 4),
+                    "published_circuit_same_harness": round(same_harness_ref, 4),
+                    "ratio": round(ratio, 4),
+                    # Matching or beating the published circuit through the
+                    # same code is the like-for-like success condition.
+                    "at_least_published": ratio >= 1.0,
+                    "basis": "both circuits measured by this pipeline, same prompts",
+                }
+
             gate = {
                 "status": "completed" if fidelity is not None else "unavailable",
                 "provenance": "live" if fidelity is not None else "unavailable",
@@ -256,6 +285,18 @@ class Critic:
                     "No metric produced a fidelity score; the gate cannot be "
                     "evaluated and does not pass."
                 ),
+                # Both fidelity_pct values above are measured against the
+                # registry's *published* reference numbers. For IOI those are
+                # not the same measurement as what this pipeline computes:
+                # running the published IOI circuit through this same harness
+                # yields a lower figure than the published 0.86. So
+                # `passed` here is a comparison against an external constant,
+                # not a like-for-like one. The calibrated comparison is below
+                # and is the one that answers "is this circuit as good as the
+                # published one".
+                "reference_basis": "published_external_constants",
+                "reference_basis_is_like_for_like": False,
+                "calibrated": calibrated,
             }
             return {
                 "status": "completed",
@@ -265,6 +306,11 @@ class Critic:
                     "live",
                 ),
                 "paper_id": paper_id,
+                # The like-for-like comparison, hoisted to the top level
+                # because it is the answerable question. `report` and `gate`
+                # compare against external published constants, which for IOI
+                # are not the same measurement as this harness makes.
+                "calibrated_vs_published_circuit": calibrated,
                 "n_prompts": n_prompts,
                 "mock_mode": False,
                 "observed_metrics": mapped,

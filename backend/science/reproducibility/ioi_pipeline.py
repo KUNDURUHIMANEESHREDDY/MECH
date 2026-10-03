@@ -130,6 +130,61 @@ class IOIReproductionPipeline:
             causes.append("Low faithfulness: Systematic bias in Name Mover Head identification.")
         return causes
 
+    def _faithfulness_of(
+        self, prompts: List[Dict[str, str]], circuit: set, lm: Any,
+        token_ids: Dict[str, Optional[int]],
+    ) -> Optional[float]:
+        """Mean logit-diff recovery for an arbitrary head set, same harness.
+
+        Extracted so the discovered circuit and the published reference circuit
+        can be measured by *identical* code on the same prompts.
+        """
+        from statistics import mean
+
+        scores: List[float] = []
+        for p in prompts:
+            io_id = token_ids[p["indirect_object"]]
+            subj_id = token_ids[p["subject"]]
+            if io_id is None or subj_id is None:
+                continue
+            clean_base = lm.baseline(p["text"], io_id, subj_id)
+            corr_base = lm.baseline(p["corrupted_text"], io_id, subj_id)
+            _, caps = lm.capture(p["text"])
+            rec_diff = lm.inject(p["corrupted_text"], io_id, subj_id,
+                                 caps, circuit)["logit_diff"]
+            denom = clean_base["logit_diff"] - corr_base["logit_diff"]
+            if denom <= 0.2 or clean_base["logit_diff"] <= 0.2:
+                continue
+            scores.append(max(0.0, min(
+                1.0, (rec_diff - corr_base["logit_diff"]) / denom)))
+        return mean(scores) if scores else None
+
+    def _reference_faithfulness_same_harness(
+        self, prompts: List[Dict[str, str]], lm: Any,
+        token_ids: Dict[str, Optional[int]],
+    ) -> Optional[float]:
+        """Measure the published IOI circuit through this same harness.
+
+        Why this exists. The registry carries a published baseline of 0.86 for
+        circuit_faithfulness. Measuring the *published circuit itself* through
+        this pipeline gives ~0.68-0.71, not 0.86. So the two numbers are not
+        the same measurement, and comparing a discovered circuit against 0.86
+        compares a quantity with an unrelated one.
+
+        The meaningful comparison is like-for-like: run both circuits through
+        identical code on identical prompts. Measured here, so the report can
+        say "your circuit recovers X of the corrupted-to-clean logit-diff gap;
+        the published circuit recovers Y of the same gap under the same code".
+
+        The published head list is a reference input *here only*. Discovery
+        never consults it.
+        """
+        reference = {lm.parse_head(h) for h in REFERENCE_ONLY_DISCOVERED_HEADS}
+        reference.discard(None)
+        if not reference:
+            return None
+        return self._faithfulness_of(prompts, reference, lm, token_ids)
+
     def _run_live(self, prompts: List[Dict[str, str]], manifest: Any,
                   seed: int) -> Dict[str, Any]:
         """Measure the IOI circuit on live weights (no reference coordinates).
@@ -272,6 +327,12 @@ class IOIReproductionPipeline:
                     if abs(single - clean_diff) >= 0.10 * abs(clean_diff):
                         necessary_votes[head] += 1
 
+        # Like-for-like reference: the published circuit through this harness.
+        # Recorded here rather than compared against the registry's 0.86,
+        # which is a different measurement (see the method docstring).
+        reference_faithfulness = self._reference_faithfulness_same_harness(
+            prompts, lm, token_ids)
+
         per_template_report = []
         for frame_id in sorted(per_template):
             b = per_template[frame_id]
@@ -323,6 +384,24 @@ class IOIReproductionPipeline:
                 < 0.25
             ),
             "per_template": per_template_report,
+            # The like-for-like reference. Both numbers come from identical code
+            # on identical prompts, so `faithfulness_vs_reference_circuit` is a
+            # real comparison; the registry's published 0.86 is not.
+            "reference_circuit_faithfulness_same_harness": (
+                round(reference_faithfulness, 4)
+                if reference_faithfulness is not None else None),
+            "faithfulness_vs_reference_circuit": (
+                round(mean(faithfulness_scores) / reference_faithfulness, 4)
+                if (reference_faithfulness and faithfulness_scores
+                    and reference_faithfulness > 0) else None),
+            "published_baseline_is_comparable": False,
+            "published_baseline_note": (
+                "The registry carries a published circuit_faithfulness of 0.86, "
+                "but measuring the published circuit itself through this "
+                "harness yields a lower value, so 0.86 is not the same "
+                "measurement as circuit_faithfulness here. Compare against "
+                "reference_circuit_faithfulness_same_harness instead."
+            ),
             "full_logit_diff": round(mean(clean_diffs), 4) if clean_diffs else 0.0,
             "ablated_logit_diff": round(mean(corr_diffs), 4) if corr_diffs else 0.0,
             "isolated_logit_diff": round(mean(rec_diffs), 4) if rec_diffs else 0.0,
@@ -337,6 +416,8 @@ class IOIReproductionPipeline:
                  "circuit_minimality_measured",
                  "n_templates", "templates_with_usable_prompts",
                  "cross_template_consistent", "per_template",
+                 "reference_circuit_faithfulness_same_harness",
+                 "faithfulness_vs_reference_circuit",
                  "full_logit_diff", "ablated_logit_diff",
                  "isolated_logit_diff", "discovered_nodes",
                  "discovered_edges"),

@@ -185,6 +185,128 @@ def test_induction_heads_are_recovered_by_measurement_alone():
 
 
 @needs_weights
+def test_published_ioi_baseline_is_not_the_same_measurement():
+    """The 0.86 in the registry is not what this harness computes.
+
+    Measured directly: running the *published* IOI circuit through
+    `ioi_pipeline`'s own harness yields materially less than 0.86. So
+    comparing a discovered circuit against 0.86 compares a quantity with an
+    unrelated one, and a "failure to reproduce" reading of it is unsound.
+    """
+    from backend.science.reproducibility.ioi_pipeline import IOIReproductionPipeline
+
+    result = IOIReproductionPipeline(mock_mode=False).run(n_prompts=10)
+    metrics = result["observed_metrics"]
+
+    same_harness = metrics["reference_circuit_faithfulness_same_harness"]
+    assert same_harness is not None
+    assert 0.0 <= same_harness <= 1.0
+
+    # The published constant is 0.86. This harness's own reading of the
+    # published circuit is lower, which is exactly why the flag is set.
+    assert same_harness < 0.86, (
+        "if this harness now reproduces 0.86 for the published circuit, the "
+        "two numbers have converged and the calibration can be simplified"
+    )
+    assert metrics["published_baseline_is_comparable"] is False
+    assert "not the same measurement" in metrics["published_baseline_note"]
+
+
+@needs_weights
+def test_discovered_circuit_is_compared_like_for_like_against_the_reference():
+    """The answerable question: is it as good as the published circuit?
+
+    Both numbers come from identical code on identical prompts, so the ratio
+    is meaningful. This is the comparison that replaced "0.6981 vs 0.86".
+    """
+    from backend.agents.critic import Critic
+
+    out = Critic().reproduce("ioi", n_prompts=10)
+    calibrated = out["calibrated_vs_published_circuit"]
+    assert calibrated is not None, "no like-for-like comparison was produced"
+
+    assert calibrated["basis"] == (
+        "both circuits measured by this pipeline, same prompts"
+    )
+    assert calibrated["discovered"] > 0
+    assert calibrated["published_circuit_same_harness"] > 0
+    assert calibrated["ratio"] == pytest.approx(
+        calibrated["discovered"] / calibrated["published_circuit_same_harness"],
+        abs=1e-3,
+    )
+    # The gate must state that its own basis is the external constants, so a
+    # reader cannot mistake `passed: False` for a like-for-like failure.
+    assert out["gate"]["reference_basis"] == "published_external_constants"
+    assert out["gate"]["reference_basis_is_like_for_like"] is False
+    assert out["gate"]["calibrated"] == calibrated
+
+
+@needs_weights
+def test_calibrated_comparison_does_not_decide_the_verdict():
+    """Beating the reference circuit must not become the gate's decision.
+
+    Matching a circuit found by the same pipeline is evidence that the
+    measurement works, not evidence that a paper is validated. The two
+    questions stay separate, so the calibration is reported alongside the gate
+    rather than substituted into it.
+    """
+    from agents.critic import Critic, CONFIDENCE_THRESHOLD
+
+    out = Critic().reproduce("ioi", n_prompts=10)
+    gate = out["gate"]
+    calibrated = out["calibrated_vs_published_circuit"]
+
+    # The verdict follows the external-constant comparison only, whatever the
+    # calibration says.
+    assert gate["passed"] == (
+        gate["value"] >= CONFIDENCE_THRESHOLD * 100
+    )
+    assert gate["metric"] == "overall_fidelity_pct"
+
+    # And the calibration is surfaced as its own, clearly-labelled field
+    # rather than folded into the verdict.
+    assert calibrated is not None
+    assert calibrated["at_least_published"] is (
+        calibrated["ratio"] >= 1.0
+    )
+    # It never claims eligibility for itself.
+    assert "publication_eligible" not in calibrated
+    assert "validation_eligible" not in calibrated
+
+
+
+@needs_weights
+def test_ioi_discovery_is_not_echoing_the_published_head_list():
+    """Overlap must be partial, which is what proves independence.
+
+    If discovery returned the published heads, overlap would be 100% -- and
+    `docs/roadmap.md` records a measured 3-of-10. Pinning that it is strictly
+    less than the full list is the stable invariant: it cannot drift as
+    discovery improves, but it would fail immediately if the published list
+    were ever used as the answer.
+    """
+    from backend.science.reproducibility.ioi_pipeline import (
+        REFERENCE_ONLY_DISCOVERED_HEADS,
+        IOIReproductionPipeline,
+    )
+
+    result = IOIReproductionPipeline(mock_mode=False).run(n_prompts=10)
+    discovered = set(result["observed_metrics"]["discovered_nodes"])
+    published = set(REFERENCE_ONLY_DISCOVERED_HEADS)
+
+    assert result["observed_metrics"]["discovery_provenance"] == "live"
+    assert discovered, "no circuit was discovered"
+    assert len(discovered & published) < len(published), (
+        "the discovered set contains every published head, which is what "
+        "returning the reference list would look like"
+    )
+    # And the discovered set is not merely a subset of the published one either.
+    assert discovered - published, (
+        "discovery returned only published heads, so it found nothing new"
+    )
+
+
+@needs_weights
 def test_induction_metrics_are_measured_not_drawn():
     """A measured metric is reproducible from its seed and matches its counts.
 
