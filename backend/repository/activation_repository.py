@@ -144,6 +144,14 @@ class LegacyActivationRepository:
         self._seed_sample_data()
 
     def _seed_sample_data(self) -> None:
+        """Fixture rows so query/search/aggregate have a contract to satisfy.
+
+        These activations (2.41, 3.12, 0.88) were never read off a model. They
+        exist to exercise the query layer, and each row now says so via
+        `provenance: "reference"` / `measured: False`, so a search returning
+        one cannot be mistaken for an observed activation. Downstream code
+        should filter on `measured` before drawing any conclusion.
+        """
         sample_records = [
             {
                 "id": "act_001",
@@ -155,6 +163,8 @@ class LegacyActivationRepository:
                 "activation": 2.41,
                 "session_id": "sess_1",
                 "prompt_id": "prompt_ioi",
+                "provenance": "reference",
+                "measured": False,
                 "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
             },
             {
@@ -167,6 +177,8 @@ class LegacyActivationRepository:
                 "activation": 3.12,
                 "session_id": "sess_1",
                 "prompt_id": "prompt_cap",
+                "provenance": "reference",
+                "measured": False,
                 "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
             },
             {
@@ -179,6 +191,8 @@ class LegacyActivationRepository:
                 "activation": 0.88,
                 "session_id": "sess_2",
                 "prompt_id": "prompt_general",
+                "provenance": "reference",
+                "measured": False,
                 "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
             },
         ]

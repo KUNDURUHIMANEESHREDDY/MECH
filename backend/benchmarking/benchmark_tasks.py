@@ -69,32 +69,49 @@ class BenchmarkResult:
     primary_score: float        # 0–100 %
     reference_score: float      # Published reference value
     fidelity_pct: float         # agreement with published metric (0–100)
-    # Resource metrics
+    # Resource metrics. Optional: these were random draws in every mode, and a
+    # resource figure that is invented reads as a measured cost.
     runtime_s: float
-    peak_memory_mb: float
+    peak_memory_mb: Optional[float]
     # Statistical
-    confidence_interval_low: float
-    confidence_interval_high: float
-    n_samples: int
+    #
+    # The interval fields were built as `score*100 +/- half_width` with a fixed
+    # half_width, which is a spread around a point estimate rather than an
+    # interval estimated from the samples. They now carry how wide they are and
+    # whether they were derived from the data at all.
+    confidence_interval_low: Optional[float]
+    confidence_interval_high: Optional[float]
+    confidence_interval_half_width: Optional[float] = None
+    confidence_interval_method: Optional[str] = None
+    confidence_interval_derived: bool = False
+    n_samples: int = 0
     # High-Fidelity Performance Metrics (Phase 39.14)
-    flops: float = 0.0
-    gpu_util_pct: float = 0.0
-    throughput_tps: float = 0.0
-    mean_latency_ms: float = 0.0
+    # Profiler readings. 0.0 is ambiguous between "measured and zero" and
+    # "never measured", so these are Optional and the caller checks.
+    flops: Optional[float] = None
+    gpu_util_pct: Optional[float] = None
+    throughput_tps: Optional[float] = None
+    mean_latency_ms: Optional[float] = None
     # Optional/Default Resource metrics
-    peak_vram_mb: float = 0.0
-    tokens_per_sec: float = 0.0
+    peak_vram_mb: Optional[float] = None
+    tokens_per_sec: Optional[float] = None
+    resource_metrics_measured: bool = False
     # Execution Metadata
     git_sha: str = "unknown"
     device_info: str = "cpu"
     precision: str = "fp32"
-    forward_passes: int = 0
-    patch_count: int = 0
-    patch_success_rate: float = 0.0
+    # Optional: a count that is not counted must not be a specific integer.
+    forward_passes: Optional[int] = None
+    patch_count: Optional[int] = None
+    patch_count_measured: bool = False
+    # 0.0 here means "no patching was run", not "patching never succeeds".
+    patch_success_rate: Optional[float] = None
     published_overlap_pct: Optional[float] = None
     # Comparison
     tl_agreement_pct: Optional[float] = None
     sae_lens_agreement_pct: Optional[float] = None
+    sae_lens_agreement_measured: bool = False
+    sae_lens_agreement_reason: Optional[str] = None
     # Metadata
     notes: str = ""
     run_id: str = ""
@@ -109,25 +126,41 @@ class BenchmarkResult:
             "reference_score": round(self.reference_score, 2),
             "fidelity_pct": round(self.fidelity_pct, 2),
             "runtime_s": round(self.runtime_s, 3),
-            "peak_memory_mb": round(self.peak_memory_mb, 1),
-            "peak_vram_mb": round(self.peak_vram_mb, 1),
-            "tokens_per_sec": round(self.tokens_per_sec, 2),
+            # Rounded only when present; round(None) raises, and a field that
+            # is None must stay None through serialisation.
+            "peak_memory_mb": (round(self.peak_memory_mb, 1)
+                               if self.peak_memory_mb is not None else None),
+            "peak_vram_mb": (round(self.peak_vram_mb, 1)
+                             if self.peak_vram_mb is not None else None),
+            "tokens_per_sec": (round(self.tokens_per_sec, 2)
+                               if self.tokens_per_sec is not None else None),
+            "resource_metrics_measured": self.resource_metrics_measured,
             "flops": self.flops,
             "gpu_util_pct": self.gpu_util_pct,
             "throughput_tps": self.throughput_tps,
             "mean_latency_ms": self.mean_latency_ms,
-            "ci_low": round(self.confidence_interval_low, 2),
-            "ci_high": round(self.confidence_interval_high, 2),
+            "profiler_measured": self.throughput_tps is not None,
+            "ci_low": (round(self.confidence_interval_low, 2)
+                       if self.confidence_interval_low is not None else None),
+            "ci_high": (round(self.confidence_interval_high, 2)
+                        if self.confidence_interval_high is not None else None),
             "n_samples": self.n_samples,
             "git_sha": self.git_sha,
             "device_info": self.device_info,
             "precision": self.precision,
             "forward_passes": self.forward_passes,
             "patch_count": self.patch_count,
-            "patch_success_rate": round(self.patch_success_rate, 2),
+            "patch_count_measured": self.patch_count_measured,
+            "patch_success_rate": (round(self.patch_success_rate, 2)
+                                   if self.patch_success_rate is not None
+                                   else None),
             "published_overlap_pct": self.published_overlap_pct,
             "tl_agreement_pct": self.tl_agreement_pct,
             "sae_lens_agreement_pct": self.sae_lens_agreement_pct,
+            "sae_lens_agreement_measured": self.sae_lens_agreement_measured,
+            "sae_lens_agreement_reason": self.sae_lens_agreement_reason,
+            "confidence_interval_derived": self.confidence_interval_derived,
+            "confidence_interval_method": self.confidence_interval_method,
             "notes": self.notes,
             "run_id": self.run_id,
         }
@@ -354,47 +387,87 @@ class BenchmarkTaskExecutor:
         from backend.runtime.performance_profiler import PerformanceProfiler
 
         # Initialize Profiler
-        profiler = PerformanceProfiler(model_id, n_params_b=0.124 if "small" in model_id else 0.355)
+        # Parameter counts were hardcoded by a substring test on the model id:
+        # anything containing "small" got 0.124B, everything else 0.355B. So
+        # gpt2-medium, pythia-1.4b and llama-7b all reported the same FLOPs.
+        # Now read from the registry, and refuse rather than guess.
+        n_params_b = self._resolve_param_count(model_id)
+        if n_params_b is None:
+            raise ValueError(
+                f"Parameter count for '{model_id}' is unknown, so FLOPs "
+                "cannot be estimated. It was previously inferred from whether "
+                "the id contained 'small', which gave every non-small model the "
+                "same figure."
+            )
+        profiler = PerformanceProfiler(model_id, n_params_b=n_params_b)
         profiler.start()
+        # Token counts are only known if a pipeline reports them. None does yet,
+        # so this stays None and the profiler reports no throughput.
+        self._tokens_counted: Optional[int] = None
 
         n = n_samples or task.dataset_size
         ref_val = task.reference.metric_value
 
         # Simulation/Execution logic based on mode
+        # Resource figures.
+        #
+        # These were all random draws in *every* mode, including the real ones:
+        # peak memory gauss(3400, 400), vram 1800.0, tokens/sec gauss(150, 20).
+        # A benchmark whose resource column is noise looks like a benchmark
+        # that measured resources. None of them are read from the process, so
+        # they are now None and the profiler's real readings are used when it
+        # has any.
+        peak_mem = None
+        vram = None
+        tokens_sec = None
+
         if mode == ExecutionMode.MOCK:
-            # Stub: deterministic realistic result centred on reference ± 3 %
+            # A fixture, and labelled as one: centred on the published
+            # reference so downstream code has something to exercise.
             noise = self._rng.gauss(0, 0.015)
             score = max(0.0, min(1.0, ref_val + noise))
             tl_agree = max(0.85, min(1.0, 0.97 + self._rng.gauss(0, 0.02)))
-            peak_mem = self._rng.gauss(1200, 180)
-            vram = 0.0
-            tokens_sec = 0.0
             patch_success = 0.0
             overlap = None
         else:
-            # REFERENCE or PRODUCTION — Run real pipelines if available
-            try:
-                score, patch_success, overlap, tl_agree = self._run_pipeline_dispatch(task, model_id, mode, n)
-                peak_mem = self._rng.gauss(3400, 400) if mode == ExecutionMode.REFERENCE else self._rng.gauss(8000, 1000)
-                vram = 1800.0 if mode == ExecutionMode.REFERENCE else self._rng.gauss(4000, 500)
-                tokens_sec = self._rng.gauss(150, 20) if mode == ExecutionMode.REFERENCE else self._rng.gauss(450, 50)
-            except Exception as exc:
-                logger.warning("Pipeline dispatch failed, falling back to real_stub: %s", exc)
-                score, tl_agree = self._run_real(task, model_id, backend, n)
-                patch_success = 0.0
-                overlap = None
-                peak_mem = self._rng.gauss(3400, 400)
-                vram = 1800.0
-                tokens_sec = self._rng.gauss(150, 20)
+            # REFERENCE or PRODUCTION — run the real pipeline.
+            score, patch_success, overlap, tl_agree = self._run_pipeline_dispatch(
+                task, model_id, mode, n)
 
         fidelity_pct = (1.0 - abs(score - ref_val) / max(ref_val, 1e-9)) * 100.0
 
-        # Stop Profiler (Estimated tokens = prompts * avg_seq_len)
-        perf = profiler.stop(total_tokens=n * 50)
+        # Stop the profiler. The caller previously passed `n * 50` -- "estimated
+        # tokens = prompts * avg_seq_len" -- so throughput and latency were
+        # divided by a token count nobody counted. Without a real count the
+        # profiler reports None for both, which is the honest answer.
+        perf = profiler.stop(total_tokens=self._tokens_counted)
         runtime_s = perf.duration_s
 
-        # 95 % CI via bootstrapped half-width (simplified)
-        half_width = 1.96 * (score * (1 - score) / n) ** 0.5 * 100
+        # A binomial 95% interval is only valid when `score` is a proportion of
+        # n independent binary outcomes. Here `score` is a single aggregate
+        # metric returned by a pipeline, so the per-sample outcomes that would
+        # justify the formula are not available at this level. The formula was
+        # still applied and the result reported as a 95% CI.
+        #
+        # The condition is now stated instead of assumed: an interval is only
+        # emitted for a metric that actually is a proportion of n Bernoulli
+        # trials, and `ci_derived` records whether that held.
+        ci_is_binomial_proportion = bool(
+            ref_val is not None and 0.0 <= score <= 1.0 and n > 0
+            and task.primary_metric.endswith(("_rate", "_accuracy", "success_rate"))
+        )
+        if ci_is_binomial_proportion:
+            half_width = 1.96 * (score * (1 - score) / n) ** 0.5 * 100
+            ci_low = round(score * 100 - half_width, 2)
+            ci_high = round(score * 100 + half_width, 2)
+            ci_method = "normal approximation to the binomial proportion"
+        else:
+            half_width = None
+            ci_low = None
+            ci_high = None
+            ci_method = (
+                None
+            )
 
         return BenchmarkResult(
             task_id=task.task_id,
@@ -405,31 +478,90 @@ class BenchmarkTaskExecutor:
             reference_score=round(ref_val * 100, 2),
             fidelity_pct=round(fidelity_pct, 2),
             runtime_s=round(runtime_s, 4),
-            peak_memory_mb=round(abs(peak_mem), 1),
-            peak_vram_mb=round(perf.peak_vram_mb or abs(vram), 1),
-            tokens_per_sec=round(perf.throughput_tps or tokens_sec, 2),
+            # `perf.X or abs(vram)` also substituted the random draw whenever
+            # the profiler reported 0.0, so a real zero became a fake number.
+            peak_memory_mb=(round(abs(peak_mem), 1) if peak_mem is not None
+                            else None),
+            peak_vram_mb=(round(perf.peak_vram_mb, 1)
+                          if perf.peak_vram_mb else None),
+            tokens_per_sec=(round(perf.throughput_tps, 2)
+                            if perf.throughput_tps else None),
+            resource_metrics_measured=bool(perf.throughput_tps),
             flops=perf.total_flops,
             gpu_util_pct=perf.gpu_util_pct,
             throughput_tps=perf.throughput_tps,
             mean_latency_ms=perf.mean_latency_ms,
-            confidence_interval_low=round(score * 100 - half_width, 2),
-            confidence_interval_high=round(score * 100 + half_width, 2),
+            confidence_interval_low=ci_low,
+            confidence_interval_high=ci_high,
+            confidence_interval_half_width=(round(half_width, 2)
+                                            if half_width is not None else None),
+            confidence_interval_method=ci_method,
+            confidence_interval_derived=ci_is_binomial_proportion,
             n_samples=n,
             tl_agreement_pct=round(tl_agree * 100, 2) if tl_agree else None,
-            sae_lens_agreement_pct=round(self._rng.gauss(0.95, 0.02) * 100, 2)
-            if task.task_id == BenchmarkTask.SAE else None,
+            # Was `self._rng.gauss(0.95, 0.02) * 100` -- a random draw reported
+            # as agreement between two lens implementations. Nothing was
+            # compared with anything.
+            sae_lens_agreement_pct=None,
+            sae_lens_agreement_measured=False,
+            sae_lens_agreement_reason=(
+                "Comparing an SAE-based and a raw LogitLens projection requires "
+                "both projections over the same prompt and tokens. No such "
+                "comparison is performed here, so no agreement can be reported."
+            ),
             notes=f"Backend: {backend} | Mode: {mode.value}",
             run_id=run_id,
-            forward_passes=n * 2, # Rough estimate
-            patch_count=n if "patching" in task.algorithm.lower() else 0,
+            # Was `n * 2` commented "Rough estimate". A forward-pass count is a
+            # real cost figure; multiplying the prompt count by a constant and
+            # calling it rough still produces a specific integer that reads as
+            # counted. It was not counted, so it is now None.
+            forward_passes=None,
+            # Was `n if "patching" in task.algorithm.lower() else 0`: a patch
+            # count inferred from the *name* of the algorithm, with no patching
+            # performed. The count was not counted.
+            patch_count=None,
+            patch_count_measured=False,
             patch_success_rate=patch_success,
             published_overlap_pct=overlap,
         )
 
+    @staticmethod
+    def _resolve_param_count(model_id: str) -> Optional[float]:
+        """Parameter count in billions, from the model registry, or None.
+
+        The registry keys on ModelFamily, so a family must be named explicitly.
+        Guessing the family from the model id is the substring matching this
+        replaced, so callers pass the family rather than have it inferred.
+        """
+        try:
+            # Absolute import: `..` fails when this module is loaded as
+            # top-level `benchmarking.benchmark_tasks` (which is how pytest and
+            # several callers reach it), and the ImportError was being swallowed
+            # into a silent None.
+            from backend.benchmarking.model_registry import MODEL_CATALOGUE
+        except Exception:
+            return None
+        # ModelFamily is a str-enum whose value is the canonical model id, so
+        # an exact match on that value is not substring guessing. Callers pass
+        # whatever id they hold; common shorthands are normalised because they
+        # are unambiguous rather than heuristic.
+        needle = (model_id or "").strip().lower()
+        aliases = {"gpt2-small": "gpt2", "gpt-2": "gpt2", "gpt2_small": "gpt2"}
+        needle = aliases.get(needle, needle)
+        for family, spec in MODEL_CATALOGUE.items():
+            if str(family.value).lower() == needle:
+                return spec.n_params_b
+        return None
+
     def _run_pipeline_dispatch(
         self, task: BenchmarkTaskSpec, model_id: str, mode: ExecutionMode, n: int
-    ) -> Tuple[float, float, Optional[float], float]:
-        """Dispatch to high-fidelity pipelines in backend/science/reproducibility/."""
+    ) -> Tuple[float, float, Optional[float], Optional[float]]:
+        """Dispatch to high-fidelity pipelines in backend/science/reproducibility/.
+
+        The fourth element is cross-implementation agreement, which is Optional:
+        no pipeline here is cross-checked against a second implementation, so
+        it is None rather than a flattering constant.
+        """
         mock_mode = (mode == ExecutionMode.MOCK)
 
         if task.task_id == BenchmarkTask.IOI:
@@ -437,14 +569,22 @@ class BenchmarkTaskExecutor:
             pipe = IOIReproductionPipeline(mock_mode=mock_mode)
             res = pipe.run(n_prompts=n)
             metrics = res["observed_metrics"]
-            return metrics["circuit_faithfulness"], metrics["patch_success_rate"], None, 0.98
+            # Was 0.98, a constant, reported as transformer-lens agreement with
+            # the pipeline it had just run. The pipeline computes its own
+            # fidelity; it does not cross-check against a second
+            # implementation. Agreement between two methods is a separate
+            # measurement and none was made.
+            return (metrics["circuit_faithfulness"],
+                    metrics["patch_success_rate"], None, None)
 
         if task.task_id == BenchmarkTask.INDUCTION_HEADS:
             from backend.science.reproducibility.induction_heads_pipeline import InductionHeadsPipeline
             pipe = InductionHeadsPipeline(mock_mode=mock_mode)
             res = pipe.run(n_sequences=n)
             metrics = res["observed_metrics"]
-            return metrics["induction_score"], 0.0, metrics["published_overlap_pct"], 0.96
+            # Was 0.96, for the same reason as the IOI case above.
+            return (metrics["induction_score"], 0.0,
+                    metrics["published_overlap_pct"], None)
 
         # Fallback for other tasks not yet fully pipelined
         score, tl = self._run_real(task, model_id, "fallback", n)
@@ -463,34 +603,58 @@ class BenchmarkTaskExecutor:
                 return self._run_tl(task, model_id, n)
             return self._run_hf(task, model_id, n)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Real backend failed (%s), using stub: %s", backend, exc)
-            noise = self._rng.gauss(0, 0.015)
-            ref = task.reference.metric_value
-            return max(0.0, min(1.0, ref + noise)), 0.97
+            # The real backend raised. Previously this logged a warning and
+            # returned `ref + noise` -- the *published reference value* plus
+            # random jitter, as a measurement. A reproduction that scores the
+            # published number by construction reproduces nothing, and it did
+            # so silently: the caller received a plausible score with no
+            # indication the real path had failed.
+            #
+            # It now fails loudly. The caller decides whether to run in mock
+            # mode, which is at least visibly a stub.
+            logger.error("Real backend %s failed for %s: %s",
+                         backend, task.task_id, exc)
+            raise RuntimeError(
+                f"Real benchmark backend '{backend}' failed for "
+                f"{task.task_id}: {exc}. This will not be replaced with a "
+                "synthetic score derived from the published reference value, "
+                "because that measures nothing. Use ExecutionMode.MOCK "
+                "explicitly if you want a fixture."
+            ) from exc
 
     def _run_tl(
         self, task: BenchmarkTaskSpec, model_id: str, n: int
     ) -> Tuple[float, float]:
         import transformer_lens as tl  # noqa: F401
-        # Real TransformerLens execution path
-        # (detailed algorithm routing lives in backend/interpretability/)
-        ref = task.reference.metric_value
-        noise = self._rng.gauss(0, 0.01)
-        return max(0.0, min(1.0, ref + noise)), 0.99
+        # Imports the library, then returns the published reference value plus
+        # jitter. No hook, no forward pass, no measurement. The import is what
+        # made this look like a real execution path.
+        raise NotImplementedError(
+            "The transformer_lens backend is not implemented: importing the "
+            "library is not running it. This previously returned "
+            "reference.metric_value + noise, which reproduces the published "
+            "number by construction."
+        )
 
     def _run_hf(
         self, task: BenchmarkTaskSpec, model_id: str, n: int
     ) -> Tuple[float, float]:
         import transformers  # noqa: F401
-        ref = task.reference.metric_value
-        noise = self._rng.gauss(0, 0.02)
-        return max(0.0, min(1.0, ref + noise)), 0.96
+        # Same problem as the transformer_lens path: import, then return the
+        # reference value with noise.
+        raise NotImplementedError(
+            "The transformers backend is not implemented: importing the "
+            "library is not running it. This previously returned "
+            "reference.metric_value + noise."
+        )
 
     def _run_ollama(
         self, task: BenchmarkTaskSpec, model_id: str, n: int
     ) -> Tuple[float, Optional[float]]:
-        ref = task.reference.metric_value
-        # Ollama doesn't expose internal activations for hook-level analysis
-        # so fidelity is estimated from token-level outputs
-        noise = self._rng.gauss(0, 0.03)
-        return max(0.0, min(1.0, ref + noise)), None
+        # The comment said fidelity is "estimated from token-level outputs",
+        # which is not an estimate -- it is the reference value with noise.
+        raise NotImplementedError(
+            "The ollama backend is not implemented. Token-level outputs cannot "
+            "substitute for the activation-level measurements these tasks "
+            "require, so no score is returned."
+        )

@@ -172,8 +172,18 @@ def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
             for li in range(12)
             for ni in range(8)
         ],
-        "gpu_util": 0.45,
-        "memory_util": 0.32,
+        # Were 0.45 / 0.32, constants, on every request. Hardware utilisation is
+        # read from the driver; a constant makes a monitoring dashboard show a
+        # healthy machine regardless of whether the model is on CPU or the GPU
+        # is saturated.
+        "gpu_util": None,
+        "memory_util": None,
+        "gpu_util_measured": False,
+        "gpu_util_reason": (
+            "No CUDA/torch allocator is attached to the seeded fallback path, "
+            "so utilisation cannot be read. Values that look like telemetry "
+            "but are constants are worse than absent ones."
+        ),
     }
 
 

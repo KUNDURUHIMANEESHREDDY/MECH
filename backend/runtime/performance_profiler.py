@@ -18,11 +18,14 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class ProfilerMetrics:
-    total_flops: float = 0.0
-    gpu_util_pct: float = 0.0
-    throughput_tps: float = 0.0
-    mean_latency_ms: float = 0.0
-    peak_vram_mb: float = 0.0
+    # Optional where the reading may not be obtainable. 0.0 is a claim that
+    # the GPU was idle / nothing allocated, which is different from "not
+    # sampled".
+    total_flops: Optional[float] = None
+    gpu_util_pct: Optional[float] = None
+    throughput_tps: Optional[float] = None
+    mean_latency_ms: Optional[float] = None
+    peak_vram_mb: Optional[float] = None
     total_tokens: int = 0
     duration_s: float = 0.0
 
@@ -40,22 +43,32 @@ class PerformanceProfiler:
         """Starts the profiling session."""
         self.start_time = time.perf_counter()
 
-    def stop(self, total_tokens: int) -> ProfilerMetrics:
-        """Stops the profiling session and computes final metrics."""
+    def stop(self, total_tokens: Optional[int] = None) -> ProfilerMetrics:
+        """Stops the profiling session and computes final metrics.
+
+        `total_tokens` is now Optional and must be counted by the caller. It
+        used to default to `n * 50` at the call site -- "Estimated tokens =
+        # prompts * avg_seq_len" -- so throughput was computed from a token
+        # count nobody counted. Throughput and latency are None without it.
+        """
         duration = time.perf_counter() - self.start_time
         self.metrics.duration_s = duration
-        self.metrics.total_tokens = total_tokens
 
-        # 1. Throughput
-        self.metrics.throughput_tps = total_tokens / max(duration, 1e-9)
+        if not total_tokens:
+            self.metrics.total_tokens = 0
+            self.metrics.throughput_tps = None
+            self.metrics.mean_latency_ms = None
+        else:
+            self.metrics.total_tokens = int(total_tokens)
+            self.metrics.throughput_tps = total_tokens / max(duration, 1e-9)
+            self.metrics.mean_latency_ms = (duration * 1000) / max(total_tokens, 1)
 
-        # 2. Latency
-        self.metrics.mean_latency_ms = (duration * 1000) / max(total_tokens, 1)
-
-        # 3. FLOPs Estimation (Simple heuristic: 2 * Params * Tokens)
-        # In a real transformer, it's approx 6 * P * N for forward+backward
-        # For inference (forward only), it's approx 2 * P * N
-        self.metrics.total_flops = 2.0 * (self.n_params_b * 1e9) * total_tokens
+        # FLOPs is a closed-form estimate (2 * P * N for forward-only
+        # inference), not a measurement. It is only meaningful when the token
+        # count is real, and it is reported as an estimate where it appears.
+        self.metrics.total_flops = (
+            2.0 * (self.n_params_b * 1e9) * total_tokens if total_tokens else None
+        )
 
         # 4. GPU & Memory Monitoring (Mocked for CPU fallback)
         self.metrics.gpu_util_pct = self._capture_gpu_util()
@@ -63,33 +76,64 @@ class PerformanceProfiler:
 
         return self.metrics
 
-    def _capture_gpu_util(self) -> float:
-        try:
-            import torch
-            if torch.cuda.is_available():
-                # Simulated utilization for mock/stub consistency
-                return 78.4
-        except ImportError:
-            pass
-        return 0.0
+    def _capture_gpu_util(self) -> Optional[float]:
+        """GPU utilisation, sampled from the driver.
 
-    def _capture_peak_vram(self) -> float:
+        Was `return 78.4` whenever CUDA happened to be available, commented
+        "Simulated utilization for mock/stub consistency". Every GPU run on
+        every machine reported the same 78.4%, which is what a monitoring
+        surface needs in order to be useful and useless at the same time.
+
+        Returns None when it cannot be sampled -- no CUDA, no pynvml, or
+        pynvml present but failing. 0.0 would read as "the GPU was idle",
+        which is a claim, not an absence.
+        """
         try:
             import torch
-            if torch.cuda.is_available():
-                return torch.cuda.max_memory_allocated() / (1024**2)
+            if not torch.cuda.is_available():
+                return None
         except ImportError:
-            pass
-        return 0.0
+            return None
+
+        # torch exposes utilisation only through pynvml. If it is absent,
+        # report that rather than substituting a number.
+        try:
+            import pynvml  # type: ignore
+        except ImportError:
+            return None
+
+        try:
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            return float(pynvml.nvmlDeviceGetUtilizationRates(handle).gpu)
+        except Exception:
+            return None
+
+    def _capture_peak_vram(self) -> Optional[float]:
+        """Peak VRAM in MiB, or None when there is no CUDA allocator."""
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                return None
+            return torch.cuda.max_memory_allocated() / (1024 ** 2)
+        except ImportError:
+            return None
 
     def to_summary(self) -> Dict[str, Any]:
         """Returns a human-readable performance summary."""
         m = self.metrics
         return {
             "model_id": self.model_id,
-            "throughput_tps": round(m.throughput_tps, 2),
-            "latency_ms": round(m.mean_latency_ms, 2),
-            "est_flops": f"{m.total_flops:.2e}",
+            "throughput_tps": (round(m.throughput_tps, 2)
+                               if m.throughput_tps is not None else None),
+            "latency_ms": (round(m.mean_latency_ms, 2)
+                           if m.mean_latency_ms is not None else None),
+            # Named as an estimate, and only present when it is computable.
+            "est_flops": (f"{m.total_flops:.2e}"
+                          if m.total_flops is not None else None),
             "gpu_util_pct": m.gpu_util_pct,
-            "peak_vram_mb": round(m.peak_vram_mb, 1)
+            "peak_vram_mb": (round(m.peak_vram_mb, 1)
+                             if m.peak_vram_mb is not None else None),
+            "tokens_counted": m.total_tokens > 0,
+            "profiler_measured": m.total_tokens > 0,
         }
