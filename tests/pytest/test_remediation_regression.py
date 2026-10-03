@@ -112,7 +112,28 @@ def test_discovery_engine_does_not_self_publish():
     assert "circuit_name" not in result
 
     if result.get("status") == "completed" and result.get("provenance") == "live":
-        assert result["validation_eligible"] is True
+        # Eligibility is derived, not asserted. The executor runs at its
+        # four-prompt default and marks a result of that size
+        # validation-ineligible, so the orchestrator now holds the lifecycle at
+        # Evidence Collection instead of advancing to Validation regardless.
+        #
+        # This branch previously asserted `validation_eligible is True`, which
+        # pinned the unconditional flags the executor used to emit. What actually
+        # matters here is that the lifecycle label agrees with the flags.
+        assert result["measured"] is True
+        assert result["publication_eligible"] is False, (
+            "a four-prompt run cannot support a publication claim"
+        )
+        if result["validation_eligible"] is False:
+            assert result["ineligible_because"], (
+                "an ineligible result must say why"
+            )
+            assert result["lifecycle"]["state"] != "Validation", (
+                "the lifecycle advanced to Validation while the record says it is "
+                "not validation-eligible"
+            )
+        else:
+            assert result["lifecycle"]["state"] == "Validation"
     else:
         assert result["validation_eligible"] is False
         assert result["publication_eligible"] is False

@@ -10,13 +10,18 @@ Method (all quantities measured from the loaded model, nothing hardcoded):
      Same-layer pairs are reported as unresolved interactions, not edges.
   5. Recovery = clean-to-corrupted activation injection of the circuit.
 
-The result carries explicit live provenance and downstream eligibility, so
-Society validation and publication may consume it.  When no live model is
-connected the executor reports itself unavailable and callers fail closed.
+The result carries explicit live provenance.  Downstream eligibility is
+*derived*, not asserted: a measurement being live does not make it scientifically
+adequate, and this module no longer claims otherwise.  See `_adequacy`.
+
+When no live model is connected the executor reports itself unavailable and
+callers fail closed.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from statistics import mean
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -34,6 +39,115 @@ EDGE_FLOOR = 0.15
 MAX_HEADS = 10
 SCREEN_CANDIDATES = 20
 EDGE_PAIR_HEADS = 8
+
+#: Minimum prompts before the result can support a validation decision.
+#: Matches ``ioi_pipeline.MIN_PROMPTS_FOR_MINIMALITY``: below ten prompts the
+#: harness has not established that a surviving head is doing anything rather
+#: than fitting one prompt.
+MIN_PROMPTS_FOR_VALIDATION = 10
+
+#: Minimum prompts before the *pairwise interaction* stage is treated as
+#: measured. It runs on ``prompts[:2]`` by design -- it is ``EDGE_PAIR_HEADS``
+#: choose-two ablations, so its cost is quadratic in the pool and quadratic in
+#: prompts, and two was chosen to keep a run affordable. Two observations is
+#: enough to compute a mean and not enough to support a claim about it.
+MIN_PROMPTS_FOR_INTERACTION = 5
+
+
+def _discovery_id(hypothesis_statement: str, prompts: List[Dict[str, Any]],
+                  model_id: str) -> str:
+    """A stable identity for a discovery, reproducible across processes.
+
+    This was ``abs(hash((hypothesis_statement, len(prompts), tuple(...))))``.
+    Python salts ``hash`` of strings per process unless ``PYTHONHASHSEED`` is
+    pinned, so the same discovery of the same hypothesis on the same prompts got
+    a different ``discovery_id`` on every interpreter start -- measured:
+    0c49e6ce, then 78e1c9a0, then 1cca0669, for byte-identical inputs.
+
+    That defeats the point of an identifier. ``recall(discovery_id)`` cannot find
+    a previous run, two runs of the same hypothesis cannot be deduplicated, and a
+    record cannot be cited by the ID it was given. SHA-256 over a canonical JSON
+    encoding is stable across processes, platforms and Python versions.
+    """
+    payload = json.dumps(
+        {
+            "hypothesis": hypothesis_statement,
+            "model_id": model_id,
+            "prompts": [
+                {"clean": p["clean"], "corrupted": p["corrupted"],
+                 "io": p["io"], "subject": p["subject"]}
+                for p in prompts
+            ],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "disc_live_" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _adequacy(n_prompts: int, n_interaction_prompts: int,
+              faithfulness: Optional[float]) -> Dict[str, Any]:
+    """Derive the eligibility ladder from what was actually measured.
+
+    Previously this module returned ``validation_eligible: True`` and
+    ``publication_eligible: True`` unconditionally, with defaults of four prompts
+    and two prompts for the interaction stage. So a four-prompt run whose edges
+    were averaged from two observations declared itself fit for publication. The
+    flags were not a judgement about the result; they were constants next to real
+    measurements, which is the most confusing place for a constant to sit.
+
+    The ladder, and what each rung means here:
+
+        live                 -- weights were loaded and forward passes ran
+        measured             -- a faithfulness figure was computed at all
+        statistically_adequate -- enough prompts for the screening stage
+        interaction_adequate  -- enough prompts behind the pairwise edges
+        validation_eligible  -- statistically_adequate
+        publication_eligible -- both of the above
+
+    ``replicated`` is deliberately absent: nothing in this module runs a second
+    model or a second seed, so it could only ever be asserted, never measured.
+    """
+    measured = faithfulness is not None
+    statistically_adequate = n_prompts >= MIN_PROMPTS_FOR_VALIDATION
+    interaction_adequate = n_interaction_prompts >= MIN_PROMPTS_FOR_INTERACTION
+
+    reasons = []
+    if not measured:
+        reasons.append("no faithfulness was computed")
+    if not statistically_adequate:
+        reasons.append(
+            f"{n_prompts} prompts, below the {MIN_PROMPTS_FOR_VALIDATION} needed "
+            f"for a validation decision"
+        )
+    if not interaction_adequate:
+        reasons.append(
+            f"pairwise edges were averaged from {n_interaction_prompts} prompts, "
+            f"below the {MIN_PROMPTS_FOR_INTERACTION} needed to support a claim "
+            f"about them"
+        )
+
+    validation_eligible = measured and statistically_adequate
+    publication_eligible = validation_eligible and interaction_adequate
+
+    return {
+        "live": True,
+        "measured": measured,
+        "statistically_adequate": statistically_adequate,
+        "interaction_adequate": interaction_adequate,
+        "replicated": False,
+        "replicated_reason": (
+            "not measured: this module runs one model at one seed and performs "
+            "no replication"
+        ),
+        "validation_eligible": validation_eligible,
+        "publication_eligible": publication_eligible,
+        "min_prompts_for_validation": MIN_PROMPTS_FOR_VALIDATION,
+        "min_prompts_for_interaction": MIN_PROMPTS_FOR_INTERACTION,
+        "n_prompts": n_prompts,
+        "n_interaction_prompts": n_interaction_prompts,
+        "ineligible_because": reasons or None,
+    }
 
 
 _registry: Dict[str, Dict[str, Any]] = {}
@@ -67,6 +181,11 @@ class LiveIOIDiscovery:
               "pairwise ablation-interaction edges, and clean-to-corrupted "
               "injection recovery")
 
+    #: Recorded in the result and mixed into the discovery identity, so that the
+    #: same hypothesis screened against a different model is a different
+    #: discovery rather than a collision.
+    model_id = "gpt2-small"
+
     @staticmethod
     def available() -> bool:
         try:
@@ -76,22 +195,41 @@ class LiveIOIDiscovery:
             return False
 
     def run(self, hypothesis_statement: str = "", n_prompts: int = 4,
-            max_heads: int = MAX_HEADS) -> Dict[str, Any]:
+            max_heads: int = MAX_HEADS,
+            n_interaction_prompts: int = 2) -> Dict[str, Any]:
+        """Discover the IOI circuit from live weights.
+
+        `n_interaction_prompts` is the number of prompts the pairwise
+        interaction stage is averaged over. It defaults to 2 -- that stage is
+        choose-two over `EDGE_PAIR_HEADS`, so its cost is quadratic in both the
+        pool and the prompt count, and 2 keeps a run affordable.
+
+        2 is enough to compute a mean and not enough to support a claim about it,
+        which is why `publication_eligible` comes back False at any
+        `n_prompts` until a caller passes at least
+        `MIN_PROMPTS_FOR_INTERACTION`. Making it a parameter rather than raising
+        the default silently keeps the cost decision with the caller, and leaves
+        the honest "cannot support a publication claim" state as the default
+        rather than quietly paying for a different experiment.
+        """
         try:
-            return self._run(hypothesis_statement, n_prompts, max_heads)
+            return self._run(hypothesis_statement, n_prompts, max_heads,
+                             n_interaction_prompts)
         except lm.LiveUnavailable as exc:
             return {
                 "status": "unavailable",
                 "provenance": "unavailable",
                 "field_provenance": field_map(
                     ("status", "reason"), "unavailable"),
+                "measured": False,
+                "replicated": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "reason": str(exc),
             }
 
     def _run(self, hypothesis_statement: str, n_prompts: int,
-             max_heads: int) -> Dict[str, Any]:
+             max_heads: int, n_interaction_prompts: int = 2) -> Dict[str, Any]:
         token_ids = lm.single_token_names(NAMES)
         missing = sorted(name for name, tid in token_ids.items() if tid is None)
         if missing:
@@ -160,7 +298,7 @@ class LiveIOIDiscovery:
 
         # Stage D: pairwise interaction edges (earlier layer -> later layer).
         edge_pool = [cand for cand, _, _ in scored[:EDGE_PAIR_HEADS]]
-        pair_prompts = prompts[:min(2, len(prompts))]
+        pair_prompts = prompts[:max(1, min(n_interaction_prompts, len(prompts)))]
         singles: Dict[Tuple[int, int], List[float]] = {
             cand: verified[cand][:len(pair_prompts)] for cand in edge_pool}
         edges = []
@@ -214,9 +352,10 @@ class LiveIOIDiscovery:
             compl = (rec_diff / clean_diff if clean_diff > 0.2 else 0.0)
             completeness.append(max(0.0, min(1.0, compl)))
 
-        digest = abs(hash((hypothesis_statement, len(prompts),
-                             tuple(p["clean"] for p in prompts)))) & 0xffffffff
-        disc_id = f"disc_live_{digest:08x}"
+        disc_id = _discovery_id(hypothesis_statement, prompts, self.model_id)
+        mean_faithfulness = round(mean(faithfulness), 4) if faithfulness else 0.0
+        adequacy = _adequacy(len(prompts), len(pair_prompts), mean_faithfulness)
+
         result = {
             "discovery_id": disc_id,
             "status": "completed",
@@ -228,16 +367,15 @@ class LiveIOIDiscovery:
                  "baselines"),
                 "live",
             ),
-            "validation_eligible": True,
-            "publication_eligible": True,
+            **adequacy,
             "method": self.method,
-            "model_id": "gpt2-small",
+            "model_id": self.model_id,
             "n_prompts": len(prompts),
             "heads": [lm.head_label(layer, head) for layer, head in circuit],
             "head_effects": head_effects,
             "edges": edges,
             "unresolved_interactions": unresolved,
-            "faithfulness": round(mean(faithfulness), 4) if faithfulness else 0.0,
+            "faithfulness": mean_faithfulness,
             "completeness": round(mean(completeness), 4) if completeness else 0.0,
             "per_prompt_recovery": [
                 {"subject": prompt["subject"], "io": prompt["io"],

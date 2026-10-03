@@ -116,10 +116,26 @@ class DiscoveryEngine:
                     "Evidence Collection",
                     "measured head effects/edges from live GPT-2 Small",
                 )
-                lifecycle.transition_to(
-                    "Validation",
-                    "released to Society validation with live provenance",
-                )
+                # Release to Validation only when the executor says the result is
+                # validation-eligible. It previously advanced unconditionally on
+                # any completed live run, which is exactly the "live implies
+                # adequate" compression: the executor derives eligibility from
+                # prompt count and interaction sampling, and at its four-prompt
+                # default that is False. Advancing anyway would put a lifecycle
+                # label on the record that contradicts the record's own flags.
+                if result.get("validation_eligible") is True:
+                    lifecycle.transition_to(
+                        "Validation",
+                        "released to Society validation with live provenance",
+                    )
+                else:
+                    why = result.get("ineligible_because") or [
+                        "the executor did not mark it validation-eligible"
+                    ]
+                    lifecycle.transition_to(
+                        "Evidence Collection",
+                        "held at evidence collection: " + "; ".join(why),
+                    )
                 result["lifecycle"] = lifecycle.to_dict()
                 return result
             lifecycle.transition_to(

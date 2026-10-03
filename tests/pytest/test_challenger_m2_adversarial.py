@@ -432,7 +432,22 @@ class TestDiscoveryLifecycleAdversarial:
         # Eligibility may only be asserted when the evidence is explicitly live
         # and completed. Anything else must be ineligible with a reason.
         if res.get("provenance") == "live" and res.get("status") == "completed":
-            assert res["validation_eligible"] is True
+            # Live and completed is not sufficient for eligibility. The executor
+            # derives the flags from prompt count and interaction sampling, and
+            # marks a four-prompt run validation-ineligible. This branch used to
+            # assert `validation_eligible is True`, pinning the unconditional
+            # flags the executor used to emit.
+            #
+            # The invariant worth keeping is that the lifecycle agrees with the
+            # flags: the orchestrator must not sit at Validation while the record
+            # says the result is not eligible for validation.
+            assert res["measured"] is True
+            assert res["publication_eligible"] is False
+            if res["validation_eligible"] is False:
+                assert res["ineligible_because"], "an ineligible result must say why"
+                assert res["lifecycle"]["state"] != "Validation"
+            else:
+                assert res["lifecycle"]["state"] == "Validation"
         else:
             assert res["validation_eligible"] is False
             assert res["publication_eligible"] is False

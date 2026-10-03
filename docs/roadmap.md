@@ -508,6 +508,53 @@ Applied so far:
       `provenance_of` on a live ACDC discovery report now returns `"live"`, having
       returned `"unavailable"`. `tests/pytest/test_circuit_discovery_no_fabrication.py`
       pins all five readable shapes and the one unreadable shape that caused it.
+
+- [x] **2.9e Live discovery asserted publication eligibility, and its `discovery_id`
+      changed on every process start.**
+      `LiveIOIDiscovery.run` returned `validation_eligible: True` and
+      `publication_eligible: True` as **literals** beside real measurements. The
+      defaults were `n_prompts = 4`, and the pairwise interaction stage ran on
+      `prompts[:2]`. So a four-prompt run whose edges were averaged from two
+      observations declared itself fit for publication — and
+      `evidence_policy` gates on exactly those two fields.
+
+      Eligibility is now derived by `_adequacy()`, which reports the whole ladder:
+      `live` → `measured` → `statistically_adequate` (≥ 10 prompts, matching
+      `ioi_pipeline.MIN_PROMPTS_FOR_MINIMALITY`) → `interaction_adequate`
+      (≥ 5 prompts behind the edges) → `validation_eligible` → `publication_eligible`,
+      plus `ineligible_because` naming which rung failed.
+
+      `replicated` is hardcoded **False**, deliberately: this module runs one model
+      at one seed and performs no replication, so that rung could only ever be
+      asserted. A missing rung is visible; an asserted one is not.
+
+      Measured live, same weights and prompts as before:
+      `n_prompts=4` → faithfulness 0.8539, `validation_eligible=False`,
+      `publication_eligible=False`, two explicit reasons.
+      `n_prompts=10` → faithfulness 0.8755, `validation_eligible=True`,
+      `publication_eligible=False` (edges still rest on 2 prompts).
+      `n_prompts=10, n_interaction_prompts=5` → `publication_eligible=True`,
+      19 edges. The interaction count is a parameter defaulting to 2 rather than
+      being raised silently, so the cost decision stays with the caller and the
+      honest "cannot support publication" state remains the default.
+
+      **`discovery_id` was `abs(hash((statement, len(prompts), tuple(clean...))))`.**
+      Python salts string hashing per interpreter, so byte-identical inputs produced
+      `0c49e6ce`, then `78e1c9a0`, then `1cca0669`. `recall(discovery_id)` could never
+      find a previous run, two runs of the same hypothesis could not be
+      deduplicated, and a discovery could not be cited by the ID it was assigned.
+      Now SHA-256 over canonical JSON: identical across four separate processes
+      (verified), and still discriminating on hypothesis, model, prompt count and
+      prompt content.
+
+      One consequence worth recording: `DiscoveryEngine` advanced the lifecycle to
+      **Validation** on any completed live run, so with four prompts it would have
+      put a lifecycle label on a record whose own flags said it was not
+      validation-eligible. It now releases to Validation only when the executor
+      agrees, and otherwise holds at Evidence Collection with the reason. Two tests
+      asserted `validation_eligible is True` on a default run — they were pinning
+      the unconditional flags, and now assert the invariant that matters: the
+      lifecycle label agrees with the flags.
 - [x] ~~Non-GPT-2 adapters — unconditional mocks.~~ **done** — the five adapters
       ignored `mock_mode` entirely and fabricated regardless of it. Each
       constructor now calls `_force_simulated`, forcing `spec.mock_mode = True`
