@@ -403,10 +403,70 @@ Applied so far:
       captured the pre-patch value because PyTorch runs hooks in registration
       order.
 
-      `causal_scrubbing.py` carries the identical bug at
-      `causal_scrubbing.py:80,85` and is not yet fixed. `path_patching.py` was
-      checked and is already correct — it uses `live_measure.path_patch` and
-      refuses rather than approximating.
+      `causal_scrubbing.py` carried the identical bug at lines 80 and 85 — **now
+      fixed**, see 2.9b. `path_patching.py` was checked and is already correct —
+      it uses `live_measure.path_patch` and refuses rather than approximating.
+
+- [x] **2.9b `causal_scrubbing` scrubbed MLP neurons and scored them by dividing
+      one logit by another.**
+      Same substitution as ACDC: `get_activations(neuron_index=head)` (a
+      residual-stream dimension) and `patch_activation(neuron_index=head)` (an
+      MLP neuron of 3072), swept over `(layer, head)` pairs. Two further problems
+      compounded it:
+
+      * **The preservation score was a ratio of two logits.**
+        `preserved_logit / base_logit_score`, clamped to [0, 1]. Not the quantity
+        the paper defines, and not bounded meaningfully — but it became the graph
+        edge weight, the aggregate `behavior_preservation`, the hypothesis verdict,
+        *and* `DiscoveryReport.confidence`. One meaningless division published
+        four times under three different names.
+      * **The scrub was a no-op on the default dataset.** Resampling drew
+        `rng.randint(0, len(prompts) - 1)` over the whole prompt list, so with the
+        default single prompt it always chose index 0 — the prompt being scrubbed.
+        Every "resampled" activation was the original activation, so each head was
+        measured against itself. Separately, `resample_count` (default 10,
+        documented as "number of resampled reference runs per sample") was read
+        into `statistics` and never used in the loop.
+
+      The module docstring also had the paper's test backwards, describing *high*
+      behaviour preservation as validating the hypothesis when it inverts the test
+      — scrubbing breaking the behaviour is what supports it. The code was right
+      and the prose wrong.
+
+      Now:
+      * Head-level resampling via `capture_head_outputs` + `patch_head_output`.
+      * `preservation = (scrubbed − corrupted) / (clean − corrupted)`, so 1.0 is
+        "scrub left the behaviour intact" and 0.0 is "scrub destroyed it". The
+        floor is the corrupted prompt's score, which also removes the fabricated
+        `base_logit_score = 1.0` fallback — that 1.0 was the denominator of every
+        reported score whenever `top_tokens` was absent.
+      * Reported **unclamped**, because patching in a foreign activation can push
+        the target logit past the clean run's and clamping to 1.0 discards the most
+        informative case.
+      * `resample_count` is actually used, and reference vectors are captured once
+        per prompt rather than re-captured per (layer, head).
+      * Resampling requires a *different* prompt; a single-prompt dataset now
+        reports `measured: false` with the reason, instead of quietly scrubbing
+        each head against itself.
+      * The verdict is `hypothesis_supported`, not `validated`; the report's
+        `confidence` is `None` rather than the preservation score republished.
+
+      Measured on three IOI-shaped prompts with `resample_count=4`: 32 resamples
+      across 8 components, `behavior_preservation` 0.8145, and 8 *distinct* edge
+      weights spanning 0.292 … 1.104 — the values above 1.0 being the unclamped
+      overshoot.
+
+      Honest limitation recorded rather than implied: `equivalence_class` is
+      configurable (`token_type`, `position`, `semantic_category`) but membership
+      is **not verified**. Only equal token count is checked — necessary for
+      structural equivalence, nowhere near sufficient for the semantic classes the
+      config names — and the report says so in `equivalence_check` and
+      `provenance.equivalence_verified: false`.
+
+      `tests/pytest/test_causal_scrubbing_semantics.py`, 12 tests, including that a
+      single-prompt dataset cannot be scrubbed and that each edge weight equals the
+      mean of its own recorded samples (which the old clamped logit ratio would not
+      have satisfied).
 - [x] ~~Non-GPT-2 adapters — unconditional mocks.~~ **done** — the five adapters
       ignored `mock_mode` entirely and fabricated regardless of it. Each
       constructor now calls `_force_simulated`, forcing `spec.mock_mode = True`
