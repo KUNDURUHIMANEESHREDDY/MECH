@@ -269,13 +269,22 @@ measured; the rest report `NOT_RUN` with the reason. Current state:
 |---|---|---|
 | IOI | MEASURED | 0.724 |
 | Induction heads | MEASURED | 0.670 |
-| Greater-Than, Arithmetic, SAE | NOT_RUN | — |
+| Greater-Than | NOT_RUN | — (task not performed: 0/10 above chance) |
+| Arithmetic, SAE | NOT_RUN | — (no measurement implemented) |
+
+The two NOT_RUN reasons are now different in kind, which matters: Greater-Than is
+wired to a real pipeline that *measured* whether the model performs the comparison
+and found it does not on this template (mean valid-minus-invalid logit difference
+−0.81, so there is no circuit to localise and no fidelity number exists), while
+Arithmetic and SAE have no measurement at all. Both report `NOT_RUN`; only one of
+them has evidence behind the claim.
 
 `MEASURED` is a distinct status from `PASS`: the pipelines ran, but their published
 baselines are not the same measurement (see 2.1), so issuing a pass/fail verdict
 would be spurious. Consequently `overall_pass_rate` is now `None` with
 `pass_rate_measured: false`, rather than 100% or 0% — both of which were lies about
-the same suite. `benchmarks_unscored: 5` says what the number is hiding.
+the same suite. `benchmarks_unscored: 5` says what the number is hiding — it counts
+both `MEASURED` and `NOT_RUN`, since neither is a pass or a failure.
 
 `RegressionDetector` also assumed `current_fidelity` was always a float and raised
 `TypeError` on an unrun benchmark; it now skips those rather than treating a missing

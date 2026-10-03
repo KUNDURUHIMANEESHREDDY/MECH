@@ -208,12 +208,33 @@ Vector norm `79.6192`, provenance `live`.
 
 These are real findings, not gaps to hide:
 
-- **Logit lens does not recover `" Paris"` on GPT-2 small.** ` Paris` never becomes the argmax
-  at any of the 12 layers for `The capital of France is`, and its probability stays near zero.
-  GPT-2 124 M is too small to do this — the same run gives `" the"` as the top prediction.
-- **The 6-sample IOI benchmark is trivially easy.** The live benchmark endpoint reports
-  `score: 1.0, pass_rate: 1.0, eval_samples: 6`. That number is real but nearly meaningless
-  statistically; it needs the full 100-template panel from the paper to be worth reporting.
+- **Logit lens does not recover `" Paris"` on GPT-2 small.** Measured across the full 8-prompt
+  panel: final-layer top-1 accuracy **0.125**, and the expected token appears at *any* depth in
+  only **0.375** of prompts — so this is the lens failing to decode, not the answer being absent.
+  For `The capital of France is` the sweep runs `destro` → `now` (layers 2–9) → `France`
+  (10–11) → `the` (12), never proposing `Paris`. Entropy is **not** monotonic: it falls to 1.55
+  mid-network then rises to 4.42 at the output layer. Both facts are reported as measured.
+
+  This is now a real forward pass through the model's own `ln_f` and unembedding matrix. It
+  previously reported the *expected* token for every layer past 60% depth
+  (`top_token = expected if progress > 0.60 else " the"`), with entropy from
+  `3.5·exp(−2·layer/n)` and a convergence layer of `int(n_layers × 0.65)` — always 7. The sweep
+  converged on the right answer by construction, which is the one thing the lens exists to test.
+  The last lens row is now taken from the model's own `logits` rather than recomputed, so it
+  verifies the rows above it; an earlier version disagreed with the real forward pass by 84
+  logits while still yielding the same argmax.
+- **GPT-2 small does not perform the greater-than comparison on this harness's template.**
+  Measured, not assumed: across 10 start years the model puts *less* logit mass on valid
+  completions (`end < start`) than invalid ones in 10 of 10 cases, mean difference **−0.81**.
+  There is therefore no greater-than circuit to localise on this model, and `bm_gt` reports
+  `NOT_RUN` carrying that measurement rather than a fidelity number. This says nothing about
+  Hanna et al.'s claims — it says this harness does not reproduce their setup.
+- ~~The 6-sample IOI benchmark is trivially easy.~~ **Stale claim, corrected.** The live endpoint
+  no longer reports `eval_samples: 6`; `n` resolves as `n_samples or task.dataset_size` and no
+  caller passes an override, so IOI runs its full **100** prompts. The `6` came from a recorded
+  result emitted by the reference-derived scoring path, which has been deleted. The real
+  statistical gap is different and smaller: the interval is computed per task from a single
+  draw, with no pooling across seeds.
 
 ---
 
@@ -457,13 +478,35 @@ static import when the store lands.
 
 Each was re-verified against the tree before being closed, because the snapshot some of these
 came from predates other fixes. Two were already resolved; two were real and are now fixed.
-
 | File | Defect | Resolution |
 |------|--------|------------|
 | `backend/benchmarking/benchmark_tasks.py` | `logger.warning(...)` called without importing `logging` → `NameError` on the fallback path. | **Already gone.** The last `logger` call was in `_run_real`, removed when the reference-derived fallback was deleted. The module contains no `logger` token at all, so there was no unused import to add either. |
 | `backend/reasoning/__init__.py:3` | Imports `journey_tracer` and `neuron_debugger`; neither module exists, so `import backend.reasoning` raised `ModuleNotFoundError`. | **Fixed.** The package now imports cleanly and resolves the five names lazily, raising `ImportError` with a named reason only if something actually uses one. Nothing referenced these symbols. |
 | `backend/main.py:93` | `backend.api.runtime_api` does not exist and a bare `except: pass` let `/api/v2` vanish silently. | **Already fixed.** A `find_spec` check now logs a WARNING stating the 404 means *capability absent, not degraded*, and a module that exists but fails to import is logged with a traceback. The module still does not exist, so `/api/v2` is genuinely absent — now explicitly, not silently. |
 | `backend/interpretability/algorithms/registry.py:23` | Used `List` without importing it. | **Fixed** to `list[str]`. This one was *latent*, not immediate: the module has `from __future__ import annotations`, so the annotation was never evaluated at import and the module loaded fine. It would only have raised under `typing.get_type_hints()`. The sibling registry already used PEP 585 lowercase; this file had been missed by that migration. |
+
+#### 3a. The same defect class, four more times ✅
+
+The `reasoning/__init__.py` defect — a module that cannot be imported — turned out to be the
+*smallest* instance of a pattern that had produced **twelve** unimportable modules. Each was
+invisible because nothing exercised the path, so the suite stayed green:
+
+| Broken import | Modules | Cause |
+|---|---|---|
+| `..reproducibility.paper_registry` / `PaperRegistry` | `discovery_memory`, `run_representation_audit` | Wrong relative path *and* wrong class name; the class is `BenchmarkRegistry` |
+| `backend.interpretability.statistics.stats_engine` | `inspectors.layer`, `.neuron`, `.prediction`, `.token` | Package does not exist; the real module is under `backend/science/statistics/`, which already exposes the `stats_engine` singleton with the exact three methods being called |
+| `CacheError`, `HookError`, `ModelLoadError`, `ModelNotFoundError`, `SessionNotFoundError` from `backend/runtime/errors.py` | `activation_cache`, `health`, `hook_framework`, `interpreter`, `model_manager`, `session_manager` | All five names actively raised or imported, none defined. `errors.py` defined four unrelated exceptions. |
+
+Fixed by correcting the two paths and defining the five missing exceptions in `errors.py` rather
+than at their raise sites — six modules already agreed that is where they belong. `ModelLoadError`
+and `ModelNotFoundError` subclass the existing `MissingModelError`, whose docstring already covers
+"cannot be resolved or loaded", so broad handlers keep working.
+
+`tests/pytest/test_all_backend_modules_import.py` now walks the whole package and asserts every
+module imports, which catches the entire class at once. It distinguishes "a dependency is not
+installed" from "this module imports something that does not exist", since conflating them would
+make it fail on a machine without a GPU instead of on a real defect. Negative-control verified:
+injecting one module with a bad import makes it fail, and removing it restores green.
 
 ### 4. Turn the IOI screen into a real circuit
 
@@ -496,6 +539,73 @@ multi-template averaging, and a path-patching pass. The injection-recovery machi
 Sparse autoencoders, tuned lens, attribution patching and path patching are currently
 placeholders with convincing-looking output. Either implement them against real weights or
 remove them — a stub that returns `0.94` is worse than an honest `unavailable`.
+
+Three of the worst offenders are resolved, and all three were worse than described — each
+fabricated metric looked like a finding and was reachable by callers with weights loaded:
+
+- [x] **SAE reproduction — simulation removed, now fails closed.** The feature bank came from
+      `rng.betavariate` and `rng.sample` over a 19-word list: `top_activating_tokens` was a
+      random draw, `monosemanticity_score` was a betavariate, `is_absorbed` was a coin flip at
+      p=0.12. Three aggravating factors: the simulation **ran regardless of `mock_mode`**, so the
+      flag controlled nothing; `reconstruction_mse` was `0.03 + (1 − mean_score) × 0.04`, a
+      formula over those same random numbers with no autoencoder trained or evaluated; and the
+      dataset manifest claimed **OpenWebText**, which is never read. The three tests that
+      "verified" it could only pass — `l0_sparsity > 0.50` was guaranteed by `betavariate(0.5,
+      5.0)`, and all ten "top" features exceeding 0.5 was guaranteed by the distribution *plus*
+      sorting by that same score.
+- [x] **Arithmetic reproduction — fabrication removed.** Returned `0.45` (modulo) and `0.85`
+      (base-10) **unconditionally**: the comment claimed a mock/test environment that the code
+      did not implement, so every caller got the numbers, and `benchmark_runner` reached them
+      through its `run(model_id=…)` fallback and wrote them into a report.
+- [x] **Greater-than — replaced with a real measurement.** `_compute_patch_effect` ignored its
+      `prompt` argument and returned `{7: 0.82, 8: 0.91, 9: 0.78}`, a table keyed to the paper's
+      own answer, so `mlp_importance_score` was a structural constant and the measurement was
+      incapable of disagreeing with the paper it reproduced. `circuit_accuracy` was separately
+      broken: it tested whether the century string appeared in a single next-token prediction,
+      which counts (1942, 1918) wrong because `range(1942, 1919)` is empty.
+
+      Now a genuine MLP activation-patching measurement against loaded weights, scoring the
+      logit mass of valid completions (`end < start`) against invalid ones rather than asking
+      the model to generate an end year — that framing measures world knowledge, not comparison,
+      and scored 0/9.
+
+      **The measured finding is that GPT-2 small does not perform this comparison here**: 0/10
+      prompts above chance, mean valid-minus-invalid logit difference **−0.81**, i.e.
+      systematically preferring invalid completions. So the pipeline raises with that evidence
+      and `bm_gt` reports `NOT_RUN` *with a measured reason* instead of "no pipeline exists". No
+      fidelity number is produced, because producing one for a task the model does not do would
+      be measuring noise. Hanna et al.'s claim is therefore neither confirmed nor refuted — this
+      harness does not reproduce their setup, and the module says so.
+- [x] **Copy task and factual recall — fabrication removed.** Both were 14–15 line modules that
+      returned `0.92`/`0.88` and `0.75`/`0.65` unconditionally under a comment claiming a mock
+      environment the code did not implement. `0.92` is also implausibly high for GPT-2 small on
+      an induction measurement. Both now raise. The copy task is not lost: the
+      induction-heads pipeline already measures the same behaviour properly.
+- [x] **Logit lens — replaced with a real forward pass.** See [Honest negative results](#honest-negative-results)
+      above for the measured numbers and what the previous version fabricated.
+- [ ] Still open: tuned lens, attribution patching, path patching, plus the honest-SAE work
+      described in `backend/science/reproducibility/sae_pipeline.py`.
+
+Also removed from `benchmark_runner.py`, which was fabricating alongside the pipelines:
+
+- Peak VRAM was `6.7 if "gpt2" in model_id else 12.4` — a constant chosen by model name and stored
+  under the key `peak_vram_gb`, i.e. presented as an observed quantity. It is now read from
+  `torch.cuda.max_memory_allocated()` (measured IOI 0.238 GB, induction-heads 0.251 GB on a 6 GB
+  card) or reported as `None`.
+- Every generated report was stamped with the literal dataset id `mock_dataset_manifest_v1` and
+  the fixed note `"Milestone A Validation Run"` — a dataset that never existed, and an assertion
+  that a validation had happened.
+- **`self.mock_mode = True` was hardcoded**, so `run_all` could only ever build fixtures, while
+  presenting them through the same report path as real measurements. It now defaults to `False`,
+  matching every pipeline in the package.
+- A mock-mode run reported `status="PASS"`, because `"PASS"` was the default for anything that
+  did not raise — so a fixture claiming a pass was indistinguishable from a measurement. Mock runs
+  now report `FIXTURE`.
+- The `except TypeError` signature probe is gone: it turned a genuine `TypeError` raised *inside*
+  a measurement into a retry with a different signature, which is precisely how the arithmetic
+  stub was reached. Signatures are now inspected with `inspect.signature`.
+- `LiveUnavailable` is reported as `NOT_RUN` rather than `ERROR`, matching the scheduler's
+  vocabulary, since four of the six pipelines now raise by design.
 
 ### 7. Frontend cleanup
 

@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from .mechanism_claim_registry import MechanismClaimRegistry, RegisteredMechanismClaim
 from .representation_engine import RepresentationEngine
-from ..reproducibility.paper_registry import PaperRegistry
+from backend.science.reproducibility.paper_registry import BenchmarkRegistry
 
 
 @dataclass
@@ -88,11 +88,11 @@ class DiscoveryMemoryEngine:
     def __init__(
         self,
         claim_registry: Optional[MechanismClaimRegistry] = None,
-        paper_registry: Optional[PaperRegistry] = None,
+        paper_registry: Optional[BenchmarkRegistry] = None,
         repr_engine: Optional[RepresentationEngine] = None,
     ) -> None:
         self.claim_registry = claim_registry or MechanismClaimRegistry()
-        self.paper_registry = paper_registry or PaperRegistry()
+        self.paper_registry = paper_registry or BenchmarkRegistry()
         self.repr_engine = repr_engine or RepresentationEngine()
 
     def search(self, query: str, top_k: int = 10) -> DiscoveryMemorySearchResults:

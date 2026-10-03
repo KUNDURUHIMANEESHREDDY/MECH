@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-10-03T07:54:34.331705Z",
+  "claims": [
+    {
+      "claim_id": "claim_ioi_name_mover",
+      "title": "IOI Name Mover Circuit",
+      "description": "L9H9 and L10H0 act as primary Name Mover Heads writing directly to IO token logits.",
+      "status": "Validated",
+      "confidence": 0.962,
+      "replications": 14,
+      "models": [
+        "GPT2-S",
+        "GPT2-M",
+        "Gemma2",
+        "Llama3"
+      ],
+      "supporting_experiments": 103,
+      "contradicting_experiments": 4,
+      "literature": [
+        "Wang et al. 2022: Interpretability in the Wild",
+        "Conmy et al. 2023: ACDC"
+      ],
+      "algorithms_used": [
+        "Attribution Patching",
+        "ACDC",
+        "Path Patching",
+        "Causal Scrubbing",
+        "Universality"
+      ],
+      "evidence_summary": {},
+      "created_at": "2026-10-03T07:54:34.331705Z",
+      "updated_at": "2026-10-03T07:54:34.331705Z"
+    },
+    {
+      "claim_id": "claim_induction_heads",
+      "title": "Induction Head Sequence Repeater",
+      "description": "Previous-token head L4H2 attends to token K-1 while Induction Head L5H1 copies token K to current position.",
+      "status": "Validated",
+      "confidence": 0.941,
+      "replications": 22,
+      "models": [
+        "GPT2-S",
+        "Gemma2",
+        "Llama3",
+        "Mistral7B"
+      ],
+      "supporting_experiments": 145,
+      "contradicting_experiments": 2,
+      "literature": [
+        "Olsson et al. 2022: In-context Learning and Induction Heads"
+      ],
+      "algorithms_used": [
+        "Attribution Patching",
+        "ACDC",
+        "Causal Scrubbing",
+        "Universality"
+      ],
+      "evidence_summary": {},
+      "created_at": "2026-10-03T07:54:34.331705Z",
+      "updated_at": "2026-10-03T07:54:34.331705Z"
+    }
+  ]
+}
