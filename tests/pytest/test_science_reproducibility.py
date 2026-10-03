@@ -130,22 +130,90 @@ def test_ioi_pipeline_generates_manifest_only_when_completed():
 
 # ── Induction Heads Pipeline ──────────────────────────────────────────────────
 
-def test_induction_heads_pipeline_runs():
+def test_induction_heads_pipeline_reports_shape_without_inventing_heads():
+    """Mock mode must report unmeasured, not return the published heads.
+
+    This test asserted `len(result["induction_heads_found"]) >= 3`, and the
+    pipeline satisfied it by scoring heads as `random.uniform(0.75, 0.92)` if
+    they were in a hardcoded canonical set. The attention matrix it computed to
+    do that was discarded.
+
+    In mock mode there is no model, so no attention exists to measure. The
+    honest result is unavailable, and that is what this asserts.
+    """
     pipeline = InductionHeadsPipeline(mock_mode=True)
     result = pipeline.run(n_sequences=20)
+
     assert result["pipeline"] == "InductionHeadsPipeline"
-    assert len(result["induction_heads_found"]) >= 3
     metrics = result["observed_metrics"]
-    assert "induction_score" in metrics
-    assert "prefix_match_accuracy" in metrics
-    assert "in_context_learning_score" in metrics
+    for name in ("induction_score", "prefix_match_accuracy",
+                 "in_context_learning_score"):
+        assert name in metrics, name
+        assert metrics[name] is None, (
+            f"{name} was {metrics[name]!r} with no model loaded; a mock must "
+            f"not produce a metric value"
+        )
+
+    assert result["provenance"] == "unavailable"
+    assert result["validation_eligible"] is False
+    assert "induction_heads_found" not in result
 
 
-def test_induction_heads_detected_canonical():
-    pipeline = InductionHeadsPipeline(mock_mode=True)
-    result = pipeline.run()
-    head_layers = {h["layer"] for h in result["induction_heads_found"]}
-    assert 5 in head_layers or 6 in head_layers or 7 in head_layers
+def test_induction_heads_are_not_hardcoded():
+    """No detection path may consult the canonical list.
+
+    The published canonical set was the detection criterion: score was high iff
+    the head was in it, so only those heads could ever be returned and the
+    threshold could not exclude anything. This checks the list is only read for
+    the post-hoc comparison.
+    """
+    import inspect
+
+    from backend.science.reproducibility import induction_heads_pipeline as mod
+
+    source = inspect.getsource(mod)
+    # The list may appear in the reference comparison and in docs, but never in
+    # a membership test that feeds a score.
+    assert ".intersection(CANONICAL_HEADS)" in source, (
+        "expected the canonical set to be used for the overlap comparison"
+    )
+    for forbidden in ("in CANONICAL_HEADS", "CANONICAL_HEADS if",
+                      "CANONICAL_HEADS and"):
+        assert forbidden not in source, (
+            f"{forbidden!r} makes the canonical list a detection criterion"
+        )
+
+
+def test_attention_measurement_requires_real_weights():
+    """The bug this pipeline had: sdpa returns None for every layer.
+
+    transformers returns a tuple of Nones for `output_attentions=True` under
+    the sdpa path. Nothing raises at the model boundary; the failure appears
+    much later as 'NoneType' is not subscriptable. The adapter now forces
+    eager, and this asserts attentions actually arrive.
+    """
+    import torch
+
+    from backend.science.models.gpt2_adapter import GPT2Adapter
+
+    adapter = GPT2Adapter(variant="small", mock_mode=False)
+    if adapter._model is None:
+        import pytest
+        pytest.skip("GPT-2 weights are not loaded")
+
+    token_ids = adapter._tokenizer("the cat sat on the")["input_ids"]
+    ids = torch.tensor([token_ids], device=adapter._model.device)
+    outputs = adapter._forward_with_hooks_ids(ids)
+
+    assert outputs.attentions is not None
+    none_layers = [i for i, t in enumerate(outputs.attentions) if t is None]
+    assert not none_layers, (
+        f"layers {none_layers} returned no attention weights; eager attention "
+        f"must be forced for measurements to be possible"
+    )
+    # [batch, heads, query, key] -- the query/key axes are the sequence length.
+    seq_len = len(token_ids)
+    assert outputs.attentions[0].shape[-2:] == (seq_len, seq_len)
 
 
 # ── Greater-Than Pipeline ─────────────────────────────────────────────────────

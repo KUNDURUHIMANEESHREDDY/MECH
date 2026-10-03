@@ -9,6 +9,7 @@ Each task defines:
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from dataclasses import dataclass, field
@@ -83,6 +84,8 @@ class BenchmarkResult:
     confidence_interval_high: Optional[float]
     confidence_interval_half_width: Optional[float] = None
     confidence_interval_method: Optional[str] = None
+    # What the interval bounds. May not be the primary score.
+    confidence_interval_target: Optional[str] = None
     confidence_interval_derived: bool = False
     n_samples: int = 0
     # High-Fidelity Performance Metrics (Phase 39.14)
@@ -99,6 +102,11 @@ class BenchmarkResult:
     # Execution Metadata
     git_sha: str = "unknown"
     device_info: str = "cpu"
+    # What actually ran. `backend` is caller-supplied and was previously
+    # ignored by every path, so a caller could not tell which code executed.
+    backend_effective: Optional[str] = None
+    # True when the score came from the fixture rather than a measurement.
+    is_fixture: bool = False
     precision: str = "fp32"
     # Optional: a count that is not counted must not be a specific integer.
     forward_passes: Optional[int] = None
@@ -121,6 +129,8 @@ class BenchmarkResult:
             "task_id": self.task_id.value,
             "model_id": self.model_id,
             "backend": self.backend,
+            "backend_effective": self.backend_effective,
+            "is_fixture": self.is_fixture,
             "mode": self.mode.value,
             "primary_score": round(self.primary_score, 2),
             "reference_score": round(self.reference_score, 2),
@@ -161,6 +171,7 @@ class BenchmarkResult:
             "sae_lens_agreement_reason": self.sae_lens_agreement_reason,
             "confidence_interval_derived": self.confidence_interval_derived,
             "confidence_interval_method": self.confidence_interval_method,
+            "confidence_interval_target": self.confidence_interval_target,
             "notes": self.notes,
             "run_id": self.run_id,
         }
@@ -424,55 +435,100 @@ class BenchmarkTaskExecutor:
         if mode == ExecutionMode.MOCK:
             # A fixture, and labelled as one: centred on the published
             # reference so downstream code has something to exercise.
-            noise = self._rng.gauss(0, 0.015)
-            score = max(0.0, min(1.0, ref_val + noise))
-            tl_agree = max(0.85, min(1.0, 0.97 + self._rng.gauss(0, 0.02)))
-            patch_success = 0.0
-            overlap = None
+            outcome = {
+                "score": self._fixture_score(task),
+                "fixture": True,
+                "patch_success_rate": None,
+                "overlap_pct": None,
+                "trials": None,
+                "correct": None,
+                "tokens": None,
+                "backend_effective": "mock fixture",
+            }
         else:
-            # REFERENCE or PRODUCTION — run the real pipeline.
-            score, patch_success, overlap, tl_agree = self._run_pipeline_dispatch(
-                task, model_id, mode, n)
+            # REFERENCE or PRODUCTION -- run the task's real pipeline.
+            outcome = self._run_pipeline_dispatch(task, model_id, mode, n)
+
+        score = outcome["score"]
+        if score is None:
+            raise RuntimeError(
+                f"The {outcome.get('backend_effective')} pipeline returned no "
+                f"primary score for {task.task_id!r}, so no result can be "
+                f"reported. This is not replaced with a reference-derived "
+                f"value."
+            )
+        patch_success = outcome.get("patch_success_rate")
+        overlap = outcome.get("overlap_pct")
+        is_fixture = bool(outcome.get("fixture"))
+        # Cross-implementation agreement is never measured here; it used to be
+        # a constant (0.98 / 0.96 / 0.97 / 0.99 depending on the path).
+        tl_agree: Optional[float] = None
+        self._tokens_counted = outcome.get("tokens")
 
         fidelity_pct = (1.0 - abs(score - ref_val) / max(ref_val, 1e-9)) * 100.0
 
-        # Stop the profiler. The caller previously passed `n * 50` -- "estimated
-        # tokens = prompts * avg_seq_len" -- so throughput and latency were
-        # divided by a token count nobody counted. Without a real count the
-        # profiler reports None for both, which is the honest answer.
+        # Stop the profiler with a token count the pipeline actually produced,
+        # so throughput and latency rest on a real denominator. It used to be
+        # `n * 50` -- "estimated tokens = prompts * avg_seq_len".
         perf = profiler.stop(total_tokens=self._tokens_counted)
         runtime_s = perf.duration_s
 
-        # A binomial 95% interval is only valid when `score` is a proportion of
-        # n independent binary outcomes. Here `score` is a single aggregate
-        # metric returned by a pipeline, so the per-sample outcomes that would
-        # justify the formula are not available at this level. The formula was
-        # still applied and the result reported as a 95% CI.
-        #
-        # The condition is now stated instead of assumed: an interval is only
-        # emitted for a metric that actually is a proportion of n Bernoulli
-        # trials, and `ci_derived` records whether that held.
+        # A binomial interval needs the per-trial outcomes, which the pipelines
+        # now return. `correct`/`trials` come from real boolean predictions;
+        # the interval is computed from them and `ci_derived` records whether
+        # they were available.
+        correct = outcome.get("correct")
+        trials = outcome.get("trials")
         ci_is_binomial_proportion = bool(
-            ref_val is not None and 0.0 <= score <= 1.0 and n > 0
-            and task.primary_metric.endswith(("_rate", "_accuracy", "success_rate"))
+            not is_fixture
+            and isinstance(correct, int)
+            and isinstance(trials, int)
+            and trials > 0
+            and 0 <= correct <= trials
         )
         if ci_is_binomial_proportion:
-            half_width = 1.96 * (score * (1 - score) / n) ** 0.5 * 100
-            ci_low = round(score * 100 - half_width, 2)
-            ci_high = round(score * 100 + half_width, 2)
-            ci_method = "normal approximation to the binomial proportion"
+            # Wilson score interval, from the pipeline's real correct/trials.
+            #
+            # The normal approximation was used before, on the *aggregate*
+            # score rather than on trial counts, and it is unreliable exactly
+            # where these benchmarks sit: at p=0.90 the approximation runs past
+            # the boundary, and a single-copy control at p=0.0 yields a
+            # zero-width interval that implies false precision. Wilson stays
+            # inside [0,1] at both extremes.
+            proportion = correct / trials
+            z = 1.959963984540054  # 95%
+            denominator = 1.0 + (z * z) / trials
+            centre = proportion + (z * z) / (2 * trials)
+            spread = z * math.sqrt(
+                (proportion * (1 - proportion) / trials)
+                + (z * z) / (4 * trials * trials)
+            )
+            ci_low = round(max(0.0, (centre - spread) / denominator) * 100, 2)
+            ci_high = round(min(1.0, (centre + spread) / denominator) * 100, 2)
+            half_width = round((ci_high - ci_low) / 2, 2)
+            ci_method = (
+                f"Wilson score interval from {correct}/{trials} observed "
+                f"outcomes"
+            )
+            # Name the quantity the interval covers. For IOI this is the same
+            # family as the primary score; for induction the primary score is a
+            # mean attention fraction, while the interval covers the
+            # behavioural accuracy. Leaving that unstated would present a
+            # narrow interval as though it bounded the headline number.
+            ci_target = outcome.get("ci_target") or "primary_score"
         else:
             half_width = None
             ci_low = None
             ci_high = None
-            ci_method = (
-                None
-            )
+            ci_method = None
+            ci_target = None
 
         return BenchmarkResult(
             task_id=task.task_id,
             model_id=model_id,
             backend=backend,
+            backend_effective=outcome.get("backend_effective"),
+            is_fixture=is_fixture,
             mode=mode,
             primary_score=round(score * 100, 2),
             reference_score=round(ref_val * 100, 2),
@@ -496,6 +552,7 @@ class BenchmarkTaskExecutor:
             confidence_interval_half_width=(round(half_width, 2)
                                             if half_width is not None else None),
             confidence_interval_method=ci_method,
+            confidence_interval_target=ci_target,
             confidence_interval_derived=ci_is_binomial_proportion,
             n_samples=n,
             tl_agreement_pct=round(tl_agree * 100, 2) if tl_agree else None,
@@ -555,106 +612,149 @@ class BenchmarkTaskExecutor:
 
     def _run_pipeline_dispatch(
         self, task: BenchmarkTaskSpec, model_id: str, mode: ExecutionMode, n: int
-    ) -> Tuple[float, float, Optional[float], Optional[float]]:
-        """Dispatch to high-fidelity pipelines in backend/science/reproducibility/.
+    ) -> Dict[str, Any]:
+        """Run the task's real reproduction pipeline.
 
-        The fourth element is cross-implementation agreement, which is Optional:
-        no pipeline here is cross-checked against a second implementation, so
-        it is None rather than a flattering constant.
+        Returns the measured primary score plus whatever the pipeline actually
+        reported. Raises for a task with no implemented pipeline rather than
+        substituting a value: six of the eight catalogue tasks have no
+        measurement implementation, and inventing one would be exactly the
+        failure this file was rewritten to remove.
+
+        `backend` is intentionally not consulted. There is one measurement path
+        -- the reproduction pipelines -- and they all run the same model. The
+        parameter is retained in the signature because it is part of the public
+        API and is recorded in the result, but a caller cannot select between
+        it. `backend_effective` on the result says what actually ran.
         """
         mock_mode = (mode == ExecutionMode.MOCK)
 
         if task.task_id == BenchmarkTask.IOI:
-            from backend.science.reproducibility.ioi_pipeline import IOIReproductionPipeline
-            pipe = IOIReproductionPipeline(mock_mode=mock_mode)
-            res = pipe.run(n_prompts=n)
-            metrics = res["observed_metrics"]
-            # Was 0.98, a constant, reported as transformer-lens agreement with
-            # the pipeline it had just run. The pipeline computes its own
-            # fidelity; it does not cross-check against a second
-            # implementation. Agreement between two methods is a separate
-            # measurement and none was made.
-            return (metrics["circuit_faithfulness"],
-                    metrics["patch_success_rate"], None, None)
+            from backend.science.reproducibility.ioi_pipeline import (
+                IOIReproductionPipeline,
+            )
+            result = IOIReproductionPipeline(mock_mode=mock_mode).run(
+                n_prompts=n)
+            if mock_mode:
+                return {
+                    "score": self._fixture_score(task),
+                    "fixture": True,
+                    "patch_success_rate": None,
+                    "overlap_pct": None,
+                    "trials": None,
+                    "correct": None,
+                    "tokens": None,
+                    "backend_effective": "mock fixture",
+                }
+
+            metrics = result["observed_metrics"]
+            traces = result.get("raw_traces") or []
+            # patch_success is a per-prompt boolean produced by the pipeline,
+            # so it is a real binomial sample and the interval can be computed
+            # from it rather than from the aggregate score.
+            successes = [
+                t["patch_success"] for t in traces
+                if isinstance(t, dict) and isinstance(t.get("patch_success"), bool)
+            ]
+            return {
+                "score": metrics.get("circuit_faithfulness"),
+                "fixture": False,
+                "patch_success_rate": metrics.get("patch_success_rate"),
+                "overlap_pct": None,
+                "trials": len(successes),
+                "correct": sum(1 for s in successes if s),
+                "tokens": self._count_ioi_tokens(traces),
+                "backend_effective": "IOIReproductionPipeline",
+            }
 
         if task.task_id == BenchmarkTask.INDUCTION_HEADS:
-            from backend.science.reproducibility.induction_heads_pipeline import InductionHeadsPipeline
-            pipe = InductionHeadsPipeline(mock_mode=mock_mode)
-            res = pipe.run(n_sequences=n)
-            metrics = res["observed_metrics"]
-            # Was 0.96, for the same reason as the IOI case above.
-            return (metrics["induction_score"], 0.0,
-                    metrics["published_overlap_pct"], None)
+            from backend.science.reproducibility.induction_heads_pipeline import (
+                InductionHeadsPipeline,
+            )
+            if mock_mode:
+                return {
+                    "score": self._fixture_score(task),
+                    "fixture": True,
+                    "patch_success_rate": None,
+                    "overlap_pct": None,
+                    "trials": None,
+                    "correct": None,
+                    "tokens": None,
+                    "backend_effective": "mock fixture",
+                }
 
-        # Fallback for other tasks not yet fully pipelined
-        score, tl = self._run_real(task, model_id, "fallback", n)
-        return score, 0.0, None, tl
+            result = InductionHeadsPipeline(mock_mode=False).run(
+                n_sequences=n, seq_len=8)
+            metrics = result["observed_metrics"]
+            behaviour = result.get("behaviour") or {}
+            trials = behaviour.get("repeated_block_n")
+            correct = behaviour.get("repeated_block_correct")
+            return {
+                "score": metrics.get("induction_score"),
+                "fixture": False,
+                "patch_success_rate": None,
+                "overlap_pct": metrics.get("published_overlap_pct"),
+                "trials": trials,
+                "correct": correct,
+                "tokens": self._count_induction_tokens(n),
+                "backend_effective": "InductionHeadsPipeline",
+                # The behavioural accuracy is a real proportion too, and it is
+                # the metric with a meaningful number of trials.
+                "behaviour_accuracy": behaviour.get("repeated_block_accuracy"),
+                "behaviour_trials": trials,
+                "behaviour_correct": correct,
+                # The primary score here is a mean attention fraction, not a
+                # proportion of trials, so the interval covers the behavioural
+                # accuracy instead. Saying so prevents a narrow interval being
+                # read as a bound on the headline number.
+                "ci_target": "behavioural_accuracy",
+                "mechanism": (result.get("mechanism") or {}).get("mechanism"),
+            }
+
+        raise NotImplementedError(
+            f"No measurement pipeline is implemented for task "
+            f"{task.task_id!r}. Tasks with a real implementation: IOI "
+            f"(IOIReproductionPipeline), INDUCTION_HEADS "
+            f"(InductionHeadsPipeline). This previously fell through to a "
+            f"stub returning the published reference value plus noise, which "
+            f"reproduces the paper by construction."
+        )
+
+    def _fixture_score(self, task: BenchmarkTaskSpec) -> float:
+        """A value centred on the published reference. Explicitly a fixture."""
+        return max(0.0, min(1.0, task.reference.metric_value
+                            + self._rng.gauss(0, 0.015)))
+
+    @staticmethod
+    def _count_ioi_tokens(traces: List[Dict[str, Any]]) -> Optional[int]:
+        """Real token count for the IOI prompts, or None if unavailable."""
+        try:
+            from backend.services import gpt2_engine
+            tokenizer = getattr(gpt2_engine, "_tokenizer", None)
+            if tokenizer is None:
+                return None
+            prompts = [t.get("prompt") for t in traces
+                       if isinstance(t, dict) and t.get("prompt")]
+            if not prompts:
+                return None
+            return sum(
+                len(tokenizer.encode(p)) for p in prompts
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _count_induction_tokens(n_sequences: int) -> Optional[int]:
+        """Token count implied by the sequences the pipeline actually built."""
+        # 8 token block + 1 separator + the repeated block, per sequence. The
+        # block length is a caller-visible parameter of the pipeline, not a
+        # guess at average prompt length.
+        try:
+            return int(n_sequences) * (8 + 1 + 8)
+        except (TypeError, ValueError):
+            return None
 
     # ------------------------------------------------------------------ #
     # Backend implementations                                              #
     # ------------------------------------------------------------------ #
 
-    def _run_real(
-        self, task: BenchmarkTaskSpec, model_id: str, backend: str, n: int
-    ) -> Tuple[float, Optional[float]]:
-        """Attempt real execution; fall back to stub on import/runtime error."""
-        try:
-            if backend == "transformerlens":
-                return self._run_tl(task, model_id, n)
-            return self._run_hf(task, model_id, n)
-        except Exception as exc:  # noqa: BLE001
-            # The real backend raised. Previously this logged a warning and
-            # returned `ref + noise` -- the *published reference value* plus
-            # random jitter, as a measurement. A reproduction that scores the
-            # published number by construction reproduces nothing, and it did
-            # so silently: the caller received a plausible score with no
-            # indication the real path had failed.
-            #
-            # It now fails loudly. The caller decides whether to run in mock
-            # mode, which is at least visibly a stub.
-            logger.error("Real backend %s failed for %s: %s",
-                         backend, task.task_id, exc)
-            raise RuntimeError(
-                f"Real benchmark backend '{backend}' failed for "
-                f"{task.task_id}: {exc}. This will not be replaced with a "
-                "synthetic score derived from the published reference value, "
-                "because that measures nothing. Use ExecutionMode.MOCK "
-                "explicitly if you want a fixture."
-            ) from exc
-
-    def _run_tl(
-        self, task: BenchmarkTaskSpec, model_id: str, n: int
-    ) -> Tuple[float, float]:
-        import transformer_lens as tl  # noqa: F401
-        # Imports the library, then returns the published reference value plus
-        # jitter. No hook, no forward pass, no measurement. The import is what
-        # made this look like a real execution path.
-        raise NotImplementedError(
-            "The transformer_lens backend is not implemented: importing the "
-            "library is not running it. This previously returned "
-            "reference.metric_value + noise, which reproduces the published "
-            "number by construction."
-        )
-
-    def _run_hf(
-        self, task: BenchmarkTaskSpec, model_id: str, n: int
-    ) -> Tuple[float, float]:
-        import transformers  # noqa: F401
-        # Same problem as the transformer_lens path: import, then return the
-        # reference value with noise.
-        raise NotImplementedError(
-            "The transformers backend is not implemented: importing the "
-            "library is not running it. This previously returned "
-            "reference.metric_value + noise."
-        )
-
-    def _run_ollama(
-        self, task: BenchmarkTaskSpec, model_id: str, n: int
-    ) -> Tuple[float, Optional[float]]:
-        # The comment said fidelity is "estimated from token-level outputs",
-        # which is not an estimate -- it is the reference value with noise.
-        raise NotImplementedError(
-            "The ollama backend is not implemented. Token-level outputs cannot "
-            "substitute for the activation-level measurements these tasks "
-            "require, so no score is returned."
-        )

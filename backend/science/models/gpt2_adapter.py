@@ -64,12 +64,87 @@ class GPT2Adapter(ModelAdapter):
     # ------------------------------------------------------------------ #
 
     def _forward_with_hooks(self, prompt: str):
-        """Run a real forward pass with registered hooks."""
+        """Run a real forward pass with registered hooks.
+
+        `output_attentions=True` is not sufficient on its own. With the sdpa
+        attention path (the default for GPT-2 in current transformers), torch
+        returns a tuple of `None` -- one per layer -- instead of the attention
+        weights. Nothing raises; `outputs.attentions[layer]` is simply None,
+        and the caller fails later with an unrelated error deep inside its own
+        arithmetic. This silently disabled every attention-based measurement:
+        the induction-heads benchmark could not run at all.
+
+        Forcing the eager implementation materialises the weights, which is
+        what "give me the attention matrix" is asking for. Done per call on the
+        config rather than by rebuilding the model, and restored afterwards so
+        the choice does not leak into unrelated forward passes.
+        """
         import torch
         inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
-        with torch.no_grad():
-            outputs = self._model(**inputs, output_hidden_states=True, output_attentions=True)
+        config = self._model.config
+        previous = getattr(config, "_attn_implementation", None)
+        if previous != "eager":
+            config._attn_implementation = "eager"
+        try:
+            with torch.no_grad():
+                outputs = self._model(**inputs, output_hidden_states=True,
+                                      output_attentions=True)
+        finally:
+            if previous is not None:
+                config._attn_implementation = previous
         return outputs
+
+    def _forward_with_hooks_ids(self, input_ids):
+        """Forward pass from pre-tokenised ids, with attentions materialised.
+
+        Callers that construct sequences from token ids need this: passing text
+        to the tokenizer again can shift the token boundary, and an off-by-one
+        in the sequence period silently invalidates every position-indexed
+        measurement made against it.
+
+        Shares the eager-attention handling with `_forward_with_hooks`; see
+        that method for why sdpa is not sufficient.
+        """
+        import torch
+        inputs = {"input_ids": input_ids.to(self._model.device)}
+        config = self._model.config
+        previous = getattr(config, "_attn_implementation", None)
+        if previous != "eager":
+            config._attn_implementation = "eager"
+        try:
+            with torch.no_grad():
+                return self._model(**inputs, output_hidden_states=True,
+                                   output_attentions=True)
+        finally:
+            if previous is not None:
+                config._attn_implementation = previous
+
+    def _attentions_or_reason(
+        self, outputs: Any, layer: int
+    ) -> tuple[Optional[Any], Optional[str]]:
+        """The attention tensor for a layer, or (None, why it is unavailable).
+
+        Callers that want attentions must handle the absent case explicitly.
+        A None here means "not measured", which is different from a measured
+        zero, and conflating the two is how a stub ends up reporting a result.
+        """
+        attentions = getattr(outputs, "attentions", None)
+        if attentions is None:
+            return None, (
+                "The model returned no attentions tuple at all."
+            )
+        if layer >= len(attentions):
+            return None, (
+                f"Layer {layer} is out of range; the model returned "
+                f"{len(attentions)} layers."
+            )
+        tensor = attentions[layer]
+        if tensor is None:
+            return None, (
+                f"Layer {layer} attention is None. The sdpa attention path "
+                f"does not materialise attention weights; eager is required."
+            )
+        return tensor, None
 
     # ------------------------------------------------------------------ #
     #  Unified interface                                                   #
@@ -112,7 +187,16 @@ class GPT2Adapter(ModelAdapter):
     def get_attention_patterns(self, prompt: str, layer: int) -> List[AttentionPattern]:
         if not self.spec.mock_mode and self._model is not None:
             outputs = self._forward_with_hooks(prompt)
-            attn = outputs.attentions[layer]               # [1, heads, seq, seq]
+            attn, unavailable = self._attentions_or_reason(outputs, layer)
+            if attn is None:
+                # Previously this indexed into a None tuple and raised
+                # "'NoneType' object is not subscriptable" from inside this
+                # function, with nothing to say that attention had not been
+                # available at all.
+                raise RuntimeError(
+                    f"Attention patterns unavailable for layer {layer}: "
+                    f"{unavailable}"
+                )
             tokens = self._tokenizer.tokenize(prompt)
             patterns = []
             for h in range(self.spec.num_heads):
