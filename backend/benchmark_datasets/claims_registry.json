@@ -1,0 +1,123 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-10-03T01:05:45.464978Z",
+  "claims": [
+    {
+      "claim_id": "claim_ioi_name_mover",
+      "title": "IOI Name Mover Circuit",
+      "description": "L9H9 and L10H0 act as primary Name Mover Heads writing directly to IO token logits.",
+      "status": "Validated",
+      "confidence": 0.962,
+      "replications": 14,
+      "models": [
+        "GPT2-S",
+        "GPT2-M",
+        "Gemma2",
+        "Llama3"
+      ],
+      "supporting_experiments": 103,
+      "contradicting_experiments": 4,
+      "literature": [
+        "Wang et al. 2022: Interpretability in the Wild",
+        "Conmy et al. 2023: ACDC"
+      ],
+      "algorithms_used": [
+        "Attribution Patching",
+        "ACDC",
+        "Path Patching",
+        "Causal Scrubbing",
+        "Universality"
+      ],
+      "evidence_summary": {},
+      "provenance": "unavailable",
+      "validation_eligible": false,
+      "publication_eligible": false,
+      "reason": null,
+      "workers_without_measured_confidence": [],
+      "created_at": "2026-10-03T01:03:55.333058Z",
+      "updated_at": "2026-10-03T01:03:55.333058Z"
+    },
+    {
+      "claim_id": "claim_induction_heads",
+      "title": "Induction Head Sequence Repeater",
+      "description": "Previous-token head L4H2 attends to token K-1 while Induction Head L5H1 copies token K to current position.",
+      "status": "Validated",
+      "confidence": 0.941,
+      "replications": 22,
+      "models": [
+        "GPT2-S",
+        "Gemma2",
+        "Llama3",
+        "Mistral7B"
+      ],
+      "supporting_experiments": 145,
+      "contradicting_experiments": 2,
+      "literature": [
+        "Olsson et al. 2022: In-context Learning and Induction Heads"
+      ],
+      "algorithms_used": [
+        "Attribution Patching",
+        "ACDC",
+        "Causal Scrubbing",
+        "Universality"
+      ],
+      "evidence_summary": {},
+      "provenance": "unavailable",
+      "validation_eligible": false,
+      "publication_eligible": false,
+      "reason": null,
+      "workers_without_measured_confidence": [],
+      "created_at": "2026-10-03T01:03:55.333058Z",
+      "updated_at": "2026-10-03T01:03:55.333058Z"
+    },
+    {
+      "claim_id": "claim_camp",
+      "title": "IOI Name Mover Circuit",
+      "description": "No worker report carried a measured confidence, so this claim carries no evidence and its posterior is the uninformative prior.",
+      "status": "Unsupported",
+      "confidence": null,
+      "replications": null,
+      "models": [],
+      "supporting_experiments": 0,
+      "contradicting_experiments": 0,
+      "literature": [],
+      "algorithms_used": [],
+      "evidence_summary": {},
+      "provenance": "unavailable",
+      "validation_eligible": false,
+      "publication_eligible": false,
+      "reason": "Worker reports supplied no confidence or algorithm, so no evidence could be aggregated.",
+      "workers_without_measured_confidence": [
+        "w1",
+        "w2"
+      ],
+      "created_at": "2026-10-03T01:05:45.461462Z",
+      "updated_at": "2026-10-03T01:05:45.461462Z"
+    },
+    {
+      "claim_id": "claim_camp2",
+      "title": "IOI Name Mover Circuit",
+      "description": "Aggregated from 1 worker report(s) carrying a measured confidence.",
+      "status": "Under_Revision",
+      "confidence": 0.8438,
+      "replications": null,
+      "models": [
+        "gpt2"
+      ],
+      "supporting_experiments": 1,
+      "contradicting_experiments": 0,
+      "literature": [],
+      "algorithms_used": [
+        "acdc"
+      ],
+      "evidence_summary": {},
+      "provenance": "live",
+      "validation_eligible": true,
+      "publication_eligible": false,
+      "reason": null,
+      "workers_without_measured_confidence": [],
+      "created_at": "2026-10-03T01:05:45.463969Z",
+      "updated_at": "2026-10-03T01:05:45.463969Z"
+    }
+  ]
+}
