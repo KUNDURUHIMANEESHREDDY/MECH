@@ -36,24 +36,34 @@ class AlgorithmPerformanceStat:
 
 @dataclass
 class SequencePerformanceStat:
-    """Empirical performance metrics for an ordered sequence of algorithms."""
+    """Empirical performance metrics for an ordered sequence of algorithms.
+
+    `convergence_speed_score` is Optional because a real convergence speed needs
+    a comparison point. Without one, the honest answer is None, not 0.95.
+    """
     sequence: List[str]
     occurrence_count: int
-    avg_final_posterior: float
-    avg_total_runtime_ms: float
-    convergence_speed_score: float
+    avg_final_posterior: Optional[float]
+    avg_total_runtime_ms: Optional[float]
+    convergence_speed_score: Optional[float]
     recommendation_rank: int
 
 
 @dataclass
 class FailureModePattern:
-    """Identified anti-pattern or failure mode in campaign execution."""
+    """Identified anti-pattern or failure mode in campaign execution.
+
+    `root_cause` and `remedy` are Optional. Diagnosing *why* an algorithm
+    failed is a separate act from observing that it did, and this engine only
+    observes. Shipping a confident causal story next to a real failure count
+    makes the count look diagnosed when it is not.
+    """
     pattern_id: str
     description: str
     sequence: List[str]
     failure_count: int
-    root_cause: str
-    remedy: str
+    root_cause: Optional[str] = None
+    remedy: Optional[str] = None
 
 
 @dataclass
@@ -77,6 +87,15 @@ class CampaignAnalyticsReport:
             "algorithm_leaderboard": [a.__dict__ for a in self.algorithm_leaderboard],
             "best_sequences": [s.__dict__ for s in self.best_sequences],
             "failure_patterns": [f.__dict__ for f in self.failure_patterns],
+            # Sequences and failure modes are derived from the archive now, so
+            # they are empty when nothing has been observed. Empty means
+            # "no evidence", which is the whole point.
+            "sequences_measured": bool(self.best_sequences),
+            "failure_patterns_measured": bool(self.failure_patterns),
+            "convergence_speed_measured": bool(self.best_sequences) and all(
+                s.convergence_speed_score is not None for s in self.best_sequences),
+            "failure_root_causes_diagnosed": bool(self.failure_patterns) and all(
+                f.root_cause is not None for f in self.failure_patterns),
             "generated_at": self.generated_at,
         }
 
@@ -151,44 +170,85 @@ class CampaignAnalyticsEngine:
 
         leaderboard.sort(key=lambda x: (x.success_rate, x.avg_belief_gain), reverse=True)
 
-        # 2. Optimal Experiment Sequences
+        # 2. Experiment sequences, grouped by the order they actually ran in.
+        #
+        # These used to be two hand-written literals: occurrence_count=42,
+        # avg_final_posterior=0.962, convergence_speed_score=0.95, ranked 1 and
+        # 2. They were returned for every archive including an empty one, which
+        # made a fixed recommendation list look like the output of mining.
+        seq_runs: Dict[Tuple[str, ...], List[Dict[str, float]]] = {}
+        for c in campaigns:
+            ordered = tuple(exp.algorithm_name for exp in c.completed_experiments)
+            if not ordered:
+                continue
+            final_posterior = 1.0 - c.completed_experiments[-1].uncertainty_after
+            seq_runs.setdefault(ordered, []).append({
+                "runtime": sum(exp.runtime_ms for exp in c.completed_experiments),
+                "posterior": final_posterior,
+            })
+
+        seq_rows = []
+        for ordered, runs in seq_runs.items():
+            seq_rows.append({
+                "sequence": list(ordered),
+                "occurrence_count": len(runs),
+                "avg_final_posterior": round(
+                    sum(r["posterior"] for r in runs) / len(runs), 4),
+                "avg_total_runtime_ms": round(
+                    sum(r["runtime"] for r in runs) / len(runs), 2),
+            })
+
+        # Rank by measured occurrence, then by measured final posterior.
+        seq_rows.sort(key=lambda r: (r["occurrence_count"],
+                                     r["avg_final_posterior"]), reverse=True)
+
+        # Convergence speed is relative: it needs at least two observed
+        # sequences to compare against. With one, there is no comparison point,
+        # so the score is None rather than a flattering constant.
+        runtimes = [r["avg_total_runtime_ms"] for r in seq_rows]
+        slowest = max(runtimes) if runtimes else 0.0
+        comparable = slowest > 0 and len(seq_rows) >= 2
+
         best_seqs = [
             SequencePerformanceStat(
-                sequence=["attribution_patching", "acdc", "causal_scrubbing", "transcoders"],
-                occurrence_count=42,
-                avg_final_posterior=0.962,
-                avg_total_runtime_ms=18500.0,
-                convergence_speed_score=0.95,
-                recommendation_rank=1
-            ),
-            SequencePerformanceStat(
-                sequence=["attribution_patching", "acdc", "feature_universality"],
-                occurrence_count=28,
-                avg_final_posterior=0.941,
-                avg_total_runtime_ms=14200.0,
-                convergence_speed_score=0.91,
-                recommendation_rank=2
+                sequence=row["sequence"],
+                occurrence_count=row["occurrence_count"],
+                avg_final_posterior=row["avg_final_posterior"],
+                avg_total_runtime_ms=row["avg_total_runtime_ms"],
+                convergence_speed_score=(
+                    round((slowest - row["avg_total_runtime_ms"]) / slowest, 4)
+                    if comparable else None
+                ),
+                recommendation_rank=index + 1,
             )
+            for index, row in enumerate(seq_rows)
         ]
 
-        # 3. Known Failure Mode Patterns
+        # 3. Failure modes, counted from failed_experiments.
+        #
+        # Previously two invented patterns with failure_count=22 and 9, plus a
+        # root cause and a remedy for each -- a causal diagnosis presented
+        # beside a real-looking tally. Only the tally is derivable here.
+        failure_counts: Dict[str, int] = {}
+        failure_sequences: Dict[str, List[str]] = {}
+        for c in campaigns:
+            for exp in c.failed_experiments:
+                failure_counts[exp.algorithm_name] = \
+                    failure_counts.get(exp.algorithm_name, 0) + 1
+                failure_sequences.setdefault(exp.algorithm_name, []).append(
+                    exp.algorithm_name)
+
         fail_patterns = [
             FailureModePattern(
-                pattern_id="fail_pat_01",
-                description="Executing Feature Universality before ACDC Circuit Pruning",
-                sequence=["feature_universality", "acdc"],
-                failure_count=22,
-                root_cause="Missing underlying causal subgraph structure prior to cross-model matching.",
-                remedy="Always schedule ACDC or Path Patching before executing Feature Universality."
-            ),
-            FailureModePattern(
-                pattern_id="fail_pat_02",
-                description="Naive Random Activation Resampling in Causal Scrubbing",
-                sequence=["causal_scrubbing"],
-                failure_count=9,
-                root_cause="Unconstrained random activations break input distribution manifold.",
-                remedy="Enforce equivalence-class resamplings based on token semantics."
+                pattern_id=f"fail_{alg}",
+                description=f"{alg} failed {count} time(s) across archived campaigns",
+                sequence=[alg],
+                failure_count=count,
+                root_cause=None,
+                remedy=None,
             )
+            for alg, count in sorted(failure_counts.items(),
+                                     key=lambda kv: kv[1], reverse=True)
         ]
 
         return CampaignAnalyticsReport(

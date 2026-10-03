@@ -23,7 +23,8 @@ from backend.knowledge_graph.ontology import NodeType, EdgeType
 class ContinuousHealthReport:
     """Comprehensive platform health snapshot artifact."""
     platform_health_score: float
-    reproducibility_score: float
+    # Optional: absent until the same work has actually been run twice.
+    reproducibility_score: Optional[float]
     overall_pass_rate: float
     total_benchmarks_run: int
     passed_benchmarks: int
@@ -33,11 +34,19 @@ class ContinuousHealthReport:
     regression_events: List[Dict[str, Any]]
     actionable_alerts: List[Dict[str, Any]]
     generated_at: str = field(default_factory=lambda: _dt.datetime.utcnow().isoformat() + "Z")
+    # Declared after the required fields: a defaulted field cannot precede
+    # non-defaulted ones in a dataclass.
+    reproducibility_reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "platform_health_score": round(self.platform_health_score, 1),
-            "reproducibility_score": round(self.reproducibility_score, 1),
+            # None, not 97.8.
+            "reproducibility_score": (
+                round(self.reproducibility_score, 1)
+                if self.reproducibility_score is not None else None
+            ),
+            "reproducibility_measured": self.reproducibility_score is not None,
             "overall_pass_rate": round(self.overall_pass_rate, 1),
             "total_benchmarks_run": self.total_benchmarks_run,
             "passed_benchmarks": self.passed_benchmarks,
@@ -80,7 +89,21 @@ class HealthDashboardEngine:
         pass_rate = (passed_bm / max(1, total_bm)) * 100.0
 
         health_score = max(0.0, 100.0 - (len(regressions) * 5.0))
-        reproducibility_score = 97.8
+
+        # Was the literal 97.8, on every run, forever.
+        #
+        # A reproducibility score needs at least two independent executions of
+        # the same thing to compare. Nothing in this pipeline runs a benchmark
+        # twice, so there is no variance to report and no basis for the number.
+        # 97.8 was a compliment about the platform's own trustworthiness,
+        # emitted before any comparison had been made.
+        reproducibility_score: Optional[float] = None
+        reproducibility_measured = False
+        reproducibility_reason = (
+            "Reproducibility requires the same benchmark to be executed more "
+            "than once so the runs can be compared. This pipeline executes "
+            "each benchmark once, so no reproducibility score can be derived."
+        )
 
         # Push Validation Run to Scientific Knowledge Graph automatically
         val_run_id = f"val_run_{int(time.time())}"
@@ -102,5 +125,6 @@ class HealthDashboardEngine:
             environment_state=env.to_dict(),
             benchmark_results=[r.to_dict() for r in bm_results],
             regression_events=[reg.to_dict() for reg in regressions],
-            actionable_alerts=[a.to_dict() for a in alerts]
+            actionable_alerts=[a.to_dict() for a in alerts],
+            reproducibility_reason=reproducibility_reason
         )

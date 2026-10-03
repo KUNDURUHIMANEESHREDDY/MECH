@@ -198,7 +198,7 @@ class DatasetManager:
             "environment_hash": e_hash
         }
 
-    def compute_health_score(self, dataset_id: str) -> Dict[str, float]:
+    def compute_health_score(self, dataset_id: str) -> Dict[str, Any]:
         """Calculates granular health metrics for a dataset."""
         meta = self._manifest.get(dataset_id, {})
         if not meta: return {"overall": 0}
@@ -218,18 +218,41 @@ class DatasetManager:
         # 4. Signature
         sig_score = 1.0 if meta.get("signature") else 0.0
 
-        # 5. Compatibility (Mocked)
-        comp_score = 0.98
+        # 5. Compatibility
+        #
+        # Was `comp_score = 0.98`, commented "# 5. Compatibility (Mocked)".
+        # It was weighted 0.1 into `overall`, so every dataset scored as 98%
+        # compatible with no compatibility check existing anywhere -- a free
+        # 9.8 points on every dataset's health score.
+        #
+        # Nothing here can load a dataset to test it, so the term is excluded
+        # from the weighted total rather than invented. `overall` is
+        # renormalised over the four terms that were actually checked, and says
+        # so, so a reader can see the 0.1 was dropped rather than lost.
+        comp_score: Optional[float] = None
+        UNMEASURED_WEIGHT = 0.1
+        measured_weight = 1.0 - UNMEASURED_WEIGHT  # 0.9
 
-        overall = (integrity * 0.3 + lineage_score * 0.2 + metadata_score * 0.2 + sig_score * 0.2 + comp_score * 0.1) * 100
+        overall = ((integrity * 0.3 + lineage_score * 0.2
+                    + metadata_score * 0.2 + sig_score * 0.2)
+                   / measured_weight) * 100
 
         return {
             "integrity": integrity * 100,
             "lineage": lineage_score * 100,
             "metadata": metadata_score * 100,
             "signature": sig_score * 100,
-            "compatibility": comp_score * 100,
-            "overall": round(overall, 1)
+            # Absent, not 98.0.
+            "compatibility": None,
+            "compatibility_measured": False,
+            "compatibility_reason": (
+                "No compatibility check is implemented; this dataset's "
+                "compatibility is unknown."
+            ),
+            "overall": round(overall, 1),
+            "overall_is_partial": True,
+            "overall_weight_covered": round(measured_weight, 2),
+            "overall_unmeasured_weight": UNMEASURED_WEIGHT,
         }
 
     def archive_dataset(self, dataset_id: str, researcher: str) -> bool:
