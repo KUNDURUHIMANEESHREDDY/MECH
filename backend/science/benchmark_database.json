@@ -5,7 +5,7 @@
     "provenance": "reference",
     "validation_eligible": false,
     "publication_eligible": false,
-    "fixture_notice": "HAND-WRITTEN FIXTURE, NOT A RESULT. The timestamps, p-values, effect sizes, and quality scores below are literals typed by hand on 2023-10-27; no experiment produced them. The benchmark_database.json schema is a plain list, so this notice is attached to every record rather than wrapping them in an object that would break BenchmarkingOrchestrator.",
+    "fixture_notice": "HAND-WRITTEN FIXTURE, NOT A RESULT. The timestamps, p-values, effect sizes, and quality scores below are literals typed by hand on 2023-10-27; no experiment produced them. Nothing writes to this file. The writer that used to append to it, BenchmarkingOrchestrator, was deleted: it appended rows carrying no provenance marker into a file whose every record is marked unmeasured and not publication-eligible, so a crashed or empty run would have left entries indistinguishable from these fixtures. Measured results are written as signed artifacts by run_reproducibility_demo.py, never appended here. The schema stays a plain list so that every record can carry this notice.",
     "timestamp": "2023-10-27T10:00:00.000000",
     "model": "gpt2-small",
     "benchmark": "IOI",

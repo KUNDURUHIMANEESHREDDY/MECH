@@ -381,7 +381,21 @@ npm run dev          # Vite + Electron together; Electron spawns the backend
 ```bash
 python scripts/capture_results.py                      # measurements + figures
 python scripts/capture_screenshots_interactive.cjs     # screenshots (needs both servers up)
+python run_benchmarks.py                               # the six benchmark pipelines, real weights
 ```
+
+`run_benchmarks.py` runs `BenchmarkRunner` over `ioi`, `induction_heads`,
+`greater_than`, `copy_task`, `arithmetic` and `factual_recall`, and reports each
+one's status verbatim — including `NOT_RUN` for a benchmark that has no
+implementation and `ERROR` for a measurement that broke, which are different
+statements and are not collapsed into one verdict. It refuses a `--model` whose
+weights are not in the local cache rather than quietly serving a different model,
+and it exits non-zero if nothing was measured.
+
+It does **not** write `backend/science/benchmark_database.json`. That file is a
+hand-written fixture in which every record reads `"measured": false,
+"provenance": "reference", "publication_eligible": false`. The orchestrator that
+used to append to it has been deleted; see §6e.
 
 ### Pinned ML stack
 
@@ -392,12 +406,25 @@ The ML dependencies carry **load-bearing upper bounds**. Verified working set:
 | `torch` | `>=2.6` | 2.14.0+cu126 |
 | `transformers` | `>=4.57,<5.0` | 4.57.6 |
 | `transformer-lens` | `>=2.18.0,<3.0` | 2.18.0 |
+| `numpy` | `>=1.24.0,<2` | 1.26.4 |
+| `pandas` | `>=2.0.0,<2.1` | 2.0.3 |
+| `huggingface-hub` | `>=0.23.2,<1.0` | 0.36.2 |
 
 `transformer-lens` 4.0 **removed `HookedTransformer`**, which three code paths depend on
 (`backend/interpretability/gpt2_model.py`, `gpt2_steps.py`,
 `backend/science/models/transformer_lens_adapter.py`). Compounding it, `transformer-lens` 2.x
 declares `transformers>=4.57` with **no ceiling**, so pip will happily pair it with an
 incompatible transformers 5.x — which is why *both* need capping.
+
+The numpy and pandas bounds are load-bearing for the same reason. `transformer-lens`
+2.18 declares `numpy>=1.24,<2` and `pandas>=1.1.5,<2.1`; with no ceiling here, an
+unrelated install can pull numpy up to 2.x and break the stack with a binary-ABI
+error (`numpy.dtype size changed, may indicate binary incompatibility`) raised on
+`import pandas` / `import sklearn` / `import transformer_lens` while `import numpy`
+alone still works — which reads as a broken install rather than a pinning problem.
+`huggingface-hub` is pinned directly because `transformers` and `transformer-lens`
+disagree about it: 5.x imports `ResolvedRevision`, removed in hub 1.0, while
+`transformer-lens` 2.18 requires `<1.0`.
 
 All three call sites now resolve the class through `backend/interpretability/tl_compat.py`,
 so an unsupported install fails with the supported range and the exact fix rather than a bare
@@ -887,6 +914,99 @@ The one escape hatch that remains is named `MECH_INTEGRITY_CHECKS=disabled-for-l
 requires an explicit value rather than a bare flag, and stamps `integrity_verified: False` plus an
 `integrity_notice` field **into the returned data**, so a bypassed load is visible in the data rather
 than only in an environment variable nobody reads later.
+
+### 6e. A benchmark campaign that could not run, and would have corrupted provenance if it could
+
+`backend/science/benchmarking_orchestrator.py` was exported from `backend.science`,
+imported by `run_benchmarks.py`, and presented as *"Orchestrates the execution of
+landmark benchmarks across multiple real models"*. It could not execute at all, and
+its failure mode was arranged so that nothing would reveal it until someone
+depended on it.
+
+**Dead on arrival.** `run_full_campaign` opened with:
+
+```python
+from ..reproductions.ioi_reproduction import IOIReproduction
+from ..reproductions.induction_heads import InductionHeadsReproduction
+from ..reproductions.sae_reproduction import SparseAutoencoderReproduction
+from ..reproductions.acdc_reproduction import ACDCReproduction
+```
+
+`backend/reproductions/` does not exist and none of those four classes exist
+anywhere in the repository. The imports were function-local, so `import
+backend.science` and `import run_benchmarks` both **succeeded** — the
+`ModuleNotFoundError` only surfaced on the first line of the campaign loop. An
+import that cannot resolve is not an entry point.
+
+**Unsound even if the imports had resolved.** `_record_result` appended rows
+shaped `{timestamp, model, benchmark, reproduction_successful, quality_score,
+p_value, effect_size}` into `backend/science/benchmark_database.json` — a file in
+which *every* record is stamped `"fixture": true, "measured": false,
+"provenance": "reference", "publication_eligible": false` with a notice saying the
+numbers are literals typed by hand. The appended rows carried **none** of those
+markers, so a run that measured nothing, or crashed halfway, would have left
+entries that neither a reader nor the evidence policy could distinguish from
+fixtures. That is precisely the failure this project exists to prevent, sitting in
+the one function that writes benchmark data.
+
+Its model list — `gpt2-small`, `gpt2-medium`, `gemma-2b`, `llama-3-8b`, `qwen-7b`
+— was also fiction. Only `gpt2` is in the local cache, and the loop attempted all
+five regardless, appending a row per *attempted* model per benchmark.
+
+`run_benchmarks.py` documented the call as:
+
+```python
+# Running the campaign generates real entries in the benchmark database
+# and produces the statistical traces required for papers.
+```
+
+It generated nothing.
+
+**Deleted rather than rewired.** Rewiring it to the real pipelines would have
+preserved the unsound writer — appending to a labelled fixture — which is the part
+that actually mattered. `backend/science/reproducibility/BenchmarkRunner` already
+runs the six real pipelines, distinguishes `NOT_RUN` from `ERROR`, and carries
+per-sample traces forward. `run_benchmarks.py` now drives it, and:
+
+- refuses a `--model` whose weights are not in the local cache, rather than quietly
+  serving a different one — the same discipline applied at `gpt2_engine.infer`,
+  where a request for `gpt2-large` used to return a live-labelled result attributed
+  to a model that never loaded;
+- never opens `benchmark_database.json`;
+- prints every status verbatim and lists what was *not* measured, so an absent
+  number is visibly absent;
+- exits non-zero when nothing was measured, and `FIXTURE` never counts as a
+  measurement.
+
+Measured on this machine (RTX 3050 6GB, gpt2, seed 42):
+
+```
+PASS       2    ioi, induction_heads
+NOT_RUN    4    greater_than, copy_task, arithmetic, factual_recall
+ERROR      0
+```
+
+`induction_heads` measured `induction_score = 0.6654`. `greater_than` is `NOT_RUN`
+on its merits — GPT-2 small does not perform the comparison on that template.
+`copy_task`, `arithmetic` and `factual_recall` refuse because they previously
+returned hardcoded accuracies (0.92, 0.45, 0.75 …) that were written into
+reproducibility reports as though measured.
+
+One observation from that run, left unresolved rather than smoothed over: the first
+attempt reported `ERROR` for `induction_heads` and `greater_than` with `CUDA error:
+unknown error`, and both succeeded when re-run immediately afterwards with the GPU
+otherwise idle. `BenchmarkRunner` does not retry, so a transient device fault is
+reported as `ERROR` — a statement about the code — when it is really a statement
+about the machine. Distinguishing the two needs retry-with-backoff, and until then
+`ERROR` should be read as "this did not produce a measurement", not "this code is
+broken".
+
+`tests/pytest/test_entry_points.py` guards the class of defect: it resolves every
+local import in the repository against the filesystem and fails on any that cannot
+be found, so a new dead entry point cannot be added without tripping it. The two
+`backend.benchmarks.*` imports that remain are declared there explicitly, with the
+reason each is tolerated, and a companion test fails if a declared exception is
+fixed but not removed from the list.
 
 ### 7. Frontend cleanup
 
