@@ -124,13 +124,27 @@ class Discoverer:
                     "discovery_id": res.get("discovery_id", ""),
                     "reason": blocked_reason(res, "Discovery"),
                 }
+            # `**res` first, the guarded verdict last.
+            #
+            # The spread used to come last, so it overwrote the keys this
+            # function had just decided. `res` carries `status`, `provenance` and
+            # `field_provenance` of its own, so the guard's answer was discarded
+            # and replaced by whatever the engine happened to say -- the same
+            # shape as the P0 defect, where a wrapper's provenance verdict was not
+            # authoritative.
+            #
+            # It was not an active misreport: `discovery_is_live` is
+            # `provenance_of(payload) == "live"` among other conditions, so the
+            # value being spread in agreed with the value being guarded. But the
+            # guard decided nothing, and it would start mattering the moment that
+            # predicate diverged from a bare provenance comparison.
             return {
+                **res,
                 "status": "completed",
                 "provenance": "live",
                 "field_provenance": field_map(
                     ("status", "result", "discovery_id"), "live"
                 ),
-                **res,
             }
         except Exception as exc:
             return {

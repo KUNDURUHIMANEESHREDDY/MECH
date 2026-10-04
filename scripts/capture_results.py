@@ -414,6 +414,50 @@ def render_figures(data: Dict[str, Any]) -> List[str]:
     return written
 
 
+#: The sections `main()` populates. A key missing from the captured data is a
+#: section that did not run, which is what makes the provenance derivation below
+#: a report rather than a claim.
+EXPECTED_SECTIONS = (
+    "architecture", "sanity_checks", "ioi", "logit_lens",
+    "head_sweep", "layer_ablation", "steering", "inspection",
+)
+
+
+def derive_meta_provenance(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Report which sections actually produced data, and withhold `live` if not.
+
+    This used to be a literal `"provenance": "live"` in the `meta` dict at the
+    top of `main()`, stamped before a single forward pass had run and never
+    revised -- `provenance` appeared exactly once in this file, in that literal.
+    Every capture below it is a genuine measurement, but the flag asserted the
+    outcome instead of deriving it, so any future change that let a capture fail
+    quietly would keep writing `live` into the artifact the README's Results
+    section is generated from.
+
+    Presence, not truthiness: a section that legitimately found nothing -- an
+    empty head sweep is a real result, not a missing measurement -- still ran and
+    still measured. Only a key absent from `data` did not run.
+    """
+    measured = [k for k in EXPECTED_SECTIONS if k in data]
+    missing = [k for k in EXPECTED_SECTIONS if k not in data]
+
+    out: Dict[str, Any] = {
+        "measured_sections": f"{len(measured)}/{len(EXPECTED_SECTIONS)}",
+        "provenance": "live" if not missing else "unavailable",
+    }
+    if missing:
+        out["reason"] = (
+            "No data for: " + ", ".join(missing)
+            + ". The artifact is incomplete, so it does not describe a full "
+              "measurement run and must not be cited as one."
+        )
+        out["note"] = (
+            "INCOMPLETE RUN. Some sections did not produce data, so this file "
+            "does not claim that every value was measured."
+        )
+    return out
+
+
 def main() -> int:
     os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -422,7 +466,14 @@ def main() -> int:
         "meta": {
             "model": "gpt2 (124M)",
             "library": "transformers + torch",
-            "provenance": "live",
+            # provenance is set after the captures run, not asserted here -- see
+            # the derivation below. It used to sit in this literal, stamped
+            # "live" before a single forward pass had happened and never revised:
+            # `provenance` appeared exactly once in this file. Every capture below
+            # is a real measurement, but the flag claimed the outcome instead of
+            # reporting it, so any future change that tolerated a failed capture
+            # would keep writing "live" into the artifact this repository's
+            # Results section is generated from.
             "generated_by": "scripts/capture_results.py",
             "note": (
                 "Every value is measured from live GPT-2 weights by a real "
@@ -444,6 +495,10 @@ def main() -> int:
 
     data["figures"] = [os.path.relpath(p, ROOT).replace("\\", "/") for p in figures]
     data["meta"]["torch"] = torch.__version__
+
+    data["meta"].update(derive_meta_provenance(data))
+    if data["meta"]["provenance"] != "live":
+        print(f"  [incomplete] {data['meta']['reason']}")
 
     path = os.path.join(OUT_DIR, "capture.json")
     with open(path, "w", encoding="utf-8") as fh:
