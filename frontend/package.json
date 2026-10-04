@@ -1,6 +1,7 @@
 {
   "name": "mech-platform",
   "version": "2.0.0",
+  "license": "Apache-2.0",
   "description": "MECH Research Platform - Mechanistic Interpretability Desktop Application",
   "main": "electron/main.js",
   "type": "commonjs",
@@ -21,14 +22,10 @@
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
-    "@vitejs/plugin-vue-jsx": "^5.1.6",
     "better-sqlite3": "^11.3.0",
     "lucide-react": "^0.441.0",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^4.0.2",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "reactflow": "^11.11.4",
     "vue": "^3.5.40",
     "vue-router": "^4.6.4"
   },
@@ -36,8 +33,6 @@
     "@playwright/test": "^1.47.0",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.4.8",
-    "@testing-library/react": "^16.0.0",
-    "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^8.2.2",
     "electron": "32.3.3",
     "electron-builder": "^25.0.5",

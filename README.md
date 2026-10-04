@@ -567,7 +567,15 @@ Sparse autoencoders, tuned lens, attribution patching and path patching are curr
 placeholders with convincing-looking output. Either implement them against real weights or
 remove them — a stub that returns `0.94` is worse than an honest `unavailable`.
 
-Three of the worst offenders are resolved, and all three were worse than described — each
+**Attribution patching is no longer on this list.** It had been a placeholder that could not have
+found anything: it read a neuron dimension as if it were a head, read token position 0 (identical
+across a shared-prefix prompt pair, so `delta_x` was exactly 0.0 for all 144 components), fabricated
+`else 0.5` / `else 0.1` activations when a read failed, and substituted `metric_delta / (|c| + |r|)`
+for a gradient — an expression that collapses to exactly `metric_delta` whenever the two activations
+straddle zero, which 9 of its previous top 10 did. It now computes a real gradient with
+`torch.autograd.grad`. See §6d.
+
+Four of the worst offenders are resolved, and all four were worse than described — each
 fabricated metric looked like a finding and was reachable by callers with weights loaded:
 
 - [x] **SAE reproduction — simulation removed, now fails closed.** The feature bank came from
@@ -728,19 +736,21 @@ fabricated metric looked like a finding and was reachable by callers with weight
       `len(hypotheses)` the same method reports three lines later — plus an invented
       `utility_score=0.92`. It now stores only what it actually knows (the goal, the real
       hypothesis count, the real plan id) and makes no success or quality claim.
-- [ ] Still open: tuned lens, attribution patching, path patching, plus the honest-SAE work
+- [ ] Still open: tuned lens, path patching, plus the honest-SAE work
       described in `backend/science/reproducibility/sae_pipeline.py`.
-- [ ] **Known, not yet fixed — hardcoded confidences in returned dicts.** A separate family this
-      pass did not reach, because these are function *return values* rather than defaults, and each
-      needs its own call path checked: `acdc.py:162,168` (`0.95`, and `1.0` on the final edge to a
-      hardcoded `"P_0"`), `attribution_patching.py:121` (`1.0` to `"Output"`),
-      `transcoders.py:92,102`, `circuit_discovery.py:51,59,60` (also fabricates node names
-      `T_0`/`N_L8_N402`/`P_0`), `discovery_planner.py:230,231`, `dag_discovery_planner.py:199`,
-      `feature_auto_interpreter.py:64`, `training_dynamics_engine.py:60-62`, `debate_engine.py:18`,
-      `hypothesis_generator.py:18,25`. Worth noting that `causal_scrubbing.py:105`,
-      `feature_universality.py:86` and `attribution_patching.py:115` already derive their
-      confidence from real measurements — so the pattern is only partly adopted, which is why the
-      hardcoded ones are invisible in review.
+- [x] ~~**Hardcoded confidences in returned dicts.**~~ **Now closed**, across two commits: the
+      ACDC/causal-scrubbing/circuit_discovery group, then the discovery cluster
+      (`discovery_planner`, `autonomous_research_loop`, `attribution_patching`, `transcoders`,
+      `concept_evolution_engine`, `training_dynamics_engine`, `feature_auto_interpreter`,
+      `debate_engine`, `hypothesis_generator`). Every one turned out to be worse than the single
+      field the audit named — four fabricated the *inputs* to the number, and
+      `attribution_patching`'s `confidence: 1.0` on its closing edge sat next to a gradient
+      substitution that made the ranking meaningless. See §6b and §6d.
+- [ ] **Still open:** `dag_discovery_planner.py:199` and
+      `MultiAgentResearchSociety.run_society_collaboration`, which returns
+      `consensus_reached: True` unconditionally. The latter is now visible in
+      `ai_scientist_engine`, where the debate arguments are read from it and are therefore currently
+      the goal itself.
 
 Also removed from `benchmark_runner.py`, which was fabricating alongside the pipelines:
 
@@ -909,14 +919,58 @@ Measured, not estimated — the figures in earlier drafts of this section were w
   (`eslint` was neither a dependency nor configured) and CI never called it. Removed rather than
   left failing. Wiring up a real linter needs a dependency, a config, and a baseline.
 
-Removing the React stack is the bulk of the cleanup, but it edits `package-lock.json` and the
-Electron build — and the Electron build has never completed (see §8), so there is no artifact to
-regression-test against. It is worth doing as its own change with the packaging work, not blind.
+**The React stack is now removed.** Six files were provably unreachable — each defined an export
+that nothing imported — and are deleted:
+
+```
+src/components/visualizations/neuron-umap/useNeuronUMAP.ts
+src/hooks/useLayerTensors.ts
+src/hooks/useModel.ts
+src/layout/LayoutManager.ts
+src/store/useAppStore.ts
+src/store/useSocietyStore.ts
+```
+
+`src/store/useAppStore.ts` was the sharpest one: it exported a `useAppStore` that collided by name
+with the **live** Pinia store of the same name in `src/store/app.ts`. Two different things, one
+identifier.
+
+Unreachability was established by scanning every `.ts/.tsx/.vue/.js/.mjs` file in `frontend/` for an
+import of the module path or of any of its exported symbols — not by assuming. `src/hooks/` and
+`src/layout/` became empty and were removed with them.
+
+Dependencies dropped: `react`, `react-dom`, `reactflow`, `@vitejs/plugin-vue-jsx`,
+`@vitejs/plugin-react`, `@testing-library/react`. **`lucide-react` was kept** — the audit listed it
+among the dead React packages, but it is imported by `src/services/panelRegistry.ts` and
+`src/utils/panelRegistry.js`, and removing it breaks the build.
+
+`react()` and `vueJsx()` were also registered in `vite.config.mts` and `vitest.config.js` for files
+that no longer exist, costing a JSX transform on every module. Both removed; the built `dist/` now
+contains no React at all.
+
+Re-verified after the change: `build:renderer` succeeds, `test:js` is 11 passed / 6 skipped
+(unchanged), and no `.jsx`/`.tsx` remains under `src/`.
+
+`npm install` has not been re-run to regenerate `package-lock.json`, so the lockfile still lists the
+removed packages.
 
 ### 8. Packaging
 
-`frontend/release/` has never been produced — `electron-builder` has not completed. Pin and
-verify the build, then ship the installers the roadmap promises.
+`frontend/release/` has never been produced. **Two concrete blockers, both now diagnosed rather
+than guessed at** — `scripts/build.js` checks both up front and names them, instead of failing
+partway through packaging with an error that does not identify the cause.
+
+1. **`../.venv` is declared but does not exist.** `package.json`'s `build.extraResources` copies
+   `../backend` and `../.venv` into the bundle. A missing `from` path is not reported clearly by
+   `electron-builder`. Fix: `python -m venv .venv`, or drop the entry.
+2. **Windows cannot create the symlinks `electron-builder` needs.** It unpacks a `winCodeSign`
+   cache containing macOS `.dylib` symlinks, and creating a symlink on Windows requires Developer
+   Mode or an elevated shell. Without it the failure surfaces only as
+   `ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`, which reads like a corrupt install rather than a missing
+   privilege. Fix: enable Developer Mode, or build from an elevated shell.
+
+Verified working up to that point: `npm run build:renderer` succeeds in ~7 s and `npm run test:js`
+passes 11/6-skipped. So the renderer half of the build is sound; only packaging is blocked.
 
 ---
 
@@ -953,8 +1007,10 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md). The short version:
 
 ## License
 
-No license file is present in the repository yet. Treat the code as unlicensed until one is
-added.
+[Apache-2.0](LICENSE) — Copyright 2026 KUNDURUHIMANEESHREDDY.
+
+Permissive, with an explicit patent grant (Section 3). Redistribution must carry the licence, mark
+modified files, and retain attribution notices.
 
 ## References
 
