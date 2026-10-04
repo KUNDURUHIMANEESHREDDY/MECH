@@ -98,10 +98,47 @@ injected at layer 10. The model's next token flips ` the` → ` Paris`.
 
 ![Steering Lab](docs/images/ui/04-steering-lab.png)
 
-### Research Society — seven-agent workflow, all steps live
+### Research Society - six agents, seven workflow steps, most of them not live
 
-`load → reproduce → inspect → patch → discover → validate → publish`, every step stamped
-`Provenance: live`, streamed to the UI over SSE.
+`load -> reproduce -> inspect -> patch -> discover -> validate -> publish`,
+streamed to the UI over SSE. Those are the **seven nodes the planner emits**,
+dispatched to **six** agents - Planner, Executor, Inspector, Discoverer, Critic,
+Scribe. "Seven" was a count of steps read as a count of agents, and this heading
+also claimed "all steps live". Neither was true.
+
+Not every step is live, and a run normally does not finish. Measured on this
+machine for the IOI goal:
+
+| step | agent | status | provenance |
+|------|-------|--------|------------|
+| load | executor | loaded | unavailable |
+| reproduce | executor | completed | **live** |
+| inspect | inspector | ok | unavailable |
+| patch | executor | ok | unavailable |
+| discover | discoverer | unavailable | live |
+| validate | critic | *never executed* | - |
+| publish | scribe | *never executed* | - |
+
+The run reports `status: blocked`, `provenance: unavailable`,
+`validation_eligible: false`, `publication_eligible: false`, and `4/5` steps
+completed. `validate` and `publish` do not run at all: the workflow stops when
+`discover` fails, and the Critic's reflection is a declared stub -
+`{"status": "unavailable", "provenance": "unavailable", "reason": "No live
+reflection executor is connected."}` - so that step cannot produce a measurement
+whatever the run does.
+
+Only `reproduce` carries `provenance: live`. The text here previously read "every
+step stamped `Provenance: live`", which no run has produced.
+
+`discover` deserves reading rather than skimming: it reports
+`status: unavailable` *with* `provenance: live`, meaning a live measurement was
+taken and then found unusable downstream. That pairing is deliberate, but it
+reads as a contradiction in a trace and it is the kind of row a reader skims
+past.
+
+The Planner's DAG is a fixed lifecycle skeleton, not experimental design. The
+code says so, and the honest description of the Society is a **six-agent guarded
+workflow with partial scientific executors and fail-closed publication gates**.
 
 ![Research Society](docs/images/ui/06b-research-society-progress.png)
 
@@ -322,7 +359,7 @@ about the project.
 | IOI clean vs. corrupted measurement | `gpt2_engine.py:1094` |
 | Live IOI circuit screening | `backend/interpretability/discovery/live_discovery.py` |
 | TransformerLens path (desktop sidecar) | `backend/interpretability/gpt2_model.py` |
-| Society v2 seven-agent workflow + SSE | `backend/agents/society.py` |
+| Society v2: six agents, seven planned steps, fail-closed + SSE | `backend/agents/society.py` |
 | SQLite persistence, plugins, logging, KG | `backend/storage`, `backend/plugins`, … |
 
 ### ⚠️ Not real yet — do not cite these
@@ -445,7 +482,7 @@ MECH/
 │   ├── main.py                 entry point; mounts the dispatcher at /api and /api/v1
 │   ├── services/gpt2_engine.py the real interpretability engine (1.4k lines)
 │   ├── interpretability/       logit lens, patching, live circuit discovery, SAE (stub)
-│   ├── agents/society.py       7-step agent workflow with fail-fast gates
+│   ├── agents/society.py       6 agents, 7-step workflow, fail-fast gates
 │   ├── validation/             benchmark runner + provenance enforcement
 │   ├── benchmarking/           9-task catalogue with literature baselines
 │   └── science/                reproducibility pipelines, statistics, LaTeX export
