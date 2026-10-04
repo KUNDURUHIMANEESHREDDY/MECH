@@ -194,27 +194,64 @@ class DynamicDAGPlanner:
                     alg = get_algorithm(node.algorithm_name, self.adapter)
                     rep: DiscoveryReport = alg.run(dataset_item)
                     node.result_report = rep.to_dict()
+                    node.executed = True
                     reports[node.node_id] = rep
                 else:
-                    node.result_report = {"algorithm": node.algorithm_name, "confidence": 0.95}
+                    # No adapter connected, so no algorithm ran.
+                    #
+                    # Was `{"algorithm": ..., "confidence": 0.95}` and
+                    # `node.executed = True` regardless -- so an unrun node
+                    # reported a fabricated 0.95 and was marked executed, which
+                    # is what lets `get_topological_levels` treat it as satisfied
+                    # for its dependants. A node that did not run must say so,
+                    # because the DAG's whole ordering depends on it.
+                    node.result_report = {
+                        "algorithm": node.algorithm_name,
+                        "status": "unavailable",
+                        "measured": False,
+                        "confidence": None,
+                        "reason": (
+                            "No adapter is connected, so this node's algorithm "
+                            "was never run. It previously reported confidence "
+                            "0.95 and was marked executed."
+                        ),
+                    }
+                    node.executed = False
 
-                node.executed = True
                 level_log["executed_nodes"].append({
                     "node_id": node.node_id,
                     "algorithm": node.algorithm_name,
                     "prerequisites": node.prerequisites,
-                    "expected_info_gain": node.expected_info_gain
+                    "expected_info_gain": node.expected_info_gain,
+                    "executed": node.executed,
+                    "measured": bool(
+                        node.executed
+                        and isinstance(node.result_report, dict)
+                        and node.result_report.get("measured", True)
+                    ),
                 })
 
             execution_logs.append(level_log)
 
         total_runtime = (time.time() - t0) * 1000
 
+        executed = [n for n in dag.nodes.values() if n.executed]
+        measured = [
+            n for n in executed
+            if isinstance(n.result_report, dict)
+            and n.result_report.get("measured", True)
+        ]
+
         return {
             "dag_id": dag.dag_id,
             "goal_description": goal.description,
             "total_levels": len(levels),
             "nodes_count": len(dag.nodes),
+            "nodes_executed": len(executed),
+            "nodes_measured": len(measured),
+            # Derived: a run with no adapter connected measured nothing, and the
+            # summary must not read as though it had.
+            "measured": bool(measured),
             "execution_logs": execution_logs,
-            "total_runtime_ms": round(total_runtime, 2)
+            "total_runtime_ms": round(total_runtime, 2),
         }

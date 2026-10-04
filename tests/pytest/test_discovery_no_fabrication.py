@@ -725,6 +725,114 @@ def test_no_module_in_the_cluster_hardcodes_the_prior_fabrications():
     assert not offenders, "prior fabrication returned: " + "; ".join(offenders)
 
 
+def test_dag_nodes_without_an_adapter_are_not_marked_executed():
+    """`{"algorithm": ..., "confidence": 0.95}` plus `node.executed = True`
+    regardless -- so an unrun node reported a fabricated 0.95 *and* was marked
+    executed, which is what lets `get_topological_levels` treat it as satisfied
+    for its dependants."""
+    from backend.interpretability.discovery.dag_discovery_planner import (
+        DynamicDAGPlanner,
+    )
+    from backend.interpretability.discovery.discovery_planner import ResearchGoal
+
+    report = DynamicDAGPlanner(adapter=None).execute_dag(ResearchGoal(
+        goal_id="g", description="d", model_id="gpt2-small", dataset_name="ioi"))
+
+    assert report["nodes_executed"] == 0
+    assert report["nodes_measured"] == 0
+    assert report["measured"] is False
+
+    for level in report["execution_logs"]:
+        for node in level["executed_nodes"]:
+            assert node["executed"] is False
+            assert node["measured"] is False
+
+
+# ── MultiAgentResearchSociety ──────────────────────────────────────────────
+
+def test_society_consensus_is_derived_not_asserted():
+    """It returned `consensus_reached: True` and `society_status: "Completed"`
+    for every goal, from seven hardcoded role dicts with no agents behind them."""
+    from backend.research_platform.autonomous.multi_agent_society import (
+        MultiAgentResearchSociety,
+    )
+
+    class Gate:
+        def __init__(self, result):
+            self._result = result
+
+        def run_blocking(self, goal):
+            return self._result
+
+    # Raises: reported as a failure, with the exception text.
+    class Boom:
+        def run_blocking(self, goal):
+            raise RuntimeError("planner unavailable")
+
+    failed = MultiAgentResearchSociety(society=Boom()).run_society_collaboration("g")
+    assert failed["consensus_reached"] is False
+    assert failed["society_status"] == "failed"
+    assert "planner unavailable" in failed["error"]
+    assert failed["reason"]
+
+    # Not a dict: unavailable, not a fabricated success.
+    weird = MultiAgentResearchSociety(
+        society=Gate("all good")).run_society_collaboration("g")
+    assert weird["society_status"] == "unavailable"
+    assert weird["consensus_reached"] is False
+
+    # Completed but not live / not eligible: each clause must withhold consensus.
+    for result, clause in (
+        ({"status": "blocked", "provenance": "live",
+          "validation_eligible": True, "publication_eligible": True},
+         "not 'completed'"),
+        ({"status": "completed", "provenance": "unavailable",
+          "validation_eligible": True, "publication_eligible": True},
+         "live provenance"),
+        ({"status": "completed", "provenance": "live",
+          "validation_eligible": False, "publication_eligible": True},
+         "validation was not eligible"),
+        ({"status": "completed", "provenance": "live",
+          "validation_eligible": True, "publication_eligible": False},
+         "publication was not eligible"),
+    ):
+        outcome = MultiAgentResearchSociety(
+            society=Gate(result)).run_society_collaboration("g")
+        assert outcome["consensus_reached"] is False, result
+        assert clause in outcome["consensus_basis"], outcome["consensus_basis"]
+
+    # Only a fully live, completed, doubly-eligible run reaches consensus.
+    agreed = MultiAgentResearchSociety(society=Gate({
+        "status": "completed", "provenance": "live",
+        "validation_eligible": True, "publication_eligible": True,
+    })).run_society_collaboration("g")
+    assert agreed["consensus_reached"] is True
+
+
+def test_society_does_not_invent_hypotheses_to_debate():
+    """The Society runs a workflow; it does not produce two rival claims.
+    `ai_scientist_engine` must not receive a fabricated pair."""
+    from backend.research_platform.autonomous.multi_agent_society import (
+        MultiAgentResearchSociety,
+    )
+
+    class Gate:
+        def run_blocking(self, goal):
+            return {"status": "completed", "provenance": "live",
+                    "validation_eligible": True, "publication_eligible": True}
+
+    society = MultiAgentResearchSociety(society=Gate())
+    result = society.run_society_collaboration("g")
+    assert "hypothesis_a" not in result
+    assert "hypothesis_b" not in result
+    assert "does not generate rival hypotheses" in result["hypotheses_source"]
+
+    society.set_hypotheses("A", "B", evidence_a=[{"support": 0.9}])
+    supplied = society.run_society_collaboration("g")
+    assert supplied["hypothesis_a"] == "A"
+    assert supplied["hypotheses_source"] == "supplied by caller"
+
+
 def test_the_five_unimplemented_modules_still_say_so():
     """None of these may quietly start reporting numbers again."""
     from backend.science.reproducibility.copy_task_pipeline import (

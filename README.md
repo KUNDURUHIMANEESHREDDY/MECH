@@ -746,11 +746,19 @@ fabricated metric looked like a finding and was reachable by callers with weight
       field the audit named — four fabricated the *inputs* to the number, and
       `attribution_patching`'s `confidence: 1.0` on its closing edge sat next to a gradient
       substitution that made the ranking meaningless. See §6b and §6d.
-- [ ] **Still open:** `dag_discovery_planner.py:199` and
-      `MultiAgentResearchSociety.run_society_collaboration`, which returns
-      `consensus_reached: True` unconditionally. The latter is now visible in
-      `ai_scientist_engine`, where the debate arguments are read from it and are therefore currently
-      the goal itself.
+- [x] **Now closed**, for the two stragglers as well.
+      `dag_discovery_planner.execute_dag` wrote
+      `{"algorithm": ..., "confidence": 0.95}` for every node with no adapter
+      *and* set `node.executed = True` regardless — so unrun nodes both reported a
+      fabricated 0.95 and were treated as satisfied for their dependants, which is
+      what the DAG's topological ordering is built on.
+      `MultiAgentResearchSociety.run_society_collaboration` returned
+      `consensus_reached: True` and `society_status: "Completed"` for every goal
+      ever passed, from seven hardcoded role dicts with no agents behind them —
+      while `backend/agents/society.py` explicitly states that the old standalone
+      stub "must not be reachable through the active Society package". It now
+      delegates to `ResearchSocietyV2` and *derives* consensus from the run's
+      status, provenance and both eligibility gates.
 
 Also removed from `benchmark_runner.py`, which was fabricating alongside the pipelines:
 
@@ -939,38 +947,62 @@ Unreachability was established by scanning every `.ts/.tsx/.vue/.js/.mjs` file i
 import of the module path or of any of its exported symbols — not by assuming. `src/hooks/` and
 `src/layout/` became empty and were removed with them.
 
+Two more files went with them, and the reasoning was longer than it first looked:
+
+```
+src/services/panelRegistry.ts
+src/utils/panelRegistry.js
+```
+
 Dependencies dropped: `react`, `react-dom`, `reactflow`, `@vitejs/plugin-vue-jsx`,
-`@vitejs/plugin-react`, `@testing-library/react`. **`lucide-react` was kept** — the audit listed it
-among the dead React packages, but it is imported by `src/services/panelRegistry.ts` and
-`src/utils/panelRegistry.js`, and removing it breaks the build.
+`@vitejs/plugin-react`, `@testing-library/react`, `lucide-react`.
+
+**`lucide-react` took two passes, and the first pass was wrong.** It *was* imported — by
+`src/services/panelRegistry.ts` and `src/utils/panelRegistry.js` — so it could not be dropped on the
+audit's word, and removing it broke the build. But both of those files only define and export a
+`panelRegistry` that nothing imports, so they were dead too, and they were the *only* reason
+`lucide-react` (and therefore `react`, as its unmet peer) survived in the lockfile. The live panel
+icon set comes from `lucide-vue-next` in `ActivityBar.vue`.
 
 `react()` and `vueJsx()` were also registered in `vite.config.mts` and `vitest.config.js` for files
 that no longer exist, costing a JSX transform on every module. Both removed; the built `dist/` now
 contains no React at all.
 
+`npm install` was re-run: it reported `removed 108 packages`, then `removed 4` after the
+`panelRegistry` pair. `package-lock.json` now contains no `react`, `react-dom`, `reactflow`,
+`lucide-react` or `scheduler` entry — direct or transitive.
+
 Re-verified after the change: `build:renderer` succeeds, `test:js` is 11 passed / 6 skipped
 (unchanged), and no `.jsx`/`.tsx` remains under `src/`.
 
-`npm install` has not been re-run to regenerate `package-lock.json`, so the lockfile still lists the
-removed packages.
-
 ### 8. Packaging
 
-`frontend/release/` has never been produced. **Two concrete blockers, both now diagnosed rather
-than guessed at** — `scripts/build.js` checks both up front and names them, instead of failing
-partway through packaging with an error that does not identify the cause.
+`frontend/release/` had never been produced because the build "was not completed" — which named no
+cause. Both causes are now diagnosed, and **neither is a hard blocker any more**:
 
-1. **`../.venv` is declared but does not exist.** `package.json`'s `build.extraResources` copies
-   `../backend` and `../.venv` into the bundle. A missing `from` path is not reported clearly by
-   `electron-builder`. Fix: `python -m venv .venv`, or drop the entry.
-2. **Windows cannot create the symlinks `electron-builder` needs.** It unpacks a `winCodeSign`
-   cache containing macOS `.dylib` symlinks, and creating a symlink on Windows requires Developer
-   Mode or an elevated shell. Without it the failure surfaces only as
-   `ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`, which reads like a corrupt install rather than a missing
-   privilege. Fix: enable Developer Mode, or build from an elevated shell.
+1. **`../.venv` is declared in `build.extraResources` and does not exist.** electron-builder does
+   not report a missing `from` path clearly; it fails partway through packaging with an error that
+   does not name the absent directory.
 
-Verified working up to that point: `npm run build:renderer` succeeds in ~7 s and `npm run test:js`
-passes 11/6-skipped. So the renderer half of the build is sound; only packaging is blocked.
+   It is now treated as what it is: an *optional* extra. `electron/main.js:resolvePythonPath`
+   already falls back through the bundled `.venv` → repo `.venv` → repo `venv` → bare `python`, so a
+   build without a bundled interpreter still produces an app that runs. `scripts/build.js` drops the
+   entry and says so, rather than failing the whole build over a preference. `../backend` *is*
+   required, and its absence is still a hard error — an app with no backend cannot start.
+
+2. **Windows cannot create the symlinks electron-builder needs** to unpack its `winCodeSign` cache
+   (which contains macOS `.dylib` symlinks). That needs Developer Mode or an elevated shell; without
+   it the failure surfaced only as `ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`, which reads like a corrupt
+   install.
+
+   `winCodeSign` is needed only to re-sign and version-stamp the built executable, so the build now
+   sets `signAndEditExecutable: false` when it detects the missing privilege and **says the artifact
+   will be unsigned and unversioned**. For a signed, stamped artifact, enable Developer Mode
+   (Settings → Update → For developers) or build from an elevated shell; the build detects the
+   privilege and uses the normal path when it is available.
+
+Verified: `npm run build:renderer` succeeds, `npm run test:js` is 11 passed / 6 skipped, and
+`node scripts/build.js` produces installers in `frontend/release/`.
 
 ---
 
