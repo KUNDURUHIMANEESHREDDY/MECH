@@ -7,7 +7,7 @@
 [![provenance](https://img.shields.io/badge/results-measured%20from%20live%20weights-2563eb?style=flat-square)](#results)
 [![backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20torch-13795f?style=flat-square)](#architecture)
 [![frontend](https://img.shields.io/badge/frontend-Vue%203%20%2B%20Vite-42b883?style=flat-square)](#architecture)
-[![status](https://img.shields.io/badge/tests-186%20passed%20%C2%B7%2027%20failed%20%C2%B7%202%20errors-ca9500?style=flat-square)](#testing-status)
+[![status](https://img.shields.io/badge/tests-533%20passed%20%C2%B7%204%20skipped%20%C2%B7%200%20failed-2563eb?style=flat-square)](#testing-status)
 
 </div>
 
@@ -277,6 +277,31 @@ Three consequences worth knowing:
 
 If you are reviewing a MECH number, check its provenance tag first.
 
+### Signature ≠ integrity tag
+
+`provenance` answers *"was this measured?"* It does not answer *"can you check it?"* Those are
+different claims and the codebase now keeps them apart:
+
+| Claim | Recorded by | Verifiable with |
+|---|---|---|
+| A value was measured | `provenance: live` | the code path that measured it |
+| A dataset is unchanged | a recorded SHA-256 in `golden_manifest.json` | `frontend/scripts/verify_golden_datasets.py` |
+| A manifest was signed | `signature_algorithm: Ed25519` + a real public key | the matching public key, alone |
+
+Nothing in the repository carries a signing key. `sign()` raises when no key is available rather than
+falling back to a default, because a signature produced with a key that ships in the source is a
+valid signature attesting to nothing. See [§6b](#6b-signing-was-not-signing).
+
+Two distinct failure modes are worth naming, because they look identical in a report:
+
+- **Optimistic defaults** (0.5–1.0, `100.0`, `"VALIDATED"`) *manufacture* a passing result. These are
+  the dangerous ones, and they are gone: `patch_success_rate=None`, `published_reference=None`,
+  `regression=None`, derived `status`.
+- **Conservative defaults** (0.0, `False`) *fail* a threshold and cannot manufacture a verdict. These
+  stay, pinned by tests — but they are labelled `not_assessed` where the question is whether something
+  was checked at all, since "no regression detected" and "no regression was looked for" are different
+  statements.
+
 ---
 
 ## Real vs. not implemented yet
@@ -311,6 +336,8 @@ about the project.
 | ACDC fidelity | **Now real, measured end to end.** The analytic formula that could never fall below 0.90 is gone; fidelity comes from `live_measure.circuit_fidelity` over the pruned circuit. See §4 for a head-vs-neuron bug that made the earlier version measure MLP neurons while labelling them `L{layer}H{head}`. |
 | Non-GPT-2 models (Gemma, Llama, Qwen, Mistral, DeepSeek) | Unconditional mocks; `mock_mode` is accepted but never read (`science/models/model_adapters.py`). |
 | `benchmark_database.json`, `*_certificate.json`, `ioi_benchmark.py` | Hand-written fixtures. Each JSON record now carries `fixture: true`, `measured: false`, `provenance: "reference"`, eligibility `false`, and a `fixture_notice`. **Never quote these.** |
+| `run_reproducibility_demo.py` | A **demo entry point**, labelled as such in its banner. It runs the real suite, but use `BenchmarkRunner` directly for anything you intend to stand behind. It replaced `run_reproducibility_audit.py`, which generated its own observations from an arithmetic ramp. See §6c. |
+| `golden_manifest.json` hashes | Placeholders. `prompt_hash` and `bundle_hash` are empty-string digests, `token_hash` is a literal string. `verify_golden_datasets.py` reports this as `not_recorded`, and the dataset's health score reflects it (**0/3 hashes, unsigned**). Recording real hashes is a prerequisite for GOLDEN promotion. |
 | `backend/discovery/*` (13 modules) | Random grids via `np.random`. |
 | `/api/v2/*` | Silently absent — the import is swallowed by a bare `except`. |
 
@@ -454,7 +481,7 @@ document recorded the latter, which was itself drift.
 
 ### 2. Get CI green ✅ Python done
 
-**Python: 387 passed, 7 skipped, 0 failed.** The suite was red at 186 passed / 27 failed /
+**Python: 533 passed, 4 skipped, 0 failed.** The suite was red at 186 passed / 27 failed /
 2 collection errors. Almost every failure shared one root cause: the code had been hardened to
 **fail closed** while the tests still asserted the old synthetic-success contract.
 
@@ -736,6 +763,113 @@ Also removed from `benchmark_runner.py`, which was fabricating alongside the pip
 - `LiveUnavailable` is reported as `NOT_RUN` rather than `ERROR`, matching the scheduler's
   vocabulary, since four of the six pipelines now raise by design.
 
+### 6b. Signing was not signing
+
+The dataset manager documented `sign_dataset` as producing an *"asymmetric digital signature"*. It
+produced `sha256(f"{payload}:{private_key}")` with `private_key="mock_private_key"` — a keyed hash,
+a MAC. Two consequences, both fatal:
+
+- Proving it required the secret, and the secret was a default argument in the source. **Anyone who
+  could read the repository could produce a signature that verified.**
+- `verify_signature(dataset_id, public_key="mock_public_key")` **accepted a `public_key` argument and
+  ignored it**, recomputing with the literal `"mock_private_key"`. Verification that needs the secret
+  proves the caller can read this file. The public key is now a required, load-bearing argument.
+
+`ResearchManifestEngine.sign_manifest` had the same shape under a docstring reading
+*"Simulating Ed25519"*. Both now use real Ed25519 via `cryptography`
+(`backend/science/integrity/signing.py`), with **no default key** — `sign()` raises rather than
+signing with something public, because a signature made with a key that ships in the source attests
+to nothing. Keys are supplied by argument, by path, or via `MECH_SIGNING_KEY_PATH`, and belong
+outside the repository.
+
+`verify` returns a `VerificationResult` rather than a bare bool, because *no signature*, *no key* and
+*wrong signature* are three different problems with three different fixes, and a collapsed `False`
+eventually gets read as `True`.
+
+Two ambiguity bugs surfaced while testing this, both of which would have signed with a key the
+caller never supplied:
+
+| Input | Naive length-first reading | Result |
+|---|---|---|
+| 64-char hex seed | also 64 **bytes** → treated as raw binary | valid signature, **wrong identity** |
+| 32-byte binary seed whose first/last byte is `0x20` | `strip()` → 31 bytes | rejected as malformed, ~4.7% of random keys |
+
+Hex is now resolved before fixed-length binary, and exact binary lengths are checked **before**
+stripping. A raw 32- or 64-byte seed made only of hex characters has probability (16/256)³², so the
+ordering is safe in the direction that matters.
+
+### 6c. The "reproducibility audit" that audited nothing
+
+`run_reproducibility_audit.py` was named *audit*, described itself as *"the high-fidelity validation
+pipeline"*, and printed `VERIFIED`, a **Reproducibility Score**, a **Digital Signature** and
+**Portable Bundle: VERIFIED**. It:
+
+- set `os.environ["MECH_BYPASS_HASH_CHECK"] = "1"` and reloaded on any failure — disabling integrity
+  checking for **every later load in the process**, and never restoring it;
+- forced `get_adapter("gpt2-small", mock_mode=True)`, so the fingerprint bound into the certificate
+  described fixture weights;
+- generated its 100 "observations" as `[0.88 + (0.02 * (0.5 - i/100.0)) for i in range(100)]` — an
+  arithmetic ramp — and passed them to `validate_benchmark`, which computes a bootstrap CI, Cohen's
+  *d* and a verdict over them;
+- supplied `published=0.880, registry=0.878, baseline=0.875, parity=0.9999` as literals, while the
+  validator separately hardcoded `"published": 0.88,  # Mocked lookup` into the certificate.
+
+**Every number that came out was an input.** The PASS was guaranteed by construction, and the
+statistics reported the guarantee as a finding. Replaced by `run_reproducibility_demo.py`, which runs
+the real suite and prints `MODE: DEMONSTRATION / NOT A SCIENTIFIC VALIDATION`. Measured output now:
+`ioi 0.724`, `induction_heads 0.6654`, four pipelines `NOT_RUN`, and IOI validation
+`REVISION_REQUIRED` at `n=10` — because `patch_success_rate` defaulted to **100.0**, so the one
+criterion that could not be checked was the one that passed. It is now `None` → `not_assessed`, and
+only a literal `True` satisfies a criterion.
+
+`ResearchManifest.status` was the literal `"VALIDATED"` regardless of verdict or signature. It is
+now derived: `VALIDATED` / `UNSIGNED` / `REVISION_REQUIRED` / `UNVALIDATED`. Signing a failed
+benchmark cannot upgrade it.
+
+### 6d. Hashes and badges that recorded nothing
+
+- `load()`'s docstring claimed **Triple-SHA**; it compared **one** hash. `prompt_hash` and
+  `expected_prompt` were computed and then never compared. Both run now, and `last_integrity_status`
+  records which. A hash whose manifest value is a placeholder is `not_recorded`, not `verified`.
+- `_is_placeholder` now strips the `sha256:` prefix. Every manifest hash carries one, so
+  `sha256:e3b0c442…` (the empty-string digest) was not recognised and the dataset scored as having
+  recorded it.
+- `compute_health_score`'s integrity term was `1.0 if all(k in h for k in [...])` — checking only
+  that three *keys* exist. All three do, but two are placeholders, so the shipped dataset scored 100%
+  on integrity while recording nothing verifiable. The signature term was
+  `1.0 if meta.get("signature")`, and the manifest's signature is the truthy string
+  `sha256:dataset_sig_placeholder` — 100% for being signed. The shipped IOI dataset now reports
+  **0/3 hashes recorded, `signature_is_real: False`, overall 44.4**.
+- The exporter's badge returned `Status: **GOLDEN & SIGNED**` **unconditionally**, and
+  `export()` defaulted a missing health method to `{"overall": 100}` — a perfect badge reachable with
+  nothing checked. The badge is now derived from the manifest.
+- `dataset_hash` held a dataset *id* and `environment_hash` a snapshot *id* — identifiers under names
+  ending in `_hash`. Split into `dataset_id`/`environment_id` labels and real digest fields that are
+  `None` when absent, replacing `"unknown"`.
+- `DatasetCertificate` copied `signature` straight from the manifest, so it issued
+  `sha256:dataset_sig_placeholder` **as a signature**. Placeholders are now excluded, and
+  `signature_status` distinguishes `unsigned`, `unverifiable_algorithm` (the old keyed SHA-256 is 64
+  hex chars; Ed25519 is 128) and `present_Ed25519_not_checked_here`.
+- `load()` built its path from the id it was given, so the manifest's **own canonical id**
+  (`IOI-Canonical-100`) raised `FileNotFoundError` and only the folder alias worked. Callers
+  "solved" this by catching the exception and reloading under a different id — which is how the old
+  audit ended up setting a bypass flag. Both spellings now resolve, and the signing payload uses the
+  canonical id, so signing via the alias and verifying via the canonical id agree.
+- `promote_dataset.py` assigned `meta["signature"]` and `meta["status"] = "GOLDEN"` to an in-memory
+  dict and **never wrote the manifest back**, then printed `PROMOTION COMPLETE … GOLDEN and signed`.
+  Every later verification ran against a manifest promotion had never touched. It now persists, and
+  recomputes `root_signature` rather than leaving `sha256:root_sig_placeholder` beside a real
+  signature.
+- `promote_dataset.py` also claimed *"verified with the public key alone"* while deriving that key
+  from the signing key it had just used — a tautology. It now says what it proves: the stored bytes
+  are a valid signature over this payload, not *who* signed. Only an independently held public key
+  (`verify_golden_datasets.py`) can attest identity.
+
+The one escape hatch that remains is named `MECH_INTEGRITY_CHECKS=disabled-for-local-development`,
+requires an explicit value rather than a bare flag, and stamps `integrity_verified: False` plus an
+`integrity_notice` field **into the returned data**, so a bypassed load is visible in the data rather
+than only in an environment variable nobody reads later.
+
 ### 7. Frontend cleanup
 
 Measured, not estimated — the figures in earlier drafts of this section were wrong:
@@ -790,10 +924,14 @@ verify the build, then ship the installers the roadmap promises.
 
 | Suite | Command | Status |
 |-------|---------|--------|
-| Python | `pytest tests/pytest -q` | **387 passed, 7 skipped, 0 failed** |
+| Python | `pytest tests/pytest -q` | **533 passed, 4 skipped, 0 failed** |
 | Frontend unit | `npm run test:js` | **11 passed, 6 skipped, 0 failed** |
 | Playwright (offline) | `npx playwright test` | 4 specs, run in CI |
 | Playwright (live backend) | `trust-online.spec.js` | Not in CI |
+
+The 4 skips are all platform-gated, not weights-gated: `os.fork` is unavailable on Windows, and two
+tests need POSIX `fcntl` pipe/rlimit behaviour. Nothing skips because weights are missing — the
+weight-loading tests run here on a 6 GB card.
 
 Only `tests/pytest/test_validation_loop.py` exercises real weights. Everything else runs
 against mocks, so **a green suite would not tell you the interpretability is correct** — one

@@ -23,13 +23,17 @@ from typing import Any, Dict, List, Optional, Tuple, Set
 # Ensure project root is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
 
+from backend.science.integrity import SigningUnavailable
 from backend.science.reproducibility.benchmark_reference_registry import CanonicalBenchmarkRegistry, BenchmarkReference
 from backend.science.reproducibility.canonical_circuit_registry import CanonicalCircuitRegistry
 from backend.science.models.adapter_base import ModelAdapter
 
 # New Governance Imports
 from backend.science.reproducibility.research_snapshot import ResearchSnapshotEngine
-from backend.science.reproducibility.research_manifest import ResearchManifestEngine
+from backend.science.reproducibility.research_manifest import (
+    ResearchManifestEngine,
+    derive_manifest_status,
+)
 from backend.science.reproducibility.audit_logger import ScientificAuditLogger
 from backend.science.reproducibility.benchmark_certificate import CertificateEngine
 from backend.science.reproducibility.model_fingerprint import ModelFingerprintEngine
@@ -46,7 +50,7 @@ class ValidationStats:
     difference_pct: float
     cohens_d: float
     verdict: str
-    criteria_met: Dict[str, bool]
+    criteria_met: Dict[str, Any]
 
 
 class ScientificValidator:
@@ -107,18 +111,34 @@ class ScientificValidator:
         self,
         metric_id: str,
         observed_data: List[float],
-        patch_success_rate: float = 100.0,
+        patch_success_rate: Optional[float] = None,
         min_n: int = 40,
         tolerance_pct: float = 2.0,
         reference_baseline: Optional[float] = None
     ) -> ValidationStats:
-        """Multi-tier validation against Published and Reference baselines."""
+        """Multi-tier validation against Published and Reference baselines.
+
+        `patch_success_rate` defaults to None rather than 100.0. The old default
+        meant a caller who never measured patch success still cleared the
+        `patch_success_met` criterion -- the one criterion that could not be
+        checked was the one that passed. None now records `not_assessed`, which
+        fails the verdict, because an unmeasured check must not be able to
+        manufacture a PASS.
+        """
         self.audit.log("Validator", "validate_benchmark", "INFO", f"Starting validation for {metric_id}")
 
         ref = self.registry.get_primary_reference(metric_id)
         if not ref:
             self.audit.log("Validator", "validate_benchmark", "FAIL", f"No reference for {metric_id}")
             raise ValueError(f"Reference for {metric_id} not found.")
+
+        if not observed_data:
+            raise ValueError(
+                f"Cannot validate {metric_id}: no observations were supplied. "
+                "There is no defensible substitute -- an aggregate repeated n "
+                "times is not a sample, and an empty series would report a mean "
+                "of 0.0 that reads as a measurement."
+            )
 
         n = len(observed_data)
         mean_obs = sum(observed_data) / n if n > 0 else 0.0
@@ -134,7 +154,10 @@ class ScientificValidator:
             "published_in_ci": ci[0] <= ref.expected_mean <= ci[1],
             "diff_within_tolerance": diff_pct <= tolerance_pct,
             "rigorous_sample": n >= min_n,
-            "patch_success_met": patch_success_rate >= 90.0
+            "patch_success_met": (
+                patch_success_rate >= 90.0 if patch_success_rate is not None
+                else "not_assessed"
+            ),
         }
 
         # Regression detection vs Reference Baseline (Local Stable)
@@ -146,8 +169,19 @@ class ScientificValidator:
             else:
                 criteria["no_regression"] = True
 
-        verdict = "PASS" if all(criteria.values()) else "REVISION_REQUIRED"
+        # `all(criteria.values())` would treat the "not_assessed" string as True,
+        # so the one criterion that could not be checked would have passed.
+        # Only a literal True satisfies a criterion.
+        verdict = "PASS" if all(v is True for v in criteria.values()) else "REVISION_REQUIRED"
         if diff_pct > 15.0: verdict = "FAIL"
+
+        unassessed = sorted(k for k, v in criteria.items() if v == "not_assessed")
+        if unassessed:
+            self.audit.log(
+                "Validator", "validate_benchmark", "WARN",
+                f"{metric_id}: {', '.join(unassessed)} not assessed; "
+                "cannot reach PASS without them."
+            )
 
         self.audit.log("Validator", "validate_benchmark", verdict, f"Completed with mean {mean_obs:.4f}")
 
@@ -171,9 +205,18 @@ class ScientificValidator:
         benchmark_results: List[Dict[str, Any]],
         adapter: ModelAdapter,
         dataset_id: str,
-        output_dir: str = "benchmark_report"
+        output_dir: str = "benchmark_report",
+        signing_key: Any = None
     ) -> Dict[str, str]:
-        """Generates the full Research Manifest, Certificate, and Reports."""
+        """Generates the full Research Manifest, Certificate, and Reports.
+
+        `signing_key` is an Ed25519 private key (seed, PEM, or a path to either),
+        or None to use `MECH_SIGNING_KEY_PATH`. When neither is available the
+        manifest is written **unsigned** and `signature_status` records why. It
+        is not signed with a fallback key: a certificate signed by a key that
+        ships in the repository attests to nothing, and reporting one as a
+        "Digital Signature" is worse than reporting none.
+        """
         if not os.path.exists(output_dir): os.makedirs(output_dir)
 
         self.audit.log("Artifacts", "generate", "INFO", "Generating research artifacts and manifest")
@@ -208,33 +251,82 @@ class ScientificValidator:
         )
 
         # 5. Generate Certificate
+        #    The `published` value was a hardcoded `0.88  # Mocked lookup`, so
+        #    every certificate asserted a comparison against a literature number
+        #    that was never looked up. It now comes from the caller, and is
+        #    `None` when absent -- a certificate that omits the published figure is
+        #    honest about not knowing it; one that invents 0.88 is not.
+        published = primary_res.get("published")
+        if published is None:
+            self.audit.log(
+                "Artifacts", "published", "WARN",
+                f"No published reference supplied for {primary_res.get('id', 'unknown')}; "
+                "certificate will not assert a literature comparison."
+            )
         cert = self.cert_engine.generate(
             benchmark_id=primary_res.get("id", "unknown"),
             results={
-                "published": 0.88, # Mocked lookup
+                "published": published,
                 "baseline": primary_res.get("baseline"),
                 "current": stats.observed_mean if hasattr(stats, 'observed_mean') else 0.0
             },
             hashes={
-                "dataset": dataset_id,
+                # `dataset_id` and `environment_id` are labels; the `*_hash`
+                # fields carry digests or None. They used to be conflated --
+                # `dataset_hash` held the dataset id -- so a certificate named a
+                # fingerprint field after an identifier.
+                "dataset_id": dataset_id,
+                "environment_id": snapshot.snapshot_id,
                 "model": fingerprint.weights_sha256,
-                "env": snapshot.snapshot_id
             },
             repro_score=repro_score,
             verdict=stats.verdict == "PASS" if hasattr(stats, 'verdict') else False
         )
 
         # 6. Assemble Research Manifest (Merkle Root)
+        verdict = stats.verdict if hasattr(stats, "verdict") else ""
+
         manifest = self.manifest_engine.generate(
             experiment_id=f"EXP-{cert.certificate_id}",
             snapshot=snapshot,
             certificate=asdict(cert),
             audit_log=self.audit.get_entries(),
-            reproducibility_score=repro_score
+            reproducibility_score=repro_score,
+            verdict=verdict,
         )
 
-        # 6b. Digital Signature
-        manifest.signature = self.manifest_engine.sign_manifest(manifest)
+        # 6b. Ed25519 signature. Optional on purpose: no key means an unsigned
+        #     manifest with the reason recorded, not a forged one.
+        signature_status: Dict[str, Any]
+        try:
+            self.manifest_engine.sign_manifest(manifest, signing_key)
+            signature_status = {
+                "signed": True,
+                "algorithm": "Ed25519",
+                "reason": None,
+            }
+        except SigningUnavailable as exc:
+            manifest.signature = ""
+            manifest.signature_algorithm = ""
+            signature_status = {
+                "signed": False,
+                "algorithm": None,
+                "reason": str(exc),
+            }
+            self.audit.log("Artifacts", "signature", "WARN",
+                           f"Manifest left unsigned: {exc}")
+        manifest.signature_status = signature_status
+
+        # `generate` derived status with signed=False because it runs before
+        # signing. Recompute now that the signature outcome is known, so a
+        # signed PASS reads VALIDATED and an unsigned one reads UNSIGNED.
+        manifest.status = derive_manifest_status(
+            verdict=verdict,
+            reproducibility_score=repro_score,
+            signed=bool(signature_status["signed"]),
+        )
+        self.audit.log("Artifacts", "status", "INFO",
+                       f"Manifest status: {manifest.status}")
 
         # Save Files
         paths = {
@@ -277,18 +369,39 @@ class ScientificValidator:
             f.write("## 1. Provenance & Integrity\n")
             f.write(f"- **Experiment ID**: `{manifest.experiment_id}`\n")
             f.write(f"- **Manifest Merkle Root**: `{manifest.root_sha256}`\n")
-            f.write(f"- **Status**: **{manifest.status}**\n\n")
+            f.write(f"- **Status**: **{manifest.status}**\n")
+            sig_status = getattr(manifest, "signature_status", None) or {}
+            if sig_status.get("signed"):
+                f.write(f"- **Signature**: {sig_status.get('algorithm', 'unknown')}\n")
+            else:
+                f.write("- **Signature**: NONE — manifest is unsigned. "
+                        f"Reason: {sig_status.get('reason') or 'not recorded'}\n")
+            f.write("\n")
 
             f.write("## 2. Four-Tier Comparison\n")
             f.write("| Metric | Published | Registry | Reference | Current | Delta |\n")
             f.write("| :--- | :--- | :--- | :--- | :--- | :--- |\n")
             for r in results:
                 s = r.get("stats")
-                pub = r.get("published", 0.0)
-                reg = r.get("registry", pub)
-                base = r.get("baseline", "N/A")
-                curr = s.observed_mean if hasattr(s, 'observed_mean') else 0.0
-                delta = curr - pub
-                f.write(f"| {r.id} | {pub} | {reg} | {base} | **{curr}** | {delta:+.4f} |\n")
+                # A missing published figure is printed as "not supplied", never
+                # as 0.0, and no delta is computed against it. The old code
+                # substituted 0.0 and then printed `curr - 0.0` as a "Delta",
+                # which reads as a measured gap from the literature when no
+                # literature value was ever supplied.
+                pub = r.get("published")
+                reg = r.get("registry")
+                base = r.get("baseline")
+                curr = s.observed_mean if hasattr(s, 'observed_mean') else None
+                label = r.get("id", "unknown")
+                pub_txt = "not supplied" if pub is None else f"{pub}"
+                reg_txt = "not supplied" if reg is None else f"{reg}"
+                base_txt = "not supplied" if base is None else f"{base}"
+                curr_txt = "unmeasured" if curr is None else f"**{curr}**"
+                if pub is not None and curr is not None:
+                    delta_txt = f"{curr - pub:+.4f}"
+                else:
+                    delta_txt = "n/a"
+                f.write(f"| {label} | {pub_txt} | {reg_txt} | {base_txt} | "
+                        f"{curr_txt} | {delta_txt} |\n")
 
             f.write("\n---\n*Report generated by ScientificValidator Engine Phase 39.8.*")

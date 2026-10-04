@@ -20,6 +20,46 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.science.integrity import sign, verify
+
+
+#: Digests that stand in for "no hash was recorded" rather than for a hash.
+#:
+#: The two are both sha256 of empty input -- the empty string and 32 zero bytes --
+#: so a manifest that ships either is carrying a placeholder, not a fingerprint.
+#: `golden_manifest.json` currently records `bundle_hash` as the 32-zero-byte
+#: digest and `prompt_hash` as the empty-string digest, which is why checking only
+#: one of them reported a spurious mismatch on the other.
+#:
+#: A digest is also treated as a placeholder when it is self-describing: entries
+#: like `sha256:token_hash_placeholder` or `sha256:f7a2d3c...placeholder` announce
+#: that no hash was taken. Comparing against those would either always mismatch or
+#: require inventing a match.
+PLACEHOLDER_DIGESTS = frozenset({
+    "d41d8cd98f00b204e9800998ecf8427e",  # sha256 of 32 zero bytes
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",  # sha256("")
+})
+
+
+def _is_placeholder(digest: str) -> bool:
+    """True when `digest` records no hash, rather than recording a different one.
+
+    Used to distinguish "nothing to check against" from "the data changed". The
+    distinction matters: a placeholder is a gap in the manifest, and reporting it
+    as a verification failure would train callers to reach for the bypass.
+
+    An `sha256:` prefix is stripped first. Every hash in `golden_manifest.json`
+    carries one, so without stripping, `sha256:e3b0c442...` (the empty-string
+    digest) was not recognised as a placeholder and the dataset scored as having
+    recorded that hash. Callers that pre-strip the prefix are unaffected.
+    """
+    if not digest:
+        return True
+    text = str(digest).strip().lower()
+    if text.startswith("sha256:"):
+        text = text[len("sha256:"):]
+    return text in PLACEHOLDER_DIGESTS or "placeholder" in text
+
 
 @dataclass
 class DatasetLineage:
@@ -43,13 +83,17 @@ class DatasetProvenance:
 
 
 class DatasetManager:
-    """Manages versioned, reproducible datasets with Triple-SHA verification."""
+    """Manages versioned, reproducible datasets with integrity verification."""
 
     def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
         self.manifest_path = os.path.join(data_dir, "golden_manifest.json")
         self._datasets: Dict[str, Dict[str, Any]] = {}
         self._manifest = self._load_manifest()
+        #: Set by `load` when integrity checks were skipped, so a bypassed load is
+        #: visible in the returned data rather than only in an environment
+        #: variable nobody reads later.
+        self.last_integrity_status: Dict[str, Any] = {}
 
     def _load_manifest(self) -> Dict[str, Dict[str, Any]]:
         """Loads the golden manifest, aliasing dataset folder names (e.g. ``ioi``)
@@ -120,58 +164,204 @@ class DatasetManager:
         self.log_audit_event(dataset_id, "IMPACT", "SYSTEM", "Dataset changed. Downstream results marked for revalidation.")
         # In a real system, this would update validation_history.db entries for pass -> stale
 
-    def sign_dataset(self, dataset_id: str, private_key: str = "mock_private_key") -> str:
-        """Asymmetric digital signature for dataset metadata."""
+    def sign_dataset(self, dataset_id: str, private_key: Any = None) -> str:
+        """Sign a dataset's identity with Ed25519.
+
+        Replaces `sha256(f"{payload}:{private_key}")` with
+        `private_key="mock_private_key"`, which was documented as an "asymmetric
+        digital signature" but was a keyed hash: proving it required the secret,
+        and the secret was a default argument in the source. Anyone who could read
+        the repository could produce a signature that verified.
+
+        `private_key` is optional only in the sense that it may come from
+        `MECH_SIGNING_KEY_PATH` instead. There is no default key, so this raises
+        rather than signing with something public.
+        """
         meta = self._manifest.get(dataset_id)
         if not meta: raise ValueError(f"Dataset {dataset_id} not found.")
 
-        # Canonical string for signing
-        payload = f"{dataset_id}:{meta['version']}:{meta['hashes']['bundle_hash']}"
-        # Simulating Ed25519 signing
-        signature = hashlib.sha256(f"{payload}:{private_key}".encode()).hexdigest()
+        signature = sign(self._signing_payload(dataset_id, meta), private_key)
         meta["signature"] = signature
+        meta["signature_algorithm"] = "Ed25519"
         return signature
 
-    def verify_signature(self, dataset_id: str, public_key: str = "mock_public_key") -> bool:
-        """Verifies dataset authenticity."""
-        meta = self._manifest.get(dataset_id)
-        if not meta or "signature" not in meta: return False
+    def verify_signature(self, dataset_id: str, public_key: Any) -> Dict[str, Any]:
+        """Verify a dataset signature with the public key.
 
-        payload = f"{dataset_id}:{meta['version']}:{meta['hashes']['bundle_hash']}"
-        expected = hashlib.sha256(f"{payload}:mock_private_key".encode()).hexdigest()
-        return meta["signature"] == expected
+        The previous signature was `verify_signature(dataset_id,
+        public_key="mock_public_key") -> bool`, and it **ignored its own
+        `public_key` argument**, recomputing with the literal
+        `"mock_private_key"`. Verification that needs the secret is not
+        verification: it proves the caller can read this file. The public key is
+        now load-bearing, and it is a required argument.
+
+        Returns a dict rather than a bool so "no signature", "no key" and "wrong
+        signature" stay distinguishable -- three different problems that a bare
+        False collapses into one.
+        """
+        meta = self._manifest.get(dataset_id)
+        if not meta:
+            return {"valid": False, "reason": f"Dataset {dataset_id} not found",
+                    "algorithm": "Ed25519"}
+        if "signature" not in meta:
+            return {"valid": False, "reason": "no signature is recorded",
+                    "algorithm": "Ed25519"}
+
+        result = verify(self._signing_payload(dataset_id, meta),
+                        meta.get("signature"), public_key)
+        return result.to_dict()
+
+    def _resolve_path(self, dataset_id: str, meta: Dict[str, Any]) -> str | None:
+        """Locate a dataset's dataset.json, tolerating canonical-vs-folder ids.
+
+        `golden_manifest.json` registers the IOI dataset as
+        `IOI-Canonical-100`, but the file lives in `datasets/ioi/dataset.json`.
+        `load` used to build its path straight from the id it was given, so the
+        canonical id -- the one the manifest and every report name -- raised
+        FileNotFoundError, and only the folder alias worked. Callers "solved"
+        this by catching the exception and reloading under a different id, which
+        is how the old audit script ended up setting a hash-bypass flag.
+
+        Resolution order: the id's own folder, then any on-disk folder whose name
+        is a case-insensitive substring of the canonical id (the existing alias
+        rule, applied in reverse).
+        """
+        direct = os.path.join(self.data_dir, dataset_id, "dataset.json")
+        if os.path.exists(direct):
+            return direct
+
+        if not os.path.isdir(self.data_dir):
+            return None
+        canonical = str(meta.get("dataset_id", dataset_id)).lower()
+        for name in sorted(os.listdir(self.data_dir)):
+            candidate = os.path.join(self.data_dir, name, "dataset.json")
+            if os.path.exists(candidate) and name.lower() in canonical:
+                return candidate
+        return None
+
+    @staticmethod
+    def _signing_payload(dataset_id: str, meta: Dict[str, Any]) -> str:
+        """The canonical string both sides sign.
+
+        Uses `meta['dataset_id']` -- the manifest's canonical id -- rather than
+        the id the caller happened to pass. Both spellings resolve to the same
+        dataset (`load("ioi")` and `load("IOI-Canonical-100")` both work), so
+        embedding the caller's spelling made the dataset sign under one payload
+        and fail to verify under the other: a signature produced via the folder
+        alias did not verify via the canonical id. Identity has to come from the
+        manifest, not from the access path.
+
+        No private key appears here, which is what separates this from the keyed
+        hash it replaces.
+        """
+        canonical = str(meta.get("dataset_id") or dataset_id)
+        return f"{canonical}:{meta['version']}:{meta['hashes']['bundle_hash']}"
 
     def load(self, dataset_id: str) -> List[Dict[str, Any]]:
-        """Loads a Golden Dataset with Triple-SHA integrity verification."""
+        """Load a Golden Dataset, verifying every manifest hash that is populated.
+
+        The docstring used to say "Triple-SHA integrity verification". It verified
+        one hash. `prompt_hash` and `expected_prompt` were computed at lines 164-166
+        and then never compared with anything -- two dead locals that made the
+        count look like three.
+
+        Both checks now run, and `last_integrity_status` records which were
+        actually performed. A hash whose manifest value is the empty-file digest
+        (`d41d8cd9...`, i.e. a placeholder rather than a recorded hash) is
+        reported as `not_recorded` rather than counted as a pass: "no expectation
+        to check against" is not "verified".
+        """
         if dataset_id not in self._manifest:
             raise ValueError(f"Dataset '{dataset_id}' not found in golden_manifest.json")
 
         meta = self._manifest[dataset_id]
-        dataset_path = os.path.join(self.data_dir, dataset_id, "dataset.json")
+        dataset_path = self._resolve_path(dataset_id, meta)
 
-        if not os.path.exists(dataset_path):
-            raise FileNotFoundError(f"Dataset file missing: {dataset_path}")
+        if dataset_path is None:
+            searched = sorted(
+                name for name in os.listdir(self.data_dir)
+                if os.path.exists(os.path.join(self.data_dir, name, "dataset.json"))
+            ) if os.path.isdir(self.data_dir) else []
+            raise FileNotFoundError(
+                f"No dataset.json found for '{dataset_id}'. Looked in "
+                f"{os.path.join(self.data_dir, dataset_id)}. On-disk dataset "
+                f"folders: {searched or 'none'}. The manifest registers this "
+                f"dataset as '{meta.get('dataset_id', dataset_id)}', so pass "
+                f"either that canonical id or the folder alias."
+            )
 
         with open(dataset_path, "r", encoding="utf-8") as f:
             raw_content = f.read()
             data = json.loads(raw_content)
 
-        # 1. Bundle Hash Verification
         bundle_hash = self._compute_sha256(raw_content)
         expected_bundle = meta["hashes"]["bundle_hash"].replace("sha256:", "")
 
-        # 2. Prompt Hash Verification (Hash of the 'prompts' field)
         prompts_str = json.dumps(data["prompts"], sort_keys=True)
         prompt_hash = self._compute_sha256(prompts_str)
-        expected_prompt = meta["hashes"]["prompt_hash"].replace("sha256:", "")
+        expected_prompt = meta["hashes"].get("prompt_hash", "").replace("sha256:", "")
 
-        # Strict Verification (Mocked check for hashes that aren't placeholders)
-        if expected_bundle != "d41d8cd98f00b204e9800998ecf8427e" and bundle_hash != expected_bundle:
-             if not os.environ.get("MECH_BYPASS_HASH_CHECK"):
-                raise ValueError(f"CRITICAL: Dataset Bundle SHA Mismatch for {dataset_id}")
+        checks: Dict[str, str] = {}
+        if _is_placeholder(expected_bundle):
+            checks["bundle_hash"] = "not_recorded"
+        elif bundle_hash != expected_bundle:
+            checks["bundle_hash"] = "mismatch"
+        else:
+            checks["bundle_hash"] = "verified"
+
+        if _is_placeholder(expected_prompt):
+            checks["prompt_hash"] = "not_recorded"
+        elif prompt_hash != expected_prompt:
+            checks["prompt_hash"] = "mismatch"
+        else:
+            checks["prompt_hash"] = "verified"
+
+        mismatched = [name for name, state in checks.items() if state == "mismatch"]
+
+        # The old `MECH_BYPASS_HASH_CHECK` was an environment variable that
+        # disabled the only check that ran, and `run_reproducibility_audit.py`
+        # set it globally without ever restoring it, so every later `load()` in that
+        # process silently skipped verification too.
+        #
+        # Replaced with an unmistakably named development override that has to be
+        # confirmed with a second value, and that records itself on the returned
+        # data. A bypass that leaves no trace in the result is not a bypass, it is
+        # a silent loss of a check.
+        bypassed = False
+        if mismatched:
+            dev_mode = os.environ.get("MECH_INTEGRITY_CHECKS", "")
+            if dev_mode == "disabled-for-local-development":
+                bypassed = True
+            else:
+                self.last_integrity_status = {
+                    "dataset_id": dataset_id,
+                    "checks": checks,
+                    "integrity_verified": False,
+                    "bypassed": False,
+                }
+                raise ValueError(
+                    f"CRITICAL: Dataset integrity check failed for {dataset_id}: "
+                    f"{', '.join(mismatched)} mismatch. To run against local "
+                    f"development data, set MECH_INTEGRITY_CHECKS="
+                    f"disabled-for-local-development -- that disables these "
+                    f"checks for every load in the process and the result is "
+                    f"marked integrity_verified=False."
+                )
 
         self.validate_schema(data)
         self._datasets[dataset_id] = data
+        self.last_integrity_status = {
+            "dataset_id": dataset_id,
+            "checks": checks,
+            "integrity_verified": not bypassed and not mismatched,
+            "bypassed": bypassed,
+        }
+        if bypassed:
+            data.setdefault("integrity_notice", (
+                "Integrity checks were DISABLED for this load "
+                "(MECH_INTEGRITY_CHECKS). This data is not verified and must not "
+                "support a scientific claim."
+            ))
         return data["prompts"]
 
     def compute_fingerprint(self, dataset_id: str, prompts: List[Dict[str, Any]], tokenizer: Any = None) -> Dict[str, str]:
@@ -203,9 +393,23 @@ class DatasetManager:
         meta = self._manifest.get(dataset_id, {})
         if not meta: return {"overall": 0}
 
-        # 1. Integrity (Hashes present)
+        # 1. Integrity.
+        #
+        # Was `1.0 if all(k in h for k in [...]) else 0.5` -- it checked only that
+        # the three keys *exist*. `golden_manifest.json` has all three, but
+        # `prompt_hash` and `bundle_hash` are placeholder digests, so the shipped
+        # dataset scored 100% on integrity while recording no verifiable hash.
+        # Presence of a field is not evidence of integrity; now a placeholder
+        # counts as not recorded.
         h = meta.get("hashes", {})
-        integrity = 1.0 if all(k in h for k in ["prompt_hash", "token_hash", "bundle_hash"]) else 0.5
+        integrity_keys = ["prompt_hash", "token_hash", "bundle_hash"]
+        recorded = [k for k in integrity_keys if not _is_placeholder(h.get(k, ""))]
+        if len(recorded) == len(integrity_keys):
+            integrity = 1.0
+        elif recorded:
+            integrity = 0.5
+        else:
+            integrity = 0.0
 
         # 2. Lineage (Parent recorded or initial)
         lineage = meta.get("lineage", {})
@@ -215,8 +419,17 @@ class DatasetManager:
         prov = meta.get("provenance", {})
         metadata_score = 1.0 if prov.get("paper_doi") and prov.get("license") else 0.7
 
-        # 4. Signature
-        sig_score = 1.0 if meta.get("signature") else 0.0
+        # 4. Signature.
+        #
+        # Was `1.0 if meta.get("signature")`. The manifest ships
+        # `"signature": "sha256:dataset_sig_placeholder"`, which is truthy, so the
+        # dataset scored 100% for being signed. A placeholder is not a signature,
+        # and neither is an unverifiable one: a full credit now requires an Ed25519
+        # signature of the recorded length, and partial credit is not offered for a
+        # value that cannot be checked at all.
+        signature = meta.get("signature", "")
+        sig_score = 1.0 if (not _is_placeholder(signature)
+                            and len(str(signature)) == 128) else 0.0
 
         # 5. Compatibility
         #
@@ -239,9 +452,12 @@ class DatasetManager:
 
         return {
             "integrity": integrity * 100,
+            "integrity_hashes_recorded": f"{len(recorded)}/{len(integrity_keys)}",
+            "integrity_unrecorded": [k for k in integrity_keys if k not in recorded],
             "lineage": lineage_score * 100,
             "metadata": metadata_score * 100,
             "signature": sig_score * 100,
+            "signature_is_real": sig_score == 1.0,
             # Absent, not 98.0.
             "compatibility": None,
             "compatibility_measured": False,

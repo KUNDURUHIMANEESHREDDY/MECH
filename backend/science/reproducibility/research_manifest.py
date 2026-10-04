@@ -13,6 +13,8 @@ import datetime
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
+from backend.science.integrity import sign, verify
+
 
 @dataclass
 class ResearchManifest:
@@ -36,11 +38,47 @@ class ResearchManifest:
     benchmark_id: str = ""
     model_id: str = ""
     reproducibility_score: float = 0.0
-    status: str = "VALIDATED" # VALIDATED, GOLDEN, DEPRECATED
+    #: Derived by `derive_manifest_status`. Not a constant: a manifest that
+    #: records a FAIL or lacks a signature says so.
+    status: str = "UNVALIDATED"  # VALIDATED, UNSIGNED, REVISION_REQUIRED, UNVALIDATED
+    #: The statistical verdict this status was derived from. Kept so a later
+    #: re-derivation (e.g. after signing) uses the real verdict instead of
+    #: assuming one.
+    statistical_verdict: str = ""
 
     # Cryptographic Signature
     signature: str = ""
+    #: Which algorithm produced `signature`. Empty means unsigned -- previously
+    #: there was no way to tell an Ed25519 signature from a keyed SHA-256, because
+    #: neither was recorded and only one of them was a signature.
+    signature_algorithm: str = ""
     signer_id: str = "MECH-CORE-VALIDATOR"
+    #: Whether the manifest is signed, and if not, why. An unsigned manifest is a
+    #: legitimate outcome when no key was supplied; what is not legitimate is
+    #: reporting a signature that was never made.
+    signature_status: Dict[str, Any] = field(default_factory=dict)
+
+
+def derive_manifest_status(verdict: str, reproducibility_score: float,
+                           signed: bool) -> str:
+    """Derive a manifest's status from what actually happened.
+
+    The status used to be the literal `"VALIDATED"` in every case, whatever the
+    benchmark verdict was and whether or not a signature existed. Four statuses,
+    each naming a distinct real outcome:
+
+    ``VALIDATED``    verdict PASS, high score, signature present
+    ``UNSIGNED``     verdict PASS but no signature -- attestable, not attested
+    ``REVISION_REQUIRED`` verdict was REVISION_REQUIRED
+    ``UNVALIDATED``  verdict FAIL, absent, or not supplied
+    """
+    if verdict == "FAIL" or not verdict:
+        return "UNVALIDATED"
+    if verdict != "PASS":
+        return "REVISION_REQUIRED"
+    if not signed:
+        return "UNSIGNED"
+    return "VALIDATED" if reproducibility_score >= 80.0 else "REVISION_REQUIRED"
 
 
 class ResearchManifestEngine:
@@ -58,9 +96,18 @@ class ResearchManifestEngine:
         snapshot: Any,
         certificate: Any,
         audit_log: List[Any],
-        reproducibility_score: float
+        reproducibility_score: float,
+        verdict: str = "",
     ) -> ResearchManifest:
-        """Assembles artifacts into a signed Merkle-root manifest."""
+        """Assemble artifacts into a Merkle-root manifest.
+
+        `verdict` is the statistical verdict (`PASS`, `REVISION_REQUIRED`,
+        `FAIL`) from the validator. It is used to derive `status`, which was
+        hardcoded to `"VALIDATED"` -- so a manifest whose benchmark FAILED, or
+        which was never signed, was still labelled VALIDATED. The label was an
+        assertion the pipeline made about itself rather than a summary of
+        anything it measured.
+        """
 
         # 1. Compute individual hashes
         snapshot_hash = self._compute_hash(asdict(snapshot))
@@ -81,15 +128,58 @@ class ResearchManifestEngine:
                 "audit_log": audit_hash
             },
             reproducibility_score=reproducibility_score,
-            status="VALIDATED"
+            status=derive_manifest_status(
+                verdict=verdict,
+                reproducibility_score=reproducibility_score,
+                signed=False,
+            ),
+            statistical_verdict=verdict,
         )
 
-    def sign_manifest(self, manifest: ResearchManifest, private_key: str = "mock_key") -> str:
-        """Signs the manifest's root hash (Simulating Ed25519)."""
-        # In real implementation:
-        # return ed25519.sign(manifest.root_sha256, private_key)
-        payload = f"{manifest.root_sha256}:{private_key}"
-        return hashlib.sha256(payload.encode()).hexdigest()
+    def sign_manifest(self, manifest: ResearchManifest,
+                      private_key: Any = None) -> str:
+        """Sign the manifest's root hash with Ed25519.
+
+        This was `sha256(f"{root_sha256}:{private_key}")` with
+        `private_key="mock_key"`, under a docstring reading "Simulating
+        Ed25519" and a comment showing the one real line that would have been
+        needed. A keyed hash is a MAC, not a signature: verifying it requires the
+        secret, and the secret was a default argument in the source.
+
+        `private_key` may instead come from `MECH_SIGNING_KEY_PATH`. There is no
+        default key, so this raises rather than producing a signature that
+        attests to nothing. `scientific_validator.generate_validation_artifacts`
+        called the old one-argument form, so it is updated in the same change to
+        pass a key through and to record when none was available.
+        """
+        signature = sign(manifest.root_sha256, private_key)
+        manifest.signature = signature
+        manifest.signature_algorithm = "Ed25519"
+        manifest.signature_status = {
+            "signed": True,
+            "algorithm": "Ed25519",
+            "reason": None,
+        }
+        # Promote UNSIGNED -> VALIDATED now that a signature exists. Uses the
+        # verdict recorded at generation time rather than assuming PASS, so a
+        # signature cannot upgrade a manifest whose benchmark failed.
+        if manifest.status == "UNSIGNED":
+            manifest.status = derive_manifest_status(
+                verdict=manifest.statistical_verdict,
+                reproducibility_score=manifest.reproducibility_score,
+                signed=True,
+            )
+        return signature
+
+    def verify_manifest_signature(self, manifest: ResearchManifest,
+                                  public_key: Any) -> Dict[str, Any]:
+        """Verify the manifest signature using the public key alone.
+
+        Returns the `VerificationResult` dict, so "unsigned", "no key" and
+        "wrong signature" remain distinguishable.
+        """
+        return verify(manifest.root_sha256, manifest.signature,
+                      public_key).to_dict()
 
     def verify(self, manifest: ResearchManifest, snapshot_data: Any, cert_data: Any, audit_data: List[Any]) -> bool:
         """Verifies the integrity of the entire research object."""

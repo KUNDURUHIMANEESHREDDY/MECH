@@ -98,6 +98,20 @@ class BenchmarkRunner:
                     peak_vram = round(torch.cuda.max_memory_allocated() / (1024 ** 3), 3)
                     torch.cuda.reset_peak_memory_stats()
 
+                #  Per-sample traces, when the pipeline records them. The runner used to
+                #  keep only `observed_metrics` (aggregates) and drop
+                #  `raw_traces`, so per-prompt evidence was discarded at the one
+                #  place a statistical validator could have used it. That gap is
+                #  part of why the old audit script had to invent an array of 100
+                #  "observations": the real ones were not carried forward.
+                #
+                #  Carried verbatim and never synthesized. A pipeline that does
+                #  not record traces yields an empty list, and an empty list is
+                #  not permission to reconstruct one.
+                raw_traces = results_dict.get("raw_traces", []) if isinstance(results_dict, dict) else []
+                if not isinstance(raw_traces, list):
+                    raw_traces = []
+
                 report = self.report_engine.generate_report(
                     paper_id=paper_id,
                     pipeline_name=pipeline.__class__.__name__,
@@ -144,7 +158,8 @@ class BenchmarkRunner:
                 "runtime_sec": end_time - start_time,
                 "peak_vram_gb": peak_vram,
                 "metrics": metrics,
-                "report": report
+                "report": report,
+                "raw_traces": raw_traces if status == "PASS" else [],
             }
         
         return {

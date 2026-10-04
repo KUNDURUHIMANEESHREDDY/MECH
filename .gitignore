@@ -54,3 +54,18 @@ backend/research_datasets/knowledge_graph_index.json
 # Plugin *sources* (library/, samples) stay tracked; installed state does not.
 backend/plugins/installed/
 backend/plugins/library/*/*.jsonl
+
+# Dataset tooling run artifacts. Written by promote_dataset.py / the exporter and
+# by the smoke-test audit; regenerated on demand and never an input to anything.
+exports/
+exports_audit/
+research_demo_artifacts/
+backend/research_datasets/dataset_audit.json
+
+# Signing keys must never be committed. Nothing in the repo ships a key -- see
+# backend/science/integrity/signing.py, which raises rather than defaulting one --
+# but a stray PEM at a conventional path is worth ignoring as a second line of
+# defence.
+*.pem
+*.key
+!frontend/**/*.pem.example
