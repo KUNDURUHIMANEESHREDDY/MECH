@@ -5,11 +5,29 @@ pydantic>=2.0.0
 sqlalchemy>=2.0.0
 
 # Scientific Computing
-numpy>=1.24.0
+#
+# NUMPY AND PANDAS UPPER BOUNDS ARE ALSO LOAD-BEARING, for the same reason as the
+# ML pins below: transformer-lens 2.18 declares `numpy>=1.24,<2` and
+# `pandas>=1.1.5,<2.1` on Python 3.11. With unbounded ">=1.24.0" and ">=2.0.0",
+# a clean install resolved to numpy 2.4.6 and pandas 3.0.6, and the ML stack broke
+# with a binary-ABI error that surfaces far from its cause:
+#
+#   ValueError: numpy.dtype size changed, may indicate binary incompatibility.
+#               Expected 96 from C header, got 88 from PyObject
+#
+# raised on `import pandas` / `import sklearn` / `import transformer_lens` while
+# `import numpy` alone still worked -- which makes it look like a broken install
+# rather than a version-pinning problem. Six tests failed this way on a machine
+# that had been fine an hour earlier.
+#
+# The trigger was unrelated to this project: installing OCR tooling for coursework
+# pulled numpy up to 2.4.6. Because the bounds were missing, pip had no reason to
+# hold transformer-lens back.
+numpy>=1.24.0,<2
 scipy>=1.10.0
 matplotlib>=3.7.0
 seaborn>=0.12.0
-pandas>=2.0.0
+pandas>=2.0.0,<2.1
 
 # ML / Interpretability
 #
@@ -28,13 +46,21 @@ pandas>=2.0.0
 # half was found on this branch; the transformer-lens half was found
 # independently on security/plugin-and-path-hardening.)
 #
+# huggingface-hub is pinned directly because transformers and transformer-lens
+# disagree about it: transformers 5.x imports `ResolvedRevision`, removed in
+# huggingface-hub 1.0, while transformer-lens 2.18 requires `<1.0`. Holding
+# transformers below 5.0 resolves the conflict, but naming the bound here means
+# pip does not have to be trusted to notice it.
+#
 # Verified working combination:
 #   torch 2.14.0+cu126 | transformers 4.57.6 | transformer-lens 2.18.0
+#   numpy 1.26.4 | pandas 2.0.3 | huggingface-hub 0.36.2
 # `backend/interpretability/tl_compat.py` turns a bad install into an
 # actionable error instead of a bare AttributeError.
 torch>=2.6
 transformers>=4.57,<5.0
 transformer-lens>=2.18.0,<3.0
+huggingface-hub>=0.23.2,<1.0
 
 # Utilities
 psutil>=5.9.0

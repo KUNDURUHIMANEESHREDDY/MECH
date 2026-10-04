@@ -119,12 +119,30 @@ def test_claim_id_is_stable_format_not_a_process_salted_hash():
     assert first.startswith("claim_")
     assert len(first) == len("claim_") + 16
     assert all(c in "0123456789abcdef" for c in first[len("claim_"):])
-    # Same goal, two calls: the id identifies the goal, not the invocation.
+    # A pure function of the goal: repeatable within a run, across processes, and
+    # across a clock-tick boundary. (An intermediate version hashed
+    # `utcnow()`, which on Windows ticks at ~15.6 ms -- so it agreed within a tick
+    # and disagreed across one, which is why this assertion was flaky.)
     assert _claim_id("goal-1") == first
     assert _claim_id("goal-2") != first
 
+    # And stable across interpreter processes, which the old salted `hash` was not.
+    import subprocess
+    import sys as _sys
+    out = subprocess.run(
+        [_sys.executable, "-c",
+         "import sys; sys.path[:0] = ['backend', '.'];"
+         "from backend.interpretability.discovery.discovery_planner import _claim_id;"
+         "print(_claim_id('goal-1'))"],
+        capture_output=True, text=True, cwd=str(ROOT), timeout=180)
+    assert out.stdout.strip().splitlines()[-1] == first, (
+        f"claim id differs across processes: {out.stdout.strip()!r} vs {first!r}")
+
     source = _source("backend/interpretability/discovery/discovery_planner.py")
     assert "hash(" not in executable_source(source)
+    # The timestamp must not be part of the handle.
+    assert "utcnow()" not in executable_source(
+        source[source.index("def _claim_id"):source.index("class AutonomousDiscoveryPlanner")])
 
 
 # ── autonomous_research_loop ───────────────────────────────────────────────

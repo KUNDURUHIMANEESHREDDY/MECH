@@ -93,12 +93,28 @@ class MechanismClaim:
 def _claim_id(goal_id: str) -> str:
     """A stable identifier for a claim.
 
-    SHA-256 over the goal id and the timestamp, so the id identifies this run.
-    `abs(hash(...))` was used before, which differs per interpreter process
-    (Python salts string hashing) *and* per call because `time.time()` was in the
-    input -- so no two runs produced the same id, and no id could be looked up.
+    SHA-256 over the goal id **and nothing else**, so the id is a pure function of
+    the goal. That is what makes it a handle: `recall(claim_id)` can find a
+    previous claim, and two claims about one goal are recognisably the same claim.
+
+    Two earlier versions were wrong in different ways.
+
+    * `abs(hash(goal_id + str(time.time()))) & 0xffffffff` -- differed per
+      interpreter process (Python salts string hashing) *and* per call, so no two
+      runs agreed and no id could be looked up at all.
+    * SHA-256 over `goal_id + utcnow()` -- looked deterministic, and was not.
+      `datetime.utcnow()` on Windows has the system clock's ~15.6 ms resolution
+      rather than microseconds, so calls within one tick produced the same id and
+      calls across a tick boundary produced different ones. A test asserting the
+      id was stable passed in isolation and failed in a full-suite run, depending
+      on where in the tick it landed. That is the worst property an identifier
+      can have: stable by accident.
+
+    If a claim ever needs to distinguish two runs of the same goal, the run
+    timestamp belongs in a field beside the id (`timestamp` already carries it),
+    not inside the handle itself.
     """
-    payload = f"{goal_id}:{_dt.datetime.utcnow().isoformat()}"
+    payload = str(goal_id)
     return "claim_" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
