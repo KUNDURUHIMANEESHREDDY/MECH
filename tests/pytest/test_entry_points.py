@@ -46,21 +46,18 @@ that looked real and was not.
 
 What is left, and why
 ---------------------
-Two unresolvable imports remain, both `backend.benchmarks.*`, and both are
-tracked here as explicit expected failures rather than quietly tolerated:
+One unresolvable import remains, `frontend/scripts/reproduce_everything.py` ->
+`backend.benchmarks.benchmark_runner`, and it is tracked here as an explicit
+expected failure rather than quietly tolerated.
 
-  * `frontend/scripts/reproduce_everything.py` -> `backend.benchmarks.benchmark_runner`
-  * `backend/benchmarking/kg_integrator.py`    -> `backend.benchmarks.benchmark_tasks`
-
-`backend/benchmarks/` does not exist. These are the next two items to fix; when
-they are, `EXPECTED_UNRESOLVED` becomes empty and this file gets stricter.
-
-One further unresolved import is *legitimate* and is asserted to stay that way:
-`backend/main.py` imports `backend.api.runtime_api`, which does not exist, behind
-an `importlib.util.find_spec` check that logs "capability absent, not degraded"
-and skips the mount. A guarded optional import is the correct pattern for a
-feature that is absent; the test below pins the guard so the import cannot lose
-it.
+Two others were listed here and have since been fixed. `backend/main.py` ->
+`backend.api.runtime_api` is *not* a defect: `/api/v2` is an absent capability
+and `main.py` checks `importlib.util.find_spec` before importing it, logging
+"capability absent, not degraded" and skipping the mount.
+`backend/benchmarking/kg_integrator.py` -> `..benchmarks.benchmark_tasks` was a
+real defect: the package is `backend/benchmarking`, so the sibling module is
+`.benchmark_tasks`. Its companion test below failed the moment it was fixed,
+which is the exception list refusing to rot.
 """
 
 from __future__ import annotations
@@ -91,14 +88,15 @@ LOCAL_TOP = {
 
 #: Imports that cannot resolve, with the reason each is tolerated. Empty once the
 #: remaining `backend.benchmarks` items are fixed.
+#:
+#: `backend/benchmarking/kg_integrator.py` was on this list and is now fixed --
+#: it wanted `.benchmark_tasks`, not `..benchmarks.benchmark_tasks`.
+#: `test_the_declared_exceptions_are_still_real` failed when it was fixed and
+#: left behind, which is that test doing its job.
 EXPECTED_UNRESOLVED: dict[str, str] = {
     "frontend/scripts/reproduce_everything.py": (
         "backend.benchmarks does not exist; this script advertises a "
         "'reproduces everything' command that cannot run"
-    ),
-    "backend/benchmarking/kg_integrator.py": (
-        "backend.benchmarks does not exist; the knowledge-graph integrator "
-        "cannot import its benchmark tasks"
     ),
 }
 
