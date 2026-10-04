@@ -23,6 +23,124 @@ from .benchmark_tasks import (
 
 logger = logging.getLogger(__name__)
 
+#: Marker for a value that was never measured, as distinct from a measured zero.
+#:
+#: The profiler returns None for throughput, latency, VRAM, GPU utilisation and
+#: FLOPs whenever CUDA is unavailable. Rendering those as 0.0 would read as
+#: "measured, and the model needs no memory / no time", which is a claim. This
+#: string is the honest rendering: the quantity is absent.
+NOT_MEASURED = "not measured"
+
+
+def _present(results: List[Any], field: str) -> List[float]:
+    """The values of `field` that were actually measured.
+
+    Skips None rather than coercing. A field can also be a non-numeric sentinel,
+    so anything that will not coerce to float is skipped too rather than raising
+    in the middle of writing a report.
+    """
+    values: List[float] = []
+    for r in results:
+        raw = getattr(r, field, None)
+        if raw is None or isinstance(raw, bool):
+            continue
+        try:
+            values.append(float(raw))
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
+def _mean_of(results: List[Any], field: str) -> tuple[Optional[float], int]:
+    values = _present(results, field)
+    return (sum(values) / len(values) if values else None), len(values)
+
+
+def _max_of(results: List[Any], field: str) -> tuple[Optional[float], int]:
+    values = _present(results, field)
+    return (max(values) if values else None), len(values)
+
+
+def _sum_of(results: List[Any], field: str) -> tuple[Optional[float], int]:
+    values = _present(results, field)
+    return (sum(values) if values else None), len(values)
+
+
+def _cell(value: Optional[float], spec: str, measured_count: int) -> str:
+    """Format an aggregate, or say it was not measured.
+
+    `measured_count` distinguishes "no value for this field" from "a value that
+    happens to be zero", so a field measured as 0.0 still renders as 0.0.
+    """
+    if value is None or measured_count == 0:
+        return NOT_MEASURED
+    return format(value, spec)
+
+
+def _pct_cell(value: Optional[float], spec: str, measured_count: int) -> str:
+    """As `_cell`, but the `%` is part of the value, not decoration.
+
+    Appending `%` outside the formatter produced "not measured%" in the column it
+    was meant to qualify.
+    """
+    if value is None or measured_count == 0:
+        return NOT_MEASURED
+    return format(value, spec) + "%"
+
+
+def _interval(result: Any) -> str:
+    """Render a confidence interval, or say it was not derived.
+
+    Was `[{low}, {high}]` interpolated directly, so a result with no interval
+    rendered the literal text `[None, None]` in a published artifact.
+    """
+    low = getattr(result, "confidence_interval_low", None)
+    high = getattr(result, "confidence_interval_high", None)
+    if low is None or high is None:
+        return NOT_MEASURED
+    derived = getattr(result, "confidence_interval_derived", False)
+    method = getattr(result, "confidence_interval_method", None)
+    if not derived:
+        return f"[{low}, {high}] (not derived from samples)"
+    suffix = f", {method}" if method else ""
+    return f"[{low}, {high}]{suffix}"
+
+
+#: Fidelity above which a *measured* result is reported as reproducing the
+#: published figure. This is agreement with a reference number, not a verdict on
+#: whether a mechanism is true, and it never overrides provenance.
+FIDELITY_REPRODUCED_PCT = 90.0
+
+
+def _verdict(result: Any) -> str:
+    """Status for one benchmark row.
+
+    Was `"PASS" if r.fidelity_pct > 90 else "WARN"`. Two defects:
+
+    * It ignored provenance entirely. A fixture score above the threshold
+      rendered as PASS with a tick, so `--mode mock` produced a report whose
+      every row looked like a passing measurement. `is_fixture` and `mode` were
+      both on the result.
+    * "PASS" and "WARN" are not the project's scientific vocabulary. The
+      validation suite distinguishes MEASURED from PASS, and `NOT_RUN` from
+      ERROR; this renderer invented a third pair that collapsed them.
+
+    So the verdict now follows what actually happened, in the project's own
+    terms, and the threshold is named rather than inline.
+    """
+    if getattr(result, "is_fixture", False):
+        return "FIXTURE — not a measurement"
+    mode = getattr(result, "mode", None)
+    if mode is not None and getattr(mode, "value", mode) == "mock":
+        return "FIXTURE — not a measurement"
+
+    fidelity = getattr(result, "fidelity_pct", None)
+    if fidelity is None:
+        return "NOT_RUN — no fidelity recorded"
+    if fidelity > FIDELITY_REPRODUCED_PCT:
+        return f"MEASURED — reproduces published (>{FIDELITY_REPRODUCED_PCT:.0f}%)"
+    return f"MEASURED — below reference (<={FIDELITY_REPRODUCED_PCT:.0f}%)"
+
 
 @dataclass
 class ModelBenchmarkSuite:
@@ -201,13 +319,50 @@ class BenchmarkRunner:
             f.write("| Model | Throughput (TPS) | Mean Latency (ms) | Peak VRAM (MB) | GPU Util % | FLOPs (Est) |\n")
             f.write("| :--- | :--- | :--- | :--- | :--- | :--- |\n")
             for suite in report.suites:
-                avg_tps = sum(r.tokens_per_sec for r in suite.task_results) / len(suite.task_results)
-                avg_lat = sum(r.mean_latency_ms for r in suite.task_results) / len(suite.task_results)
-                max_vram = max(r.peak_vram_mb for r in suite.task_results)
-                avg_gpu = sum(r.gpu_util_pct for r in suite.task_results) / len(suite.task_results)
-                total_flops = sum(r.flops for r in suite.task_results)
-                f.write(f"| {suite.model_id} | {avg_tps:.1f} | {avg_lat:.2f} | {max_vram:.1f} | {avg_gpu:.1f}% | {total_flops:.2e} |\n")
+                # These five were `sum(...) / len(...)` and `max(...)` straight
+                # over the task results, with no None handling:
+                #
+                #     avg_tps = sum(r.tokens_per_sec for r in suite.task_results) / len(...)
+                #     max_vram = max(r.peak_vram_mb for r in suite.task_results)
+                #
+                # Every one of those fields is `Optional[...] = None`, and the
+                # profiler leaves them None whenever CUDA is unavailable -- which
+                # is every CPU run, including this repository's documented setup.
+                # So `sum()` raised TypeError on the first None and `max()` raised
+                # on the comparison, and the report renderer crashed *after* the
+                # science had already succeeded. `len(...) == 0` raised
+                # ZeroDivisionError the other way.
+                #
+                # The failure was in the artifact path, not the measurement path,
+                # which is the worst place for it: the work is done and then the
+                # report cannot be written.
+                #
+                # Aggregation now skips absent values and says how many it saw, so
+                # "unmeasured" is visible in the output instead of being either a
+                # crash or a zero. A field that was never measured must not render
+                # as 0.0 -- that reads as "measured, and the answer was zero".
+                avg_tps, n_tps = _mean_of(suite.task_results, "tokens_per_sec")
+                avg_lat, n_lat = _mean_of(suite.task_results, "mean_latency_ms")
+                max_vram, n_vram = _max_of(suite.task_results, "peak_vram_mb")
+                avg_gpu, n_gpu = _mean_of(suite.task_results, "gpu_util_pct")
+                total_flops, n_flops = _sum_of(suite.task_results, "flops")
+
+                # The `%` belongs to a number, so it is attached inside `_cell`
+                # rather than pasted after it -- otherwise an unmeasured column
+                # reads "not measured%".
+                f.write(
+                    f"| {suite.model_id} | {_cell(avg_tps, '.1f', n_tps)} "
+                    f"| {_cell(avg_lat, '.2f', n_lat)} "
+                    f"| {_cell(max_vram, '.1f', n_vram)} "
+                    f"| {_pct_cell(avg_gpu, '.1f', n_gpu)} "
+                    f"| {_cell(total_flops, '.2e', n_flops)} |\n"
+                )
             f.write("\n")
+            f.write(
+                "`not measured` means the value was absent for every task on that "
+                "model -- these are GPU profiler readings, so a CPU run leaves "
+                "them unmeasured. It does not mean zero.\n\n"
+            )
 
             for suite in report.suites:
                 f.write(f"## Model: {suite.model_id} ({suite.backend})\n")
@@ -215,8 +370,11 @@ class BenchmarkRunner:
                 f.write("| Task | Fidelity % | Published | Observed | 95% CI | Status |\n")
                 f.write("| :--- | :--- | :--- | :--- | :--- | :--- |\n")
                 for r in suite.task_results:
-                    status = "✅ PASS" if r.fidelity_pct > 90 else "⚠️ WARN"
-                    f.write(f"| {r.task_id.value} | {r.fidelity_pct}% | {r.reference_score} | {r.primary_score} | [{r.confidence_interval_low}, {r.confidence_interval_high}] | {status} |\n")
+                    f.write(
+                        f"| {r.task_id.value} | {r.fidelity_pct}% "
+                        f"| {r.reference_score} | {r.primary_score} "
+                        f"| {_interval(r)} | {_verdict(r)} |\n"
+                    )
                 f.write("\n")
 
         # 4. Raw Experiment Data

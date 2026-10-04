@@ -46,18 +46,23 @@ that looked real and was not.
 
 What is left, and why
 ---------------------
-One unresolvable import remains, `frontend/scripts/reproduce_everything.py` ->
-`backend.benchmarks.benchmark_runner`, and it is tracked here as an explicit
-expected failure rather than quietly tolerated.
+**Nothing.** `EXPECTED_UNRESOLVED` is empty, so any import in the repository that
+names a module which does not exist is a test failure.
 
-Two others were listed here and have since been fixed. `backend/main.py` ->
-`backend.api.runtime_api` is *not* a defect: `/api/v2` is an absent capability
-and `main.py` checks `importlib.util.find_spec` before importing it, logging
-"capability absent, not degraded" and skipping the mount.
-`backend/benchmarking/kg_integrator.py` -> `..benchmarks.benchmark_tasks` was a
-real defect: the package is `backend/benchmarking`, so the sibling module is
-`.benchmark_tasks`. Its companion test below failed the moment it was fixed,
-which is the exception list refusing to rot.
+Three were tolerated while they were being fixed, and each was removed the moment
+the fix landed:
+
+  * `backend/benchmarking/kg_integrator.py` -> `..benchmarks.benchmark_tasks`.
+    The package is `backend/benchmarking`, so the sibling module is
+    `.benchmark_tasks`.
+  * `frontend/scripts/reproduce_everything.py` -> `backend.benchmarks.*`. Same
+    rename, from the other direction.
+  * `backend/main.py` -> `backend.api.runtime_api`. This one is *not* a defect and
+    stays on a separate list: `/api/v2` is an absent capability, and `main.py`
+    checks `importlib.util.find_spec` before importing it, logging "capability
+    absent, not degraded" and skipping the mount. A guarded optional import is the
+    correct pattern for a feature that is not there; the test below pins the
+    guard so the import cannot lose it.
 """
 
 from __future__ import annotations
@@ -86,19 +91,18 @@ LOCAL_TOP = {
     "research_datasets", "sdk", "frontend",
 }
 
-#: Imports that cannot resolve, with the reason each is tolerated. Empty once the
-#: remaining `backend.benchmarks` items are fixed.
+#: Imports that cannot resolve, with the reason each is tolerated.
 #:
-#: `backend/benchmarking/kg_integrator.py` was on this list and is now fixed --
-#: it wanted `.benchmark_tasks`, not `..benchmarks.benchmark_tasks`.
-#: `test_the_declared_exceptions_are_still_real` failed when it was fixed and
-#: left behind, which is that test doing its job.
-EXPECTED_UNRESOLVED: dict[str, str] = {
-    "frontend/scripts/reproduce_everything.py": (
-        "backend.benchmarks does not exist; this script advertises a "
-        "'reproduces everything' command that cannot run"
-    ),
-}
+#: Empty. Both entries this list held have been fixed, and in both cases
+#: `test_the_declared_exceptions_are_still_real` failed the moment the fix landed,
+#: which is that test doing its job -- an exception list that can only grow is a
+#: permission slip, not a guard.
+#:
+#:   * `backend/benchmarking/kg_integrator.py` wanted `.benchmark_tasks`, not
+#:     `..benchmarks.benchmark_tasks`.
+#:   * `frontend/scripts/reproduce_everything.py` wanted
+#:     `backend.benchmarking.*`, not `backend.benchmarks.*`.
+EXPECTED_UNRESOLVED: dict[str, str] = {}
 
 #: A module imported on purpose, behind a `find_spec` guard, for a capability that
 #: is absent. Not a defect: an optional route that is not mounted must not stop
