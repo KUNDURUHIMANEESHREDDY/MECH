@@ -42,6 +42,46 @@ DEFAULT_LIMITS: Dict[str, int] = {
 }
 
 
+def resolve_limits(requested: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
+    """Merge a caller's requested limits over the defaults, clamped to them.
+
+    Clamped, not merely defaulted. A caller that may raise its own containment
+    cap may as well remove it, so a request above the default is reduced to the
+    default rather than honoured. Unknown keys are dropped, and non-numeric or
+    non-positive values fall back, so a malformed request cannot produce an
+    unbounded worker.
+
+    This exists because the two platforms were reading the same request
+    differently. `start_remote_plugin(..., limits={"cpu_seconds": 2})` reached
+    `apply_posix_limits` in the child, so the cap applied on POSIX -- while the
+    parent's `assign_windows_job(proc.pid)` call took no arguments and silently
+    used `DEFAULT_LIMITS`, so on Windows the same worker was allowed 120 seconds.
+    The containment boundary enforced different limits depending on the host, and
+    the test that would have shown it was skipped on Windows.
+    """
+    resolved = dict(DEFAULT_LIMITS)
+    if not isinstance(requested, dict):
+        return resolved
+
+    for key, value in requested.items():
+        if key not in DEFAULT_LIMITS:
+            logger.warning("ignoring unknown plugin limit %r", key)
+            continue
+        try:
+            number = int(value)
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError matters: `int(float("inf"))` raises it, and an
+            # unbounded-looking value that raises here would otherwise escape as
+            # an exception from inside the containment boundary.
+            logger.warning("ignoring non-numeric plugin limit %s=%r", key, value)
+            continue
+        if number <= 0:
+            logger.warning("ignoring non-positive plugin limit %s=%r", key, value)
+            continue
+        resolved[key] = min(number, DEFAULT_LIMITS[key])
+    return resolved
+
+
 def apply_posix_limits(
     cpu_seconds: int = DEFAULT_LIMITS["cpu_seconds"],
     address_space_mb: int = DEFAULT_LIMITS["address_space_mb"],
@@ -99,8 +139,6 @@ def apply_posix_limits(
 # Windows Job Object
 # --------------------------------------------------------------------------- #
 
-_JOB_HANDLE = None
-
 
 def _win_job_types():  # type: ignore[no-untyped-def]
     """Define the Job Object structures. Returns None off Windows."""
@@ -145,20 +183,59 @@ def _win_job_types():  # type: ignore[no-untyped-def]
 
 def assign_windows_job(
     pid: int,
-    cpu_seconds: int = DEFAULT_LIMITS["cpu_seconds"],
-    address_space_mb: int = DEFAULT_LIMITS["address_space_mb"],
-    processes: int = DEFAULT_LIMITS["processes"],
+    limits: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """Assign ``pid`` to a bounded Job Object. No-op off Windows.
 
     Call this immediately after spawning the worker and before sending it the
     load command, so the worker cannot run plugin code while unbounded.
+
+    `limits` is the dict from :func:`resolve_limits`. A Job Object cannot enforce
+    every key -- there is no equivalent of `RLIMIT_FSIZE` or `RLIMIT_NOFILE` -- so
+    the unenforceable ones are reported under ``result["not_enforceable"]`` rather
+    than dropped in silence. That mirrors what `apply_posix_limits` records as
+    ``"unavailable: ..."``, and it matters because the platform's containment is
+    then visibly partial instead of looking complete.
+
+    **One job per worker.** This used to cache the handle in a module-level
+    `_JOB_HANDLE` and reuse it, so every worker the backend ever started landed
+    in the *same* job. Three limits are job-wide rather than per-process:
+    `PerJobUserTimeLimit`, `JobMemoryLimit` and (in aggregate) `ActiveProcessLimit`.
+    With one shared job those budgets were shared across every concurrent plugin,
+    so one misbehaving plugin burning its CPU allocation could terminate its
+    siblings, and `ActiveProcessLimit` capped the backend's plugin count in total
+    rather than any one plugin's children.
+
+    Verified before the fix, on this host:
+
+        assign(worker A) -> {'platform': 'win32', 'assigned': True}
+        assign(worker B) -> {'platform': 'win32', 'assigned': True}
+        worker A in the module-level job : True
+        worker B in the module-level job : True
+
+    The handle is returned as `result["handle"]` so the caller can close it. That
+    matters twice over: closing is what triggers `KILL_ON_JOB_CLOSE` for any
+    surviving descendants, and the handle is a real resource that would otherwise
+    leak for the life of the backend.
     """
     result: Dict[str, Any] = {"platform": sys.platform}
     if sys.platform != "win32":
         return result
 
-    global _JOB_HANDLE
+    resolved = resolve_limits(limits)
+    cpu_seconds = resolved["cpu_seconds"]
+    address_space_mb = resolved["address_space_mb"]
+    processes = resolved["processes"]
+
+    # RLIMIT_FSIZE and RLIMIT_NOFILE have no Job Object equivalent. Reported, not
+    # silently ignored: a caller reading `not_enforceable` can see that Windows
+    # containment is partial rather than assume it matches POSIX.
+    unenforceable = {
+        key: "no Windows Job Object equivalent"
+        for key in ("file_size_mb", "open_files")
+    }
+    if unenforceable:
+        result["not_enforceable"] = unenforceable
     try:
         types = _win_job_types()
         if types is None:
@@ -167,18 +244,30 @@ def assign_windows_job(
 
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
 
+        # HANDLE is pointer-sized. Without this, ctypes defaults the return type
+        # to c_int and a handle whose value exceeds 32 bits is sign-extended into
+        # a different -- and possibly valid -- handle. That was harmless while the
+        # handle was never closed; now that `close_windows_job` closes it, the
+        # truncation would close an unrelated handle.
+        kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        kernel32.SetInformationJobObject.restype = ctypes.c_int
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+        kernel32.CloseHandle.restype = ctypes.c_int
+        kernel32.TerminateJobObject.restype = ctypes.c_int
+
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
         JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
         JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
         JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
         JOB_OBJECT_LIMIT_PROCESS_TIME = 0x00000002
 
-        if _JOB_HANDLE is None:
-            handle = kernel32.CreateJobObjectW(None, None)
-            if not handle:
-                result["error"] = "CreateJobObjectW failed"
-                return result
-            _JOB_HANDLE = handle
+        # Fresh job per worker. See the docstring.
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            result["error"] = "CreateJobObjectW failed"
+            return result
 
         info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
         info.BasicLimitInformation.LimitFlags = (
@@ -189,34 +278,73 @@ def assign_windows_job(
             | JOB_OBJECT_LIMIT_PROCESS_TIME
         )
         info.BasicLimitInformation.ActiveProcessLimit = processes
+        # 100-nanosecond intervals, per the Win32 documentation. Both limits are
+        # set to the same value; now that the job holds exactly one worker tree,
+        # per-process and per-job mean the same thing and neither is shared.
         info.BasicLimitInformation.PerProcessUserTimeLimit = cpu_seconds * 10_000_000
         info.BasicLimitInformation.PerJobUserTimeLimit = cpu_seconds * 10_000_000
         info.ProcessMemoryLimit = address_space_mb * 1024 * 1024
         info.JobMemoryLimit = address_space_mb * 1024 * 1024
 
         ok = kernel32.SetInformationJobObject(
-            _JOB_HANDLE, 9, ctypes.byref(info), ctypes.sizeof(info)
+            handle, 9, ctypes.byref(info), ctypes.sizeof(info)
         )
         if not ok:
+            kernel32.CloseHandle(handle)
             result["error"] = "SetInformationJobObject failed"
             return result
 
         process = kernel32.OpenProcess(0x1F0FFF, False, pid)  # PROCESS_SET_QUOTA|TERMINATE|...
         if not process:
+            kernel32.CloseHandle(handle)
             result["error"] = "OpenProcess failed"
             return result
         try:
-            assigned = kernel32.AssignProcessToJobObject(_JOB_HANDLE, process)
+            assigned = kernel32.AssignProcessToJobObject(handle, process)
         finally:
             kernel32.CloseHandle(process)
 
-        result["assigned"] = bool(assigned)
+        if not assigned:
+            kernel32.CloseHandle(handle)
+            result["assigned"] = False
+            result["error"] = "AssignProcessToJobObject failed"
+            return result
+
+        result["assigned"] = True
+        result["handle"] = handle
         return result
     except Exception as exc:  # noqa: BLE001
         # A missing capability must be loud, not silent.
         result["error"] = str(exc)
         logger.warning("Windows Job Object assignment failed: %s", exc)
         return result
+
+
+def close_windows_job(handle: Any, terminate: bool = False) -> bool:
+    """Release a job handle returned by :func:`assign_windows_job`.
+
+    Closing a job handle flagged `KILL_ON_JOB_CLOSE` terminates every process
+    still assigned to it, which is the intended backstop when a worker
+    outlives its usefulness. Pass ``terminate=True`` to kill the job explicitly
+    before closing.
+
+    No-op off Windows. Returns whether the handle was closed.
+    """
+    if sys.platform != "win32" or not handle:
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32.CloseHandle.restype = ctypes.c_int
+        kernel32.TerminateJobObject.restype = ctypes.c_int
+        kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        if terminate:
+            kernel32.TerminateJobObject(handle, 1)
+        return bool(kernel32.CloseHandle(handle))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not close Windows Job Object handle: %s", exc)
+        return False
 
 
 def describe_limits() -> Dict[str, Any]:

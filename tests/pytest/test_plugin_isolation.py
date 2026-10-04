@@ -369,7 +369,6 @@ def test_worker_reports_limits_in_handshake():
             pass
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX rlimit behaviour")
 def test_infinite_loop_is_bounded(tmp_path):
     """CPU limit must terminate a hung plugin instead of hanging the backend."""
     payload = tmp_path / "spin.py"
@@ -402,3 +401,29 @@ def test_infinite_loop_is_bounded(tmp_path):
     # 120s production default.
     elapsed = time.monotonic() - started
     assert elapsed < 60, f"CPU limit did not stop the spin promptly ({elapsed:.1f}s)"
+
+
+def test_a_worker_cannot_raise_its_own_cpu_allowance(tmp_path):
+    """A caller may lower its containment cap, never raise it.
+
+    `resolve_limits` clamps to `DEFAULT_LIMITS`. Without the clamp a caller could
+    ask for an unbounded worker, which makes the containment boundary advisory
+    rather than enforced -- and it is the caller, not the plugin, that would be
+    choosing.
+    """
+    from backend.plugins.limits import DEFAULT_LIMITS, resolve_limits
+
+    assert resolve_limits({"cpu_seconds": 2})["cpu_seconds"] == 2
+
+    too_big = resolve_limits({"cpu_seconds": 10 ** 9})
+    assert too_big["cpu_seconds"] == DEFAULT_LIMITS["cpu_seconds"], (
+        "a request above the default must be reduced to it, not honoured")
+
+    # Malformed requests must not produce an unbounded worker either.
+    for bad in (0, -1, "abc", None, [], float("inf")):
+        assert resolve_limits({"cpu_seconds": bad})["cpu_seconds"] == \
+            DEFAULT_LIMITS["cpu_seconds"], bad
+
+    # Unknown keys are dropped rather than reaching the OS layer.
+    assert set(resolve_limits({"open_ports": 1})) == set(DEFAULT_LIMITS)
+    assert resolve_limits("not a dict") == DEFAULT_LIMITS

@@ -128,23 +128,85 @@ def test_workspace_counts_are_capped_and_flagged(tmp_path, storage, monkeypatch)
     assert summary["countCapped"] is False
 
 
-def test_workspace_does_not_follow_symlinks_out_of_root(tmp_path, storage, monkeypatch):
-    """A symlink inside the root must not pull in files from outside it."""
+def _make_escape_link(link: Path, target: Path) -> str:
+    """Create a directory link pointing outside the root. Returns its kind.
+
+    Prefers a real symlink. Falls back to a Windows **junction**, which reaches
+    the same place by a different mechanism.
+
+    That fallback is not cosmetic. This test skipped on Windows -- symlink
+    creation needs `SeCreateSymbolicLinkPrivilege`, which an unelevated account
+    without Developer Mode does not hold -- and while working out what the skip
+    was hiding, a junction was tried against the same containment code and
+    escaped:
+
+        file.txt   is_symlink=False  is_dir(follow_symlinks=False)=False  attrs=32
+        junction   is_symlink=False  is_dir(follow_symlinks=False)=True   attrs=1040
+        plain      is_symlink=False  is_dir(follow_symlinks=False)=True   attrs=16
+
+    A junction is a reparse point rather than a symlink, so
+    `entry.is_dir(follow_symlinks=False)` returns True for it and the walk
+    traversed straight out of the authorised root:
+
+        files physically outside the root : 5
+        describe_workspace -> fileCount   : 5
+
+    A skip that hides a live containment bug is worse than a failing test, so the
+    property is now exercised through whichever link the host supports.
+    """
+    try:
+        os.symlink(target, link, target_is_directory=True)
+        return "symlink"
+    except (OSError, NotImplementedError, AttributeError):
+        pass
+
+    if sys.platform == "win32":
+        import subprocess
+
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            return "junction"
+
+    pytest.skip("neither symlinks nor junctions can be created on this platform")
+
+
+@pytest.mark.parametrize("link_kind", ["symlink", "junction"])
+def test_workspace_does_not_follow_links_out_of_root(tmp_path, storage,
+                                                     monkeypatch, link_kind):
+    """A link inside the root must not pull in files from outside it."""
     root = tmp_path / "root"
     root.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
     for i in range(5):
         (outside / f"secret{i}.txt").write_text("s", encoding="utf-8")
+    # Real content inside the root, so a walk that refuses the link but stops
+    # counting altogether would also fail.
+    (root / "real.txt").write_text("x", encoding="utf-8")
+    (root / "sub").mkdir()
+    (root / "sub" / "nested.txt").write_text("x", encoding="utf-8")
 
-    try:
-        os.symlink(outside, root / "link", target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip("symlinks unavailable on this platform")
+    if link_kind == "symlink":
+        try:
+            os.symlink(outside, root / "link", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable on this platform")
+        made = "symlink"
+    else:
+        if sys.platform != "win32":
+            pytest.skip("junctions are a Windows facility")
+        made = _make_escape_link(root / "link", outside)
+        assert made == "junction"
 
     monkeypatch.setenv("MECH_WORKSPACE_ROOTS", str(root))
     summary = storage.describe_workspace(str(root))
-    assert summary["fileCount"] == 0, "symlinked subtree must not be counted"
+
+    assert summary["fileCount"] == 2, (
+        f"expected only the 2 real files; got {summary['fileCount']} -- the "
+        f"{made} out of the root was traversed")
 
 
 # --------------------------------------------------------------------------- #

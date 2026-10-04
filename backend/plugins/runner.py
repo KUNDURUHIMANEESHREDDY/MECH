@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .limits import assign_windows_job
+from .limits import assign_windows_job, close_windows_job, resolve_limits
 from .protocol import MAX_MESSAGE_BYTES, ProtocolError, decode, encode, ready
 from .proxy import RemotePluginError, RemotePluginProxy, _manifest_from_dict
 
@@ -191,12 +191,29 @@ def start_remote_plugin(
                     "plugin worker could not apply limits: %s", ", ".join(unavailable))
 
         # Bound the worker before it is permitted to load any plugin code.
-        job = assign_windows_job(proc.pid)
+        #
+        # The requested limits are resolved and passed here. This call used to
+        # take no arguments, so `limits={"cpu_seconds": 2}` was honoured by the
+        # child on POSIX and ignored here on Windows -- the same request produced
+        # a 2-second cap on Linux and the 120-second default on this host.
+        job = assign_windows_job(proc.pid, resolve_limits(limits))
         if job.get("error") or job.get("assigned") is False:
             proc.kill()
             raise WorkerBootError(
                 f"could not apply containment to worker: "
                 f"{job.get('error', 'job object assignment refused')}")
+        if job.get("not_enforceable"):
+            logger.warning(
+                "Windows containment cannot enforce %s; the worker is bounded on "
+                "CPU, memory and process count only",
+                ", ".join(sorted(job["not_enforceable"])),
+            )
+        # Per-worker job handle. `limits.assign_windows_job` used to cache one
+        # module-level handle for every worker, so the job-wide CPU, memory and
+        # process budgets were shared across all of them. It is returned now so
+        # `stop_remote_plugin` can close it, which is also what makes
+        # KILL_ON_JOB_CLOSE fire as the intended backstop.
+        job_handle = job.get("handle")
 
         proc.stdin.write(encode({"op": "load", "path": str(plugin_path),
                                  "limits": limits or {}}))
@@ -222,6 +239,12 @@ def start_remote_plugin(
             proc.kill()
         except Exception:  # noqa: BLE001
             pass
+        # Close the job on the boot-failure paths too, so a rejected plugin does
+        # not leave a handle -- and a KILL_ON_JOB_CLOSE group -- behind.
+        try:
+            close_windows_job(locals().get("job_handle"), terminate=True)
+        except Exception:  # noqa: BLE001
+            pass
         raise
 
     # Restore blocking mode. The non-blocking flags set above live on the open
@@ -237,9 +260,11 @@ def start_remote_plugin(
             pass  # Windows: pipes are always blocking here.
 
     proxy = RemotePluginProxy(proc.stdin, proc.stdout, manifest, timeout=timeout)
-    # Keep the handle so the caller can terminate the worker; the Windows Job
-    # Object's KILL_ON_JOB_CLOSE is the backstop if they forget.
+    # Keep the handle so the caller can terminate the worker. The Windows Job
+    # Object's KILL_ON_JOB_CLOSE is the backstop if they forget -- and it can only
+    # fire if the handle is eventually closed, so `stop_remote_plugin` closes it.
     proxy._proc = proc  # type: ignore[attr-defined]
+    proxy._job_handle = job_handle  # type: ignore[attr-defined]
     return proxy
 
 
@@ -258,3 +283,13 @@ def stop_remote_plugin(proxy: RemotePluginProxy, proc: Optional[Any] = None) -> 
                 proc.kill()
             except Exception:  # noqa: BLE001
                 pass
+    # Close this worker's Job Object, terminating whatever is still in it.
+    #
+    # This is what makes `KILL_ON_JOB_CLOSE` do its job. With one shared,
+    # never-closed handle the flag never fired, so a plugin that outlived its
+    # proxy stayed alive until the whole backend exited. With a handle per worker
+    # the backstop is scoped to that worker's own process tree.
+    try:
+        close_windows_job(getattr(proxy, "_job_handle", None), terminate=True)
+    except Exception:  # noqa: BLE001
+        pass

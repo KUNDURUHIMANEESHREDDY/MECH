@@ -51,6 +51,38 @@ SETTING_TYPES = {
 VALID_THEMES = {"system", "light", "dark"}
 VALID_ACCELERATION = {"auto", "on", "off"}
 
+#: Windows `FILE_ATTRIBUTE_REPARSE_POINT`. A junction, a symlink and a mount point
+#: all carry it. Present only on Windows; absent elsewhere, where `is_symlink()`
+#: is sufficient to identify a link.
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _is_link_like(entry: os.DirEntry) -> bool:
+    """Whether a directory entry is a link rather than a real directory.
+
+    ``entry.is_dir(follow_symlinks=False)`` is not enough on Windows. A junction
+    is a reparse point, so ``is_symlink()`` returns False and
+    ``is_dir(follow_symlinks=False)`` returns True -- the junction looks like an
+    ordinary directory to that call and was therefore traversed out of the
+    authorised workspace root.
+
+    Both signals are checked. ``st_file_attributes`` only exists on Windows, so
+    the reparse-point test is guarded rather than assumed.
+    """
+    try:
+        if entry.is_symlink():
+            return True
+    except OSError:
+        return True
+    try:
+        attributes = getattr(entry.stat(follow_symlinks=False),
+                             "st_file_attributes", None)
+    except OSError:
+        return True
+    if attributes is None:
+        return False
+    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT)
+
 
 class DesktopStorage:
     def __init__(self, db_path: Path | str) -> None:
@@ -393,12 +425,38 @@ class DesktopStorage:
         }
 
     def _count_files_bounded(self, root: Path) -> tuple[int, bool]:
-        """Count files under ``root`` without following symlinks out of it.
+        """Count files under ``root`` without following links out of it.
 
         Uses an explicit stack rather than ``rglob``: rglob materialises a Path
         for every entry and follows directory symlinks, so a link pointing at
-        ``C:\\`` would be traversed. ``followlinks=False`` on the ``stat`` call
-        keeps the count inside the root the caller already authorised.
+        ``C:\\`` would be traversed.
+
+        Two link types have to be refused, and only one of them is a symlink.
+
+        On POSIX, ``entry.is_dir(follow_symlinks=False)`` is False for a symlink
+        to a directory, so the ``follow_symlinks=False`` call alone keeps the walk
+        inside the root.
+
+        On Windows that is not sufficient. A **junction** is a reparse point, not
+        a symlink: ``is_symlink()`` returns False and ``is_dir(follow_symlinks=
+        False)`` returns **True**, so the junction was pushed onto the stack and
+        traversed. Measured on this host, with five files living outside the
+        authorised root:
+
+            file.txt   is_symlink=False  is_dir(follow=False)=False  attrs=32
+            junction   is_symlink=False  is_dir(follow=False)=True   attrs=1040
+            plain      is_symlink=False  is_dir(follow=False)=True   attrs=16
+
+        1040 is 0x418 -- FILE_ATTRIBUTE_REPARSE_POINT (0x400) | DIRECTORY (0x10).
+        So a junction escaped the workspace root and was counted, turning
+        ``workspace.describe`` into the same enumeration oracle the containment
+        check above exists to prevent. The test that would have caught this was
+        skipped on Windows, because it built its escape with ``os.symlink``, which
+        needs a privilege this account does not hold.
+
+        Reparse points are therefore refused as well. That is deliberately broad:
+        it also covers mount points and OneDrive placeholders, none of which
+        should be traversed out of an authorised root either.
         """
         deadline = time.monotonic() + self.MAX_WORKSPACE_SECONDS
         stack = [root]
@@ -414,6 +472,10 @@ class DesktopStorage:
             for entry in entries:
                 try:
                     if entry.is_dir(follow_symlinks=False):
+                        if _is_link_like(entry):
+                            # Counted as neither a file nor a directory: it is a
+                            # pointer, and following it is what escapes the root.
+                            continue
                         stack.append(Path(entry.path))
                     elif entry.is_file(follow_symlinks=False):
                         count += 1
