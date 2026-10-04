@@ -93,17 +93,43 @@ class AIScientistEngine:
         question: str = "Why does GPT-2 predict Paris for capital of France?",
         policy: UncertaintyPolicy | Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        # 1. Multi-agent collaboration & debate
+        # 1. Multi-agent collaboration & debate.
+        #
+        #    Both hypotheses were literals, and one of them named `L8_N402` --
+        #    the invented neuron already removed from `circuit_discovery` as a
+        #    fabricated specific claim about a specific neuron. The other
+        #    ("Layer 0 embeddings direct country logits") had no supporting
+        #    argument at all.
+        #
+        #    The debate engine now derives its verdict from presented evidence
+        #    and returns `consensus_winner: None` when there is none, so a
+        #    hardcoded pairing cannot produce a winner. Whatever the debate
+        #    concludes is carried forward as `debate_subject`; when it names no
+        #    winner, the downstream stages are given the goal itself rather than
+        #    a hypothesis nobody argued for.
         society_res = self.agent_society.run_society_collaboration(goal=question)
         debate_res = self.debate_engine.debate_hypotheses(
-            hypothesis_a="L8_N402 mediates geographic capital retrieval",
-            hypothesis_b="Layer 0 embeddings direct country logits",
+            hypothesis_a=society_res.get("hypothesis_a") or question,
+            hypothesis_b=society_res.get("hypothesis_b") or question,
+            evidence_a=society_res.get("evidence_a"),
+            evidence_b=society_res.get("evidence_b"),
+            counter_evidence_a=society_res.get("counter_evidence_a"),
+            counter_evidence_b=society_res.get("counter_evidence_b"),
+            rounds=society_res.get("debate_rounds", 0),
         )
+        debate_subject = debate_res["consensus_winner"] or question
 
         # 2. Research Critic & Governance
+        #
+        #    `evidence=[{"score": 0.95}, {"score": 0.92}]` was two invented
+        #    scores attached to an invented hypothesis, and the critic was asked
+        #    to assess a `consensus_winner` that had been `hypothesis_a` by
+        #    construction. It is now given whatever evidence the society actually
+        #    produced, which is currently none -- `MultiAgentResearchSociety` is a
+        #    stub that returns `consensus_reached: True` and nothing else.
         critique = self.critic_agent.critique_hypothesis(
-            hypothesis=debate_res["consensus_winner"],
-            evidence=[{"id": "ev_1", "score": 0.95}, {"id": "ev_2", "score": 0.92}],
+            hypothesis=debate_subject,
+            evidence=society_res.get("critique_evidence") or [],
         )
         gov = self.governance_engine.validate_and_approve(experiment_id="exp_s5_gov_1")
 
@@ -117,7 +143,7 @@ class AIScientistEngine:
         # 5. Scientific Validation Layer
         val_res = self.validation_engine.validate_discovery(
             discovery_id="disc_s5_master",
-            hypothesis_statement=debate_res["consensus_winner"],
+            hypothesis_statement=debate_subject,
         )
 
         # 6. Uncertainty Manager decision logic with Configurable Policy
@@ -152,9 +178,18 @@ class AIScientistEngine:
             planner_feedback_loop = {
                 "triggered": True,
                 "target_action": "scientific_debate",
+                # The follow-up debate is posed against the winner when there is
+                # one, and against the goal when there is not. Naming a winner
+                # that was never reached -- which is what `consensus_winner` used
+                # to be -- made the follow-up debate a comparison between a fixed
+                # answer and a placeholder.
                 "followup_debate": self.debate_engine.debate_hypotheses(
-                    hypothesis_a=debate_res["consensus_winner"],
-                    hypothesis_b="Alternative variance explanation",
+                    hypothesis_a=debate_res["consensus_winner"] or question,
+                    hypothesis_b=society_res.get("alternative_hypothesis")
+                    or f"An alternative explanation for: {question}",
+                    evidence_a=society_res.get("followup_evidence_a"),
+                    evidence_b=society_res.get("followup_evidence_b"),
+                    rounds=0,
                 ),
             }
 

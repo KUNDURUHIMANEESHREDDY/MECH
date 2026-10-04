@@ -11,6 +11,7 @@ Research Goal ➔ Discovery Planner ➔ Strategy & Pipeline Selection
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -58,12 +59,20 @@ class MechanismClaim:
     claim_id: str
     goal_description: str
     summary_claim: str
-    composite_confidence: float
+    #: Optional, and Optional for a reason. A campaign that measured nothing has
+    #: no composite confidence; it previously reported 0.95 beside a fabricated
+    #: IOI graph. `None` is also what a downstream gate must not read as a score.
+    composite_confidence: Optional[float]
     evidence_chain: List[Dict[str, Any]]
     unified_graph: Dict[str, Any]
-    falsification_passed: bool
+    #: `None` means no falsification was established -- either no stage ran, or
+    #: the one that ran was unmeasured. That is not the same as `False`.
+    falsification_passed: Optional[bool]
     runtime_ms: float
     timestamp: str = field(default_factory=lambda: _dt.datetime.utcnow().isoformat() + "Z")
+    #: Whether `falsification_passed` is a claim about the hypothesis at all.
+    falsification_established: bool = False
+    falsification_reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -74,9 +83,23 @@ class MechanismClaim:
             "evidence_chain": self.evidence_chain,
             "unified_graph": self.unified_graph,
             "falsification_passed": self.falsification_passed,
+            "falsification_established": self.falsification_established,
+            "falsification_reason": self.falsification_reason,
             "runtime_ms": self.runtime_ms,
             "timestamp": self.timestamp,
         }
+
+
+def _claim_id(goal_id: str) -> str:
+    """A stable identifier for a claim.
+
+    SHA-256 over the goal id and the timestamp, so the id identifies this run.
+    `abs(hash(...))` was used before, which differs per interpreter process
+    (Python salts string hashing) *and* per call because `time.time()` was in the
+    input -- so no two runs produced the same id, and no id could be looked up.
+    """
+    payload = f"{goal_id}:{_dt.datetime.utcnow().isoformat()}"
+    return "claim_" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 class AutonomousDiscoveryPlanner:
@@ -174,7 +197,21 @@ class AutonomousDiscoveryPlanner:
         seen_nodes = set()
         seen_edges = set()
 
-        falsification_passed = True
+        # Three states, not two.
+        #
+        # Was `falsification_passed = True` -- "falsification passed" was the
+        # state before any falsification had run, so a campaign with no
+        # causal-scrubbing stage at all reported a *passed* falsification and
+        # had that sentence written into its summary.
+        #
+        #   None  no falsification stage ran, or the one that ran was unmeasured
+        #   False falsification ran and the hypothesis did not survive it
+        #   True  falsification ran and the hypothesis survived it
+        #
+        # Only the last two are a claim about the hypothesis.
+        falsification_passed: Optional[bool] = None
+        falsification_established = False
+        falsification_reason = "No causal-scrubbing stage was planned or executed."
 
         # Execute each planned algorithm stage sequentially
         for stage in plan.stages:
@@ -188,7 +225,29 @@ class AutonomousDiscoveryPlanner:
 
             # Check falsification result if Causal Scrubbing ran
             if stage.algorithm_name == "causal_scrubbing":
-                falsification_passed = report.statistics.get("validated", True)
+                # Was `report.statistics.get("validated", True)`. A causal-scrubbing
+                # report that does not carry a `validated` key -- because the
+                # stage was declined, incomplete, or unmeasured -- scored as a
+                # PASSED falsification. Falsification is the one stage whose
+                # silence should never be read as support: an unrun falsification
+                # leaves the hypothesis untested, not upheld.
+                falsification_passed = report.statistics.get("validated")
+                if falsification_passed is None:
+                    falsification_reason = (
+                        "Causal scrubbing ran but reported no `validated` "
+                        "verdict, so the hypothesis was not tested."
+                    )
+                elif falsification_passed:
+                    falsification_established = True
+                    falsification_reason = (
+                        "Causal scrubbing ran and the hypothesis survived it."
+                    )
+                else:
+                    falsification_established = True
+                    falsification_reason = (
+                        "Causal scrubbing ran and the hypothesis did not "
+                        "survive it."
+                    )
 
             evidence_chain.append({
                 "stage": stage.stage_number,
@@ -212,45 +271,107 @@ class AutonomousDiscoveryPlanner:
                     seen_edges.add(esig)
                     fused_edges.append(edge)
 
-        # Fuse evidence into composite scientific confidence score
+        # Fuse evidence into a composite confidence.
+        #
+        # This used to be a fabricated circuit. With no reports it returned
+        # `composite_confidence = 0.95` alongside a complete three-node IOI graph
+        # naming L9H9 as the Name Mover Head with edges at 0.92/0.95 and
+        # confidences 0.95/0.98, and a summary beginning "Validated mechanism for".
+        # A caller reading `composite_confidence` got 0.95 and a caller rendering
+        # `unified_graph` drew a specific invented claim about a specific head --
+        # the same defect already fixed in `circuit_discovery.discover_circuit`.
+        #
+        # An unrun pipeline has no evidence, so it reports no evidence: empty
+        # graph, confidence None, and a reason. Same keys as a real claim, so
+        # consumers need no special case.
         if reports:
-            # Weighted harmonic mean favoring causal scrubbing & attribution agreement
-            conf_scores = [r.confidence for r in reports]
-            composite_confidence = sum(conf_scores) / len(conf_scores)
-            if not falsification_passed:
-                composite_confidence *= 0.3  # Heavily penalize if falsification failed
+            # An arithmetic mean of the per-stage confidences. The comment above
+            # this block claimed a "weighted harmonic mean favoring causal
+            # scrubbing & attribution agreement"; no weighting and no harmonic
+            # mean was ever computed, so stages counted equally and a stage
+            # reporting 0.0 could not be heard.
+            #
+            # Stages that measured nothing report `confidence is None` and are
+            # excluded -- averaging None as 0.0 would penalise a stage for being
+            # honest, and averaging them in as if measured would not.
+            measured = [r.confidence for r in reports if r.confidence is not None]
+            unmeasured = [r.algorithm for r in reports if r.confidence is None]
+
+            if measured:
+                composite_confidence = sum(measured) / len(measured)
+                # Penalise only an *established* falsification failure. An absent
+                # or unmeasured falsification is already excluded from `measured`
+                # by leaving the stage's own confidence out of the mean; applying
+                # the 0.3 penalty as well would charge the same omission twice.
+                if falsification_established and not falsification_passed:
+                    composite_confidence *= 0.3
+            else:
+                # Every stage ran and every one declined to state a confidence.
+                # That is not a score of zero and it is not a score of 0.95.
+                composite_confidence = None
+                no_confidence_reason = (
+                    f"No stage produced a confidence ({len(reports)} ran, "
+                    f"all unmeasured). Nothing was measured, so there is no "
+                    f"composite to report."
+                )
         else:
-            composite_confidence = 0.95
-            fused_nodes = [
-                {"id": "Input", "type": "Token", "label": "John gave a drink to Mary"},
-                {"id": "L9H9", "type": "Head", "label": "Name Mover Head (L9H9)"},
-                {"id": "Output", "type": "Prediction", "label": "Mary"}
-            ]
-            fused_edges = [
-                {"source": "Input", "target": "L9H9", "weight": 0.92, "confidence": 0.95},
-                {"source": "L9H9", "target": "Output", "weight": 0.95, "confidence": 0.98}
-            ]
+            composite_confidence = None
+            unmeasured = []
+            no_confidence_reason = (
+                "No algorithm produced a report, so this campaign measured "
+                "nothing. There is no graph and no confidence to report."
+            )
 
         runtime_ms = (time.time() - t0) * 1000
 
-        summary = (
-            f"Validated mechanism for '{goal.description}'. "
-            f"Pipeline executed {len(plan.stages)} algorithms ({', '.join(s.algorithm_name for s in plan.stages)}). "
-            f"Causal Falsification: {'PASSED' if falsification_passed else 'FAILED'}. "
-            f"Composite Confidence: {composite_confidence * 100:.1f}%."
-        )
+        if composite_confidence is None:
+            summary = (
+                f"No mechanism was established for '{goal.description}'. "
+                f"Pipeline planned {len(plan.stages)} algorithms "
+                f"({', '.join(s.algorithm_name for s in plan.stages)}) but "
+                f"produced no measurements. {no_confidence_reason}"
+            )
+        else:
+            if falsification_established:
+                falsification_txt = ("passed" if falsification_passed
+                                    else "FAILED")
+            else:
+                falsification_txt = "not established"
+            summary = (
+                f"Mechanism evidence assembled for '{goal.description}'. "
+                f"Pipeline executed {len(plan.stages)} algorithms "
+                f"({', '.join(s.algorithm_name for s in plan.stages)}). "
+                f"Causal Falsification: {falsification_txt}. "
+                f"Composite Confidence: {composite_confidence * 100:.1f}% "
+                f"over {len(measured)} of {len(reports)} reporting stages."
+            )
+            if unmeasured:
+                summary += (f" Not counted: {', '.join(unmeasured)} "
+                            f"(no confidence reported).")
+            if not falsification_established:
+                summary += f" {falsification_reason}"
 
         return MechanismClaim(
-            claim_id=f"claim_{hash(goal.goal_id + str(time.time())) & 0xffffffff:08x}",
+            # SHA-256 over (goal_id, timestamp). Was
+            # `hash(goal.goal_id + str(time.time())) & 0xffffffff`, so the id
+            # differed on every interpreter start (Python salts string hashing
+            # per process) *and* on every call -- an identifier that cannot
+            # identify anything. Same fix as `live_discovery._discovery_id`.
+            claim_id=_claim_id(goal.goal_id),
             goal_description=goal.description,
             summary_claim=summary,
-            composite_confidence=round(composite_confidence, 4),
+            composite_confidence=(None if composite_confidence is None
+                                  else round(composite_confidence, 4)),
             evidence_chain=evidence_chain,
             unified_graph={
                 "nodes": fused_nodes,
                 "edges": fused_edges,
-                "score": round(composite_confidence, 3)
+                "score": (None if composite_confidence is None
+                          else round(composite_confidence, 3)),
+                "measured": composite_confidence is not None,
             },
             falsification_passed=falsification_passed,
+            falsification_established=falsification_established,
+            falsification_reason=falsification_reason,
             runtime_ms=runtime_ms
         )

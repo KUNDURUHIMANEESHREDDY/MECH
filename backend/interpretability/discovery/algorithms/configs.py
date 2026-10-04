@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 @dataclass
@@ -58,6 +58,17 @@ class AttributionPatchingConfig(DiscoveryAlgorithmConfig):
     metric: str = "logit_difference"                 # Options: logit_difference, kl_divergence, probability
     top_k: int = 20                                  # Return top K highest attributed components
     threshold: float = 0.01                          # Minimum attribution score to include in graph
+    # Optional cap on heads examined per layer. Previously hardcoded to
+    # `min(4, num_heads)` while `search_space` was declared "all_components", so
+    # most heads were never examined under a claim of complete coverage. None
+    # means no cap: examine every head.
+    max_heads: Optional[int] = None
+    # Token position the attribution is evaluated at. None means the final
+    # position of each prompt -- where the target token is predicted, and so
+    # where the metric lives. It used to read position 0 for every component,
+    # which for a shared-prefix pair is identical in both prompts and yields
+    # delta_x == 0 exactly.
+    token_position: Optional[int] = None
 
 
 @dataclass
@@ -67,7 +78,15 @@ class TranscoderConfig(DiscoveryAlgorithmConfig):
     l1_alpha: float = 1e-3                 # L1 sparsity penalty coefficient
     source_layer: int = 4                  # Input layer to transcode from
     target_layer: int = 5                  # Output layer to transcode to
-    reconstruction_target: float = 0.95    # Target fraction of variance explained (FVE)
+    reconstruction_target: float = 0.95    # Target FVE. A *goal*, not an expectation.
+    #                                    The simulated algorithm clamped its
+    #                                    measured FVE into [0.80, 0.99], so this
+    #                                    number was reported as a result.
+    # A trained dictionary is required to measure anything at all. None of these
+    # is defaulted, because a default would let the algorithm proceed without one.
+    dictionary_path: Optional[str] = None
+    encoder: Optional[Any] = None
+    decoder: Optional[Any] = None
 
 
 @dataclass

@@ -565,6 +565,135 @@ class GPT2Adapter(ModelAdapter):
             }
         return out
 
+    def _forward_with_grad(self, prompt: str) -> Any:
+        """Forward pass with autograd enabled.
+
+        `_forward_with_hooks` wraps the model call in `torch.no_grad()` because
+        every measurement it serves is a read-only observation and building the
+        graph for 12 layers of GPT-2 wastes memory for nothing. A gradient is the
+        one thing that genuinely needs the graph, so this is a separate entry
+        point rather than a flag on the shared helper: flipping `no_grad` off
+        for all callers would make a slow path the default and, worse, would let
+        a future caller mutate the model by accident.
+
+        Eager attention is forced for the same reason as elsewhere, so behaviour
+        matches `_forward_with_hooks` exactly.
+        """
+        import torch
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+        config = self._model.config
+        previous = getattr(config, "_attn_implementation", None)
+        if previous != "eager":
+            config._attn_implementation = "eager"
+        try:
+            with torch.enable_grad():
+                return self._model(**inputs, output_hidden_states=True,
+                                   output_attentions=True)
+        finally:
+            if previous is not None:
+                config._attn_implementation = previous
+
+    def capture_head_outputs_with_grad(
+        self,
+        prompt: str,
+        target_token_id: int,
+        baseline_token_id: int,
+    ) -> Dict[int, Dict[int, List[float]]]:
+        """Per-head output vectors *and* d(metric)/d(head output) in one pass.
+
+        The metric is the logit difference ``target - baseline`` at the final
+        position. Returns ``{layer: {head: {"activation": [...],
+        "grad": [...]}}}``.
+
+        Why this exists
+        ---------------
+        Attribution patching needs ``d Metric / d z``, a gradient. The algorithm
+        was substituting ``metric_delta / (|z_clean| + |z_corrupted|)`` -- a
+        global metric change divided by an activation magnitude, which is not a
+        derivative of anything.
+
+        Worse, that expression is algebraically degenerate. When a component's
+        clean and corrupted activations straddle zero, ``|c - r| == |c| + |r|``
+        exactly, so
+
+            attribution = |c - r| * metric_delta / (|c| + |r|) = metric_delta
+
+        identically -- for every such component, regardless of how small its
+        activation change was. Measured on gpt2-small over all 144 heads: 9 of
+        the top 10 attributions were exactly ``metric_delta``, so the ranking
+        among them was decided by rounding rather than by importance.
+
+        The real gradient has no such degeneracy, so it is computed with
+        `torch.autograd.grad`. The concatenated head outputs are captured with
+        `requires_grad_()` on the forward hook input, the metric is built from
+        the logits, and one backward pass yields every component's gradient.
+
+        Raises `LiveUnavailable` without weights. There is no fixture for a
+        gradient, and substituting one would defeat the purpose.
+        """
+        if self.spec.mock_mode or self._model is None:
+            raise LiveUnavailable(
+                "capture_head_outputs_with_grad requires loaded weights: a "
+                "gradient is a backward-pass measurement and has no fixture."
+            )
+
+        import torch
+
+        captured: Dict[int, Any] = {}
+        hooks = []
+
+        def make_hook(layer: int):
+            def hook(_module, inp, _out):
+                tensor = inp[0]
+                if tensor.requires_grad is False:
+                    tensor = tensor.detach().requires_grad_(True)
+                captured[layer] = tensor
+            return hook
+
+        for layer in range(self.spec.num_layers):
+            hooks.append(
+                self._model.transformer.h[layer].attn.c_proj.register_forward_hook(
+                    make_hook(layer)
+                )
+            )
+
+        try:
+            outputs = self._forward_with_grad(prompt)
+            logits = outputs.logits[0, -1, :]
+            metric = logits[target_token_id] - logits[baseline_token_id]
+            # `grad` is taken with respect to the captured tensors directly, so
+            # the backward pass stops there instead of propagating through the
+            # remaining 12 layers into the embedding. The result is identical for
+            # these leaves and materially cheaper.
+            grads = torch.autograd.grad(
+                metric, list(captured.values()), allow_unused=True)
+            grad_by_layer = dict(zip(captured.keys(), grads))
+
+            d_head = self.spec.d_model // self.spec.num_heads
+            result: Dict[int, Dict[int, Dict[str, List[float]]]] = {}
+            for layer, merged in captured.items():
+                last = merged[0, -1, :]
+                layer_grad = grad_by_layer.get(layer)
+                grad_slice = (None if layer_grad is None
+                              else layer_grad[0, -1, :])
+                per_head: Dict[int, Dict[str, List[float]]] = {}
+                for head in range(self.spec.num_heads):
+                    lo, hi = head * d_head, (head + 1) * d_head
+                    per_head[head] = {
+                        # `.detach()` before `float()`: the captured tensor still
+                        # carries requires_grad, and converting it to a Python
+                        # scalar warns about unexpected behaviour.
+                        "activation": [round(float(v), 6)
+                                       for v in last[lo:hi].detach()],
+                        "grad": ([] if grad_slice is None
+                                 else [round(float(v), 8) for v in grad_slice[lo:hi]]),
+                    }
+                result[layer] = per_head
+            return result
+        finally:
+            for handle in hooks:
+                handle.remove()
+
     def patch_head_output(
         self, prompt: str, layer: int, head_index: int,
         patch_vector: Optional[List[float]] = None,
