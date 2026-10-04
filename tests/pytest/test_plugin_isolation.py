@@ -9,6 +9,7 @@ sandbox tests. Timeouts are generous to stay green on loaded CI.
 """
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -320,24 +321,86 @@ def test_worker_pipes_are_blocking_after_handshake():
     that flag lives on the open file description, which the worker inherited
     across fork/exec. A non-blocking stdin makes the worker's readline() return
     EOF immediately, so the worker exits and the first hook call fails with
-    "plugin worker exited unexpectedly". This is a Linux-only symptom because
+    "plugin worker exited unexpectedly". That is a Linux-only symptom because
     os.set_blocking does not exist on Windows, where it silently no-ops.
 
-    Asserted directly where the platform can report blocking state, which is
-    exactly the platform that was broken.
-    """
-    if not hasattr(os, "get_blocking"):
-        pytest.skip("platform cannot report pipe blocking state")
+    This test used to assert the flag with `os.get_blocking` and skip where that
+    does not exist -- which is every Windows run. So the branch of the code
+    guarded by `except AttributeError: pass` was the branch that was never
+    checked, on the platform this repository actually ships on.
 
+    Where `os.get_blocking` exists it is still the primary assertion: that is the
+    branch the original Linux bug took.
+
+    Where it does not (Windows), the property is measured instead of skipped, by
+    two arguments that do not need the OS to describe the mode:
+
+    1. `os.set_blocking` does not exist here, so the flag that leaks on Linux is
+       never applied in the first place. There is nothing to inherit. That is the
+       premise of `runner.py`'s "Windows: pipes are always blocking here", and it
+       is asserted rather than assumed.
+
+    2. The read end is blocking, which is observable: with the worker alive
+       holding the write end and nothing pending, a read cannot complete. It
+       waits. On a non-blocking pipe it returns at once.
+
+    The write end is deliberately not probed with `os.read`. The first draft of
+    this test did that and reported a failure that was not there:
+
+        os.read(proxy._stdin) -> OSError: [Errno 9] Bad file descriptor
+
+    `_stdin` is opened `wb`, so `os.read` on it is EBADF on any platform, in
+    blocking mode or not. That says nothing about blocking state -- and an
+    earlier standalone probe had already shown the inherited Windows pipe
+    blocking for 2s, so believing the EBADF would have meant acting on a
+    measurement artefact. Reading a write-only descriptor is not a blocking-mode
+    signal, and `os.get_blocking` works on such an fd precisely because it reads
+    the flag rather than the descriptor.
+    """
     proxy = start_remote_plugin(ECHO)
     try:
-        assert os.get_blocking(proxy._stdin.fileno()), (  # noqa: SLF001
-            "worker stdin left non-blocking; the worker will see EOF and exit")
-        assert os.get_blocking(proxy._stdout.fileno()), (  # noqa: SLF001
-            "worker stdout left non-blocking; replies may be missed")
+        if hasattr(os, "get_blocking"):
+            assert os.get_blocking(proxy._stdin.fileno()), (  # noqa: SLF001
+                "worker stdin left non-blocking; the worker will see EOF and exit")
+            assert os.get_blocking(proxy._stdout.fileno()), (  # noqa: SLF001
+                "worker stdout left non-blocking; replies may be missed")
+            return
+
+        # No os.get_blocking (Windows). The leak cannot originate here: the API
+        # that sets the flag is absent, so runner.py's restore loop and its
+        # handshake both no-op and the child inherits a pipe nobody made
+        # non-blocking.
+        assert not hasattr(os, "set_blocking"), (
+            "os.set_blocking now exists on this platform, so runner.py WILL set "
+            "O_NONBLOCK during the handshake and this test must assert the "
+            "restored state directly instead of relying on the flag never "
+            "being set. Use os.get_blocking if it exists.")
+
+        # The read end, measured by its consequence.
+        stream = proxy._stdout  # noqa: SLF001
+        fd = stream.fileno()
+        finished = threading.Event()
+        outcome = {}
+
+        def _read():
+            try:
+                outcome["value"] = f"read {os.read(fd, 1)!r}"
+            except Exception as exc:  # noqa: BLE001
+                outcome["value"] = f"{type(exc).__name__}: {exc}"
+            finally:
+                finished.set()
+
+        threading.Thread(target=_read, daemon=True, name="blocking-probe").start()
+        returned_early = finished.wait(timeout=2.0)
+
+        assert not returned_early, (
+            f"the proxy's stdout is not blocking: a read with nothing pending "
+            f"and the worker still alive returned "
+            f"{outcome.get('value')} instead of waiting. Left non-blocking, "
+            f"replies are missed and the first hook call fails.")
     finally:
         try:
-            proxy._roundtrip({"op": "shutdown"})  # noqa: SLF001
+            proxy._roundtrip({"op": "shutdown"})  # type: ignore[attr-defined]
         except Exception:  # noqa: BLE001
             pass
 
