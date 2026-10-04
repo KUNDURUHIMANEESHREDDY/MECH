@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from backend.core.provenance import pass_through, withhold
+
 
 class Inspector:
     """Reads activations, heads, neurons, and predictions."""
@@ -48,20 +50,26 @@ class Inspector:
         try:
             res = getattr(engine, name)(*args)
             if isinstance(res, dict):
-                res.setdefault("provenance", "live")
-                res.setdefault("field_provenance", {
-                    str(key): "live" for key in res
-                    if key not in {"provenance", "field_provenance"}
-                })
-                return res
-            return {
-                "status": "ok",
-                "provenance": "live",
-                "field_provenance": {"status": "live", "result": "live"},
-                "result": res,
-            }
+                # Never infer `live` here. This was a line-for-line copy of the
+                # same defect in `agents/executor.py`: `setdefault("provenance",
+                # "live")` plus a `field_provenance` defaulting every key to
+                # live, so a returned `{"status": "unavailable"}` became a live
+                # measurement and its `reason` was marked live too.
+                return pass_through(res)
+            # A bare return value carries no provenance, so it cannot be presented
+            # as a measurement. This previously wrapped it as `status: ok,
+            # provenance: live`, so a function returning None produced a live
+            # record asserting a successful result.
+            return withhold(
+                {"status": "unmeasured", "op": name, "result": res},
+                reason=(f"{name}() returned {type(res).__name__}, not a record. "
+                        f"A bare return value carries no provenance."),
+            )
         except Exception as exc:
-            return {"status": "error", "op": name, "error": str(exc)[:500]}
+            return withhold(
+                {"status": "error", "op": name, "error": str(exc)[:500]},
+                reason=f"{name} raised {type(exc).__name__}: {exc}"[:300],
+            )
 
     def architecture(self) -> Dict[str, Any]:
         return self._engine_call("architecture")

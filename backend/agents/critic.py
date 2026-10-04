@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from backend.core.provenance import pass_through
+
 from .evidence_policy import (
     blocked_reason,
     discovery_is_live,
@@ -214,8 +216,17 @@ class Critic:
                 ],
             )
             if isinstance(report, dict):
-                report = dict(report)
-                report.setdefault("provenance", "live")
+                # Never infer `live` here.
+                #
+                # Was `report.setdefault("provenance", "live")` on a record built
+                # by `ReproducibilityReportEngine.generate_report`. The Critic is a
+                # *gate*, not the measurement layer: it did not run a forward
+                # pass, so it cannot know whether the run it is judging measured
+                # anything. Defaulting the label meant a report whose metrics were
+                # all `NOT_RUN` still arrived labelled as a live measurement, and
+                # the evidence policy -- which reads exactly this field -- would
+                # accept it.
+                report = pass_through(dict(report))
             # Gate value is the mean fidelity_pct over *measured* metrics, on
             # the same 0-100 scale the threshold is expressed in
             # (CONFIDENCE_THRESHOLD * 100).

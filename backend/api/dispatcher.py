@@ -16,6 +16,7 @@ from pathlib import Path
 # Real GPT-2 inference engine (torch + transformers) is imported lazily so the
 # desktop app can open immediately. Falls back to seeded stand-ins when absent.
 from backend.storage import DesktopStorage
+from backend.core.provenance import pass_through
 
 router = APIRouter()
 
@@ -127,17 +128,21 @@ def infer(payload: Dict[str, Any]) -> Dict[str, Any]:
     model_name = _as_text(payload, "model_name", "gpt2-small")
     if engine and engine.is_available():
         res = engine.infer(prompt, model_name)
-        if isinstance(res, dict):
-            # Provenance marker: live weights (never silently fake).
-            res.setdefault("provenance", "live")
-            res.setdefault("field_provenance", {
-                "model_name": "live",
-                "tokens": "live",
-                "generated_text": "live",
-                "attention_maps": "live",
-                "neuron_activations": "live",
-            })
-        return res
+        # Provenance is passed through, never inferred.
+        #
+        # Was `res.setdefault("provenance", "live")` with a fixed
+        # `field_provenance` naming five fields live. Two problems:
+        #
+        #  * `engine.is_available()` reports that torch and transformers
+        #    imported. It does not report that a forward pass ran, so an engine
+        #    returning `{"status": "unavailable"}` was relabelled live.
+        #  * the fixed field list asserted `attention_maps` and
+        #    `neuron_activations` were live even when the engine returned neither.
+        #
+        # The measurement layer now originates provenance and names the weights
+        # it actually loaded -- see backend/core/provenance.py. If it attested
+        # nothing, the response is withheld rather than upgraded here.
+        return pass_through(res) if isinstance(res, dict) else res
     prompt_tokens = [t.strip() for t in prompt.split() if t.strip()]
     if not prompt_tokens:
         prompt_tokens = ["Hello"]

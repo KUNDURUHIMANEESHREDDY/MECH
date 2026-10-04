@@ -9,6 +9,8 @@ import math
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.core.provenance import attest_measurement
+
 try:
     import numpy as np
     import torch
@@ -24,6 +26,29 @@ _lock = threading.Lock()
 _model: Any = None
 _tokenizer: Any = None
 _cache: Dict[str, Any] = {}
+
+#: The only checkpoint this engine can serve. `load()` hardcodes it, and there is
+#: a single module-level `_model`, so any other `model_name` a caller passes is a
+#: label rather than a request. Recorded so a response can name the weights that
+#: actually produced it.
+SUPPORTED_MODEL = "gpt2"
+
+
+def _loaded_model_id() -> Optional[str]:
+    """Identity of the weights currently loaded, or None if nothing is.
+
+    Read from the model config where possible rather than from `SUPPORTED_MODEL`,
+    so this reports what is in memory rather than what was intended.
+    """
+    if _model is None:
+        return None
+    config = getattr(_model, "config", None)
+    for attr in ("_name_or_path", "name_or_path"):
+        value = getattr(config, attr, None) if config is not None else None
+        if isinstance(value, str) and value:
+            return value
+    name = getattr(config, "name_or_path", None) if config is not None else None
+    return name if isinstance(name, str) and name else SUPPORTED_MODEL
 
 
 def is_available() -> bool:
@@ -1164,16 +1189,30 @@ def infer(prompt: str, model_name: str) -> Dict[str, Any]:
                         "activation": round(float(val), 4),
                     }
                 )
-    return {
-        "model_name": model_name,
-        "tokens": tokens,
-        "generated_text": "".join(t["text"] for t in tokens),
-        "attention_maps": attention_maps,
-        "neuron_activations": neuron_activations,
-        "n_layers": _n_layers(),
-        "d_mlp": _d_mlp(),
-        "d_model": _d_model(),
-    }
+    return attest_measurement(
+        {
+            # `model_requested` is what the caller asked for. It is deliberately
+            # not reported as the model that produced these numbers: this engine
+            # loads exactly one model (hardcoded "gpt2" in load()), so echoing the
+            # caller's string here claimed a model that never ran. Measured, before
+            # this change:
+            #
+            #   infer("Hello", "gpt2-large")["model_name"] -> "gpt2-large"
+            #   infer("Hello", "gpt2-large")["d_model"]    -> 768   (gpt2-small)
+            #
+            # and the dispatcher then stamped provenance="live" on top of it.
+            "model_requested": model_name,
+            "tokens": tokens,
+            "generated_text": "".join(t["text"] for t in tokens),
+            "attention_maps": attention_maps,
+            "neuron_activations": neuron_activations,
+            "n_layers": _n_layers(),
+            "d_mlp": _d_mlp(),
+            "d_model": _d_model(),
+        },
+        model_loaded=_loaded_model_id(),
+        model_requested=model_name,
+    )
 
 
 def _ensure_prompt(prompt: str) -> Optional[Dict[str, Any]]:

@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict
 
+from backend.core.provenance import pass_through, withhold
+
 PIPELINE_MODULES = {
     "ioi": ("backend.science.reproducibility.ioi_pipeline", "IOIReproductionPipeline"),
     "induction_heads": (
@@ -107,20 +109,44 @@ class Executor:
             fn = getattr(engine, name)
             res = await asyncio.to_thread(fn, *args, **kwargs)
             if isinstance(res, dict):
-                res.setdefault("provenance", "live")
-                res.setdefault("field_provenance", {
-                    str(key): "live" for key in res
-                    if key not in {"provenance", "field_provenance"}
-                })
-                return res
-            return {
-                "status": "ok",
-                "provenance": "live",
-                "field_provenance": {"status": "live", "result": "live"},
-                "result": res,
-            }
+                # Never infer `live` here.
+                #
+                # Was `res.setdefault("provenance", "live")` plus a
+                # `field_provenance` defaulting *every* key to live. So a
+                # returned `{"status": "unavailable"}` became a live
+                # measurement, and its `reason` field was relabelled live as
+                # well -- the explanation of why nothing was measured was itself
+                # marked as measured.
+                #
+                # `is_available()` is not the missing piece of evidence either: it
+                # says torch and transformers imported. It does not say a forward
+                # pass ran.
+                #
+                # The measurement layer now originates provenance (see
+                # backend/core/provenance.py). This only preserves what it said,
+                # and withholds when it said nothing.
+                return pass_through(res)
+            # A bare value carries no provenance of its own, so it cannot be
+            # presented as a measurement. Previously this wrapped it as
+            # `status: ok, provenance: live`, which meant a function returning
+            # None produced a live record asserting a successful result.
+            return withhold(
+                {
+                    "status": "unmeasured",
+                    "op": name,
+                    "result": res,
+                },
+                reason=(
+                    f"{name}() returned {type(res).__name__}, not a record. A bare "
+                    f"return value carries no provenance, so it cannot be "
+                    f"reported as a measurement."
+                ),
+            )
         except Exception as exc:
-            return {"status": "error", "op": name, "error": str(exc)[:500]}
+            return withhold(
+                {"status": "error", "op": name, "error": str(exc)[:500]},
+                reason=f"{name} raised {type(exc).__name__}: {exc}"[:300],
+            )
 
     # -- model ops ------------------------------------------------------
     async def ensure_model(self, model_name: str = "gpt2") -> Dict[str, Any]:
