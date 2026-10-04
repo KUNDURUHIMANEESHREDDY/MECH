@@ -11,6 +11,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+# The status vocabulary is imported, not re-spelled. This module used to
+# declare its own in a field comment -- `# PASS, REGRESSION, WARNING,
+# NOT_RUN` -- which named a status it never produced (WARNING) and omitted
+# one it does produce (MEASURED).
+from .benchmark_status import MEASURED, NOT_RUN, PASS, REGRESSION
+
 
 @dataclass
 class GoldenBenchmarkTask:
@@ -49,14 +55,41 @@ class GoldenBenchmarkResult:
     current_runtime_ms: Optional[float]
     published_baseline_vram_gb: float
     current_vram_gb: Optional[float]
-    status: str  # PASS, REGRESSION, WARNING, NOT_RUN
+    # The real vocabulary is NOT_RUN / MEASURED / PASS / REGRESSION.
+    #
+    # This comment read `# PASS, REGRESSION, WARNING, NOT_RUN`, which was wrong
+    # twice over: WARNING was never produced by any code path, and MEASURED --
+    # the state this scheduler actually assigns to a measured-but-incomparable
+    # benchmark, at the line below -- was not listed. A reader trusting the
+    # contract would not have known MEASURED existed.
+    #
+    # Defined once in backend/validation/benchmark_status.py rather than restated
+    # per field, because this is the fourth place in the repository that had its
+    # own idea of what a benchmark status means.
+    status: str
     executed_at: str = field(default_factory=lambda: _dt.datetime.utcnow().isoformat() + "Z")
     measured: bool = False
     reason: Optional[str] = None
     # Set when the published baseline is not the same measurement, which is the
     # case for IOI: running the published circuit through this repo's harness
     # yields a lower figure than the published constant.
+    #
+    # `None` means *not established*, and `benchmark_status.is_comparable` treats
+    # that as NOT comparable. Fail-closed on purpose: an unestablished comparison
+    # is not a comparison.
     baseline_is_comparable: Optional[bool] = None
+    # The same question asked separately of wall-clock timing.
+    #
+    # This needed its own flag rather than reusing `baseline_is_comparable`,
+    # because the two comparability questions have different answers. Fidelity
+    # baselines here are published *metric* values that this harness may or may
+    # not compute the same way. Runtime baselines are hardware-specific figures
+    # from papers: 1200 ms for IOI, measured here at 77896 ms on an RTX 3050. No
+    # amount of fidelity comparability makes those two numbers comparable, and
+    # scoring the difference produced a "+6391% latency regression" against a
+    # different machine. Comparing local timings belongs to RegressionSuite,
+    # which compares against a golden record captured on this hardware.
+    runtime_is_comparable: Optional[bool] = None
     reference_circuit_fidelity_same_harness: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -74,6 +107,7 @@ class GoldenBenchmarkResult:
             "measured": self.measured,
             "reason": self.reason,
             "baseline_is_comparable": self.baseline_is_comparable,
+            "runtime_is_comparable": self.runtime_is_comparable,
             "reference_circuit_fidelity_same_harness":
                 self.reference_circuit_fidelity_same_harness,
             "provenance": "live" if self.measured else "unavailable",
@@ -147,7 +181,7 @@ class ValidationBenchmarkScheduler:
                 current_runtime_ms=None,
                 published_baseline_vram_gb=bm.published_baseline_vram_gb,
                 current_vram_gb=None,
-                status="NOT_RUN",
+                status=NOT_RUN,
                 measured=False,
                 reason=(
                     "No measurement pipeline is implemented for this "
@@ -169,7 +203,7 @@ class ValidationBenchmarkScheduler:
                 current_runtime_ms=None,
                 published_baseline_vram_gb=bm.published_baseline_vram_gb,
                 current_vram_gb=None,
-                status="NOT_RUN",
+                status=NOT_RUN,
                 measured=False,
                 reason=f"Pipeline raised: {type(exc).__name__}: {exc}",
             )
@@ -186,7 +220,7 @@ class ValidationBenchmarkScheduler:
                 current_runtime_ms=measured.get("runtime_ms"),
                 published_baseline_vram_gb=bm.published_baseline_vram_gb,
                 current_vram_gb=None,
-                status="NOT_RUN",
+                status=NOT_RUN,
                 measured=False,
                 reason=measured.get("reason", "No fidelity was produced."),
                 baseline_is_comparable=measured.get("baseline_is_comparable"),
@@ -200,9 +234,9 @@ class ValidationBenchmarkScheduler:
         # and the run is reported as measured-but-incomparable.
         if baseline_comparable:
             threshold = bm.published_baseline_fidelity * 0.95
-            status = "PASS" if fidelity >= threshold else "REGRESSION"
+            status = PASS if fidelity >= threshold else REGRESSION
         else:
-            status = "MEASURED"
+            status = MEASURED
 
         return GoldenBenchmarkResult(
             benchmark_id=bm.benchmark_id,
@@ -218,12 +252,34 @@ class ValidationBenchmarkScheduler:
             measured=True,
             reason=measured.get("reason"),
             baseline_is_comparable=baseline_comparable,
+            # Carried through from `_measure` rather than derived here, so the
+            # pipeline that knows where the baseline came from is the one that
+            # says whether it is comparable. Default is `None`, which
+            # `benchmark_status.is_comparable` treats as not comparable.
+            runtime_is_comparable=measured.get("runtime_is_comparable"),
             reference_circuit_fidelity_same_harness=measured.get(
                 "reference_same_harness"),
         )
 
     def _measure(self, pipeline: str) -> Dict[str, Any]:
-        """Run a real pipeline and return what it measured."""
+        """Run a real pipeline and return what it measured.
+
+        Every return includes `runtime_is_comparable`. These published runtime
+        baselines were measured on the authors' hardware -- 1200 ms for IOI,
+        measured here at 77896 ms on an RTX 3050 -- so none of them is comparable
+        to a local run and each says so explicitly rather than leaving the field
+        unset and hoping a consumer defaults sensibly.
+        """
+
+        runtime_not_comparable = {
+            "runtime_is_comparable": False,
+            "runtime_comparability_reason": (
+                "The published runtime baseline was measured on unspecified "
+                "hardware. A local wall-clock figure is not comparable to it. "
+                "Local timing regression belongs to RegressionSuite, which "
+                "compares against a golden record captured on this machine."
+            ),
+        }
         import time as _time
 
         started = _time.perf_counter()
@@ -243,6 +299,7 @@ class ValidationBenchmarkScheduler:
                 # The published 0.88 is not what this harness computes for the
                 # published circuit, so no PASS/REGRESSION verdict is issued.
                 "baseline_is_comparable": False,
+                **runtime_not_comparable,
                 "reference_same_harness": reference,
                 "reason": (
                     "Measured on live weights. The published baseline is not "
@@ -262,6 +319,7 @@ class ValidationBenchmarkScheduler:
                 "fidelity": metrics.get("induction_score"),
                 "runtime_ms": round((_time.perf_counter() - started) * 1000, 2),
                 "baseline_is_comparable": False,
+                **runtime_not_comparable,
                 "reference_same_harness": None,
                 "reason": (
                     "Measured on live weights. The registry baseline is a "
@@ -286,6 +344,7 @@ class ValidationBenchmarkScheduler:
                 # under a setup this harness does not reproduce, so no verdict is
                 # issued against it.
                 "baseline_is_comparable": False,
+                **runtime_not_comparable,
                 "reference_same_harness": None,
                 "reason": (
                     "Measured on live weights. The dominant MLP layer was "
