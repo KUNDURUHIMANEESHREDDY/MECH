@@ -978,15 +978,41 @@ per-sample traces forward. `run_benchmarks.py` now drives it, and:
 - exits non-zero when nothing was measured, and `FIXTURE` never counts as a
   measurement.
 
-Measured on this machine (RTX 3050 6GB, gpt2, seed 42):
+Measured on this machine (RTX 3050 6GB, gpt2, seed 42). **This table is a
+composite of two runs, not the output of any single run** — the split is stated
+below because the first attempt did not produce it:
 
 ```
-PASS       2    ioi, induction_heads
-NOT_RUN    4    greater_than, copy_task, arithmetic, factual_recall
-ERROR      0
+first attempt                      after re-running the two that errored
+PASS       1    ioi                PASS       2    ioi, induction_heads
+NOT_RUN    3    ...                NOT_RUN    4    greater_than, copy_task,
+ERROR      2    induction_heads,                arithmetic, factual_recall
+               greater_than       ERROR      0
 ```
 
-`induction_heads` measured `induction_score = 0.6654`. `greater_than` is `NOT_RUN`
+`induction_heads` measured `induction_score = 0.6654` at the pipeline's default
+`n_sequences=12`. That figure deserves its own caveat, because the same benchmark
+reports a different number elsewhere and the difference is not meaningful:
+
+| caller | `n_sequences` | `induction_score` |
+|---|---|---|
+| `run_benchmarks.py` → `BenchmarkRunner` | 12 (default) | 0.6654 |
+| validation suite → `ValidationBenchmarkScheduler` | 10 (explicit) | 0.6695 |
+
+Both are deterministic for their parameters — repeated runs agree exactly. But
+across seeds at `n_sequences=12` the score moves:
+
+```
+seed=42  0.6654      seed=43  0.6506      seed=44  0.6636      spread 0.0148
+```
+
+So the 0.0041 gap between the two entry points is **well inside the 0.0148
+seed-to-seed spread**, and neither output says so: each reports a bare point
+estimate while `BenchmarkResult` already carries `confidence_interval_*` fields
+that are `None` here. A single-seed figure from this benchmark should be read as
+roughly `0.665 ± 0.015`, not as four decimal places of knowledge.
+
+`greater_than` is `NOT_RUN`
 on its merits — GPT-2 small does not perform the comparison on that template.
 `copy_task`, `arithmetic` and `factual_recall` refuse because they previously
 returned hardcoded accuracies (0.92, 0.45, 0.75 …) that were written into
@@ -1003,10 +1029,12 @@ broken".
 
 `tests/pytest/test_entry_points.py` guards the class of defect: it resolves every
 local import in the repository against the filesystem and fails on any that cannot
-be found, so a new dead entry point cannot be added without tripping it. The two
-`backend.benchmarks.*` imports that remain are declared there explicitly, with the
-reason each is tolerated, and a companion test fails if a declared exception is
-fixed but not removed from the list.
+be found, so a new dead entry point cannot be added without tripping it.
+`EXPECTED_UNRESOLVED` is now **empty** — both `backend.benchmarks.*` imports were
+repointed at `backend.benchmarking` — so any unresolvable local import is now a
+test failure rather than a tolerated exception. A companion test fails if a
+declared exception is fixed but left in the list, so the allowance cannot rot into
+a standing permission.
 
 ### 7. Frontend cleanup
 

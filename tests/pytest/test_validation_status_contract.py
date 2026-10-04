@@ -246,6 +246,109 @@ def test_health_score_is_none_when_nothing_was_comparable(dashboard, monkeypatch
     assert report.to_dict()["platform_health_score"] is None
 
 
+#: The formula this replaced, verbatim. `platform_health_score` was this, with no
+#: guard at all.
+LEGACY_HEALTH_SCORE = "max(0.0, 100.0 - (len(regressions) * 5.0))"
+
+
+def test_the_legacy_health_formula_really_would_have_said_100(dashboard,
+                                                             monkeypatch):
+    """Executable proof of the claim, because the prose version was a prediction.
+
+    The commit that fixed this said the old code "returned a perfect 100.0 for a
+    suite in which nothing had been checked". That was **derived, not observed**:
+    the pre-fix code path was never executed. What was measured was that the
+    detector, once comparability was honoured, produced zero regression events,
+    and the old formula was then evaluated by hand in a probe.
+
+    The prediction is sound -- the old line was unconditional -- but a claim in a
+    commit message is not evidence, and this session had already produced one
+    claim of that kind that turned out to be a measurement artefact. So the suite
+    now demonstrates it: run the real detector against an incomparable suite, then
+    evaluate the legacy formula against that real output, and assert the number it
+    would have produced.
+
+    If this test ever fails because `LEGACY_HEALTH_SCORE` no longer describes the
+    old behaviour, that is the signal to correct the historical record rather than
+    to adjust the constant.
+    """
+    monkeypatch.setattr(dashboard.scheduler, "execute_validation_suite",
+                        lambda: [_result(baseline_is_comparable=False,
+                                         runtime_is_comparable=False,
+                                         status=MEASURED)])
+
+    results = dashboard.scheduler.execute_validation_suite()
+    regressions = dashboard.detector.analyze_results(results)
+
+    assert regressions == [], "precondition: no regression event was raised"
+    legacy = max(0.0, 100.0 - (len(regressions) * 5.0))
+
+    assert legacy == 100.0, (
+        f"the legacy formula {LEGACY_HEALTH_SCORE} produced {legacy} for a suite "
+        f"in which no comparison was possible -- this is the false 100 the "
+        f"change removed")
+
+    # And the shipped code disagrees with it, which is the whole point.
+    report = dashboard.run_continuous_validation()
+    assert report.platform_health_score is None
+    assert report.platform_health_score != legacy
+
+
+def test_the_legacy_health_formula_really_would_have_said_80(dashboard,
+                                                            monkeypatch):
+    """Same, for the false 80 the detector fix removed.
+
+    The real shape was two measured benchmarks, each raising a fidelity event and
+    a runtime event:
+
+        reg_fid_01  bm_ioi  Fidelity  -17.73%   HIGH
+        reg_rt_01   bm_ioi  Runtime   +6391.35%  MEDIUM
+        reg_fid_02  bm_ind  Fidelity  -28.78%   HIGH
+        reg_rt_02   bm_ind  Runtime   +716.40%   MEDIUM
+
+    Four events, and `100 - (4 * 5)` = 80. The four events were observed; the 80
+    was computed from them rather than run, so it is derived here too.
+
+    Reproduced with two comparable results that each miss on both axes. The first
+    attempt used a single result and got one event, because its runtime was
+    *faster* than the baseline -- the count only reaches four when both benchmarks
+    regress on both metrics, which is what the real suite did.
+    """
+    def regressing(benchmark_id, name, fidelity, runtime_ms):
+        return _result(
+            benchmark_id=benchmark_id, name=name,
+            current_fidelity=fidelity,
+            current_runtime_ms=runtime_ms,
+            baseline_is_comparable=True, runtime_is_comparable=True,
+            status=REGRESSION,
+        )
+
+    monkeypatch.setattr(dashboard.scheduler, "execute_validation_suite", lambda: [
+        # IOI-shaped: 0.724 against a published 0.880, and a local wall-clock far
+        # above the paper's 1200 ms.
+        regressing("bm_ioi", "IOI Circuit Recovery", 0.724, 77896.15),
+        # Induction-heads-shaped: 0.6695 against 0.940, 17144 ms against 2100 ms.
+        regressing("bm_ind", "Induction Head Sequence Repeater", 0.6695, 17144.33),
+    ])
+
+    results = dashboard.scheduler.execute_validation_suite()
+    regressions = dashboard.detector.analyze_results(results)
+
+    assert len(regressions) == 4, (
+        f"expected the 4 events this test documents, got {len(regressions)}: "
+        f"{[(e.metric_type, round(e.percentage_change, 1)) for e in regressions]}")
+    kinds = sorted(e.metric_type for e in regressions)
+    assert kinds == ["Fidelity", "Fidelity", "Runtime Latency", "Runtime Latency"]
+
+    legacy = max(0.0, 100.0 - (len(regressions) * 5.0))
+    assert legacy == 80.0, legacy
+
+    report = dashboard.run_continuous_validation()
+    assert report.platform_health_score == 80.0, (
+        "these comparisons are genuinely comparable, so the score is derivable "
+        "and four real regressions do cost 20 points")
+
+
 def test_health_score_is_derived_when_something_was_comparable(
         dashboard, monkeypatch):
     # status=PASS, matching what the scheduler assigns to a comparable benchmark
