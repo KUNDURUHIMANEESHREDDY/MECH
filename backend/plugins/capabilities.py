@@ -41,6 +41,53 @@ _NETWORK_EVENTS = (
 )
 
 # Audit events that mean "this is about to start another program".
+#
+# These are **audit event names, not Python function names**, and the hook matches
+# them by exact equality (`if event in process_events`). The distinction is not
+# cosmetic, and the most important case is `os.exec`:
+#
+#     os.execv(...)   raises the audit event "os.exec"
+#     os.execl(...)   raises the audit event "os.exec"
+#     os.execve(...)  raises the audit event "os.exec"
+#
+# One entry covers every exec variant. Verified on this host with a spy audit
+# hook: `os.execv` produced exactly `['os.exec']`. So "correcting" this entry to
+# `os.execv` -- which looks like a typo fix -- would silently stop blocking every
+# exec variant. `test_process_denylist_covers_the_platform_spawn_apis` is what
+# catches that.
+#
+# Two further notes on the entries:
+#
+# * `os.startfile` is the Windows-native way to launch a program, and it does
+#   raise a matching audit event (plus `os.startfile/2`), so it is genuinely
+#   blocked here. It was previously unverified on any platform, on a platform
+#   where it is the most obvious escape.
+# * `os.fork`, `os.forkpty`, `os.posix_spawn` and `pty.spawn` cannot be exercised
+#   on Windows because those APIs do not exist there, so their coverage rests on
+#   the POSIX run. `os.fork1` could not be confirmed to correspond to any audit
+#   event CPython raises; it is harmless to keep and is listed so the policy is
+#   explicit rather than accidental.
+# `os.fork1` could not be confirmed to correspond to any audit event CPython
+# raises; it is harmless to keep and is listed so the policy is explicit rather
+# than accidental.
+#
+# One measured gap, deliberately left to the static layer rather than papered
+# over. On Windows `subprocess.Popen` raises a second, private event:
+#
+#     subprocess.Popen  ->  ['subprocess.Popen', '_winapi.CreateProcess']
+#
+# `_winapi.CreateProcess` is not on this list, and the hook does not block it --
+# calling it under an installed hook reaches the OS layer rather than raising
+# CapabilityViolation. So a plugin that could reach `_winapi` could spawn a
+# process through the back door. It cannot: `PluginSandbox.analyze_ast` rejects
+# `import _winapi` before any code runs ("Importing module '_winapi' is forbidden
+# in sandbox"), which is the defence-in-depth split this module's docstring
+# describes -- the audit hook is the dynamic layer, the AST scan the static one,
+# and neither is redundant.
+#
+# That makes the import ban load-bearing, so it is asserted rather than assumed.
+# `test_the_private_winapi_escape_is_blocked_by_the_static_gate` checks both
+# halves, and fails deliberately if the hook ever starts covering it.
 _PROCESS_EVENTS = (
     "subprocess.Popen",
     "os.system",
