@@ -1,0 +1,88 @@
+{
+  "elapsed_s": 201.7,
+  "audit": {
+    "status": "completed",
+    "provenance": "live",
+    "field_provenance": {
+      "status": "live",
+      "n_seeds_requested": "live",
+      "n_seeds_used": "live",
+      "pooled": "live",
+      "per_seed": "live",
+      "reason": "live"
+    },
+    "validation_eligible": true,
+    "publication_eligible": true,
+    "metric": "circuit_faithfulness",
+    "n_seeds_requested": 5,
+    "n_seeds_run": 5,
+    "n_seeds_live": 5,
+    "n_prompts_per_seed": 20,
+    "confidence": 0.95,
+    "pooled": {
+      "n_seeds_requested": 5,
+      "n_seeds_used": 5,
+      "seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "values": [
+        0.7206,
+        0.7298,
+        0.8331,
+        0.6934,
+        0.7796
+      ],
+      "mean": 0.7513,
+      "sd": 0.055338,
+      "observed_range": [
+        0.6934,
+        0.8331
+      ],
+      "ci_low": 0.682589,
+      "ci_high": 0.820011,
+      "half_width": 0.068711,
+      "method": "Student t interval at 95% on 5 seed-level means, df=4, t=2.7764",
+      "target": "circuit_faithfulness pooled across seeds",
+      "derived": true,
+      "reason": null,
+      "discarded": []
+    },
+    "per_seed": [
+      {
+        "seed": 42,
+        "status": "completed",
+        "provenance": "live",
+        "value": 0.7206
+      },
+      {
+        "seed": 43,
+        "status": "completed",
+        "provenance": "live",
+        "value": 0.7298
+      },
+      {
+        "seed": 44,
+        "status": "completed",
+        "provenance": "live",
+        "value": 0.8331
+      },
+      {
+        "seed": 45,
+        "status": "completed",
+        "provenance": "live",
+        "value": 0.6934
+      },
+      {
+        "seed": 46,
+        "status": "completed",
+        "provenance": "live",
+        "value": 0.7796
+      }
+    ],
+    "reason": null
+  }
+}

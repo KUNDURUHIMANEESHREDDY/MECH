@@ -367,7 +367,8 @@ about the project.
 | Feature | Reality |
 |---------|---------|
 | SAE / feature dictionaries | Config-only. Weights are never fetched; feature indices and activations are hardcoded (`interpretability/sae/loader.py:61`). |
-| Tuned lens | No trained translators; the "affine translation" is `+0.12` on a number. |
+| Tuned lens | **Now real, trained and measured.** Per-layer **diagonal** affine translators (18,432 params) fitted against live GPT-2 by minimising KL to the model's own final-layer distribution. Held-out mean KL reduction **62.2%** vs 71.6% in-sample, 12/12 layers improved out of sample. Not the paper's full affine map — see below. |
+| Logit lens | **Now real.** It projected through `backend/runtime/logits.py`, which never loaded a model: `residual_norm = 10.0 + layer*1.5`, `top_prediction = " Paris" if layer >= 6`, `top_logit = 4.5 + layer*0.8`, `entropy = 2.5 - layer*0.15`, and no provenance field at all. `LogitLens.project` also appended a hardcoded runner-up `{"token": " France", "logit": top_logit - 1.2, "probability": 0.12}`. Both now project through `gpt2_engine` over a real forward pass. |
 | Causal tracing / attribution patching | Closed-form linear formulas, not measured gradients (`interpretability/causal/causal_tracing.py:19`). |
 | Path patching | Was self-documented as simulated. **Now real** — it uses `live_measure.path_patch` (frozen sender plus swapped receiver in one pass) and refuses rather than reporting edges it cannot justify. |
 | ACDC fidelity | **Now real, measured end to end.** The analytic formula that could never fall below 0.90 is gone; fidelity comes from `live_measure.circuit_fidelity` over the pruned circuit. See §4 for a head-vs-neuron bug that made the earlier version measure MLP neurons while labelling them `L{layer}H{head}`. |
@@ -620,16 +621,114 @@ multi-template averaging, and a path-patching pass. The injection-recovery machi
       passes an `n_samples_override`, so every task uses its full `dataset_size` (IOI 100,
       induction-heads 200, up to 500). The `6` came from a recorded result emitted by the
       reference-derived path that has since been deleted, not from a live request.
-- [ ] Still to do: the CI is a Wilson interval over per-prompt booleans, which is the right
-      shape, but it is computed per task with **no pooling across seeds**. The pipeline exposes
-      `run_stability_audit(n_seeds=5)`; until a run reports across seeds rather than one sample,
-      a single 100-prompt draw is still one draw.
+- [x] ~~No pooling across seeds.~~ `statistics.seed_pooling.pool_across_seeds` pools per-seed values into a
+      mean with a **Student-t interval on the seed means** (`df = n_seeds - 1`), and
+      `BenchmarkResult` now carries `n_seeds`, `seeds` and `per_seed_values` so a reported score
+      states how many independent draws it rests on. `n_samples` counts prompts and was never able
+      to answer that: ten prompts from one draw is not ten observations.
+
+      The seed is the unit of variation, not the prompt. Prompts generated under one seed share
+      that seed's name set and RNG stream, so a Wilson interval over pooled prompts understates
+      seed-to-seed spread. With `n_seeds = 5` the t quantile is 2.776 against z's 1.960 — a 42%
+      wider interval, which is the honest number at that sample size.
+
+      **Measured, 5 seeds x 20 prompts, live GPT-2 weights** (`docs/results/ioi_seed_audit.json`,
+      201.7 s):
+
+      | seed | 42 | 43 | 44 | 45 | 46 |
+      |---|---|---|---|---|---|
+      | `circuit_faithfulness` | 0.7206 | 0.7298 | 0.8331 | 0.6934 | 0.7796 |
+
+      pooled mean **0.7513**, sd **0.055338**, 95% CI **[0.6826, 0.8200]**, observed range
+      0.6934–0.8331.
+
+      That is the point of the item. The single-draw figure quoted elsewhere in this README, 0.724,
+      sits inside a **14-point** seed-to-seed spread. Whatever the seed does, it moves the headline
+      number by more than any within-draw interval would suggest.
+
+      Caveats stated rather than buried: the budget is 5 seeds of 20 prompts, not 5 of 100, so the
+      interval is wide largely *because* `n_seeds = 5` — `t(df=4)` is doing the work. The published
+      0.88 baseline lies outside this interval, consistent with the already-documented same-harness
+      discrepancy below; it remains not a like-for-like comparison. Pooling is opt-in
+      (`n_seeds > 1`) because five IOI seeds is five times the cost, and only IOI implements it —
+      induction and greater-than are single-draw and now say so.
+
+- [x] ~~Multi-template averaging was computed but never read, and never tested.~~ The pipeline
+      rotates 8 prompt frames deterministically (so every frame is covered at any `n`, evenly) and
+      tallies faithfulness per frame. Two things were wrong with how that was reported:
+
+      - `cross_template_consistent` was one boolean that was `False` both when frames *disagreed*
+        and when agreement could not be *tested* — a result resting on a single frame was
+        indistinguishable from a measured disagreement. It is now joined by
+        `cross_template_consistency_measured`, so absence of evidence and evidence of absence are
+        separate claims. The verdict itself stays fail-closed.
+      - A frame counted toward the comparison on **one** usable prompt. One observation is not a
+        frame-level estimate; comparing it against a five-prompt mean makes the spread a function
+        of which prompts happened to work. Frames now need `MIN_USABLE_PROMPTS_PER_TEMPLATE = 3`
+        usable prompts, and excluded frames are listed with their counts rather than dropped.
+
+      The `0.25` agreement tolerance was a bare inline constant with no stated basis; it is now
+      named, documented and reported as `cross_template_tolerance`.
+
+      **Measured, 40 prompts over 8 frames, live GPT-2 weights** (`docs/results/ioi_template_audit.json`,
+      92.5 s). Aggregate `circuit_faithfulness` **0.7416**.
+
+      | frame | place/verb/item | usable | faithfulness |
+      |---|---|---|---|
+      | 0 | store/gave/drink | 5 | 0.802 |
+      | 1 | park/gave/ball | 5 | 0.7152 |
+      | 2 | library/offered/book | 5 | 0.6169 |
+      | 3 | kitchen/passed/towel | 5 | 0.7445 |
+      | 4 | market/bought/apple | **1** | (1.0 — excluded) |
+      | 5 | garden/sent/letter | 5 | 0.7017 |
+      | 6 | school/showed/photo | 5 | 0.7894 |
+      | 7 | beach/handed/shell | 5 | 0.7697 |
+
+      7 of 8 frames comparable, spread **0.1851**, within the 0.25 tolerance →
+      `cross_template_consistent: true`.
+
+      **This corrects a wrong reading I published mid-task.** Including frame 4 gave a spread of
+      **0.3831** and the verdict "the frames disagree, the aggregate is not a statement about
+      IOI". That number was an artifact of the defect above: a single usable prompt scoring 1.0,
+      compared against five-prompt means. With it excluded the frames agree. The frame is still
+      reported, because a frame that yields almost nothing usable is itself a finding — and it is
+      the weakest part of this table, not the strongest.
 
 ### 6. Implement or delete the stubs
 
 Sparse autoencoders, tuned lens, attribution patching and path patching are currently
 placeholders with convincing-looking output. Either implement them against real weights or
 remove them — a stub that returns `0.94` is worse than an honest `unavailable`.
+
+**The tuned lens is no longer on this list.** It used to add a flat `+0.12` to the top-token
+probability and report `affine_translation_applied: True`. It now trains real translators.
+Measured, live GPT-2 small, 15 calibration prompts, 300 Adam steps
+(`docs/results/tuned_lens_training.json`, 634 s):
+
+| | mean KL reduction | layers improved |
+|---|---|---|
+| in-sample (12 prompts, 81 tokens) | 71.57% | 12 / 12 |
+| **held out (3 unseen prompts)** | **62.22%** | **12 / 12** |
+
+Per layer, held-out reduction ranges from 37.0% (layer 2) to 88.1% (layer 12).
+
+Four caveats, stated rather than buried:
+
+- **It is the diagonal variant.** The translator is a per-dimension scale and shift,
+  `2 × d_model` parameters per layer. The tuned-lens paper uses a full affine map — ~590k
+  parameters per layer for d=768, roughly 32× the capacity. Every payload carries
+  `translator_kind: "diagonal_affine"` precisely so these figures cannot be quoted as "the
+  tuned lens".
+- **The calibration set is tiny.** 81 tokens. A published tuned lens uses millions. The
+  held-out split exists precisely because an in-sample reduction on 81 tokens is close to
+  unfalsifiable — a diagonal map can drive it toward zero by memorising. The 62.22% held out
+  against 71.57% in-sample is the number that means something.
+- **A per-prompt projection is not a mechanism.** `project()` returns a layer projection for
+  one prompt. Nothing here identifies a circuit.
+- **Training must run.** There are no bundled translator weights and no default weight file,
+  so `TunedLens()` starts untrained and reports `provenance: unavailable` until `train()` has
+  fitted against the model actually in front of it. There is no path that projects through a
+  learned map that was never trained.
 
 **Attribution patching is no longer on this list.** It had been a placeholder that could not have
 found anything: it read a neuron dimension as if it were a head, read token position 0 (identical

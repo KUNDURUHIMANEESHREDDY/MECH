@@ -1,0 +1,317 @@
+{
+  "elapsed_s": 35.4,
+  "run": {
+    "pipeline": "SAEReproductionPipeline",
+    "status": "completed",
+    "provenance": "live",
+    "field_provenance": {
+      "reconstruction_mse": "live",
+      "train_reconstruction_mse": "live",
+      "held_out_fraction": "live",
+      "l0_mean_active_features": "live",
+      "requested_k": "live",
+      "dictionary_size": "live",
+      "activation_variance": "live",
+      "normalized_mse": "live",
+      "dead_feature_fraction": "live",
+      "n_activations": "live",
+      "n_features": "live",
+      "topk_k": "live",
+      "top_activating_tokens": "live",
+      "training_history": "live",
+      "monosemanticity_scored": "live",
+      "monosemanticity_reason": "live"
+    },
+    "mock_mode": false,
+    "validation_eligible": false,
+    "publication_eligible": false,
+    "model_id": null,
+    "autoencoder": "top_k_sae",
+    "observed_metrics": {
+      "reconstruction_mse": 11687.22363281,
+      "train_reconstruction_mse": 7838.4921875,
+      "held_out_fraction": 0.2002,
+      "l0_mean_active_features": 16.0,
+      "requested_k": 16,
+      "dictionary_size": 64,
+      "activation_variance": 38.4744873,
+      "normalized_mse": 303.765546,
+      "dead_feature_fraction": 0.4688,
+      "n_activations": 205,
+      "n_features": 64,
+      "topk_k": 16,
+      "top_activating_tokens": [
+        {
+          "feature": 24,
+          "top_tokens": [
+            {
+              "token": "@",
+              "activation": 238.2357
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 48,
+          "top_tokens": [
+            {
+              "token": "}",
+              "activation": 232.618
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 9,
+          "top_tokens": [
+            {
+              "token": "K",
+              "activation": 214.7917
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 6,
+          "top_tokens": [
+            {
+              "token": "K",
+              "activation": 191.1019
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 31,
+          "top_tokens": [
+            {
+              "token": "@",
+              "activation": 176.3536
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 7,
+          "top_tokens": [
+            {
+              "token": "\ufffd",
+              "activation": 174.3331
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 52,
+          "top_tokens": [
+            {
+              "token": "x",
+              "activation": 170.1821
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 62,
+          "top_tokens": [
+            {
+              "token": "}",
+              "activation": 169.4115
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 5,
+          "top_tokens": [
+            {
+              "token": "\ufffd",
+              "activation": 156.1444
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 11,
+          "top_tokens": [
+            {
+              "token": ",",
+              "activation": 154.9768
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 15,
+          "top_tokens": [
+            {
+              "token": ",",
+              "activation": 133.0363
+            }
+          ],
+          "is_dead_on_holdout": false
+        },
+        {
+          "feature": 53,
+          "top_tokens": [
+            {
+              "token": ",",
+              "activation": 124.044
+            }
+          ],
+          "is_dead_on_holdout": false
+        }
+      ],
+      "training_history": [
+        {
+          "step": 0,
+          "train_mse": 30050.33398438
+        },
+        {
+          "step": 375,
+          "train_mse": 8240.359375
+        },
+        {
+          "step": 750,
+          "train_mse": 7972.65185547
+        },
+        {
+          "step": 1125,
+          "train_mse": 7913.9609375
+        },
+        {
+          "step": 1500,
+          "train_mse": 7874.25097656
+        },
+        {
+          "step": 1875,
+          "train_mse": 7859.13671875
+        },
+        {
+          "step": 2250,
+          "train_mse": 7849.95605469
+        },
+        {
+          "step": 2625,
+          "train_mse": 7843.18847656
+        },
+        {
+          "step": 2999,
+          "train_mse": 7838.51123047
+        }
+      ],
+      "monosemanticity_scored": false,
+      "monosemanticity_reason": "Not scored. A monosemanticity score needs a stated interpretability criterion evaluated against an independent judge; max-activation token attribution is not that, and inventing a scalar from it would repeat the defect this pipeline previously had. The per-feature tokens below are measurements of which tokens maximise each feature, and nothing more."
+    },
+    "corpus": {
+      "dataset_name": "MECH repository documentation text (README.md and backend module docstrings). NOT a natural-language corpus.",
+      "corpus_is_documentation_text": true,
+      "corpus_licence": "Same licence as this repository. It is project documentation, which is why it was available offline.",
+      "corpus_chars": 200000,
+      "corpus_sha256": "3e94a9b849db9c6d6563ca27c52b7dd73fa8626b94be67dd4bf557aabe9bff60",
+      "corpus_files": [
+        {
+          "path": "README.md",
+          "sha256": "94cf817cf92195449dc1d51822b5da516333dcb8dfafda0c525257618f18c85b",
+          "chars": 81130
+        },
+        {
+          "path": "backend/__init__.py",
+          "sha256": "3d4a782e6cc7657020cd7277c2f209efce4527a4ace63661af043bf82cb94509",
+          "chars": 186
+        },
+        {
+          "path": "backend/agents/__init__.py",
+          "sha256": "a17d1eabd13e7e1f100fd9d3b830fff60a4f76039d9f66ce6af029ff80950a08",
+          "chars": 966
+        },
+        {
+          "path": "backend/agents/critic.py",
+          "sha256": "d497e06c4f0bbbbbbe6889341b689811e9fb89bc902c9a30d35f6da344ebf170",
+          "chars": 17217
+        },
+        {
+          "path": "backend/agents/discoverer.py",
+          "sha256": "5632bb7a898356da865aa8e8f0d13ef5d20b8bc84accec7ec74caa34ab8bc12a",
+          "chars": 8366
+        },
+        {
+          "path": "backend/agents/evidence_policy.py",
+          "sha256": "4495cadeae6562ba5d167497c547c5ba7c74065d3419d2a555d12ca04f6731c1",
+          "chars": 5664
+        },
+        {
+          "path": "backend/agents/executor.py",
+          "sha256": "0258a535e506f23d73eebd83c97ef2b1dd3b3c343fdb0e91ec329fd765d1b43c",
+          "chars": 10054
+        },
+        {
+          "path": "backend/agents/inspector.py",
+          "sha256": "9d52acd8a0ccb442be6771ba5c8088dafc03f1481ab18954edaabb08eb4a7830",
+          "chars": 6311
+        },
+        {
+          "path": "backend/agents/llm/__init__.py",
+          "sha256": "95fcec6223fd1e35c52355aa288970e285fa23a8371e8eb8572da4a560ca5da2",
+          "chars": 199
+        },
+        {
+          "path": "backend/agents/llm/engine_base.py",
+          "sha256": "2413a50760c955d5c688d28495d24e12a3badf0e34efb5e83048871ca7e7e4c1",
+          "chars": 2736
+        },
+        {
+          "path": "backend/agents/llm/ollama_engine.py",
+          "sha256": "82b43d841586f665bd31071c6bfaafc9750924b881f2949d614083c5202720d0",
+          "chars": 6432
+        },
+        {
+          "path": "backend/agents/llm/openai_engine.py",
+          "sha256": "90b31c8131a0170bd7ace4f98a6742743e708dbf3dd921afc278fa75975f5d83",
+          "chars": 7143
+        },
+        {
+          "path": "backend/agents/llm/prompts.py",
+          "sha256": "f65fbdf3d7077d954e3253e190ccbc1c840bb3e870f3c9ad32c690e4a79777a1",
+          "chars": 3689
+        },
+        {
+          "path": "backend/agents/planner.py",
+          "sha256": "066b5076b1dd2ffece1a7090c82b90fd1b3eed9088790f8b0449fff77999de1c",
+          "chars": 8626
+        },
+        {
+          "path": "backend/agents/research_society.py",
+          "sha256": "167b2ceec0cda8a6e93905bf0267b8222739be28fa0c73adc1cf2750605c82cf",
+          "chars": 6710
+        },
+        {
+          "path": "backend/agents/scribe.py",
+          "sha256": "e78f3c607983b5d231e6c9f1f5046307f027e21ea7657245e68145c37cda5dde",
+          "chars": 17123
+        },
+        {
+          "path": "backend/agents/society.py",
+          "sha256": "739aa4d8d496ef2ba55a8d1751ba7c8b5eb253f8d5878ffd57a8fe10b73d2789",
+          "chars": 16527
+        },
+        {
+          "path": "backend/analysis/__init__.py",
+          "sha256": "3d47978b625edd235271f7248bfffe776f3b6139645d7a8f577da21152fc6e5e",
+          "chars": 294
+        },
+        {
+          "path": "backend/analysis/data_loader.py",
+          "sha256": "89cc5c711ac4f43978e956760ebb48849bf3c8f13ee2b5ea719d6a99f2674552",
+          "chars": 5499
+        }
+      ],
+      "corpus_file_count": 19,
+      "limitation": "Technical documentation, not natural prose. Features and attributions learned here describe technical vocabulary and must not be presented as findings about what GPT-2 represents in general."
+    },
+    "seed": 42,
+    "steps": 3000,
+    "learning_rate": 0.001,
+    "reason": "Top-k SAE with 64 dictionary elements and k=16 trained for 3000 steps on 1024 real GPT-2 MLP post-activation vectors (205 held out). Reconstruction MSE 11687.2 on held-out activations, normalised 303.8 of activation variance, mean L0 16.0. Corpus is this repository's documentation text, so these are features of technical vocabulary, not findings about GPT-2 in general."
+  }
+}

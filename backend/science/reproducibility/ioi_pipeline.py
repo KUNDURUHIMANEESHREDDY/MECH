@@ -41,6 +41,78 @@ REFERENCE_ONLY_PATCH_HEAD = (9, 9)
 # reported as unmeasured instead.
 MIN_PROMPTS_FOR_MINIMALITY = 10
 
+#: Usable prompts a frame needs before its faithfulness may enter the
+#: cross-template comparison.
+#:
+#: Measured, 40 prompts over 8 frames (5 per frame): frame 4
+#: (market/bought/apple) yielded **one** usable prompt out of five, scored
+#: `circuit_faithfulness = 1.0`, and was then compared against frames with five.
+#: A one-prompt mean is not a frame-level estimate, and folding it into the
+#: spread makes the consistency verdict meaningless in both directions -- it can
+#: manufacture disagreement from a single lucky prompt, or agreement from a
+#: single unlucky one.
+#:
+#: Set to 3, below the 5-per-frame that a 40-prompt run gives, so a frame has to
+#: have lost some prompts before it is excluded, while a 1- or 2-prompt frame is
+#: never treated as comparable to a 5-prompt one. Frames that fail this are
+#: reported in `templates_excluded_insufficient` rather than dropped, because a
+#: frame that produced almost nothing usable is itself a finding.
+MIN_USABLE_PROMPTS_PER_TEMPLATE = 3
+
+
+#: How far apart two frames' faithfulness may sit and still count as agreement.
+#:
+#: This was a bare `0.25` inline with no stated basis, which made it
+#: indistinguishable from a tuned constant. The basis is the size of the effect
+#: being claimed: frame-level `circuit_faithfulness` for this pipeline sits around
+#: 0.70-0.83 (measured, 5 seeds x 20 prompts, 8 frames). A spread wider than a
+#: quarter of the scale means the discovered circuit works on some surface forms
+#: and not others, at which point the aggregate is not a statement about
+#: indirect object identification and the tolerance has done its job.
+#:
+#: It is a judgement call about what counts as generalisation, not a derived
+#: quantity. It is named, documented and reported in the metrics
+#: (`cross_template_tolerance`) so a reader can disagree with it explicitly
+#: rather than having to find it.
+CROSS_TEMPLATE_AGREEMENT_TOLERANCE = 0.25
+
+
+def _comparable_templates(per_template_report: List[Dict[str, Any]]):
+    """Split frame tallies into those usable for a cross-template comparison.
+
+    A frame's mean is a frame-level estimate only if enough of its prompts were
+    usable. Measured, 40 prompts over 8 frames: frame 4 yielded **one** usable
+    prompt out of five and scored `circuit_faithfulness = 1.0`. Folding that into
+    the spread made the pipeline report a 0.3831 disagreement against a 0.25
+    tolerance -- a disagreement manufactured by sampling rather than present in
+    the frames. Excluding it, the seven comparable frames span 0.1851 and agree.
+
+    Extracted as a function so the rule is testable without loading GPT-2, and so
+    a test cannot accidentally re-implement it and pass by agreeing with itself.
+
+    Returns `(compared, excluded)`. `excluded` is reported rather than dropped:
+    a frame that produced almost nothing usable is itself a finding, and hiding
+    it would make the aggregate look better-covered than it is.
+    """
+    with_value = [t for t in per_template_report
+                  if t.get("circuit_faithfulness") is not None]
+    compared = [t for t in with_value
+                if t.get("usable", 0) >= MIN_USABLE_PROMPTS_PER_TEMPLATE]
+    excluded = [{
+        "frame_id": t.get("frame_id"),
+        "template": t.get("template", ""),
+        "place": t.get("place", ""), "verb": t.get("verb", ""),
+        "item": t.get("item", ""),
+        "n": t.get("n"), "usable": t.get("usable"),
+        "circuit_faithfulness": t.get("circuit_faithfulness"),
+        "why": (f"{t.get('usable')} usable prompt(s) is below the "
+                f"{MIN_USABLE_PROMPTS_PER_TEMPLATE} required for a frame-level "
+                f"estimate, so this frame's value is not comparable to a "
+                f"fully-covered frame."),
+    } for t in with_value
+        if t.get("usable", 0) < MIN_USABLE_PROMPTS_PER_TEMPLATE]
+    return compared, excluded
+
 
 def _field_map(fields, provenance: str):
     return {str(field): provenance for field in fields}
@@ -349,6 +421,68 @@ class IOIReproductionPipeline:
         templates_with_usable = [
             t for t in per_template_report if t["circuit_faithfulness"] is not None
         ]
+        # A frame's mean is only a frame-level estimate if enough of its prompts
+        # were usable. One usable prompt out of five is a single observation, and
+        # comparing it against a five-prompt mean makes the spread -- and so the
+        # consistency verdict -- a function of which prompts happened to work.
+        templates_compared, templates_excluded_insufficient = (
+            _comparable_templates(per_template_report))
+        usable_faithfulness = [t["circuit_faithfulness"]
+                               for t in templates_compared]
+
+        # Whether cross-template agreement is *testable* is a separate fact from
+        # whether it *holds*. They used to be one boolean, which meant a result
+        # resting on a single frame was indistinguishable from a result measured
+        # across eight frames that disagreed -- both reported False. A single
+        # frame is not evidence of inconsistency; it is absence of evidence, and
+        # a consumer reading `cross_template_consistent: false` would reasonably
+        # conclude the circuit had been shown not to generalise.
+        #
+        # So the verdict stays fail-closed (False unless demonstrated), and a
+        # separate flag says whether there was anything to demonstrate with.
+        cross_template_measured = len(usable_faithfulness) >= 2
+        cross_template_spread = (
+            round(max(usable_faithfulness) - min(usable_faithfulness), 4)
+            if cross_template_measured else None)
+        cross_template_consistent = bool(
+            cross_template_measured
+            and cross_template_spread < CROSS_TEMPLATE_AGREEMENT_TOLERANCE
+        )
+        if not cross_template_measured:
+            cross_template_reason = (
+                f"Cross-template agreement could not be tested: "
+                f"{len(templates_compared)} of {len(per_template_report)} "
+                f"templates produced a usable measurement on at least "
+                f"{MIN_USABLE_PROMPTS_PER_TEMPLATE} prompts, and agreement "
+                f"needs at least 2. A figure from one frame is a statement "
+                f"about that frame, not about indirect object identification."
+                + (f" {len(templates_excluded_insufficient)} frame(s) were "
+                   f"excluded for too few usable prompts; see "
+                   f"`templates_excluded_insufficient`."
+                   if templates_excluded_insufficient else "")
+            )
+        elif cross_template_consistent:
+            cross_template_reason = (
+                f"Frame-level faithfulness spans {cross_template_spread} across "
+                f"{len(usable_faithfulness)} comparable templates, within the "
+                f"{CROSS_TEMPLATE_AGREEMENT_TOLERANCE} tolerance."
+            )
+        else:
+            best = max(templates_compared,
+                       key=lambda t: t["circuit_faithfulness"])
+            worst = min(templates_compared,
+                        key=lambda t: t["circuit_faithfulness"])
+            cross_template_reason = (
+                f"Frame-level faithfulness spans {cross_template_spread} across "
+                f"{len(usable_faithfulness)} comparable templates, above the "
+                f"{CROSS_TEMPLATE_AGREEMENT_TOLERANCE} tolerance. The aggregate "
+                f"is not a statement about IOI generally. "
+                f"Highest frame: {best['place']}/{best['verb']}/{best['item']} "
+                f"at {best['circuit_faithfulness']} over {best['usable']} usable "
+                f"prompts. Lowest frame: {worst['place']}/{worst['verb']}/"
+                f"{worst['item']} at {worst['circuit_faithfulness']} over "
+                f"{worst['usable']} usable prompts."
+            )
 
         n = len(prompts)
         minimality_measured = bool(circuit) and usable >= MIN_PROMPTS_FOR_MINIMALITY
@@ -374,15 +508,20 @@ class IOIReproductionPipeline:
             "circuit_minimality_measured": minimality_measured,
             "n_templates": len(per_template_report),
             "templates_with_usable_prompts": len(templates_with_usable),
-            "cross_template_consistent": (
-                # Consistent only if at least two distinct frames produced a
-                # usable measurement and they broadly agree. A result from one
-                # frame alone is a claim about that frame.
-                len(templates_with_usable) >= 2
-                and (max(t["circuit_faithfulness"] for t in templates_with_usable)
-                     - min(t["circuit_faithfulness"] for t in templates_with_usable))
-                < 0.25
-            ),
+            # How many of those are frame-level estimates rather than single
+            # observations. These two counts differ, and the difference is the
+            # finding: a frame that produced almost nothing usable is evidence
+            # about the frame, not a data point to average in.
+            "templates_compared": len(templates_compared),
+            "templates_excluded_insufficient": templates_excluded_insufficient,
+            "min_usable_prompts_per_template": MIN_USABLE_PROMPTS_PER_TEMPLATE,
+            "cross_template_consistent": cross_template_consistent,
+            # True only when there were at least two frames to compare. The
+            # verdict above is fail-closed; this says whether it was reachable.
+            "cross_template_consistency_measured": cross_template_measured,
+            "cross_template_spread": cross_template_spread,
+            "cross_template_reason": cross_template_reason,
+            "cross_template_tolerance": CROSS_TEMPLATE_AGREEMENT_TOLERANCE,
             "per_template": per_template_report,
             # The like-for-like reference. Both numbers come from identical code
             # on identical prompts, so `faithfulness_vs_reference_circuit` is a
@@ -732,10 +871,107 @@ class IOIReproductionPipeline:
             "model_id": self.adapter.spec.model_id
         }
 
-    def run_stability_audit(self, n_seeds: int = 5, model_variant: str = "small") -> List[Dict[str, Any]]:
-        """Runs the pipeline across multiple seeds to aggregate stability data."""
-        all_results = []
-        for i in range(n_seeds):
-            res = self.run(n_prompts=40, seed=42 + i, model_variant=model_variant)
-            all_results.append(res)
-        return all_results
+    #: Seeds for the stability audit are drawn from here upward. Exposed so a
+    #: caller can reproduce the exact set of draws rather than guessing at 42.
+    SEED_BASE = 42
+
+    #: Confidence level for the seed-level interval. 0.95, not a wider band:
+    #: the seed count is small, and widening the level would hide how few
+    #: independent draws the interval rests on.
+    SEED_POOL_CONFIDENCE = 0.95
+
+    def run_stability_audit(self, n_seeds: int = 5, model_variant: str = "small",
+                            n_prompts: int = 40,
+                            metric: str = "circuit_faithfulness") -> Dict[str, Any]:
+        """Run the pipeline across several seeds and pool the results.
+
+        This used to return a bare `List[Dict]` -- one result per seed and no
+        aggregation at all. Nothing consumed it, because a list of runs is not a
+        finding: a reader cannot tell a stable result from one that happened to
+        land well, and there was no interval and no seed count to judge it by.
+
+        `n_prompts` is a parameter rather than the hardcoded 40 it used to be, so
+        a caller can spend more prompts per seed instead of quietly getting 40.
+
+        Pooling is done by `statistics.seed_pooling`, which uses the seed as the
+        unit of variation: a Student-t interval on the seed-level values, not a
+        Wilson interval over the pooled prompts. Those bound different things,
+        and only the seed-level one accounts for seed-to-seed spread.
+        """
+        from backend.science.statistics.seed_pooling import pool_metric
+
+        if n_seeds < 1:
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "n_seeds_requested": n_seeds,
+                "n_seeds_run": 0,
+                "reason": f"n_seeds={n_seeds} was requested; there is nothing to pool.",
+            }
+
+        base_seed = self.SEED_BASE
+        seeds = [base_seed + i for i in range(n_seeds)]
+        results: List[Dict[str, Any]] = []
+
+        for seed in seeds:
+            res = self.run(n_prompts=n_prompts, seed=seed,
+                           model_variant=model_variant)
+            # Carry the seed onto the result so the pool can attribute each value
+            # to the draw that produced it. Without it the pooled spread cannot
+            # be traced back to any run.
+            if isinstance(res, dict):
+                res["seed"] = seed
+            results.append(res)
+
+        pool = pool_metric(
+            results,
+            metric=metric,
+            confidence=self.SEED_POOL_CONFIDENCE,
+            target=f"{metric} pooled across seeds",
+            bounds=(0.0, 1.0),
+        )
+
+        live = [r for r in results
+                if isinstance(r, dict) and r.get("provenance") == "live"]
+        unavailable = [r for r in results
+                       if not (isinstance(r, dict)
+                               and r.get("provenance") == "live")]
+
+        return {
+            "status": "completed" if live else "unavailable",
+            "provenance": "live" if live else "unavailable",
+            "field_provenance": _field_map(
+                ("status", "n_seeds_requested", "n_seeds_used", "pooled",
+                 "per_seed", "reason"),
+                "live" if live else "unavailable",
+            ),
+            "validation_eligible": bool(live),
+            "publication_eligible": bool(live),
+            "metric": metric,
+            "n_seeds_requested": n_seeds,
+            "n_seeds_run": len(results),
+            "n_seeds_live": len(live),
+            "n_prompts_per_seed": n_prompts,
+            "confidence": self.SEED_POOL_CONFIDENCE,
+            "pooled": pool.to_dict(),
+            "per_seed": [
+                {
+                    "seed": r.get("seed"),
+                    "status": r.get("status"),
+                    "provenance": r.get("provenance"),
+                    "value": (r.get("observed_metrics") or {}).get(metric)
+                             if isinstance(r, dict) else None,
+                }
+                for r in results
+            ],
+            "reason": (
+                None if pool.derived and not unavailable else
+                "Pooling is incomplete. See `pooled.reason` and `per_seed`: "
+                + (
+                    f"{len(unavailable)} of {len(results)} seeds did not run "
+                    "live, so their values are absent rather than zero."
+                    if unavailable else
+                    (pool.reason or "the pooled interval was withheld.")
+                )
+            ),
+        }

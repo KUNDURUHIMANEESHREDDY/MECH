@@ -14,6 +14,7 @@ from .statistical_protocol import StatisticalProtocol
 from .bayesian_frequentist import BayesianFrequentistComparison
 from .statistical_recommender import StatisticalRecommender
 from .statistical_quality import StatisticalQualityScore
+from .seed_pooling import SeedPool, pool_across_seeds, pool_metric
 
 __all__ = [
     "HypothesisTesting",
@@ -31,5 +32,8 @@ __all__ = [
     "StatisticalProtocol",
     "BayesianFrequentistComparison",
     "StatisticalRecommender",
-    "StatisticalQualityScore"
+    "StatisticalQualityScore",
+    "SeedPool",
+    "pool_across_seeds",
+    "pool_metric"
 ]

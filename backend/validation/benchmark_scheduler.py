@@ -169,7 +169,8 @@ class ValidationBenchmarkScheduler:
 
         return results
 
-    def _run_one(self, bm: GoldenBenchmarkTask) -> GoldenBenchmarkResult:
+    def _run_one(self, bm: GoldenBenchmarkTask,
+                 n_seeds: int = 1) -> GoldenBenchmarkResult:
         if bm.pipeline is None:
             return GoldenBenchmarkResult(
                 benchmark_id=bm.benchmark_id,
@@ -191,7 +192,7 @@ class ValidationBenchmarkScheduler:
             )
 
         try:
-            measured = self._measure(bm.pipeline)
+            measured = self._measure(bm.pipeline, n_seeds=n_seeds)
         except Exception as exc:  # noqa: BLE001
             return GoldenBenchmarkResult(
                 benchmark_id=bm.benchmark_id,
@@ -261,7 +262,7 @@ class ValidationBenchmarkScheduler:
                 "reference_same_harness"),
         )
 
-    def _measure(self, pipeline: str) -> Dict[str, Any]:
+    def _measure(self, pipeline: str, n_seeds: int = 1) -> Dict[str, Any]:
         """Run a real pipeline and return what it measured.
 
         Every return includes `runtime_is_comparable`. These published runtime
@@ -269,6 +270,13 @@ class ValidationBenchmarkScheduler:
         measured here at 77896 ms on an RTX 3050 -- so none of them is comparable
         to a local run and each says so explicitly rather than leaving the field
         unset and hoping a consumer defaults sensibly.
+
+        `n_seeds` is how many independent draws to pool. It defaults to 1, and
+        every return states the seed count it actually used. That is the point:
+        a single 100-prompt draw is still one draw, and the difference between
+        one draw and five has to be visible in the data rather than implied by
+        `n_samples`. Only IOI supports pooling today; the other pipelines are
+        single-draw and say so.
         """
 
         runtime_not_comparable = {
@@ -288,9 +296,34 @@ class ValidationBenchmarkScheduler:
             from backend.science.reproducibility.ioi_pipeline import (
                 IOIReproductionPipeline,
             )
+
+            if n_seeds > 1:
+                audit = IOIReproductionPipeline(
+                    mock_mode=False).run_stability_audit(n_seeds=n_seeds)
+                pooled = audit.get("pooled") or {}
+                return {
+                    "fidelity": pooled.get("mean"),
+                    "runtime_ms": round((_time.perf_counter() - started) * 1000, 2),
+                    "baseline_is_comparable": False,
+                    **runtime_not_comparable,
+                    "reference_same_harness": None,
+                    "correct": None,
+                    "trials": None,
+                    "ci_target": "circuit_faithfulness pooled across seeds",
+                    "n_seeds": pooled.get("n_seeds_used"),
+                    "seeds": pooled.get("seeds"),
+                    "per_seed_values": pooled.get("values"),
+                    "reason": (
+                        f"Pooled across {pooled.get('n_seeds_used')} seeds on "
+                        f"live weights. {pooled.get('method')}. "
+                        + (pooled.get("reason") or "")
+                    ).strip(),
+                }
+
             result = IOIReproductionPipeline(mock_mode=False).run(n_prompts=10)
             if result.get("status") == "unavailable":
-                return {"fidelity": None, "reason": result.get("reason")}
+                return {"fidelity": None, "n_seeds": 0,
+                        "reason": result.get("reason")}
             metrics = result["observed_metrics"]
             reference = metrics.get("reference_circuit_faithfulness_same_harness")
             return {
@@ -301,11 +334,22 @@ class ValidationBenchmarkScheduler:
                 "baseline_is_comparable": False,
                 **runtime_not_comparable,
                 "reference_same_harness": reference,
+                # One draw. Stated rather than left implicit, because
+                # `n_samples=10` on its own reads like a settled figure.
+                "n_seeds": 1,
+                "seeds": [IOIReproductionPipeline.SEED_BASE],
+                "per_seed_values": [metrics.get("circuit_faithfulness")],
                 "reason": (
-                    "Measured on live weights. The published baseline is not "
-                    "the same measurement; the published circuit scores "
+                    "Measured on live weights from a single seed. "
+                    "The Wilson interval bounds precision within that draw and "
+                    "says nothing about seed-to-seed variation; pass "
+                    "n_seeds>1 to pool. The published baseline is not the same "
+                    "measurement; the published circuit scores "
                     f"{reference} through this harness."
-                ) if reference is not None else None,
+                ) if reference is not None else (
+                    "Measured on live weights from a single seed, so no "
+                    "seed-level interval is derivable."
+                ),
             }
 
         if pipeline == "induction_heads":
@@ -321,10 +365,19 @@ class ValidationBenchmarkScheduler:
                 "baseline_is_comparable": False,
                 **runtime_not_comparable,
                 "reference_same_harness": None,
+                # Single-draw, and fixed at seed 42. Pooling is not implemented
+                # for this pipeline, so the seed count is stated rather than
+                # left to be inferred from n_sequences.
+                "n_seeds": 1,
+                "seeds": [42],
+                "per_seed_values": [metrics.get("induction_score")],
                 "reason": (
-                    "Measured on live weights. The registry baseline is a "
-                    "different quantity (mean attention to previous-token "
-                    "copies under a different procedure)."
+                    "Measured on live weights from a single fixed seed. The "
+                    "Wilson interval bounds precision within that draw; "
+                    "seed-to-seed variation is not measured for this pipeline. "
+                    "The registry baseline is a different quantity (mean "
+                    "attention to previous-token copies under a different "
+                    "procedure)."
                 ),
             }
 
@@ -353,6 +406,11 @@ class ValidationBenchmarkScheduler:
                     "mid-layer concentration. The registry baseline comes from a "
                     "different model and setup, so it is not rescored."
                 ),
+                # Single draw: this pipeline takes no seed argument and has no
+                # pooling path, so seed-to-seed variation is not measured.
+                "n_seeds": 1,
+                "seeds": [],
+                "per_seed_values": [metrics.get("mlp_importance_score")],
             }
 
         raise NotImplementedError(f"No pipeline named {pipeline!r}")

@@ -88,6 +88,21 @@ class BenchmarkResult:
     confidence_interval_target: Optional[str] = None
     confidence_interval_derived: bool = False
     n_samples: int = 0
+    #: How many independent seeds the score rests on.
+    #:
+    #: `n_samples` counts prompts; it says nothing about how many times the
+    #: measurement was repeated. A result from one seed and a result pooled over
+    #: five are very different claims, and `n_samples=100` looks identical in
+    #: both -- which is how "a single 100-prompt draw is still one draw" stayed
+    #: invisible. None means the seed count was not established, not that it
+    #: was one.
+    n_seeds: Optional[int] = None
+    #: Which seeds produced the pooled value, when pooling happened.
+    seeds: Optional[List[int]] = None
+    #: The per-seed values behind a pooled score. Kept so a reader can see
+    #: whether a tight interval came from seeds that agree or seeds that happen
+    #: to cancel out; a mean alone reads the same either way.
+    per_seed_values: Optional[List[float]] = None
     # High-Fidelity Performance Metrics (Phase 39.14)
     # Profiler readings. 0.0 is ambiguous between "measured and zero" and
     # "never measured", so these are Optional and the caller checks.
@@ -155,6 +170,10 @@ class BenchmarkResult:
             "ci_high": (round(self.confidence_interval_high, 2)
                         if self.confidence_interval_high is not None else None),
             "n_samples": self.n_samples,
+            "n_seeds": self.n_seeds,
+            "seeds": list(self.seeds) if self.seeds is not None else None,
+            "per_seed_values": (list(self.per_seed_values)
+                                if self.per_seed_values is not None else None),
             "git_sha": self.git_sha,
             "device_info": self.device_info,
             "precision": self.precision,
@@ -523,6 +542,28 @@ class BenchmarkTaskExecutor:
             ci_method = None
             ci_target = None
 
+        # Seed provenance. The Wilson interval above is computed from the
+        # pipeline's per-prompt outcomes, which bounds within-draw precision.
+        # Whether the score itself was repeated across seeds is a separate fact,
+        # and it is recorded separately: `n_samples` counting prompts must not
+        # stand in for it.
+        seeds = outcome.get("seeds")
+        n_seeds = outcome.get("n_seeds")
+        per_seed_values = outcome.get("per_seed_values")
+        if n_seeds is not None:
+            try:
+                n_seeds = int(n_seeds)
+            except (TypeError, ValueError):
+                n_seeds = None
+            # An interval over a single seed cannot be a seed-level interval, so
+            # say so on the interval rather than leaving `derived` implying one.
+            if n_seeds == 1 and ci_is_binomial_proportion:
+                ci_method += (
+                    f". NOTE: from one seed only (n_seeds=1), so this bounds "
+                    f"precision within that draw and says nothing about "
+                    f"seed-to-seed variation."
+                )
+
         return BenchmarkResult(
             task_id=task.task_id,
             model_id=model_id,
@@ -555,6 +596,9 @@ class BenchmarkTaskExecutor:
             confidence_interval_target=ci_target,
             confidence_interval_derived=ci_is_binomial_proportion,
             n_samples=n,
+            n_seeds=n_seeds,
+            seeds=seeds,
+            per_seed_values=per_seed_values,
             tl_agreement_pct=round(tl_agree * 100, 2) if tl_agree else None,
             # Was `self._rng.gauss(0.95, 0.02) * 100` -- a random draw reported
             # as agreement between two lens implementations. Nothing was
