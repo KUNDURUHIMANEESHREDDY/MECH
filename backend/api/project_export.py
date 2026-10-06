@@ -69,21 +69,52 @@ class ProjectExporter:
         archive_path = destination / f"{project_id}.interp-project"
 
         # Real integration: Query the DB for project artifacts
-        from ..core.database import SessionLocal, SessionRecord, ReportRecord, ExperimentRecord
+        from ..core.database import SessionLocal, SessionRecord
         db = SessionLocal()
 
         try:
             # Fetch sessions associated with this project (assuming experiment ties to project)
             sessions = db.query(SessionRecord).filter(SessionRecord.project_id == project_id).all()
-            reports = db.query(ReportRecord).all() # For demo, export all or filter by project
 
+            # Reports are deliberately not exported.
+            #
+            # This used to be:
+            #
+            #     reports = db.query(ReportRecord).all()  # For demo, export all
+            #
+            # which put *every* report in the database into whichever project's
+            # archive was being written, including other projects' work. An
+            # export is the most portable thing this codebase produces: it is a
+            # zip file the recipient keeps, so the boundary is crossed for good.
+            #
+            # Filtering is not available as a patch here. `ReportRecord` has no
+            # `project_id` column -- reports are not linked to projects at all,
+            # so there is nothing to filter on. Adding the column is the real
+            # fix and needs a migration; `Base.metadata.create_all` does not
+            # alter an existing table, so simply declaring it would break every
+            # database already on disk. Until that migration exists, omitting
+            # reports is the only option that does not leak.
+            #
+            # So: sessions are exported (they are project-scoped), reports are
+            # not, and the archive says so in its own metadata rather than
+            # omitting them silently.
             session_data_list = [s.session_data for s in sessions]
-            report_data_list = [r.report_data for r in reports]
 
             with zipfile.ZipFile(archive_path, 'w') as archive:
-                archive.writestr("metadata.json", json.dumps({"project_id": project_id, "export_version": "1.0"}))
+                archive.writestr("metadata.json", json.dumps({
+                    "project_id": project_id,
+                    "export_version": "1.0",
+                    "sessions_included": len(session_data_list),
+                    "reports_included": 0,
+                    "reports_omitted_reason": (
+                        "ReportRecord has no project_id column, so reports "
+                        "cannot be attributed to a project. Exporting them "
+                        "would leak every other project's reports into this "
+                        "archive. They are omitted until the schema links "
+                        "them."
+                    ),
+                }))
                 archive.writestr("sessions.json", json.dumps(session_data_list, indent=2))
-                archive.writestr("reports.json", json.dumps(report_data_list, indent=2))
         finally:
             db.close()
 
