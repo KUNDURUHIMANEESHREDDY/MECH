@@ -1,9 +1,32 @@
 import ast
+import sys
 import types
 from typing import Dict, Any
 
 class SecurityViolation(Exception):
     pass
+
+
+def _plugin_print(*args: Any, **kwargs: Any) -> None:
+    """`print` for plugin code, redirected to stderr.
+
+    The worker's stdout *is* the JSON protocol channel: the parent reads frames
+    from it and a single frame that is not JSON deserialises as a protocol error
+    and can desynchronise the stream for every later message. Exposing the real
+    `print` meant a plugin debugging itself with one line of output could break
+    the channel it is answering on.
+
+    stderr is not protocol, and the runner already drains it for diagnostics,
+    so plugin logging stays visible instead of being taken away. `print` stays
+    available deliberately -- removing it would only teach plugin authors to
+    open ``sys.stdout`` directly, which the AST gate would then have to police.
+    """
+    try:
+        print(*args, file=sys.stderr, **kwargs)
+    except Exception:
+        # A logging call must never be the thing that fails a hook.
+        pass
+
 
 class PluginSandbox:
     """
@@ -12,7 +35,7 @@ class PluginSandbox:
     """
     
     ALLOWED_BUILTINS = {
-        'print': print,
+        'print': _plugin_print,
         'len': len,
         'range': range,
         'int': int,
