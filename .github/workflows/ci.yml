@@ -26,6 +26,23 @@ jobs:
       - run: npm run test:js
       - run: npm run build:renderer
 
+  # Seconds, not minutes, and no dependencies installed. Syntax errors and
+  # undefined names are what make a tree unrunnable, and pytest cannot report
+  # them usefully: a SyntaxError shows up as a collection error attributed to
+  # the file, and an F821 inside an assert *message* surfaces only once the
+  # assertion it was reporting has already failed. Both were found by hand after
+  # a session spent entirely without running Python.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          # E9 = syntax errors. F821 = undefined names. Deliberately not the
+          # full default rule set: F401 unused-import noise would fail CI on
+          # files nobody is touching, and a gate people disable is not a gate.
+          args: check --isolated --no-cache --select E9,F821 --output-format concise backend tests scripts
+
   backend:
     runs-on: ubuntu-latest
     steps:
@@ -111,7 +128,7 @@ jobs:
 
   # Every other job must have passed before this one reports success.
   required:
-    needs: [frontend, backend, live-evidence]
+    needs: [lint, frontend, backend, live-evidence]
     runs-on: ubuntu-latest
     steps:
       - run: echo "frontend, backend, and live-evidence all passed"

@@ -53,12 +53,27 @@ Worth recording, because it is the argument for having run it:
   any runtime type introspection — `typing.get_type_hints`, which FastAPI calls
   on route handlers — raises `NameError`.
 
-Two `F821` reports were left in place as false positives:
-`test_challenger_m1_adversarial.py` reports `storage` as undefined at lines 329
-and 340, but it is bound at 319 in the same function and read by nested
-closures, which is valid Python. That test is in the passing baseline. Editing
-working test code on the strength of a lint believed to be wrong is how a guard
-gets broken.
+Two `F821` reports in `test_challenger_m1_adversarial.py` were investigated
+rather than dismissed, and turned out to be a genuine ruff false positive with a
+specific trigger. `storage` is bound at line 319 in the function and read by
+nested closures at 329 and 340, which is valid Python; the reports come from the
+`del storage` at the end of the function. A minimal reproduction confirmed it:
+delete the `del` and both reports disappear. Ruff treats a deleted name as
+possibly-unbound and flags closure reads of it, but these reads all happen
+before the `del`. Suppressed with `# noqa: F821` and the reason recorded at the
+site, so nobody has to re-derive it.
+
+### Now a gate
+
+`.github/workflows/ci.yml` gains a `lint` job running exactly the command above,
+and `required` depends on it. It takes seconds and installs nothing. pytest
+cannot report these defects usefully — a `SyntaxError` arrives as a collection
+error attributed to the file, and an `F821` inside an `assert` *message* appears
+only once the assertion it was reporting has already failed.
+
+The rule set is `--select E9,F821` on purpose. The default set includes
+`F401` unused-import noise, which would fail CI on files nobody is touching, and
+a gate people have to disable is not a gate.
 
 ### Tests that must be run, in this order
 

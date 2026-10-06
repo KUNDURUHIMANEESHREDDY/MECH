@@ -326,7 +326,15 @@ def test_concurrent_multithreaded_storage_writes_and_checkpoints():
         def writer(thread_id: int):
             try:
                 for i in range(records_per_thread):
-                    storage.add_experiment({
+                    # ruff F821 false positive: `storage` is bound at line 319
+                    # in this function and read by these closures, which is
+                    # valid. The report is triggered by the `del storage` at the
+                    # end of the function -- ruff treats a deleted name as
+                    # possibly-unbound and flags closure reads of it, while
+                    # these calls all happen before the del. Confirmed with a
+                    # minimal reproduction: the F821 disappears when the `del`
+                    # is removed.
+                    storage.add_experiment({  # noqa: F821
                         "id": f"t{thread_id}-rec{i}",
                         "thread": thread_id,
                         "seq": i,
@@ -337,7 +345,7 @@ def test_concurrent_multithreaded_storage_writes_and_checkpoints():
         def checkpointer():
             try:
                 for _ in range(10):
-                    storage.checkpoint_wal()
+                    storage.checkpoint_wal()  # noqa: F821 -- see above
                     time.sleep(0.01)
             except Exception as e:
                 errors.append(e)
