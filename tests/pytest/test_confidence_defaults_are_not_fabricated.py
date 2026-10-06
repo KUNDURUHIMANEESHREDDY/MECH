@@ -27,6 +27,13 @@ fails critic's 0.85 threshold and returns False -- so it cannot manufacture a
 positive verdict, which is what the 0.95/0.96/1.0 defaults did. Changing them
 would be churn without a defect. They are pinned by a test here so that nobody
 "fixes" them into an optimistic default later.
+
+That reasoning covered the confidence score only. The *peer review* default in
+the same function was a separate defect and is now fixed: `decision` defaulted
+to "" at two levels (an absent `peer_review` dict, and an absent `decision`
+key), and "" was an accepted value, so a validation with a 0.90 score and no
+peer review at all passed. A missing review is now a failed review. See
+`test_missing_peer_review_is_not_an_accept` below.
 """
 
 from __future__ import annotations
@@ -316,6 +323,59 @@ def test_missing_confidence_defaults_to_zero_and_stays_conservative():
     not_live = live({"confidence_score": 1.0})
     not_live["provenance"] = "unavailable"
     assert critic.is_confident(not_live) is False
+
+
+class _Absent:
+    """Sentinel: distinguishes 'no peer_review key' from 'an empty one'."""
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "<absent>"
+
+
+_ABSENT = _Absent()
+
+
+def test_missing_peer_review_is_not_an_accept():
+    """A review that did not happen is not a review that succeeded.
+
+    `is_confident` accepted `decision in ("", "Accept")`, and `decision` was
+    "" whenever `peer_review` was absent, or present without a `decision` key.
+    So confidence 0.90 with no peer review whatsoever passed the gate, while
+    the documentation for the same function said peer review must be Accept.
+    """
+    from backend.agents.critic import CONFIDENCE_THRESHOLD, Critic
+
+    critic = Critic()
+
+    def payload(peer_review):
+        record = {
+            "status": "completed",
+            "provenance": "live",
+            "validation_eligible": True,
+            "publication_eligible": True,
+            "validated": True,
+            "confidence": {"confidence_score": CONFIDENCE_THRESHOLD},
+        }
+        if peer_review is not _ABSENT:
+            record["peer_review"] = peer_review
+        return record
+
+    # The cases that used to pass.
+    assert critic.is_confident(payload(_ABSENT)) is False, (
+        "an absent peer_review satisfied the gate")
+    assert critic.is_confident(payload({})) is False
+    assert critic.is_confident(payload({"decision": ""})) is False
+    assert critic.is_confident(payload({"decision": None})) is False
+
+    # Decisions that are not an accept.
+    for decision in ("Reject", "Revise", "pending", "accept", "ACCEPT",
+                     "Accepted"):
+        assert critic.is_confident(payload({"decision": decision})) is False, decision
+
+    # Surrounding whitespace is tolerated, so a real reviewer's stray space does
+    # not silently fail a legitimate accept. The comparison is exact otherwise.
+    assert critic.is_confident(payload({"decision": "Accept"})) is True
+    assert critic.is_confident(payload({"decision": " Accept "})) is True
 
 
 # ── Source-level guard against reintroduction ───────────────────────────────

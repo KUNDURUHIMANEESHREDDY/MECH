@@ -163,7 +163,20 @@ class SAEProvider(ABC):
 
 
 def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any]]:
-    """Open real SAE weights from disk and hash the file."""
+    """Open real SAE weights from disk and hash the file.
+
+    `weights_only=True` is not a stylistic preference here. `weights_only=False`
+    is a pickle load, so a checkpoint from anywhere -- a downloaded artefact, a
+    path handed in by an API caller, a file in a shared cache -- becomes
+    arbitrary code execution inside this process. The previous value was False,
+    and it was False with no comment saying why, so it read as an oversight that
+    a later reader might "fix" the wrong way.
+
+    `weights_only=True` refuses to reconstruct anything that is not a tensor,
+    dict, or a small set of primitives. A checkpoint that genuinely needs more
+    than that is a checkpoint that has to be converted first, which is the
+    correct place to make that decision deliberately.
+    """
     if not os.path.exists(path):
         raise SAELoadError(f"SAE checkpoint not found: {path}")
     try:
@@ -171,7 +184,16 @@ def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any]]:
     except ImportError as exc:
         raise SAELoadError(f"torch is required to load SAE weights: {exc}")
 
-    state = torch.load(path, map_location="cpu", weights_only=False)
+    try:
+        state = torch.load(path, map_location="cpu", weights_only=True)
+    except Exception as exc:
+        # A checkpoint that cannot be loaded safely is refused, not retried with
+        # a permissive loader: retrying is how `weights_only=False` gets
+        # reintroduced two releases later.
+        raise SAELoadError(
+            f"SAE checkpoint could not be loaded with weights_only=True, so it "
+            f"was refused rather than unpickled: {type(exc).__name__}: {exc}"
+        ) from exc
     if not isinstance(state, dict):
         raise SAELoadError(f"SAE checkpoint is not a state dict: {path}")
 

@@ -104,14 +104,31 @@ class Critic:
             }
 
     def is_confident(self, validation_result: Dict[str, Any]) -> bool:
+        """Whether a validation result is confident *and* peer-accepted.
+
+        The peer-review decision must be exactly "Accept". This used to be
+
+            return score >= CONFIDENCE_THRESHOLD and decision in ("", "Accept")
+
+        and `decision` defaults to "" at two levels -- an absent `peer_review`
+        dict, and an absent `decision` key inside it. So a validation carrying a
+        0.90 confidence score and *no peer review at all* passed this gate. The
+        surrounding documentation says peer review must be Accept; the code
+        permitted its absence, which is the one state that can never mean
+        Accept.
+
+        Only an explicit Accept passes. Missing, empty, pending, revise and
+        reject all fail, and failing closed is the point: a review that has not
+        happened is not a review that succeeded.
+        """
         if not validation_is_live(validation_result):
             return False
         try:
             conf = validation_result.get("confidence", {})
             score = float(conf.get("confidence_score", 0.0))
             review = validation_result.get("peer_review", {})
-            decision = review.get("decision", "")
-            return score >= CONFIDENCE_THRESHOLD and decision in ("", "Accept")
+            decision = str(review.get("decision", "") or "").strip()
+            return score >= CONFIDENCE_THRESHOLD and decision == "Accept"
         except Exception:
             return False
 

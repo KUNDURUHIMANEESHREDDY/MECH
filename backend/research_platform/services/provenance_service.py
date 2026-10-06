@@ -1,29 +1,22 @@
-"""Provenance Service.
+"""Provenance Service -- re-exported.
 
-Tracks pipeline, model, dataset, plugin versions, and reproducibility checksums.
+This file used to be a byte-identical copy of
+``backend/mech_platform/services/provenance_service.py``. Two copies of a
+provenance service is not a convenience: a provenance rule that is fixed in one
+and not the other is a rule that can be bypassed by importing the other, which
+is precisely the "one canonical authority per concern" problem this codebase is
+trying to close.
+
+Rather than patch the same bug twice and leave two implementations to drift
+again, this module delegates. The implementation lives in
+``backend.mech_platform.services.provenance_service``.
+
+Both package __init__ files are bare docstrings with no imports, so the
+cross-package import cannot cycle.
 """
 
 from __future__ import annotations
 
-import datetime as _dt
-from typing import Any, Dict
+from backend.mech_platform.services.provenance_service import ProvenanceService
 
-
-class ProvenanceService:
-    """Service for recording experiment execution provenance."""
-
-    def record_provenance(
-        self,
-        experiment_id: str,
-        pipeline_version: str = "2.0.0",
-        model_version: str = "GPT-2 Small",
-        dataset_version: str = "OpenWebText v1",
-    ) -> Dict[str, Any]:
-        return {
-            "experiment_id": experiment_id,
-            "pipeline_version": pipeline_version,
-            "model_version": model_version,
-            "dataset_version": dataset_version,
-            "checksum": f"sha256_{hash(experiment_id + pipeline_version) & 0xffffffff:08x}",
-            "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
-        }
+__all__ = ["ProvenanceService"]
