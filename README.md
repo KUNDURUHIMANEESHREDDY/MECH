@@ -366,13 +366,14 @@ about the project.
 
 | Feature | Reality |
 |---------|---------|
-| SAE / feature dictionaries | Config-only. Weights are never fetched; feature indices and activations are hardcoded (`interpretability/sae/loader.py:61`). |
+| SAE / feature dictionaries | **Now real, trained and measured.** A top-k SAE (64 dictionary elements, k=16) fitted on real GPT-2 MLP post-activations. Held-out reconstruction MSE 11687.2, **normalised 0.396** (explains ~60% of activation variance), L0 16.0 measured, 46.9% of features dead. Corpus is this repo's own documentation text — see the caveats below. |
 | Tuned lens | **Now real, trained and measured.** Per-layer **diagonal** affine translators (18,432 params) fitted against live GPT-2 by minimising KL to the model's own final-layer distribution. Held-out mean KL reduction **62.2%** vs 71.6% in-sample, 12/12 layers improved out of sample. Not the paper's full affine map — see below. |
 | Logit lens | **Now real.** It projected through `backend/runtime/logits.py`, which never loaded a model: `residual_norm = 10.0 + layer*1.5`, `top_prediction = " Paris" if layer >= 6`, `top_logit = 4.5 + layer*0.8`, `entropy = 2.5 - layer*0.15`, and no provenance field at all. `LogitLens.project` also appended a hardcoded runner-up `{"token": " France", "logit": top_logit - 1.2, "probability": 0.12}`. Both now project through `gpt2_engine` over a real forward pass. |
 | Causal tracing / attribution patching | Closed-form linear formulas, not measured gradients (`interpretability/causal/causal_tracing.py:19`). |
 | Path patching | Was self-documented as simulated. **Now real** — it uses `live_measure.path_patch` (frozen sender plus swapped receiver in one pass) and refuses rather than reporting edges it cannot justify. |
 | ACDC fidelity | **Now real, measured end to end.** The analytic formula that could never fall below 0.90 is gone; fidelity comes from `live_measure.circuit_fidelity` over the pruned circuit. See §4 for a head-vs-neuron bug that made the earlier version measure MLP neurons while labelling them `L{layer}H{head}`. |
-| Non-GPT-2 models (Gemma, Llama, Qwen, Mistral, DeepSeek) | Unconditional mocks; `mock_mode` is accepted but never read (`science/models/model_adapters.py`). |
+| Non-GPT-2 models (Gemma, Llama, Qwen, Mistral, DeepSeek) | **Now real** — `hf_adapter.HFAdapterMixin` runs all five methods against `transformers` (`science/models/hf_adapter.py`). **Not yet exercised**: these are multi-gigabyte gated downloads and the RTX 3050 here has 6 GB, so only the no-weights paths are covered by tests. |
+| Planner | **Now composes from the goal.** It returned the same 7 nodes for every goal. |
 | `benchmark_database.json`, `*_certificate.json`, `ioi_benchmark.py` | Hand-written fixtures. Each JSON record now carries `fixture: true`, `measured: false`, `provenance: "reference"`, eligibility `false`, and a `fixture_notice`. **Never quote these.** |
 | `run_reproducibility_demo.py` | A **demo entry point**, labelled as such in its banner. It runs the real suite, but use `BenchmarkRunner` directly for anything you intend to stand behind. It replaced `run_reproducibility_audit.py`, which generated its own observations from an arithmetic ramp. See §6c. |
 | `golden_manifest.json` hashes | Placeholders. `prompt_hash` and `bundle_hash` are empty-string digests, `token_hash` is a literal string. `verify_golden_datasets.py` reports this as `not_recorded`, and the dataset's health score reflects it (**0/3 hashes, unsigned**). Recording real hashes is a prerequisite for GOLDEN promotion. |
@@ -694,11 +695,82 @@ multi-template averaging, and a path-patching pass. The injection-recovery machi
       reported, because a frame that yields almost nothing usable is itself a finding — and it is
       the weakest part of this table, not the strongest.
 
+**Non-GPT-2 models are no longer on this list either.** `model_adapters.py` had five classes and
+every method called a shared mock helper *unconditionally* — it never read `self._model`, so
+`mock_mode=False` changed nothing. Real architecture metadata sat beside fabricated attention
+matrices (`random.uniform(0.05, 0.3)`), entropies (`1.1 + h * 0.07`) and logits
+(`{"token": " Paris", "prob": 0.80}`). Cross-model comparisons built on those — "causal similarity
+0.91 between GPT-2 and Gemma" — were fiction with a real model name attached.
+
+All five methods now run against real weights: activations from hidden states, attention from
+`output_attentions=True`, a genuine forward hook for ablation, and a real L2 norm per layer. The
+spec tables are real published configurations pinned to actual HuggingFace repo ids, and
+`config_agreement()` compares each declared field against the config that was loaded — because a
+hardcoded table is a claim, and Llama 2 / Mistral / Qwen 2 use grouped-query attention where
+`num_key_value_heads != num_attention_heads`.
+
+Two things this does **not** claim:
+
+- **The measured path is untested.** These are multi-gigabyte downloads; an earlier attempt to
+  construct all five families in one test run crashed the test process with a Windows access
+  violation partway through. The load is now stubbed and the no-weights paths are covered; the
+  weights-present path is covered structurally, not functionally.
+- **`mock_mode=True` still simulates.** It is now opt-in and honest — every method labels the
+  output `synthetic` and names the flag — rather than a flag that was accepted and ignored.
+
+**The planner now composes from the goal.** It returned an identical 7-node DAG for every goal,
+which was disclosed (`plan_is_templated: true`) but not implemented. The node list is now built in
+three recorded steps: the unconditional floor (weights, discovery, validation, publication — these
+apply to any goal), a `reproduce`/`inspect`/`patch` branch emitted only when the goal names a
+reproduction target, and a capability filter that drops any node naming a method the agent does not
+expose. `detect_pipeline` returning `"ioi"` for an unrelated goal would otherwise have reattached
+IOI's L10H7 to a plan about protein folding; that is unchanged, and the branch is simply absent
+when nothing matches, with the omission recorded in `dropped_nodes`.
+
 ### 6. Implement or delete the stubs
 
 Sparse autoencoders, tuned lens, attribution patching and path patching are currently
 placeholders with convincing-looking output. Either implement them against real weights or
 remove them — a stub that returns `0.94` is worse than an honest `unavailable`.
+
+**Sparse autoencoders are no longer on this list either.** The pipeline drew its entire
+feature bank from a seeded RNG — `act_freq` from `betavariate(0.5, 5.0)`, `top_tokens` from
+`rng.sample` over a 19-word list, `mono` from `betavariate(3.0, 1.5)`, `is_absorbed` from a coin
+flip at p=0.12 — and reported them under names that read as findings. It also ignored
+`mock_mode` entirely, so a caller with real weights loaded still got simulated features, and it
+wrote `dataset_name="OpenWebText Sample"` into the manifest for a corpus that was never opened.
+
+It now trains a real top-k SAE on real GPT-2 MLP post-activations. Measured, 3000 Adam steps,
+64 dictionary elements, k=16, 205 held-out activation vectors (`docs/results/sae_training.json`):
+
+| | value |
+|---|---|
+| reconstruction MSE (held out, summed over 768 dims) | 11687.22 |
+| activation variance (summed, same units) | 29548.41 |
+| **normalised MSE** | **0.396** |
+| L0 (measured, not the requested k) | 16.0 |
+| dead dictionary entries | 46.9% |
+
+Four things this does **not** claim:
+
+- **The corpus is this repository's own documentation text.** No natural-language corpus is
+  available on this machine and no dataset cache exists, so the default is `README.md` plus the
+  backend docstrings, pinned by SHA-256 per file. That is a real corpus and it is honestly
+  named — `corpus_is_documentation_text: true` — but it means these are features of *technical
+  vocabulary*, not findings about what GPT-2 represents. The manifest says so, and the run's own
+  `reason` repeats it.
+- **Normalised MSE was wrong at first and I nearly wrote off a working fit.** Squared error is
+  summed over the 768 feature dimensions while `var()` is per element, so dividing one by the
+  other divides by `d_model` too few. That reported NMSE **303** for a fit whose true value was
+  **0.395**. The pipeline now reports `mse_units`, `activation_variance_summed`, and a
+  `reconstruction_useful` flag that turns the status to `unavailable` when NMSE ≥ 1 — because a
+  reconstruction worse than predicting the mean is not a reconstruction.
+- **Monosemanticity is not scored.** `monosemanticity_scored: false` with the reason attached.
+  A scalar derived from max-activation attribution would be the same fabrication with better
+  manners. The per-feature tokens are measurements of what maximises each feature and nothing
+  more.
+- **1024 activations is a smoke test.** 205 held-out vectors and 46.9% dead entries is a
+  diagnostic, not a result.
 
 **The tuned lens is no longer on this list.** It used to add a flat `+0.12` to the top-token
 probability and report `affine_translation_applied: True`. It now trains real translators.

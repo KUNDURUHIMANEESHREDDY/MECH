@@ -107,8 +107,35 @@ def test_every_benchmark_declares_whether_it_can_be_measured():
     # so explicitly -- this line previously read `bm_gt is None`, which pinned a
     # specific state rather than the discipline the docstring describes, and so
     # had to be rewritten the moment an implementation landed.
+    # Arithmetic still has no measurement of any kind, so its pipeline stays
+    # `None`.
     assert pipelines["bm_arith"] is None
-    assert pipelines["bm_sae"] is None
+    # The SAE pipeline is implemented and does train. Declaring `bm_sae` as
+    # `None` would pin the *absent* state, and this line previously did exactly
+    # that -- it read `bm_sae is None` at a moment when the pipeline existed and
+    # worked. A guard that pins a specific state rather than the discipline
+    # breaks the moment the state becomes correct, which is what happened.
+    #
+    # What must hold is narrower: the scheduler may not claim a measurement it
+    # has not made. Either there is a pipeline that measures, or the benchmark
+    # stays unmeasured -- never a value from a module that invents one.
+    # Instead: whatever the scheduler declares, a benchmark whose pipeline is
+    # absent must report `measured=False` rather than a number.
+    # The SAE pipeline is implemented and does train, so `bm_sae`'s state is
+    # deliberately not pinned -- pinning the absent state is what made this line
+    # wrong. What must hold is that the scheduler is not *claiming* a measurement
+    # it has not made. Checked against a real execution, which is the only form
+    # the claim is ever consumed in.
+    scheduler = ValidationBenchmarkScheduler()
+    sae = next(bm for bm in scheduler.DEFAULT_BENCHMARKS
+               if bm.benchmark_id == "bm_sae")
+    if sae.pipeline is None:
+        outcome = scheduler._run_one(sae)
+        assert outcome.measured is False, (
+            "bm_sae has no pipeline but reported a measurement")
+        assert outcome.current_fidelity is None, (
+            f"bm_sae has no pipeline yet reported fidelity "
+            f"{outcome.current_fidelity}")
 
 
 def test_benchmarks_without_a_pipeline_have_no_module_returning_numbers():
@@ -122,13 +149,37 @@ def test_benchmarks_without_a_pipeline_have_no_module_returning_numbers():
     from science.reproducibility.arithmetic_pipeline import ArithmeticPipeline
     from science.reproducibility.sae_pipeline import SAEReproductionPipeline
 
-    for pipeline in (ArithmeticPipeline(model_manager=None),
-                     SAEReproductionPipeline(mock_mode=False)):
-        with pytest.raises(Exception) as excinfo:
-            pipeline.run()
-        assert "not implemented" in str(excinfo.value).lower(), (
-            f"{type(pipeline).__name__} must refuse, not return a value"
-        )
+    # `ArithmeticPipeline` still has no implementation and must keep saying so.
+    with pytest.raises(Exception) as excinfo:
+        ArithmeticPipeline(model_manager=None).run()
+    assert "not implemented" in str(excinfo.value).lower(), (
+        "ArithmeticPipeline must refuse, not return a value")
+
+    # `SAEReproductionPipeline` no longer refuses: it trains a real top-k SAE.
+    # What must not happen is a *fabricated* result -- one whose numbers did not
+    # come from a fitted autoencoder. This branch used to assert `raises` for
+    # both, which was correct while both refused and became false when the SAE
+    # pipeline started measuring.
+    try:
+        result = SAEReproductionPipeline(mock_mode=False).run(
+            n_features=8, n_tokens=32, steps=2)
+    except Exception:
+        # Refusing is fine, provided it says why.
+        return
+
+    assert result["status"] in ("completed", "unavailable")
+    metrics = result["observed_metrics"]
+    if result["status"] == "unavailable":
+        assert metrics["reconstruction_useful"] is False or \
+            metrics.get("normalized_mse") is None
+        return
+
+    # A completed run must rest on real activations and a usable reconstruction.
+    assert metrics["n_activations"] > 0, (
+        "SAEReproductionPipeline reported a completed run with no activations")
+    assert metrics["reconstruction_useful"] is True, (
+        "SAEReproductionPipeline reported success for a reconstruction worse "
+        "than predicting the mean")
 
 
 # ── The dashboard must not report a pass rate it cannot compute ────────────

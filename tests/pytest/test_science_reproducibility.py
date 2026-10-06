@@ -320,8 +320,8 @@ def test_logit_lens_has_no_hardcoded_sweep():
 
 # ── SAE Pipeline ──────────────────────────────────────────────────────────────
 
-def test_sae_pipeline_refuses_rather_than_simulating():
-    """No SAE is trained, so there is nothing to report.
+def test_sae_pipeline_measures_or_refuses_but_never_fabricates():
+    """The contract, at the level it should have been written.
 
     These three tests previously asserted the opposite. They could only pass:
 
@@ -337,13 +337,55 @@ def test_sae_pipeline_refuses_rather_than_simulating():
     `reconstruction_mse` was `0.03 + (1 - mean_monosemanticity) * 0.04` -- no
     autoencoder was trained or evaluated. The simulation also ran regardless of
     mock_mode, and the dataset manifest claimed OpenWebText, never read.
+
+    Then a later fix made the pipeline refuse outright, and the test was
+    rewritten to demand `LiveUnavailable` with "not implemented" in the
+    message. That was correct while it was true and became false when the
+    pipeline started training a real top-k SAE.
+
+    So the test now states the invariant that survives both states: the pipeline
+    either measures against real weights or refuses, and never returns a feature
+    bank that did not come from a trained autoencoder. Pinning either specific
+    outcome would break the moment the other became correct -- which is what
+    just happened.
     """
     from science.models.adapter_base import LiveUnavailable
+    from science.reproducibility.sae_pipeline import SAEReproductionPipeline
 
-    pipeline = SAEReproductionPipeline(mock_mode=True)
-    with pytest.raises(LiveUnavailable) as excinfo:
-        pipeline.run(n_features=30)
-    assert "not implemented" in str(excinfo.value).lower()
+    pipeline = SAEReproductionPipeline()
+
+    try:
+        result = pipeline.run(n_features=8, n_tokens=32, steps=2)
+    except LiveUnavailable as exc:
+        # Refusing is a valid outcome. It must say what it is refusing to do,
+        # so a reader can tell missing weights from missing code.
+        message = str(exc).lower()
+        assert any(phrase in message for phrase in
+                   ("requires torch", "needs loaded", "could not be fitted",
+                    "no features", "empty")), (
+            f"the refusal does not say what it is refusing to do: {message[:200]}")
+        return
+
+    # A result is the other valid outcome. Everything in it must be measured.
+    assert result["provenance"] in ("live", "unavailable"), (
+        f"unexpected provenance {result['provenance']!r}")
+    metrics = result["observed_metrics"]
+
+    if result["status"] == "unavailable":
+        # An unusable fit must say so rather than reporting the numbers.
+        assert metrics["reconstruction_useful"] is False or \
+            metrics.get("normalized_mse") is None, (
+            "status is unavailable but the payload looks like a usable fit")
+        return
+
+    assert result["status"] == "completed"
+    assert metrics["reconstruction_mse"] is not None
+    assert metrics["n_activations"] > 0, (
+        "a result with no activations was produced; nothing was measured")
+    # A reconstruction no better than predicting the mean is not a result.
+    assert metrics["reconstruction_useful"] is True, (
+        "status is completed but the reconstruction is worse than the mean")
+    assert metrics["monosemanticity_scored"] is False
 
 
 def test_sae_pipeline_has_no_feature_simulation():

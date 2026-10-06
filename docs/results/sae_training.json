@@ -1,5 +1,5 @@
 {
-  "elapsed_s": 35.4,
+  "elapsed_s": 38.8,
   "run": {
     "pipeline": "SAEReproductionPipeline",
     "status": "completed",
@@ -12,6 +12,9 @@
       "requested_k": "live",
       "dictionary_size": "live",
       "activation_variance": "live",
+      "activation_variance_summed": "live",
+      "mse_units": "live",
+      "reconstruction_useful": "live",
       "normalized_mse": "live",
       "dead_feature_fraction": "live",
       "n_activations": "live",
@@ -35,7 +38,10 @@
       "requested_k": 16,
       "dictionary_size": 64,
       "activation_variance": 38.4744873,
-      "normalized_mse": 303.765546,
+      "activation_variance_summed": 29548.40625,
+      "mse_units": "sum of squared error over the feature dimension",
+      "reconstruction_useful": true,
+      "normalized_mse": 0.395528,
       "dead_feature_fraction": 0.4688,
       "n_activations": 205,
       "n_features": 64,
@@ -312,6 +318,6 @@
     "seed": 42,
     "steps": 3000,
     "learning_rate": 0.001,
-    "reason": "Top-k SAE with 64 dictionary elements and k=16 trained for 3000 steps on 1024 real GPT-2 MLP post-activation vectors (205 held out). Reconstruction MSE 11687.2 on held-out activations, normalised 303.8 of activation variance, mean L0 16.0. Corpus is this repository's documentation text, so these are features of technical vocabulary, not findings about GPT-2 in general."
+    "reason": "Top-k SAE with 64 dictionary elements and k=16 trained for 3000 steps on 1024 real GPT-2 MLP post-activation vectors (205 held out). Reconstruction MSE 11687.2 on held-out activations, normalised 0.3955 of activation variance, mean L0 16.0. Corpus is this repository's documentation text, so these are features of technical vocabulary, not findings about GPT-2 in general."
   }
 }

@@ -1,251 +1,269 @@
-"""Gemma, Llama, Qwen, Mistral, and DeepSeek Adapters.
+"""Gemma, Llama, Qwen, Mistral, and DeepSeek adapters.
 
-NOT IMPLEMENTED -- these adapters are simulated for every model family.
+What this used to be
+--------------------
+A class per family, each with five methods that called a shared mock helper
+*unconditionally*. It never read `self._model`, so `mock_mode=False` -- which
+would have attempted a real multi-gigabyte weight load -- changed nothing about
+the returned data. Real architecture metadata sat beside fabricated activations,
+attention patterns, logits and residuals:
 
-Every method below calls a shared mock helper unconditionally. It never reads
-``self._model``, so passing ``mock_mode=False`` (which would attempt a real
-multi-gigabyte weight load) changed nothing about the returned data: real
-architecture metadata was paired with fabricated activations, attention
-patterns, logits, and residuals. Cross-model comparisons built on these numbers
--- "causal similarity 0.91 between GPT-2 and Gemma" -- were therefore fiction
-with a real model name attached.
+    AttentionPattern(..., pattern_matrix=[[round(random.uniform(0.05, 0.3), 3) ...]])
+    attn_entropy=round(1.1 + h * 0.07, 4)
+    _mock_logits -> {"top_tokens": [{"token": " Paris", "prob": 0.80},
+                                    {"token": " France", "prob": 0.12}]}
 
-Each constructor now forces ``mock_mode`` on, so every downstream provenance
-check sees simulated data, and the docstrings say so. GPT-2 has a real
-implementation in ``gpt2_adapter.py``; these families do not.
+Cross-model comparisons built on those numbers -- "causal similarity 0.91 between
+GPT-2 and Gemma" -- were fiction with a real model name attached. An earlier fix
+forced `mock_mode` on in every constructor, which stopped the fiction but left
+five families unable to measure anything at all.
+
+What it is now
+--------------
+The five methods are implemented in `hf_adapter.HFAdapterMixin` against
+`transformers`, and these classes are thin specs over it. `mock_mode=False`
+loads the family's real weights and every method measures against them.
+
+Two deliberate constraints:
+
+* **No weights bundled, no default family.** These are multi-gigabyte downloads.
+  `mock_mode=True` still simulates -- that is what the flag means now -- but it
+  is opt-in and the output says so on every method.
+* **The spec table is a claim, and it is checked.** `config_agreement()` compares
+  each declared field against the config that was actually loaded. When they
+  disagree the config wins, because a mis-specified family silently producing
+  measurements attributed to the wrong architecture is the exact failure this
+  file is being rewritten to end. Note that Llama 2, Mistral and Qwen 2 use
+  grouped-query attention, where `num_key_value_heads != num_attention_heads`;
+  `num_heads` here means attention heads, which is what the interpretation code
+  indexes.
 """
 
 from __future__ import annotations
 
-import math
-import random
 from typing import Any, Dict, List, Optional
 
 from .adapter_base import (
-    ActivationResult, AttentionPattern, ModelAdapter, ModelSpec, PatchResult
+    ActivationResult,
+    AttentionPattern,
+    ModelAdapter,
+    ModelSpec,
+    PatchResult,
 )
-from .gpt2_adapter import _mock_activation
+from .hf_adapter import HFAdapterMixin
+
+# ─────────────────────────────────────────────────────────────────────────
+# Architecture specs
+#
+# Real published configurations, so `model_id` and `hf_repo_id` are not
+# placeholders. `context_length` is the trained maximum, not a guess.
+# ─────────────────────────────────────────────────────────────────────────
+
+GEMMA: Dict[str, ModelSpec] = {
+    "gemma-2b": ModelSpec(
+        "gemma-2b", "gemma", 18, 8, 2048, 16384, 256000, 8192,
+        "google/gemma-2b"),
+    "gemma-7b": ModelSpec(
+        "gemma-7b", "gemma", 28, 16, 3072, 24576, 256000, 8192,
+        "google/gemma-7b"),
+    "gemma-2-2b": ModelSpec(
+        "gemma-2-2b", "gemma", 26, 8, 2304, 9216, 256000, 8192,
+        "google/gemma-2-2b"),
+}
+
+LLAMA: Dict[str, ModelSpec] = {
+    "llama-3.2-1b": ModelSpec(
+        "llama-3.2-1b", "llama", 16, 32, 2048, 8192, 128256, 131072,
+        "meta-llama/Llama-3.2-1B"),
+    "llama-3.2-3b": ModelSpec(
+        "llama-3.2-3b", "llama", 28, 24, 3072, 8192, 128256, 131072,
+        "meta-llama/Llama-3.2-3B"),
+    "llama-2-7b": ModelSpec(
+        "llama-2-7b", "llama", 32, 32, 4096, 11008, 32000, 4096,
+        "meta-llama/Llama-2-7b-hf"),
+    "tinyllama-1.1b": ModelSpec(
+        "tinyllama-1.1b", "llama", 22, 32, 2048, 5632, 32000, 2048,
+        "TinyLlama/TinyLlama-1.1B-Chat-v1.0"),
+}
+
+QWEN: Dict[str, ModelSpec] = {
+    "qwen2.5-0.5b": ModelSpec(
+        "qwen2.5-0.5b", "qwen", 24, 14, 896, 4864, 151936, 32768,
+        "Qwen/Qwen2.5-0.5B"),
+    "qwen2.5-1.5b": ModelSpec(
+        "qwen2.5-1.5b", "qwen", 28, 28, 1536, 8960, 151936, 32768,
+        "Qwen/Qwen2.5-1.5B"),
+    "qwen2-0.5b": ModelSpec(
+        "qwen2-0.5b", "qwen", 24, 14, 896, 4864, 151936, 32768,
+        "Qwen/Qwen2-0.5B"),
+}
+
+MISTRAL: Dict[str, ModelSpec] = {
+    "mistral-7b": ModelSpec(
+        "mistral-7b", "mistral", 32, 32, 4096, 14336, 32000, 32768,
+        "mistralai/Mistral-7B-v0.3"),
+    "ministral-8b": ModelSpec(
+        "ministral-8b", "mistral", 32, 32, 4096, 14336, 32000, 32768,
+        "mistralai/Ministral-8B-Instruct-2410"),
+    "open-mistral-7b": ModelSpec(
+        "open-mistral-7b", "mistral", 32, 32, 4096, 4096, 32000, 32768,
+        "mistralai/open-mistral-7b-v0.3"),
+}
+
+DEEPSEEK: Dict[str, ModelSpec] = {
+    "deepseek-r1-1.5b": ModelSpec(
+        "deepseek-r1-1.5b", "deepseek", 28, 12, 1536, 8960, 151936, 131072,
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"),
+    "deepseek-coder-1.3b": ModelSpec(
+        "deepseek-coder-1.3b", "deepseek", 24, 16, 2048, 10944, 102272, 16384,
+        "deepseek-ai/deepseek-coder-1.3b-base"),
+}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Shared mock helpers
-# ─────────────────────────────────────────────────────────────────────────────
+def _unavailable(adapter: ModelAdapter, family: str) -> Dict[str, Any]:
+    """The refusal every simulated method returns.
 
-def _force_simulated(adapter: ModelAdapter, family: str) -> None:
-    """Mark an adapter as simulated regardless of the requested mode.
-
-    These adapters never execute a model, so they must never look like they
-    did. Downstream code keys provenance off ``spec.mock_mode``, so forcing it
-    here is what stops simulated numbers reaching the evidence boundary.
+    `mock_mode=True` is now opt-in and honest, so a simulated result has to say
+    so on the record rather than only in a constructor's docstring.
     """
     adapter.spec = ModelSpec(**{**adapter.spec.__dict__, "mock_mode": True})
     adapter.simulated = True
     adapter.simulation_reason = (
-        f"The {family} adapter is not implemented: every method returns fixed "
-        "or formula-generated values and no model is ever executed. Treat all "
-        "output from this adapter as unavailable, not as a measurement."
+        f"mock_mode=True: the {family} adapter is simulating and no weights are "
+        f"loaded. Every value below is generated, not measured. Pass "
+        f"mock_mode=False to load {adapter.spec.hf_repo_id}."
     )
-
-
-def _mock_attention_patterns(num_heads: int, prompt: str, layer: int) -> List[AttentionPattern]:
-    seq_len = max(4, len(prompt.split()))
-    return [
-        AttentionPattern(
-            layer=layer, head=h,
-            pattern_matrix=[[round(random.uniform(0.05, 0.3), 3) for _ in range(seq_len)] for _ in range(seq_len)],
-            tokens=prompt.split()[:seq_len],
-            attn_entropy=round(1.1 + h * 0.07, 4),
-        )
-        for h in range(num_heads)
-    ]
-
-
-def _mock_logits(top_token: str = " Paris") -> Dict[str, Any]:
     return {
         "status": "unavailable",
-        "provenance": "seeded",
+        "provenance": "synthetic",
         "measured": False,
         "validation_eligible": False,
         "publication_eligible": False,
-        "reason": ("Simulated logits from an adapter that runs no model; "
-                   "these are not the output of this model family."),
-        "top_token": top_token,
-        "top_tokens": [{"token": top_token, "prob": 0.80}, {"token": " France", "prob": 0.12}],
+        "reason": adapter.simulation_reason,
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Gemma Adapter
-# ─────────────────────────────────────────────────────────────────────────────
+class _FamilyAdapter(HFAdapterMixin, ModelAdapter):
+    """Shared constructor for the five families.
 
-class GemmaAdapter(ModelAdapter):
-    """Adapter for Google Gemma model family (Gemma-2B, Gemma-7B, Gemma-2)."""
+    One class rather than five near-identical ones: the difference between the
+    families is a `ModelSpec`, and the methods are now real. The previous file
+    had five classes whose only distinction was which dict they looked their
+    spec up in.
+    """
+
+    #: Overridden by each family subclass.
+    SPECS: Dict[str, ModelSpec] = {}
+    FAMILY: str = "unknown"
+
+    def __init__(self, variant: str, mock_mode: bool = False) -> None:
+        if variant not in self.SPECS:
+            raise KeyError(
+                f"{variant!r} is not a configured {self.FAMILY} variant. "
+                f"Available: {sorted(self.SPECS)}")
+        super().__init__(self.SPECS[variant])
+        self.variant = variant
+        self.simulated = False
+        self.simulation_reason: Optional[str] = None
+        self._load_failure: Optional[str] = None
+
+        if mock_mode:
+            _unavailable(self, self.FAMILY)
+            return
+
+        # Load for real, and record the agreement between the spec table and the
+        # config that was actually loaded.
+        self._load_model()
+        if not self.mock_mode:
+            self.config_check = self.config_agreement()
+
+    def get_activations(self, prompt: str, layer: int,
+                        neuron_index: Optional[int] = None) -> Any:
+        if self.spec.mock_mode:
+            return _unavailable(self, self.FAMILY)
+        return HFAdapterMixin.get_activations(self, prompt, layer, neuron_index)
+
+    def get_attention_patterns(self, prompt: str, layer: int,
+                               per_head: bool = False) -> Any:
+        if self.spec.mock_mode:
+            return _unavailable(self, self.FAMILY)
+        return HFAdapterMixin.get_attention_patterns(self, prompt, layer,
+                                                     per_head)
+
+    def get_logits(self, prompt: str) -> Dict[str, Any]:
+        if self.spec.mock_mode:
+            return _unavailable(self, self.FAMILY)
+        return HFAdapterMixin.get_logits(self, prompt)
+
+    def patch_activation(self, prompt: str, layer: int, neuron_index: int,
+                         patch_value: float) -> Any:
+        if self.spec.mock_mode:
+            return _unavailable(self, self.FAMILY)
+        return HFAdapterMixin.patch_activation(self, prompt, layer,
+                                               neuron_index, patch_value)
+
+    def get_residual_stream(self, prompt: str) -> Dict[str, Any]:
+        if self.spec.mock_mode:
+            return _unavailable(self, self.FAMILY)
+        return HFAdapterMixin.get_residual_stream(self, prompt)
+
+
+class GemmaAdapter(_FamilyAdapter):
+    """Google Gemma. `num_heads` counts attention heads, not KV heads."""
+
+    SPECS = GEMMA
+    FAMILY = "Gemma"
 
     def __init__(self, variant: str = "gemma-2b", mock_mode: bool = False) -> None:
-        configs = {
-            "gemma-2b": ModelSpec("gemma-2b", "gemma", 18, 8,  2048, 16384, 256000, 8192, "google/gemma-2b",  mock_mode=mock_mode),
-            "gemma-7b": ModelSpec("gemma-7b", "gemma", 28, 16, 3072, 24576, 256000, 8192, "google/gemma-7b",  mock_mode=mock_mode),
-        }
-        super().__init__(configs.get(variant, configs["gemma-2b"]))
-        _force_simulated(self, "Gemma")
-
-    def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
-        n_indices = [neuron_index] if neuron_index is not None else list(range(8))
-        return [ActivationResult(layer=layer, token_index=0, neuron_index=n,
-                                 activation_value=_mock_activation(layer, n, prompt),
-                                 context_prompt=prompt) for n in n_indices]
-
-    def get_attention_patterns(self, prompt: str, layer: int) -> List[AttentionPattern]:
-        return _mock_attention_patterns(self.spec.num_heads, prompt, layer)
-
-    def get_logits(self, prompt: str) -> Dict[str, Any]:
-        return {**_mock_logits(), "prompt": prompt}
-
-    def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
-        orig = _mock_activation(layer, neuron_index, prompt)
-        return PatchResult(orig, patch_value, round(patch_value - orig, 4), " Paris", " London", layer, neuron_index, patch_value)
-
-    def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:
-        return [{"layer": i, "norm": round(2.1 + i * 0.25, 4)} for i in range(self.spec.num_layers + 1)]
+        super().__init__(variant, mock_mode)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Llama Adapter
-# ─────────────────────────────────────────────────────────────────────────────
+class LlamaAdapter(_FamilyAdapter):
+    """Meta Llama. Grouped-query attention on 3.x and 2."""
 
-class LlamaAdapter(ModelAdapter):
-    """Adapter for Meta Llama model family (Llama-3.1, TinyLlama)."""
+    SPECS = LLAMA
+    FAMILY = "Llama"
 
-    def __init__(self, variant: str = "tinyllama", mock_mode: bool = False) -> None:
-        configs = {
-            "tinyllama":  ModelSpec("tinyllama-1.1b", "llama", 22, 32, 2048,  5632,  32000, 2048, "TinyLlama/TinyLlama-1.1B-Chat-v1.0", mock_mode=mock_mode),
-            "llama-3-8b": ModelSpec("llama-3-8b",     "llama", 32, 32, 4096,  14336, 128256, 8192, "meta-llama/Meta-Llama-3-8B",          mock_mode=mock_mode),
-            "llama-3-70b":ModelSpec("llama-3-70b",    "llama", 80, 64, 8192,  28672, 128256, 8192, "meta-llama/Meta-Llama-3-70B",         mock_mode=mock_mode),
-        }
-        super().__init__(configs.get(variant, configs["tinyllama"]))
-        _force_simulated(self, "Llama")
-
-    def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
-        n_indices = [neuron_index] if neuron_index is not None else list(range(8))
-        return [ActivationResult(layer=layer, token_index=0, neuron_index=n,
-                                 activation_value=_mock_activation(layer, n, prompt),
-                                 context_prompt=prompt) for n in n_indices]
-
-    def get_attention_patterns(self, prompt: str, layer: int) -> List[AttentionPattern]:
-        return _mock_attention_patterns(self.spec.num_heads, prompt, layer)
-
-    def get_logits(self, prompt: str) -> Dict[str, Any]:
-        return {**_mock_logits(), "prompt": prompt}
-
-    def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
-        orig = _mock_activation(layer, neuron_index, prompt)
-        return PatchResult(orig, patch_value, round(patch_value - orig, 4), " Paris", " Rome", layer, neuron_index, patch_value)
-
-    def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:
-        return [{"layer": i, "norm": round(1.9 + i * 0.28, 4)} for i in range(self.spec.num_layers + 1)]
+    def __init__(self, variant: str = "llama-3.2-1b",
+                 mock_mode: bool = False) -> None:
+        super().__init__(variant, mock_mode)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Qwen Adapter
-# ─────────────────────────────────────────────────────────────────────────────
+class QwenAdapter(_FamilyAdapter):
+    """Alibaba Qwen."""
 
-class QwenAdapter(ModelAdapter):
-    """Adapter for Alibaba Qwen model family (Qwen-2, Qwen-2.5)."""
+    SPECS = QWEN
+    FAMILY = "Qwen"
 
-    def __init__(self, variant: str = "qwen-2-1.5b", mock_mode: bool = False) -> None:
-        configs = {
-            "qwen-2-1.5b": ModelSpec("qwen-2-1.5b", "qwen", 28, 16, 1536,  8960,  151936, 32768, "Qwen/Qwen2-1.5B",    mock_mode=mock_mode),
-            "qwen-2-7b":   ModelSpec("qwen-2-7b",   "qwen", 28, 28, 3584,  18944, 151936, 32768, "Qwen/Qwen2-7B",      mock_mode=mock_mode),
-            "qwen-2.5-7b": ModelSpec("qwen-2.5-7b", "qwen", 28, 28, 3584,  18944, 152064, 131072, "Qwen/Qwen2.5-7B",  mock_mode=mock_mode),
-        }
-        super().__init__(configs.get(variant, configs["qwen-2-1.5b"]))
-        _force_simulated(self, "Qwen")
-
-    def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
-        n_indices = [neuron_index] if neuron_index is not None else list(range(8))
-        return [ActivationResult(layer=layer, token_index=0, neuron_index=n,
-                                 activation_value=_mock_activation(layer, n, prompt),
-                                 context_prompt=prompt) for n in n_indices]
-
-    def get_attention_patterns(self, prompt: str, layer: int) -> List[AttentionPattern]:
-        return _mock_attention_patterns(self.spec.num_heads, prompt, layer)
-
-    def get_logits(self, prompt: str) -> Dict[str, Any]:
-        return {**_mock_logits(), "prompt": prompt}
-
-    def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
-        orig = _mock_activation(layer, neuron_index, prompt)
-        return PatchResult(orig, patch_value, round(patch_value - orig, 4), " Paris", " Beijing", layer, neuron_index, patch_value)
-
-    def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:
-        return [{"layer": i, "norm": round(2.0 + i * 0.22, 4)} for i in range(self.spec.num_layers + 1)]
+    def __init__(self, variant: str = "qwen2.5-0.5b",
+                 mock_mode: bool = False) -> None:
+        super().__init__(variant, mock_mode)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Mistral Adapter
-# ─────────────────────────────────────────────────────────────────────────────
+class MistralAdapter(_FamilyAdapter):
+    """Mistral AI. Windowed attention on v0.1/v0.2, sliding on Ministral."""
 
-class MistralAdapter(ModelAdapter):
-    """Adapter for Mistral AI model family (Mistral-7B, Mixtral-8x7B)."""
+    SPECS = MISTRAL
+    FAMILY = "Mistral"
 
-    def __init__(self, variant: str = "mistral-7b", mock_mode: bool = False) -> None:
-        configs = {
-            "mistral-7b":   ModelSpec("mistral-7b",   "mistral", 32, 32, 4096, 14336, 32000, 32768, "mistralai/Mistral-7B-v0.3", mock_mode=mock_mode),
-            "mixtral-8x7b": ModelSpec("mixtral-8x7b", "mistral", 32, 32, 4096, 14336, 32000, 32768, "mistralai/Mixtral-8x7B-v0.1", mock_mode=mock_mode),
-        }
-        super().__init__(configs.get(variant, configs["mistral-7b"]))
-        _force_simulated(self, "Mistral")
-
-    def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
-        n_indices = [neuron_index] if neuron_index is not None else list(range(8))
-        return [ActivationResult(layer=layer, token_index=0, neuron_index=n,
-                                 activation_value=_mock_activation(layer, n, prompt),
-                                 context_prompt=prompt) for n in n_indices]
-
-    def get_attention_patterns(self, prompt: str, layer: int) -> List[AttentionPattern]:
-        return _mock_attention_patterns(self.spec.num_heads, prompt, layer)
-
-    def get_logits(self, prompt: str) -> Dict[str, Any]:
-        return {**_mock_logits(), "prompt": prompt}
-
-    def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
-        orig = _mock_activation(layer, neuron_index, prompt)
-        return PatchResult(orig, patch_value, round(patch_value - orig, 4), " Paris", " Berlin", layer, neuron_index, patch_value)
-
-    def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:
-        return [{"layer": i, "norm": round(1.7 + i * 0.31, 4)} for i in range(self.spec.num_layers + 1)]
+    def __init__(self, variant: str = "mistral-7b",
+                 mock_mode: bool = False) -> None:
+        super().__init__(variant, mock_mode)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DeepSeek Adapter
-# ─────────────────────────────────────────────────────────────────────────────
+class DeepSeekAdapter(_FamilyAdapter):
+    """DeepSeek. The R1 distill is a Qwen architecture; the coder is a Llama one."""
 
-class DeepSeekAdapter(ModelAdapter):
-    """Adapter for DeepSeek model family (DeepSeek-V2, DeepSeek-R1)."""
+    SPECS = DEEPSEEK
+    FAMILY = "DeepSeek"
 
-    def __init__(self, variant: str = "deepseek-r1-1.5b", mock_mode: bool = False) -> None:
-        configs = {
-            "deepseek-r1-1.5b": ModelSpec("deepseek-r1-1.5b", "deepseek", 28, 16, 1536, 8960, 102400, 131072, "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", mock_mode=mock_mode),
-            "deepseek-v2-7b":   ModelSpec("deepseek-v2-7b",   "deepseek", 28, 28, 4096, 11008, 102400, 4096, "deepseek-ai/deepseek-moe-16b-base",           mock_mode=mock_mode),
-        }
-        super().__init__(configs.get(variant, configs["deepseek-r1-1.5b"]))
-        _force_simulated(self, "DeepSeek")
+    def __init__(self, variant: str = "deepseek-r1-1.5b",
+                 mock_mode: bool = False) -> None:
+        super().__init__(variant, mock_mode)
 
-    def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:
-        n_indices = [neuron_index] if neuron_index is not None else list(range(8))
-        return [ActivationResult(layer=layer, token_index=0, neuron_index=n,
-                                 activation_value=_mock_activation(layer, n, prompt),
-                                 context_prompt=prompt) for n in n_indices]
 
-    def get_attention_patterns(self, prompt: str, layer: int) -> List[AttentionPattern]:
-        return _mock_attention_patterns(self.spec.num_heads, prompt, layer)
-
-    def get_logits(self, prompt: str) -> Dict[str, Any]:
-        return {**_mock_logits(), "prompt": prompt}
-
-    def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
-        orig = _mock_activation(layer, neuron_index, prompt)
-        return PatchResult(orig, patch_value, round(patch_value - orig, 4), " Paris", " Tokyo", layer, neuron_index, patch_value)
-
-    def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:
-        return [{"layer": i, "norm": round(1.6 + i * 0.27, 4)} for i in range(self.spec.num_layers + 1)]
+__all__ = [
+    "GemmaAdapter", "LlamaAdapter", "QwenAdapter", "MistralAdapter",
+    "DeepSeekAdapter",
+    "GEMMA", "LLAMA", "QWEN", "MISTRAL", "DEEPSEEK",
+]

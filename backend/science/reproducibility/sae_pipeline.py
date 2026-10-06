@@ -263,7 +263,13 @@ class SAEReproductionPipeline:
         sae = _sae_class()(d_model, n_features, top_k).to(acts.device)
         optimiser = torch.optim.Adam(sae.parameters(), lr=learning_rate)
 
+        # Per-element variance, and the summed squared deviation it corresponds
+        # to. The squared error below is summed over the feature dimension while
+        # `var()` is per element, so normalising one against the other divides by
+        # d_model too few -- it reported NMSE 303 for a fit whose true NMSE was
+        # 0.395, and I nearly wrote off a working reconstruction as a failure.
         variance = float(fit_x.var())
+        variance_sum = variance * d_model
         history: List[Dict[str, float]] = []
         for step in range(int(steps)):
             optimiser.zero_grad()
@@ -285,9 +291,15 @@ class SAEReproductionPipeline:
             held_l0 = sae.l0(held_sparse)
             dead = sae.dead_fraction(held_sparse)
 
-        # Normalised MSE: the fraction of activation variance left unexplained.
-        # Reported because raw MSE is uninterpretable across models and layers.
-        nmse = held_mse / variance if variance > 0 else None
+        # Fraction of activation variance left unexplained. Both terms are
+        # summed over the feature dimension, so the ratio is dimensionless and
+        # comparable across models and layers.
+        nmse = held_mse / variance_sum if variance_sum > 0 else None
+
+        # An NMSE at or above 1 means the reconstruction is worse than predicting
+        # the mean, so it is not a reconstruction at all. Reported as a failure
+        # rather than left for a reader to notice.
+        reconstruction_useful = bool(nmse is not None and nmse < 1.0)
 
         attributions = self._attribute(torch, sae, held_x, held_sparse,
                                        tokenizer, top_tokens)
@@ -302,6 +314,9 @@ class SAEReproductionPipeline:
             "requested_k": top_k,
             "dictionary_size": n_features,
             "activation_variance": round(variance, 8),
+            "activation_variance_summed": round(variance_sum, 6),
+            "mse_units": "sum of squared error over the feature dimension",
+            "reconstruction_useful": reconstruction_useful,
             "normalized_mse": (round(nmse, 6) if nmse is not None else None),
             "dead_feature_fraction": round(dead, 4),
             "n_activations": int(held_x.shape[0]),
@@ -321,6 +336,35 @@ class SAEReproductionPipeline:
                 "nothing more."
             ),
         }
+
+        # The status reflects whether the fit produced a usable reconstruction.
+        # Training without converging is not "completed": reporting a status that
+        # reads as success alongside an NMSE above 1 would be the same defect as
+        # the one this pipeline was rewritten to remove.
+        if not reconstruction_useful:
+            return {
+                "pipeline": "SAEReproductionPipeline",
+                "status": UNAVAILABLE,
+                "provenance": UNAVAILABLE,
+                "field_provenance": {name: UNAVAILABLE for name in metrics},
+                "mock_mode": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "observed_metrics": metrics,
+                "corpus": corpus_manifest,
+                "seed": int(seed),
+                "steps": int(steps),
+                "reason": (
+                    f"An autoencoder was fitted but its reconstruction is not "
+                    f"usable: normalised MSE {nmse:.4g} is at or above 1, so it "
+                    f"explains less of the held-out activation variance than "
+                    f"predicting the mean would. Reported rather than presented "
+                    f"as a reconstruction. The training history is in "
+                    f"`observed_metrics.training_history`; more steps or a higher "
+                    f"learning rate may fix it, and a corpus with narrower "
+                    f"activation outliers may help more."
+                ),
+            }
 
         return {
             "pipeline": "SAEReproductionPipeline",
