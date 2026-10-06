@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from backend.agents.evidence_policy import field_map
+from backend.core.identifiers import content_id
 
 from ..semantics.auto_circuit_namer import AutoCircuitNamerEngine
 from .auto_hypothesis_tester import AutomaticHypothesisTesterEngine
@@ -90,7 +91,7 @@ class DiscoveryEngine:
                 f"{type(hypothesis_statement).__name__}"
             )
 
-        disc_id = f"disc_{hash(hypothesis_statement) & 0xffffffff:08x}"
+        disc_id = content_id(hypothesis_statement, prefix="disc_")
         lifecycle = DiscoveryLifecycleState(discovery_id=disc_id,
                                             title=hypothesis_statement[:50])
         self.discoveries[disc_id] = lifecycle

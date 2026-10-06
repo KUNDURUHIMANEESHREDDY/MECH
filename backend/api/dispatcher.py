@@ -16,6 +16,7 @@ from pathlib import Path
 # Real GPT-2 inference engine (torch + transformers) is imported lazily so the
 # desktop app can open immediately. Falls back to seeded stand-ins when absent.
 from backend.storage import DesktopStorage
+from backend.core.identifiers import entity_id
 from backend.core.provenance import pass_through
 
 router = APIRouter()
@@ -280,7 +281,10 @@ def list_experiments() -> Dict[str, Any]:
 @router.post("/experiments")
 def create_experiment(payload: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(payload)
-    item.setdefault("id", f"exp_{hash(str(payload)) % 10000}")
+    # Was `f"exp_{hash(str(payload)) % 10000}"`. See
+    # backend.core.identifiers for why a salted 10,000-value namespace is the
+    # wrong thing to hand a persisted row.
+    item.setdefault("id", entity_id("exp_"))
     _store.add_experiment(item)
     return {"status": "created", "id": item["id"]}
 
@@ -299,7 +303,7 @@ def list_sessions() -> Dict[str, Any]:
 @router.post("/sessions")
 def create_session(payload: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(payload)
-    item.setdefault("id", f"sess_{hash(str(payload)) % 10000}")
+    item.setdefault("id", entity_id("sess_"))
     _store.add_session(item)
     return {"status": "created", "id": item["id"]}
 

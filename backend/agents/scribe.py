@@ -18,6 +18,8 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any, Dict, List, Optional
 
+from backend.core.identifiers import entity_id
+
 from .evidence_policy import field_map, publication_block_reason
 
 
@@ -157,7 +159,7 @@ class Scribe:
                 "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
             }
 
-        exp_id = f"exp_{abs(hash(goal)) % 10000:04d}"
+        exp_id = entity_id("exp_")
         # Provenance is derived from the trace inside report(), not asserted here.
         rep = self.report(experiment_id=exp_id,
                           title=f"Mechanistic Report: {goal[:60]}",

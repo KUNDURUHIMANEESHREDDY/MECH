@@ -14,6 +14,7 @@ from .evidence_boundary import (
 )
 from .evidence_graph import TraceableEvidenceGraph
 from .experiment_templates import ExperimentTemplatesSystem
+from .identifiers import entity_id, content_id
 from .provenance_viewer import ProvenanceViewerEngine
 from .research_registry import ResearchRegistry
 from .unified_registry import UnifiedRegistry, PaperRegistry, MechanismRegistry, CircuitRegistry
@@ -31,6 +32,7 @@ __all__ = [
     "digest_of", "sha256_file",
     "TraceableEvidenceGraph",
     "ExperimentTemplatesSystem",
+    "entity_id", "content_id",
     "ProvenanceViewerEngine",
     "ResearchRegistry",
     "UnifiedRegistry", "PaperRegistry", "MechanismRegistry", "CircuitRegistry",

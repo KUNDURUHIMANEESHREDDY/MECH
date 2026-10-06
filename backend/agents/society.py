@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List
 
+from backend.core.identifiers import entity_id
+
 from .evidence_policy import (
     blocked_reason,
     discovery_is_live,
@@ -213,7 +215,7 @@ class ResearchSocietyV2:
         successful = [t["node"] for t in trace if not self._failed(t)]
         failed = [t["node"] for t in trace if self._failed(t)]
         reflection = self.critic.reflect(
-            campaign_id=f"camp_{abs(hash(goal)) % 10000:04d}",
+            campaign_id=entity_id("camp_"),
             successful=successful, failed=failed,
             planner_decisions=[n["id"] for n in nodes])
 
