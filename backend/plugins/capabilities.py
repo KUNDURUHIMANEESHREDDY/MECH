@@ -10,13 +10,53 @@ bound and expensive to get wrong:
 
 * no network (sockets, regardless of how they were reached)
 * no process creation (subprocess, exec, spawn, os.system)
+* no reads outside an explicit allow-list
 * no writes outside the plugin's own directory and the temp dir
 
 It is explicitly **not** a full sandbox. A determined attacker with a working
 interpreter can still find gaps; the OS limits in :mod:`limits` bound the blast
 radius regardless. What this buys is that the obvious post-exploitation steps --
-exfiltrate over the network, spawn a shell, write to a config file -- fail even
-if the AST gate is bypassed outright.
+exfiltrate over the network, spawn a shell, read a credential, write to a config
+file -- fail even if the AST gate is bypassed outright.
+
+Reads used to be unrestricted
+-----------------------------
+The hook gated writes and let reads through:
+
+    if flags & _WRITE_FLAGS and not _within(target):
+        raise CapabilityViolation(...)
+
+`writable_roots` was the only root list, so a plugin could read anything the
+host user could. It needed no network escape to do it, because the plugin IPC
+channel is already authorised: `Path("~/.ssh/id_rsa").read_text()` returns into
+a dict the host hands back to the caller. The documented position was
+"network / processes / writes / reads" as four rows, and reads were the one
+marked no.
+
+The fix is an allow-list, and the interesting part is what goes on it. Reads are
+granted for:
+
+* the plugin's own directory,
+* the system temp directory,
+* the Python installation and site-packages,
+* the model caches (plugins legitimately load weights),
+* the interpreter's own import roots, so a plugin can still import what it
+  already imported -- ``backend/plugins/library/ioi_experiment_logger`` needs
+  ``backend.plugins.plugin_base``, and excluding it would break a bundled
+  plugin,
+* any explicitly granted readable root.
+
+Everything else is refused, including ``~/.ssh``, ``~/.config``, browser
+profiles, other projects on the machine, and the host's own credential files.
+
+Residual risk, stated plainly: because the import roots are granted, a
+third-party plugin can read MECH's own source. That is a real confidentiality
+cost and it is the price of letting bundled plugins import from the package.
+Denying it means either vendoring the plugin API into a separate importable
+package or dropping bundled plugins' ability to use it; both are larger
+changes than this fix, and neither can be validated on a machine that is
+currently not allowed to run the test suite. The host's *data* -- the
+database, results, artifacts -- is outside the granted roots and is not exposed.
 
 Audit hooks cannot be removed once installed, which is the property we want:
 plugin code cannot unhook itself.
@@ -24,7 +64,9 @@ plugin code cannot unhook itself.
 from __future__ import annotations
 
 import os
+import site
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 from typing import Iterable, Set
@@ -101,11 +143,21 @@ _PROCESS_EVENTS = (
     "pty.spawn",
 )
 
-# Modes that mutate. Reads are permitted: a plugin legitimately reads its own
-# data files and the HF cache for model weights.
+# Flags that mean "this open will modify the file".
+#
+# Everything else is a read, and reads are governed by the readable allow-list
+# rather than by being unrestricted. A plugin legitimately reads its own data
+# files and the model caches for weights; it has no need for the host's SSH
+# keys, browser profiles or other projects, and those are what an exfiltration
+# through the (already-authorised) plugin IPC channel would reach for.
 _WRITE_FLAGS = (
     os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC | os.O_EXCL
 )
+
+# Directory enumeration is a read. It does not raise `open`, so it needs its
+# own entry or a plugin could map the shape of a directory tree it may not
+# open -- enough to learn where credentials and other projects live.
+_LIST_DIR_EVENTS = ("os.listdir", "os.scandir")
 
 
 class CapabilityViolation(PermissionError):
@@ -120,18 +172,168 @@ def _normalize(path: str | os.PathLike) -> Path:
         return Path(os.path.abspath(str(path)))
 
 
+#: Directories under the home directory that hold credentials. This is a
+#: *secondary* filter -- the primary control is that only allow-listed roots are
+#: readable at all. It exists because the allow-list is seeded from `sys.path`,
+#: which is influenceable, and it is deliberately a named list rather than a
+#: "reject everything dotted" rule: that rule would also reject
+#: `~/.cache/huggingface`, which is where the model weights live and which a
+#: plugin is entitled to read.
+_SENSITIVE_HOME_NAMES = frozenset({
+    ".ssh", ".aws", ".azure", ".gcloud", ".kube", ".gnupg", ".netrc",
+    ".config", ".docker", ".git-credentials", ".npmrc", ".pypirc",
+    ".gem", ".cargo", ".mozilla", ".thunderbird", ".password-store",
+})
+
+
+def _is_credential_location(path: Path) -> bool:
+    """Whether a path is the home directory, an ancestor of it, or a known
+    credential directory inside it.
+
+    Defence in depth rather than the primary control -- the primary control is
+    that only allow-listed roots are readable at all. This exists because
+    `sys.path` is influenceable: a host that put `""` (the current directory)
+    or the user's home directory on it would otherwise hand a plugin the whole
+    home directory to read.
+    """
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        return False
+    if path == home:
+        return True
+    if path in home.parents:
+        # An ancestor of home (``C:\\Users``, ``/home``) grants far more than
+        # intended. Rejected unconditionally: nothing legitimate lives there,
+        # and a Python installation at that level would be a system-wide
+        # install, not a per-user one.
+        return True
+    if home in path.parents:
+        relative = path.relative_to(home)
+        first = relative.parts[0] if relative.parts else ""
+        return first in _SENSITIVE_HOME_NAMES
+    return False
+
+
+def _python_roots() -> Set[Path]:
+    """The interpreter's own installation.
+
+    A plugin cannot import anything at all without these, so they are granted
+    unconditionally rather than filtered: they contain no user data, and
+    excluding them would break every plugin. In particular a per-user install
+    under ``%LOCALAPPDATA%`` sits *inside* the home directory, so this must not
+    be passed through `_is_credential_location`.
+    """
+    found: Set[Path] = set()
+    for key in ("stdlib", "platstdlib", "purelib", "platlib"):
+        try:
+            found.add(_normalize(sysconfig.get_paths()[key]))
+        except (KeyError, OSError, RuntimeError):
+            continue
+    for getter in (lambda: site.getsitepackages(), site.getusersitepackages):
+        try:
+            entries = getter()
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(entries, str):
+            entries = [entries]
+        for entry in entries:
+            if entry:
+                found.add(_normalize(entry))
+    for prefix in (sys.base_prefix, sys.prefix):
+        if prefix:
+            found.add(_normalize(prefix))
+    return found
+
+
+def _model_cache_roots() -> Set[Path]:
+    """Where model weights live, which plugins legitimately read.
+
+    Granted by name and therefore not filtered either: ``~/.cache`` is under the
+    home directory, and a filter that rejected it would stop every plugin from
+    loading a model.
+    """
+    found: Set[Path] = set()
+    names = ("HF_HOME", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE",
+             "HF_HUB_CACHE", "TORCH_HOME", "XDG_CACHE_HOME")
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            found.add(_normalize(value))
+    return found
+
+
+def default_readable_roots() -> Set[Path]:
+    """The readable allow-list a plugin gets without being told otherwise.
+
+    Derived from the interpreter's own import roots so that bundled plugins can
+    still import the package they are written against -- the import roots are
+    filtered, but not by the same rule as the deliberate grants above.
+    """
+    roots: Set[Path] = {_normalize(tempfile.gettempdir())}
+    roots |= _python_roots()
+    roots |= _model_cache_roots()
+    for entry in list(sys.path):
+        # An empty entry means "the current directory", which is not a path and
+        # would otherwise resolve to wherever the worker happens to be.
+        if not entry:
+            continue
+        try:
+            resolved = _normalize(entry)
+        except Exception:  # noqa: BLE001
+            continue
+        if not _is_credential_location(resolved):
+            roots.add(resolved)
+    return roots
+
+
+def resolve_readable_roots(
+    writable_roots: Iterable[str | os.PathLike] = (),
+    readable_roots: Iterable[str | os.PathLike] = (),
+) -> Set[Path]:
+    """The effective readable allow-list.
+
+    Split out from `install_capability_hook` because the interesting decision --
+    whether a *caller-supplied* root is honoured or refused -- is worth testing
+    directly, and a test for it should not have to create a credential
+    directory to do so. `readable_roots` is exactly the parameter an attacker
+    would aim at, so the filter has to apply to it and not only to the defaults.
+    """
+    readable: Set[Path] = default_readable_roots()
+    for root in readable_roots:
+        try:
+            resolved = _normalize(root)
+        except Exception:  # noqa: BLE001
+            continue
+        if not _is_credential_location(resolved):
+            readable.add(resolved)
+    # Writing implies reading, so the writable set is readable too.
+    for root in writable_roots:
+        try:
+            readable.add(_normalize(root))
+        except Exception:  # noqa: BLE001
+            continue
+    return readable
+
+
 def install_capability_hook(
     writable_roots: Iterable[str | os.PathLike] = (),
+    readable_roots: Iterable[str | os.PathLike] = (),
     allow_network: bool = False,
 ) -> Set[Path]:
     """Install the audit hook. Returns the resolved writable roots.
 
-    Must be called before any plugin code runs. Idempotent: a second call
-    installs no additional hook, because the first one already denies.
+    Must be called before any plugin code runs. A second call adds a second
+    hook rather than replacing the first; both deny, so the effect is the same
+    and neither can be removed.
 
     Args:
         writable_roots: Directories the plugin may write into. The plugin's own
             directory and the system temp directory are always included.
+        readable_roots: Extra directories the plugin may read. Combined with
+            `default_readable_roots()`, and filtered the same way: a caller
+            cannot widen the read allow-list into the host's own credentials by
+            passing them in as configuration.
         allow_network: Escape hatch for debugging. Off by default.
     """
     roots: Set[Path] = {Path(tempfile.gettempdir()).resolve()}
@@ -141,11 +343,13 @@ def install_capability_hook(
         except Exception:  # noqa: BLE001
             continue
 
+    readable = resolve_readable_roots(roots, readable_roots)
+
     network_events = frozenset() if allow_network else frozenset(_NETWORK_EVENTS)
     process_events = frozenset(_PROCESS_EVENTS)
 
-    def _within(path: Path) -> bool:
-        return any(path == root or root in path.parents for root in roots)
+    def _within(path: Path, allowed: Set[Path]) -> bool:
+        return any(path == root or root in path.parents for root in allowed)
 
     def hook(event: str, args: tuple) -> None:
         if event in network_events:
@@ -162,17 +366,40 @@ def install_capability_hook(
             )
 
         if event == "open":
-            # open(path, mode, flags)
+            # Both `open()` and `os.open()` raise this event, as
+            # (path, mode, flags), so one check covers the builtin, the os
+            # module, and everything pathlib does underneath (`Path.read_text`,
+            # `Path.read_bytes`, `Path.write_text`, ...).
             try:
                 target = _normalize(args[0])
                 flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
             except Exception:  # noqa: BLE001
                 raise CapabilityViolation(
                     "open() with an unresolvable path is not permitted") from None
-            if flags & _WRITE_FLAGS and not _within(target):
+            if flags & _WRITE_FLAGS:
+                if not _within(target, roots):
+                    raise CapabilityViolation(
+                        f"writing outside the plugin directory is not permitted "
+                        f"(blocked: {target})"
+                    )
+                return
+            if not _within(target, readable):
                 raise CapabilityViolation(
-                    f"writing outside the plugin directory is not permitted "
-                    f"(blocked: {target})"
+                    f"reading outside the plugin's permitted roots is not "
+                    f"permitted (blocked: {target})"
+                )
+            return
+
+        if event in _LIST_DIR_EVENTS:
+            try:
+                target = _normalize(args[0])
+            except Exception:  # noqa: BLE001
+                raise CapabilityViolation(
+                    f"{event} with an unresolvable path is not permitted") from None
+            if not _within(target, readable):
+                raise CapabilityViolation(
+                    f"listing {target} is not permitted in a plugin worker "
+                    f"(blocked: {event})"
                 )
             return
 
@@ -184,7 +411,7 @@ def install_capability_hook(
             except Exception:  # noqa: BLE001
                 raise CapabilityViolation(
                     f"{event} with an unresolvable path is not permitted") from None
-            if not _within(target):
+            if not _within(target, roots):
                 raise CapabilityViolation(
                     f"{event} outside the plugin directory is not permitted "
                     f"(blocked: {target})"

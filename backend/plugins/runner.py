@@ -37,6 +37,31 @@ class WorkerBootError(Exception):
     """The worker failed to start, load the plugin, or stay within limits."""
 
 
+def containment_refusal(job: Dict[str, Any]) -> str:
+    """Why a containment result must not be trusted. Empty means acceptable.
+
+    Split out as a pure function so the decision is testable on its own, and in
+    particular the case that used to fall through: a result carrying no
+    `assigned` key at all. The runner's original check was
+
+        if job.get("error") or job.get("assigned") is False:
+
+    and `assign_windows_job` returns precisely such a result when the Windows Job
+    Object types cannot be built. The worker therefore started uncontained while
+    every visible signal said containment had merely been requested.
+
+    Windows-only, because off Windows `assign_windows_job` returns
+    `{"platform": "posix"}` with no `assigned` key by design and POSIX
+    containment is applied in the child by `apply_posix_limits`.
+    """
+    if job.get("error"):
+        return str(job["error"])
+    if job.get("platform") == "win32" and job.get("assigned") is not True:
+        return ("Windows job object assignment was not confirmed "
+                f"(assigned={job.get('assigned')!r})")
+    return ""
+
+
 def _child_env() -> Dict[str, str]:
     """A scrubbed environment for the worker.
 
@@ -197,11 +222,11 @@ def start_remote_plugin(
         # child on POSIX and ignored here on Windows -- the same request produced
         # a 2-second cap on Linux and the 120-second default on this host.
         job = assign_windows_job(proc.pid, resolve_limits(limits))
-        if job.get("error") or job.get("assigned") is False:
+        refusal = containment_refusal(job)
+        if refusal:
             proc.kill()
             raise WorkerBootError(
-                f"could not apply containment to worker: "
-                f"{job.get('error', 'job object assignment refused')}")
+                f"could not apply containment to worker: {refusal}")
         if job.get("not_enforceable"):
             logger.warning(
                 "Windows containment cannot enforce %s; the worker is bounded on "

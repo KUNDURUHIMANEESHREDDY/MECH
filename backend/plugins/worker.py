@@ -130,6 +130,13 @@ def main() -> int:
             try:
                 install_capability_hook(
                     writable_roots=[Path(load_path).resolve().parent],
+                    # Reads are allow-listed, not merely ungated. The defaults
+                    # cover the interpreter's own import roots, the Python
+                    # installation and the model caches; the host may grant more
+                    # explicitly, and the credential filter still applies to
+                    # anything it names.
+                    readable_roots=[str(p) for p in
+                                    (message.get("readable_roots") or [])],
                     allow_network=bool(message.get("allow_network")),
                 )
             except Exception as exc:  # noqa: BLE001

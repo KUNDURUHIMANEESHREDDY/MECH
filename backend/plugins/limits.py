@@ -239,6 +239,14 @@ def assign_windows_job(
     try:
         types = _win_job_types()
         if types is None:
+            # Previously this returned without setting `assigned`, and the
+            # runner's check was `job.get("assigned") is False` -- so a result
+            # with no `assigned` key at all satisfied it and the worker went on
+            # to load plugin code with no containment on Windows. Said plainly
+            # instead: the job object could not be built here.
+            result["assigned"] = False
+            result["error"] = ("Windows Job Object types are unavailable, so "
+                               "no containment could be applied")
             return result
         ctypes, JOBOBJECT_EXTENDED_LIMIT_INFORMATION = types
 
