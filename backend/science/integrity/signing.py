@@ -37,6 +37,7 @@ belongs outside the tree, referenced by path or environment.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -301,3 +302,42 @@ def verify(payload: Union[str, bytes], signature: Optional[str],
         return VerificationResult(
             False, "signature does not verify under the supplied public key")
     return VerificationResult(True, None)
+
+
+def public_key_hex(private_key: Optional[KeyMaterial] = None) -> str:
+    """Return the hex public key matching `private_key`.
+
+    Needed wherever a signature travels away from the process that made it. A
+    signature is only checkable by a party that was *not* the signer if the
+    verifying key travels with it, so any artifact that embeds a signature has
+    to embed the key too.
+    """
+    key = load_private_key(private_key)
+    from cryptography.hazmat.primitives import serialization
+
+    raw = key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return raw.hex()
+
+
+def key_id_for(public_key: Union[str, bytes]) -> str:
+    """A short, stable identifier for a verifying key.
+
+    An artifact that carries both a signature and its key needs a way to state
+    *which* key was used. This fingerprint does that, and comparing it against
+    the carried key catches a swapped or substituted key -- the check that
+    shape-only validation could never perform, because a substituted key
+    produces a signature that is internally perfectly consistent.
+
+    It also lets a verifier that knows which executor it trusts pin the
+    expected `key_id` instead of trusting whichever key arrived.
+    """
+    if isinstance(public_key, (bytes, bytearray)):
+        raw = bytes(public_key)
+    else:
+        text = str(public_key or "").strip()
+        # Hex before utf-8: a 64-character hex public key is also 64 bytes,
+        # for the same reason `load_private_key` checks hex first.
+        raw = bytes.fromhex(text) if (_is_hex(text) and len(text) == 64) \
+            else text.encode("utf-8")
+    return "ed25519:" + hashlib.sha256(raw).hexdigest()[:16]

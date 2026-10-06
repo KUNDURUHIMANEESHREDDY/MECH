@@ -9,6 +9,8 @@ from .evidence_boundary import (
     EvidenceBoundary,
     EvidenceResult,
     RunAttestation,
+    digest_of,
+    sha256_file,
 )
 from .evidence_graph import TraceableEvidenceGraph
 from .experiment_templates import ExperimentTemplatesSystem
@@ -26,6 +28,7 @@ __all__ = [
     "CoreExperimentDTO", "CoreDiscoveryDTO",
     "ResearchEvent",
     "BOUNDARY", "EvidenceBoundary", "EvidenceResult", "RunAttestation",
+    "digest_of", "sha256_file",
     "TraceableEvidenceGraph",
     "ExperimentTemplatesSystem",
     "ProvenanceViewerEngine",

@@ -14,7 +14,9 @@ from .signing import (  # noqa: F401
     SignatureInvalid,
     SigningUnavailable,
     VerificationResult,
+    key_id_for,
     load_private_key,
+    public_key_hex,
     sign,
     verify,
 )
@@ -24,7 +26,9 @@ __all__ = [
     "SignatureInvalid",
     "SigningUnavailable",
     "VerificationResult",
+    "key_id_for",
     "load_private_key",
+    "public_key_hex",
     "sign",
     "verify",
 ]
