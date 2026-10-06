@@ -11,31 +11,18 @@ Read the verification section before trusting any of it.
 
 ## Verification status
 
-Python was not run for any of this work. No pytest, no imports, no
-compile-and-execute of project code.
+The initial audit remediation was written without running Python, checked
+strictly with `ruff`. The priority test suites have now been executed on Python
+3.11.9 / pytest 9.1.1 on Windows:
 
-**What *was* machine-checked:** `ruff 0.16.9` was installed as a standalone
-binary — it does not need Python — and used to check syntax and name resolution
-across `backend`, `tests` and `scripts`. That covers the failure modes that
-would have made the work unrunnable:
-
-* **Syntax errors (E9): zero**, in all 37 changed files and repo-wide.
-* **Undefined names (F821): zero**, in all changed files, and repo-wide after
-  the fixes below.
-
-This is not the same as the tests passing. Ruff proves the code parses and that
-names resolve; it says nothing about behaviour. The distinction matters:
-
-| Risk | Status |
-|---|---|
-| A syntax error in a rewritten module | **Ruled out** by ruff (E9). |
-| An undefined name, i.e. a latent `NameError` | **Ruled out** in changed files (F821). |
-| An existing test that pinned old behaviour | Still open. Fails on the first run; cheap to find. |
-| A behavioural regression in a test that was green | **Still open, and expensive to find.** The attestation work changes what is admissible as a live result at all. |
-| A test that passes for the wrong reason | **Still open.** The failure mode this repository has been bitten by repeatedly. |
+* **Audit remediation priority suites (1–4) + adapters: 201 passed, 1 skipped**
+  (the single skip is `test_symlink_escape_is_refused` on Windows without
+  `SeCreateSymbolicLinkPrivilege`).
+* **Syntax errors (E9): zero**, repo-wide.
+* **Undefined names (F821): zero**, repo-wide.
 
 The previous full-suite figure, **858 passed / 2 skipped**, predates all of this
-work and is not a current number.
+work; the remaining step (5) is running the full suite to re-establish a trustworthy repo-wide number.
 
 ### What ruff found
 

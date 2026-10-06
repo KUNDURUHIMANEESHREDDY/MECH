@@ -161,7 +161,23 @@ class _FamilyAdapter(HFAdapterMixin, ModelAdapter):
             raise KeyError(
                 f"{variant!r} is not a configured {self.FAMILY} variant. "
                 f"Available: {sorted(self.SPECS)}")
-        super().__init__(self.SPECS[variant])
+
+        # `mock_mode` has to reach the spec *before* the base constructor runs,
+        # not after. `ModelAdapter.__init__` loads weights whenever
+        # `spec.mock_mode` is false, and it is called on the line below.
+        #
+        # Passing the spec through unchanged meant `mock_mode=True` did not
+        # prevent loading -- it only marked the result unavailable afterwards.
+        # So constructing a "simulated" adapter downloaded and materialised the
+        # real weights first, which is the opposite of what the flag says, and
+        # was the reason four families in one process took the interpreter down
+        # with an access violation. The unit suite has to be able to build every
+        # adapter without touching a multi-gigabyte download.
+        spec = self.SPECS[variant]
+        if mock_mode and not spec.mock_mode:
+            spec = ModelSpec(**{**spec.__dict__, "mock_mode": True})
+
+        super().__init__(spec)
         self.variant = variant
         self.simulated = False
         self.simulation_reason: Optional[str] = None

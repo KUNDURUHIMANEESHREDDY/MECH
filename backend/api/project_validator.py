@@ -110,19 +110,24 @@ class ProjectValidator:
             status = "ready"
             reason = (f"All {len(checks)} required checks were verified and "
                       f"passed.")
-        elif missing:
-            status = "incomplete"
-            reason = (f"{len(missing)} of {len(checks)} checks ran and failed: "
-                      + ", ".join(sorted(missing)))
-            if unverified:
-                reason += (f". {len(unverified)} further checks could not be "
-                           f"run at all: " + ", ".join(sorted(unverified)))
-        else:
+        elif len(unverified) == len(REQUIRED_CHECKS):
             status = "unverified"
             reason = ("No readiness check could be performed, because no probe "
                       "was supplied for any required check. This is not a "
                       "statement that the project is incomplete -- it is a "
                       "statement that nothing was checked.")
+        else:
+            status = "incomplete"
+            if missing:
+                reason = (f"{len(missing)} of {len(checks)} checks ran and failed: "
+                          + ", ".join(sorted(missing)))
+                if unverified:
+                    reason += (f". {len(unverified)} further checks could not be "
+                               f"run at all: " + ", ".join(sorted(unverified)))
+            else:
+                reason = (f"{len(checks) - len(unverified)} of {len(checks)} checks were verified, "
+                          f"but {len(unverified)} checks could not be run: "
+                          + ", ".join(sorted(unverified)))
 
         result: Dict[str, Any] = {
             "project_id": project_id,

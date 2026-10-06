@@ -57,6 +57,16 @@ KNOWN_REMAINING = frozenset({
 })
 
 
+def _calls_builtin_hash(node: ast.AST) -> bool:
+    """Whether `node` contains a call to Python's builtin `hash()`."""
+    return any(
+        isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Name)
+        and child.func.id == "hash"
+        for child in ast.walk(node)
+    )
+
+
 def _hash_identifier_sites(path: Path) -> list:
     """Lines in `path` where `hash()` feeds something identifier-shaped."""
     try:
@@ -67,15 +77,15 @@ def _hash_identifier_sites(path: Path) -> list:
     found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.JoinedStr):
-            if "hash(" in ast.unparse(node):
+            if _calls_builtin_hash(node):
                 found.append(node.lineno)
         elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mod, ast.BitAnd)):
-            if "hash(" in ast.unparse(node):
+            if _calls_builtin_hash(node):
                 found.append(node.lineno)
         elif isinstance(node, ast.Assign):
             if any(isinstance(t, ast.Name) and t.id.endswith(("_id", "_hash"))
                    for t in node.targets):
-                if "hash(" in ast.unparse(node.value):
+                if _calls_builtin_hash(node.value):
                     found.append(node.lineno)
     return sorted(set(found))
 

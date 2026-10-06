@@ -147,6 +147,10 @@ PROBE = textwrap.dedent(
     secret = Path(secret_dir)
     extra = Path(extra_dir)
 
+    plugin.mkdir(parents=True, exist_ok=True)
+    secret.mkdir(parents=True, exist_ok=True)
+    extra.mkdir(parents=True, exist_ok=True)
+
     # Everything is created before the hook goes on, so that only the reads and
     # writes under test are governed by it.
     (plugin / "data.json").write_text('{"ok": true}')
@@ -183,7 +187,7 @@ PROBE = textwrap.dedent(
     attempt("listdir_secret_parent", lambda: os.listdir(str(secret)))
     attempt("scandir_secret_parent", lambda: list(os.scandir(str(secret))))
     attempt("traversal_to_secret",
-            lambda: (plugin / ".." / ".." / secret.name / "secret.txt").read_text())
+            lambda: (plugin / os.path.relpath(secret_file, plugin)).read_text())
     if have_link:
         attempt("read_through_symlink", lambda: link.read_text())
     attempt("read_extra", lambda: (extra / "public.txt").read_text())
@@ -205,7 +209,7 @@ def _run_probe(grant: str, tmp_path: Path) -> dict:
     # the wrong reason.
     tag = uuid.uuid4().hex[:8]
     secret = Path.home() / f"mech_probe_secret_{tag}"
-    extra = Path.home() / f"mech_probe_grant_{tag}"
+    extra = Path(grant) if grant else (Path.home() / f"mech_probe_grant_{tag}")
 
     out = subprocess.run(
         [sys.executable, "-c", PROBE, str(ROOT), str(plugin), str(secret),
@@ -220,8 +224,9 @@ def _run_probe(grant: str, tmp_path: Path) -> dict:
             if len(parts) >= 2
         )
     finally:
-        for d in (secret, extra):
-            shutil_rmtree(d)
+        shutil_rmtree(secret)
+        if not grant:
+            shutil_rmtree(extra)
 
 
 def shutil_rmtree(path: Path) -> None:

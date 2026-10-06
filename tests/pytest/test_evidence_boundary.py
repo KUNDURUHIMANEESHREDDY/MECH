@@ -21,6 +21,7 @@ Guards here are behavioural: each forgery is actually constructed and the
 boundary is actually asked. Grepping the source for banned spellings would not
 have caught any of the counterexamples below.
 """
+import ast
 import hashlib
 import inspect
 from dataclasses import replace
@@ -354,8 +355,58 @@ def test_no_module_outside_the_boundary_constructs_a_result():
 
 
 def test_only_the_boundary_grants_publication_eligibility():
+    """Exactly one executable statement may grant publication eligibility.
+
+    Parsed as an AST, not counted as text. The first version of this test was
+    `inspect.getsource(module).count('"publication_eligible": True') == 1`,
+    which failed -- correctly reporting two grants when there is one.
+
+    The second occurrence is in the module docstring, which quotes the audit's
+    counterexample
+
+        EvidenceResult(..., eligibility={"publication_eligible": True})
+
+    in order to explain why direct construction is refused. So the guard was
+    counting its own documentation of the bypass it exists to prevent. A grep
+    cannot tell an explanation from a grant.
+
+    This is the failure mode this repository has been bitten by repeatedly, and
+    the one `test_no_hash_derived_identifiers.py` warns about in its own
+    docstring. Worth recording that a guard written that way was written here,
+    in a file whose other tests were careful.
+    """
+    tree = ast.parse(inspect.getsource(_boundary_module))
+
+    grants = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if (isinstance(key, ast.Constant)
+                    and key.value == "publication_eligible"
+                    and isinstance(value, ast.Constant)
+                    and value.value is True):
+                grants += 1
+
+    assert grants == 1, (
+        f"{grants} executable statements grant publication eligibility; "
+        f"exactly one -- the boundary's admission path -- may"
+    )
+
+
+def test_the_quoted_counterexample_is_prose_not_code():
+    """Guards the guard: the pattern really does appear twice in the text.
+
+    Without this, someone "fixing" the AST test could delete the docstring
+    explanation and leave the next reader no record of what is being defended
+    against.
+    """
     source = inspect.getsource(_boundary_module)
-    assert source.count('"publication_eligible": True') == 1
+    assert source.count('"publication_eligible": True') == 2, (
+        "expected the literal twice -- once as code, once in the docstring "
+        "that explains the bypass. If this changed, re-check that the "
+        "explanation is still there."
+    )
 
 
 # ── Nothing is ever upgraded ─────────────────────────────────────────────────
