@@ -9,23 +9,56 @@ Read the verification section before trusting any of it.
 
 ---
 
-## Verification status: nothing here is machine-verified
+## Verification status
 
-The instruction for this session was not to run Python. No pytest run, no
-import, no compile check was performed on any change below. Every edit was
-reviewed by reading.
+Python was not run for any of this work. No pytest, no imports, no
+compile-and-execute of project code.
 
-That is a real limitation and it is not a formality:
+**What *was* machine-checked:** `ruff 0.16.9` was installed as a standalone
+binary — it does not need Python — and used to check syntax and name resolution
+across `backend`, `tests` and `scripts`. That covers the failure modes that
+would have made the work unrunnable:
 
-| Risk | Consequence |
+* **Syntax errors (E9): zero**, in all 37 changed files and repo-wide.
+* **Undefined names (F821): zero**, in all changed files, and repo-wide after
+  the fixes below.
+
+This is not the same as the tests passing. Ruff proves the code parses and that
+names resolve; it says nothing about behaviour. The distinction matters:
+
+| Risk | Status |
 |---|---|
-| A syntax error in a rewritten module | The suite fails at collection. Cheap to find, but it means this branch may not even import. |
-| An existing test that pinned old behaviour | Fails on the first run. Also cheap to find. |
-| A behavioural regression in a green test | **Expensive to find**, and possible in the attestation work, which changes when a live result is admissible at all. |
-| A test that passes for the wrong reason | The failure mode this repository has been bitten by repeatedly. |
+| A syntax error in a rewritten module | **Ruled out** by ruff (E9). |
+| An undefined name, i.e. a latent `NameError` | **Ruled out** in changed files (F821). |
+| An existing test that pinned old behaviour | Still open. Fails on the first run; cheap to find. |
+| A behavioural regression in a test that was green | **Still open, and expensive to find.** The attestation work changes what is admissible as a live result at all. |
+| A test that passes for the wrong reason | **Still open.** The failure mode this repository has been bitten by repeatedly. |
 
-The previous full-suite figure, **858 passed / 2 skipped**, predates all of
-this work. It is not a current number.
+The previous full-suite figure, **858 passed / 2 skipped**, predates all of this
+work and is not a current number.
+
+### What ruff found
+
+Worth recording, because it is the argument for having run it:
+
+* `tests/pytest/test_no_hash_derived_identifiers.py` used `pytest.mark.parametrize`
+  and `pytest.skip` with **no `import pytest`** — a `NameError` at collection,
+  in a file written this session and reviewed by reading twice.
+* `tests/pytest/test_discovery_no_fabrication.py` referenced an undefined
+  `rel` inside an `assert` message. Since the message is only evaluated when the
+  assertion fails, the guard reported `NameError` instead of its own diagnostic
+  — precisely when the diagnostic was needed.
+* Four modules annotated with typing names they never imported (`Set`, `Dict`
+  twice, `Optional`). Harmless under `from __future__ import annotations`, but
+  any runtime type introspection — `typing.get_type_hints`, which FastAPI calls
+  on route handlers — raises `NameError`.
+
+Two `F821` reports were left in place as false positives:
+`test_challenger_m1_adversarial.py` reports `storage` as undefined at lines 329
+and 340, but it is bound at 319 in the same function and read by nested
+closures, which is valid Python. That test is in the passing baseline. Editing
+working test code on the strength of a lint believed to be wrong is how a guard
+gets broken.
 
 ### Tests that must be run, in this order
 

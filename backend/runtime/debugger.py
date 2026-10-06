@@ -7,7 +7,7 @@ state inspection mid-inference, and event emissions.
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 
 class DebuggerSession:

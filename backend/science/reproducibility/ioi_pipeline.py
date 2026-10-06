@@ -10,7 +10,7 @@ Methodology (Refined):
 from __future__ import annotations
 
 import random
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..models.gpt2_adapter import GPT2Adapter
 from .dataset_versioning import DatasetVersioningEngine

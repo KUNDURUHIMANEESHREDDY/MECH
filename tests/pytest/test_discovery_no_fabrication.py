@@ -477,8 +477,8 @@ def test_transcoders_refuses_rather_than_simulating():
             continue
         text = ast.unparse(node).replace(" ", "")
         assert not (text.startswith("0.4+0.04") or text.startswith("0.92+0.05")), (
-            f"{rel}: the simulated ramp is computed again at line {node.lineno}: "
-            f"{ast.unparse(node)}")
+            f"transcoders.py: the simulated ramp is computed again at line "
+            f"{node.lineno}: {ast.unparse(node)}")
 
 
 # ── feature_auto_interpreter ───────────────────────────────────────────────

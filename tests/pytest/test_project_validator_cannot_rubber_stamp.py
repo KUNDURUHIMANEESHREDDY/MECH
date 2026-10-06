@@ -16,8 +16,6 @@ These tests pin the fail-closed behaviour: no probe means unverified, and
 """
 from __future__ import annotations
 
-import pytest
-
 
 def test_no_probe_means_not_ready():
     from backend.api.project_validator import ProjectValidator

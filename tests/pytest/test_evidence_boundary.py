@@ -35,7 +35,6 @@ from backend.core.evidence_boundary import (
     EvidenceResult,
     RunAttestation,
     digest_of,
-    sha256_file,
 )
 from backend.agents.evidence_policy import discovery_is_live, validation_is_live
 

@@ -51,7 +51,7 @@ against with `baseline_comparable`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict
 
 from ..models.adapter_base import LiveUnavailable
 
