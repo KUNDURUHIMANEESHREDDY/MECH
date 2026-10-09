@@ -44,6 +44,11 @@ def attempt(label, fn):
         fn()
     except CapabilityViolation as exc:
         print("BLOCKED", label, str(exc)[:70])
+    except OSError as exc:
+        # Windows refuses os.symlink without SeCreateSymbolicLink (WinError
+        # 1314). That is the *platform* declining, not the capability hook
+        # approving, so it is reported distinctly and the symlink tests skip.
+        print("NOSYM", label, str(exc)[:70])
     except Exception as exc:
         print("OTHER", label, type(exc).__name__, str(exc)[:70])
     else:
@@ -93,6 +98,55 @@ def _remove_outside():
 def _write_temp():
     Path(tempfile.gettempdir(), "mech_cap_probe.txt").write_text("x")
 
+# --- two-path mutations: the destination must be authorized too ---------
+# The hook used to validate args[0] only, so every one of these moved or
+# planted something OUTSIDE the plugin directory and was allowed.
+
+def _rename_out():
+    import os
+    (plugin_dir / "movable.txt").write_text("x")
+    os.rename(str(plugin_dir / "movable.txt"), str(outside))
+
+def _replace_out():
+    import os
+    (plugin_dir / "movable2.txt").write_text("x")
+    os.replace(str(plugin_dir / "movable2.txt"), str(outside))
+
+def _shutil_move_out():
+    import shutil
+    (plugin_dir / "movable3.txt").write_text("x")
+    shutil.move(str(plugin_dir / "movable3.txt"), str(outside))
+
+def _link_out():
+    import os
+    (plugin_dir / "srclink.txt").write_text("x")
+    os.link(str(plugin_dir / "srclink.txt"), str(outside))
+
+def _symlink_out():
+    import os
+    os.symlink(str(plugin_dir), str(outside))
+
+def _rename_inside():
+    import os
+    (plugin_dir / "keep.txt").write_text("x")
+    os.rename(str(plugin_dir / "keep.txt"),
+              str(plugin_dir / "kept_inside.txt"))
+
+def _link_inside():
+    import os
+    (plugin_dir / "insrc.txt").write_text("x")
+    os.link(str(plugin_dir / "insrc.txt"),
+            str(plugin_dir / "hardlink_inside.txt"))
+
+def _symlink_inside():
+    import os
+    os.symlink(str(plugin_dir / "allowed.txt"),
+               str(plugin_dir / "link_inside"))
+
+def _symlink_outside_target():
+    import os
+    os.symlink(str(outside), str(plugin_dir / "link_to_secret"))
+
 attempt("socket", _socket)
 attempt("connect", _connect)
 attempt("dns", _dns)
@@ -105,6 +159,15 @@ attempt("write_inside", _write_inside)
 attempt("read_outside", _read_outside)
 attempt("remove_outside", _remove_outside)
 attempt("write_temp", _write_temp)
+attempt("rename_out", _rename_out)
+attempt("replace_out", _replace_out)
+attempt("shutil_move_out", _shutil_move_out)
+attempt("link_out", _link_out)
+attempt("symlink_out", _symlink_out)
+attempt("rename_inside", _rename_inside)
+attempt("link_inside", _link_inside)
+attempt("symlink_inside", _symlink_inside)
+attempt("symlink_outside_target", _symlink_outside_target)
 '''
 
 
@@ -124,7 +187,7 @@ def run_probe(tmp_path):
     results = {}
     for line in proc.stdout.splitlines():
         parts = line.split(None, 2)
-        if len(parts) >= 2 and parts[0] in ("BLOCKED", "ALLOWED", "OTHER"):
+        if len(parts) >= 2 and parts[0] in ("BLOCKED", "ALLOWED", "OTHER", "NOSYM"):
             results[parts[1]] = (parts[0], parts[2] if len(parts) > 2 else "")
     assert results, f"probe produced no results; stderr:\n{proc.stderr[-600:]}"
     return results, outside
@@ -145,12 +208,48 @@ def probe(tmp_path_factory):
     "socket", "connect", "dns",
     "subprocess", "os.system", "os.execv",
     "write_outside", "remove_outside",
+    # Two-path mutations whose DESTINATION is outside the plugin directory.
+    # These were the hole: the hook validated args[0] only, so a plugin could
+    # move or plant a file anywhere the process could reach.
+    "rename_out", "replace_out", "shutil_move_out", "link_out", "symlink_out",
 ])
 def test_capability_is_denied(probe, label):
     results, _ = probe
     assert label in results, f"{label} was never attempted; got {sorted(results)}"
     verdict, detail = results[label]
+    if verdict == "NOSYM":
+        # The hook was never consulted: the OS refused first. The escape is
+        # still covered by the other four events plus the file-integrity check.
+        pytest.skip("this platform refuses symlink creation (no privilege)")
     assert verdict == "BLOCKED", f"{label} was {verdict}: {detail}"
+
+
+def test_two_path_mutations_never_escape(probe):
+    """The escape itself: none of these may modify anything outside."""
+    results, outside = probe
+    # Every blocked attempt must have left the target file untouched, and no
+    # link may exist where one was requested.
+    assert outside.read_text(encoding="utf-8") == "secret", (
+        "a two-path mutation wrote outside the plugin directory")
+    assert not outside.is_symlink()
+
+
+def test_link_destination_was_the_hole():
+    """`os.link` was the genuinely exploitable case; keep it pinned.
+
+    Measured against the pre-fix hook: with only `args[0]` validated, a link
+    written to a non-writable root SUCCEEDED. `os.rename`/`os.replace` were
+    already refused, because for a move the *source* is what leaves the
+    sandbox and `args[0]` covered it. This asserts the destination of every
+    two-path mutation is now refused, so the coincidence cannot regress.
+    """
+    from backend.plugins import capabilities as cap_mod
+
+    assert set(cap_mod._TWO_PATH_MUTATION_EVENTS) == {
+        "os.rename", "os.replace", "os.link", "os.symlink"}
+    # Both positions, not just the source.
+    for event, indexes in cap_mod._TWO_PATH_MUTATION_EVENTS.items():
+        assert indexes == (0, 1), f"{event} checks only {indexes}"
 
 
 @pytest.mark.skipif(not hasattr(sys.modules.get("os") or __import__("os"), "fork"),
@@ -172,6 +271,31 @@ def test_fork_is_denied_on_posix(probe):
 def test_plugin_directory_is_writable(probe):
     results, _ = probe
     assert results["write_inside"][0] == "ALLOWED", results["write_inside"]
+
+
+@pytest.mark.parametrize("label", [
+    "rename_inside", "link_inside", "symlink_inside",
+])
+def test_two_path_mutations_inside_still_work(probe, label):
+    """Confining the destination must not break ordinary file juggling."""
+    results, _ = probe
+    verdict, detail = results[label]
+    if verdict == "NOSYM":
+        pytest.skip("this platform refuses symlink creation (no privilege)")
+    assert verdict == "ALLOWED", f"{label} was {verdict}: {detail}"
+
+
+def test_symlink_to_an_unreadable_target_is_refused(probe):
+    """A symlink target is a reference: it must clear the read allow-list.
+
+    Pointing at a credential or secret location is refused even though the
+    link itself would sit inside the plugin directory.
+    """
+    results, _ = probe
+    verdict, detail = results["symlink_outside_target"]
+    if verdict == "NOSYM":
+        pytest.skip("this platform refuses symlink creation (no privilege)")
+    assert verdict == "BLOCKED", (verdict, detail)
 
 
 def test_reads_outside_are_permitted(probe):
