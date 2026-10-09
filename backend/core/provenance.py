@@ -68,6 +68,7 @@ _FAILURE_STATUSES = frozenset({
 _FRAME_KEYS = frozenset({
     "provenance", "field_provenance", "status", "reason", "error",
     "provenance_note", "model_loaded", "model_requested", "model_mismatch",
+    "attested",
     "measured", "elapsed_ms", "runtime_ms", "timestamp",
 })
 
@@ -96,15 +97,19 @@ def attest_measurement(
 
     An existing, more specific provenance is respected: this never overwrites a
     label the measurement layer chose deliberately.
+
+    This function is the ONLY issuer of `attested`, which is what
+    `evidence_policy._is_attested` and `evidence_graph` gate on. So it attests
+    only what it measured, and never on the strength of a label it did not
+    write.
     """
     if not isinstance(result, dict):
         return result
 
-    existing = result.get("provenance")
-    if isinstance(existing, str) and existing.strip():
-        # The measurement layer already said what this is. Do not override.
-        return result
-
+    # A failure is a failure on every path. This check used to sit *below* the
+    # pre-existing-label branch, whose early `return` meant a record already
+    # claiming `live` never reached it -- so `{"provenance": "live",
+    # "status": "failed"}` came back attested.
     if is_failure_status(result.get("status")):
         return withhold(
             result,
@@ -112,7 +117,32 @@ def attest_measurement(
                     f"measured and the result cannot be attested live"),
         )
 
+    existing = result.get("provenance")
+    if isinstance(existing, str) and existing.strip():
+        if existing.strip().lower() == LIVE:
+            # A `live` label arriving from outside is a claim, not a
+            # measurement. `provenance` is an ordinary dict key, so this
+            # function cannot distinguish a deliberate choice by a measurement
+            # layer from a value some caller typed in -- and treating them the
+            # same is what makes the label forgeable.
+            #
+            # Note there is deliberately no exemption for a record that also
+            # carries `attested: True`. That flag is caller-writable too, so
+            # trusting it here would leave the identical hole one key over.
+            # The legitimate re-wrap path does not exist: this module's own
+            # contract routes wrappers and orchestrators through
+            # `pass_through`, which never invents `live`. A record that really
+            # was measured once already holds its attestation.
+            return withhold(
+                result,
+                reason=("carried a 'live' provenance label that this "
+                        "measurement boundary did not issue; an unattested "
+                        "live label is not a measurement"),
+            )
+        return result
+
     result["provenance"] = LIVE
+    result["attested"] = True
     keys = list(fields) if fields is not None else [
         k for k in result if k not in _FRAME_KEYS
     ]
@@ -140,6 +170,9 @@ def withhold(result: Dict[str, Any], reason: str) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return result
 
+    # Withheld means not measured, so never attested — on every path,
+    # including the early return for an already-specific non-live label.
+    result["attested"] = False
     existing = str(result.get("provenance") or "").strip().lower()
     if existing and existing != LIVE:
         result.setdefault("reason", reason)
