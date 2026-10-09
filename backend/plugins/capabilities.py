@@ -159,6 +159,52 @@ _WRITE_FLAGS = (
 # open -- enough to learn where credentials and other projects live.
 _LIST_DIR_EVENTS = ("os.listdir", "os.scandir")
 
+#: Mutations that carry a *second* path: the destination. Validated from the
+#: real audit-event signatures rather than assumed, because the argument order
+#: is not uniform across the family:
+#:
+#:   os.rename(src, dst, src_dir_fd, dst_dir_fd) -> args (src, dst, -1, -1)
+#:   os.replace(...)                            -> raises the os.rename event
+#:   os.link(src, dst, src_dir_fd, dst_dir_fd)  -> args (src, dst, -1, -1)
+#:   os.symlink(src, dst, dir_fd)               -> args (src, dst, -1)
+#:
+#: Checking `args[0]` alone authorized only the *source*. Measured impact with
+#: the destination confirmed as the sole hole:
+#:
+#:   * `os.link`   -> SUCCEEDED outside the roots. The link's location (the
+#:                    write) was never checked; args[0] is the file being
+#:                    linked, which is usually already inside the plugin dir.
+#:   * `os.rename` / `os.replace` -> already blocked, because for a move the
+#:                    *source* is the path leaving the sandbox, and args[0]
+#:                    happened to cover it. Now checked explicitly at both
+#:                    ends rather than relying on that coincidence.
+#:
+#: `shutil.move` funnels through `os.rename`, so it inherited the same
+#: source-only check.
+_TWO_PATH_MUTATION_EVENTS = {
+    "os.rename": (0, 1),
+    "os.replace": (0, 1),
+    "os.link": (0, 1),
+    "os.symlink": (0, 1),
+}
+
+#: For a symlink the two paths are not peers: `args[0]` is the link *target*
+#: (a reference, which only has to be readable) and `args[1]` is where the
+#: link is created (the write, which must be inside the plugin's roots).
+_SYMLINK_TARGET_INDEX = 0
+
+#: Index of the trailing `dir_fd` arguments, per event. A non-negative
+#: directory file descriptor makes the adjacent path relative to *that*
+#: directory rather than the process cwd, so `_normalize` would resolve it
+#: against the wrong base and could approve a path that does not exist in
+#: those terms. Denied outright rather than approximated.
+_MUTATION_DIR_FD_INDEX = {
+    "os.rename": (2, 3),
+    "os.replace": (2, 3),
+    "os.link": (2, 3),
+    "os.symlink": (2,),
+}
+
 
 class CapabilityViolation(PermissionError):
     """A plugin attempted an operation outside its permitted capabilities."""
@@ -403,9 +449,39 @@ def install_capability_hook(
                 )
             return
 
-        if event in ("os.remove", "os.rename", "os.rmdir", "os.mkdir",
-                     "os.link", "os.symlink", "os.truncate", "os.chmod",
-                     "os.chown"):
+        if event in _TWO_PATH_MUTATION_EVENTS:
+            # A directory fd would change the base the paths resolve against,
+            # so the containment check below could not be trusted. Refuse.
+            for fd_index in _MUTATION_DIR_FD_INDEX[event]:
+                if len(args) > fd_index and args[fd_index] not in (-1, None):
+                    raise CapabilityViolation(
+                        f"{event} with an explicit directory fd is not permitted "
+                        f"in a plugin worker"
+                    )
+            for path_index in _TWO_PATH_MUTATION_EVENTS[event]:
+                try:
+                    target = _normalize(args[path_index])
+                except Exception:  # noqa: BLE001
+                    raise CapabilityViolation(
+                        f"{event} with an unresolvable path is not permitted"
+                    ) from None
+                # A symlink's first path is the thing being pointed at. Creating
+                # a reference to it is not a write, so it is checked against the
+                # read allow-list; the link's own location (args[1]) is the write
+                # and must be inside the plugin's roots like any other.
+                is_reference = (event == "os.symlink"
+                                and path_index == _SYMLINK_TARGET_INDEX)
+                allowed = readable if is_reference else roots
+                verb = "referencing" if is_reference else event
+                if not _within(target, allowed):
+                    raise CapabilityViolation(
+                        f"{verb} outside the plugin directory is not permitted "
+                        f"(blocked: {target})"
+                    )
+            return
+
+        if event in ("os.remove", "os.rmdir", "os.mkdir",
+                     "os.truncate", "os.chmod", "os.chown", "os.utime"):
             try:
                 target = _normalize(args[0])
             except Exception:  # noqa: BLE001

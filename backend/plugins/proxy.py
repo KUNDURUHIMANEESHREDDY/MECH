@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import queue
 from typing import Any, Dict, List, Optional
 
 from .plugin_base import MechPlugin, PluginManifest
@@ -73,7 +74,7 @@ class RemotePluginProxy(MechPlugin):
                 raise RemotePluginError(
                     f"plugin worker stdin closed: {exc}") from exc
 
-            line = self._stdout.readline()
+            line = self._read_with_timeout()
             if not line:
                 self._alive = False
                 raise RemotePluginError("plugin worker exited unexpectedly")
@@ -97,6 +98,35 @@ class RemotePluginProxy(MechPlugin):
             self._alive = False
             raise RemotePluginError(str(response.get("error", "worker call failed")))
         return response.get("result")
+
+    def _read_with_timeout(self) -> bytes:
+        """readline() bounded by self._timeout.
+
+        A blocking readline on a hung worker would park the backend thread
+        forever, so run it on a daemon thread and race it against the
+        timeout. On timeout, kill the worker (when the proxy holds its proc
+        handle) and mark the proxy dead.
+        """
+        q: "queue.Queue[bytes]" = queue.Queue(maxsize=1)
+
+        def _pump() -> None:
+            try:
+                q.put(self._stdout.readline())
+            except Exception:  # noqa: BLE001
+                q.put(b"")
+
+        threading.Thread(target=_pump, daemon=True).start()
+        try:
+            return q.get(timeout=self._timeout)
+        except queue.Empty:
+            self._alive = False
+            proc = getattr(self, "_proc", None)
+            if proc is not None:
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+            raise RemotePluginError("plugin worker timed out") from None
 
     def _call(self, hook: str, *args: Any) -> Any:
         with self._lock:
