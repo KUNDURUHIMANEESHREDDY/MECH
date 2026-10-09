@@ -68,58 +68,75 @@ class ProjectExporter:
         os.makedirs(destination, exist_ok=True)
         archive_path = destination / f"{project_id}.interp-project"
 
-        # Real integration: Query the DB for project artifacts
-        from ..core.database import SessionLocal, SessionRecord
-        db = SessionLocal()
+        # Sessions come from `DesktopStorage`, the single storage authority.
+        #
+        # This used to read `backend.core.database.SessionLocal`, a second
+        # authority with its own engine on `sqlite:///./interp_research.db`.
+        # That file was always 0 bytes -- `init_db()` had no callers -- so
+        # every call raised `no such table: sessions`. The queries below are
+        # therefore not a port of working code; they were never runnable.
+        from backend.storage import DesktopStorage, get_default_db_path
 
-        try:
-            # Fetch sessions associated with this project (assuming experiment ties to project)
-            sessions = db.query(SessionRecord).filter(SessionRecord.project_id == project_id).all()
+        store = DesktopStorage(get_default_db_path())
+        all_sessions = store.list_sessions()
 
-            # Reports are deliberately not exported.
-            #
-            # This used to be:
-            #
-            #     reports = db.query(ReportRecord).all()  # For demo, export all
-            #
-            # which put *every* report in the database into whichever project's
-            # archive was being written, including other projects' work. An
-            # export is the most portable thing this codebase produces: it is a
-            # zip file the recipient keeps, so the boundary is crossed for good.
-            #
-            # Filtering is not available as a patch here. `ReportRecord` has no
-            # `project_id` column -- reports are not linked to projects at all,
-            # so there is nothing to filter on. Adding the column is the real
-            # fix and needs a migration; `Base.metadata.create_all` does not
-            # alter an existing table, so simply declaring it would break every
-            # database already on disk. Until that migration exists, omitting
-            # reports is the only option that does not leak.
-            #
-            # So: sessions are exported (they are project-scoped), reports are
-            # not, and the archive says so in its own metadata rather than
-            # omitting them silently.
-            session_data_list = [s.session_data for s in sessions]
+        # A session is included only when it names this project. An
+        # unattributable session is excluded rather than guessed at: an export
+        # is the most portable artifact this codebase produces, so a wrong
+        # inclusion is permanent once the archive leaves.
+        session_data_list, unattributed = _sessions_for_project(
+            all_sessions, project_id)
 
-            with zipfile.ZipFile(archive_path, 'w') as archive:
-                archive.writestr("metadata.json", json.dumps({
-                    "project_id": project_id,
-                    "export_version": "1.0",
-                    "sessions_included": len(session_data_list),
-                    "reports_included": 0,
-                    "reports_omitted_reason": (
-                        "ReportRecord has no project_id column, so reports "
-                        "cannot be attributed to a project. Exporting them "
-                        "would leak every other project's reports into this "
-                        "archive. They are omitted until the schema links "
-                        "them."
-                    ),
-                }))
-                archive.writestr("sessions.json", json.dumps(session_data_list, indent=2))
-        finally:
-            db.close()
+        # Reports are deliberately not exported.
+        #
+        # The single authority has no `reports` table at all, so there is
+        # nothing to export and nothing that can leak across projects. This
+        # used to be a comment about `ReportRecord` having no `project_id`
+        # column in the deleted ORM schema.
+        #
+        # If reports are ever added to `DesktopStorage`, they must carry a
+        # project link before this export includes them, and
+        # `test_broken_and_leaking_methods.py` fails until they do.
+        with zipfile.ZipFile(archive_path, 'w') as archive:
+            archive.writestr("metadata.json", json.dumps({
+                "project_id": project_id,
+                "export_version": "1.0",
+                "sessions_included": len(session_data_list),
+                "sessions_omitted_unattributed": unattributed,
+                "reports_included": 0,
+                "reports_omitted_reason": (
+                    "The storage authority has no reports table. Reports were "
+                    "never linked to a project -- there is no project_id column "
+                    "to filter on -- so exporting them would leak every other "
+                    "project's reports into this archive."
+                ),
+            }))
+            archive.writestr("sessions.json", json.dumps(session_data_list, indent=2))
 
         return {
             "status": "success",
             "archive_path": str(archive_path),
             "project_id": project_id
         }
+
+
+#: Payload keys a session may carry its project link under. `project_id` is
+#: the canonical name; the others are read so a session written by an older
+#: build is still attributable rather than silently dropped from an export.
+_PROJECT_KEYS = ("project_id", "projectId", "project")
+
+
+def _sessions_for_project(sessions, project_id: str):
+    """Split sessions into those attributable to ``project_id`` and the rest."""
+    included, unattributed = [], 0
+    for session in sessions:
+        if not isinstance(session, dict):
+            unattributed += 1
+            continue
+        owner = next((session[key] for key in _PROJECT_KEYS
+                      if isinstance(session.get(key), str)), None)
+        if owner == project_id:
+            included.append(session)
+        else:
+            unattributed += 1
+    return included, unattributed

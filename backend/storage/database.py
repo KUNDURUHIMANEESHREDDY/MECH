@@ -118,13 +118,15 @@ class DesktopStorage:
                 CREATE TABLE IF NOT EXISTS experiments (
                     item_id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS sessions (
                     item_id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS plugins (
@@ -136,6 +138,7 @@ class DesktopStorage:
                 );
                 """
             )
+            self._migrate(connection)
             for key, value in DEFAULT_SETTINGS.items():
                 connection.execute(
                     """
@@ -144,6 +147,38 @@ class DesktopStorage:
                     """,
                     (key, json.dumps(value), self._now()),
                 )
+
+    #: Columns added after the first schema shipped. `CREATE TABLE IF NOT
+    #: EXISTS` is a no-op against an existing table, so a database written by an
+    #: older build would otherwise be missing them permanently and every write
+    #: naming them would fail.
+    _ADDED_COLUMNS = {
+        "experiments": {"updated_at": "TEXT"},
+        "sessions": {"updated_at": "TEXT"},
+    }
+
+    def _migrate(self, connection: sqlite3.Connection) -> None:
+        """Bring an older database up to the current schema, in place.
+
+        Existing rows get `updated_at` seeded from `created_at`, so an item's
+        two stamps stay ordered rather than the update time reading as
+        earlier than its own creation.
+        """
+        for table, columns in self._ADDED_COLUMNS.items():
+            present = {row[1] for row in connection.execute(
+                f"PRAGMA table_info({table})")}
+            if not present:
+                # The table does not exist yet; CREATE TABLE above made it with
+                # every column already.
+                continue
+            for column, kind in columns.items():
+                if column in present:
+                    continue
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+                if column == "updated_at":
+                    connection.execute(
+                        f"UPDATE {table} SET updated_at = created_at")
 
     def get_settings(self) -> dict[str, Any]:
         with self._connect() as connection:
@@ -512,7 +547,14 @@ class DesktopStorage:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    _JSON_TABLES = ("experiments", "sessions")
+
+    def _check_table(self, table: str) -> None:
+        if table not in self._JSON_TABLES:
+            raise StorageError(f"unknown table: {table}")
+
     def _list_json_items(self, table: str) -> list[dict[str, Any]]:
+        self._check_table(table)
         with self._connect() as connection:
             rows = connection.execute(
                 f"SELECT payload FROM {table} ORDER BY created_at, item_id"
@@ -520,25 +562,32 @@ class DesktopStorage:
         return [json.loads(row["payload"]) for row in rows]
 
     def _add_json_item(self, table: str, item: dict[str, Any]) -> dict[str, Any]:
+        self._check_table(table)
         if not isinstance(item, dict):
             raise StorageError(f"{table} item must be an object")
         item_id = item.get("id")
         if not isinstance(item_id, str) or not item_id.strip():
             raise StorageError(f"{table} item requires a string 'id'")
+        stamp = self._now()
         with self._connect() as connection:
             connection.execute(
                 f"""
-                INSERT INTO {table} (item_id, payload, created_at)
-                VALUES (?, ?, ?)
+                INSERT INTO {table} (item_id, payload, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(item_id) DO UPDATE SET
                     payload = excluded.payload,
-                    created_at = excluded.created_at
+                    updated_at = excluded.updated_at
                 """,
-                (item_id, json.dumps(item), self._now()),
+                # `created_at` is deliberately absent from the UPDATE clause.
+                # Rewriting it made `list_*` order by last-modified while the
+                # column name and the ORDER BY both said "created", so saving
+                # an old item silently moved it to the end of the list.
+                (item_id, json.dumps(item), stamp, stamp),
             )
         return item
 
     def _delete_json_item(self, table: str, item_id: str) -> bool:
+        self._check_table(table)
         if not isinstance(item_id, str) or not item_id.strip():
             raise StorageError(f"{table} item id must be a string")
         with self._connect() as connection:
