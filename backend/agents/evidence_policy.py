@@ -1,14 +1,20 @@
 """Fail-closed evidence eligibility rules for Research Society stages.
 
 Scientific evidence is eligible for downstream validation or publication only
-when the backend explicitly marks it as live and opts it into both downstream
-uses.  Missing provenance is treated as unavailable; it is never inferred from
-a plausible score or a successful process exit.
+when the backend explicitly marks it as live, attests the measurement, and
+opts it into both downstream uses. Missing provenance is treated as
+unavailable; it is never inferred from a plausible score or a successful
+process exit. A `live` label without `attested is True` is a live-looking
+record, not evidence.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
+
+
+def _is_attested(payload: Any) -> bool:
+    return _record(payload).get("attested") is True
 
 
 _COMPLETED_STATUSES = {"completed", "complete", "ok", "passed", "success"}
@@ -55,6 +61,7 @@ def discovery_is_live(payload: Any) -> bool:
     """Whether a discovery result may enter validation and publication."""
     return (_is_completed(payload)
             and provenance_of(payload) == _LIVE
+            and _is_attested(payload)
             and _opted_in(payload))
 
 
@@ -70,6 +77,7 @@ def reproduction_is_live(payload: Any) -> Dict[str, Any]:
     record = _record(payload)
     if (not _is_completed(record)
             or provenance_of(record) != _LIVE
+            or not _is_attested(record)
             or record.get("mock_mode") is True):
         return {}
     return record
@@ -80,6 +88,7 @@ def gate_is_live(payload: Any) -> bool:
     record = _record(payload)
     return (_is_completed(record)
             and provenance_of(record) == _LIVE
+            and _is_attested(record)
             and record.get("passed") is True)
 
 
@@ -91,6 +100,8 @@ def blocked_reason(payload: Any, stage: str) -> str:
         return f"{stage} blocked: provenance '{provenance}' is not live."
     if not _is_completed(record):
         return f"{stage} blocked: status '{status_of(record)}' is not complete."
+    if not _is_attested(record):
+        return f"{stage} blocked: the measurement is not attested."
     if record.get("validation_eligible") is not True:
         return f"{stage} blocked: validation eligibility was not asserted."
     if record.get("publication_eligible") is not True:

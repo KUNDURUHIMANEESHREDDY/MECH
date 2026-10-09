@@ -1,8 +1,14 @@
+import type {
+  InferenceResponse,
+  UnavailableResponse,
+} from '../types';
+
 type AnyFunction = (...args: any[]) => any;
 type LocalBridge = Record<string, AnyFunction | undefined>;
 
 type RuntimeGlobals = typeof globalThis & {
   __MECH_API_BASE__?: string;
+  __MECH_API_TOKEN__?: string;
   appApi?: LocalBridge;
 };
 
@@ -20,6 +26,32 @@ export function apiUrl(path: string): string {
 
 const BASE = API_ORIGIN;
 const REQUEST_TIMEOUT_MS = 30_000;
+
+export function apiToken(): string | null {
+  const fromGlobal = runtime.__MECH_API_TOKEN__?.trim();
+  if (fromGlobal) return fromGlobal;
+  try {
+    const fromStorage = typeof localStorage !== 'undefined'
+      ? localStorage.getItem('mech_api_token')?.trim()
+      : null;
+    if (fromStorage) return fromStorage;
+  } catch {
+    /* storage unavailable (SSR/tests) — fall through */
+  }
+  try {
+    const fromEnv = (import.meta as unknown as { env?: Record<string, string> })
+      ?.env?.VITE_MECH_API_TOKEN?.trim();
+    if (fromEnv) return fromEnv;
+  } catch {
+    /* no Vite env — fall through */
+  }
+  return null;
+}
+
+export function authHeaders(): Record<string, string> {
+  const token = apiToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 function localBridge(): LocalBridge | null {
   return runtime.appApi ?? null;
@@ -39,7 +71,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${BASE}${path}`, { ...init, signal: controller.signal });
+    const headers = { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) };
+    const response = await fetch(`${BASE}${path}`, { ...init, headers, signal: controller.signal });
+    if (response.status === 401) throw new Error(`${init.method ?? 'GET'} ${path} failed: 401 (missing or invalid bearer token)`);
     if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${path} failed: ${response.status}`);
     return (await response.json()) as T;
   } catch (error) {
@@ -84,13 +118,23 @@ export const api = {
     post<Record<string, unknown>>(`/api/${method}`, params),
 
   listModels: () => get<{ models: string[] }>('/api/models'),
-  loadModel: (name: string) => post<{ status: string; model_name?: string }>('/api/models/load', { model_name: name }),
+  loadModel: (name: string) =>
+    post<{ status: string; model_name?: string } & Partial<UnavailableResponse>>(
+      '/api/models/load',
+      { model_name: name },
+    ),
   getModelInfo: (name: string) => get<Record<string, unknown>>(`/api/models/${name}`),
   infer: (prompt: string, model?: string) =>
-    post<Record<string, unknown>>('/api/infer', { prompt, model_name: model }),
+    post<Partial<InferenceResponse> & Partial<UnavailableResponse>>(
+      '/api/infer',
+      { prompt, model_name: model },
+    ),
 
   gpt2Load: (model?: string) =>
-    post<{ status: string; model_name: string }>('/api/gpt2/load', { model_name: model ?? 'gpt2' }),
+    post<{ status: string; model_name?: string } & Partial<UnavailableResponse>>(
+      '/api/gpt2/load',
+      { model_name: model ?? 'gpt2' },
+    ),
   gpt2RunPrompt: (prompt: string) =>
     post<Record<string, unknown>>('/api/gpt2/run_prompt', { prompt }),
   gpt2FreshPrompt: () =>
@@ -117,6 +161,15 @@ export const api = {
     post<Record<string, unknown>>('/api/gpt2/neuron', { layer, neuron_index: neuronIndex, component, top_k_weights: topKWeights }),
   gpt2Neurons: (layer: number, component?: string, page?: number, pageSize?: number, sortBy?: string, order?: string) =>
     post<Record<string, unknown>>('/api/gpt2/neurons', { layer, component, page, page_size: pageSize, sort_by: sortBy, order }),
+
+  saeStatus: () =>
+    get<Record<string, unknown>>('/api/sae/status'),
+  saeInspect: (payload: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/sae/inspect', payload),
+  saeTrain: (payload: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/sae/train', payload),
+  saeRun: (runId: string) =>
+    get<Record<string, unknown>>(`/api/sae/runs/${runId}`),
 
   listExperiments: async (): Promise<unknown[]> => {
     const res = await get<{ experiments?: unknown[] }>('/api/experiments');

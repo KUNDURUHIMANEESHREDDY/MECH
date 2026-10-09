@@ -14,6 +14,7 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # When this file is executed directly (`python backend/main.py`) Python puts
@@ -37,6 +38,21 @@ async def lifespan(application: FastAPI):
     shutdown, and the WAL remains durable either way.
     """
     logger.info("MECH starting up (lifespan).")
+    try:
+        from backend.core import auth as auth_mod
+        auth_mod.get_bearer_token()
+        logger.info("Control-plane bearer auth active (token file: %s).",
+                    auth_mod._token_file())
+    except Exception as exc:
+        logger.warning("Bearer token init failed: %s", exc)
+    try:
+        from backend.core import evidence_graph as eg_mod
+        report = eg_mod.quarantine_legacy_records()
+        if report.get("moved"):
+            logger.info("Quarantined %s legacy evidence record(s) to %s.",
+                        report["moved"], report["destination"])
+    except Exception as exc:
+        logger.warning("Evidence quarantine skipped: %s", exc)
     try:
         from backend.plugins.service import get_service
         restored = get_service().restore_enabled()
@@ -148,6 +164,85 @@ async def _request_log_middleware(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def _auth_middleware(request: Request, call_next):
+    """Mandatory bearer gate for the control plane.
+
+    Loopback reachability and Origin are never authorization. ``/`` and
+    ``/health`` stay public, CORS preflight (OPTIONS) passes through to the
+    CORS middleware, and the built frontend's static files stay public so the
+    app can load. Everything else under ``/api``, ``/mcp``, ``/health/``,
+    ``/openapi.json``, ``/docs`` and ``/redoc`` requires
+    ``Authorization: Bearer <MECH_API_TOKEN>``.
+    """
+    from backend.core import auth as auth_mod
+
+    if auth_mod.is_public_path(request.url.path, request.method):
+        return await call_next(request)
+    token = auth_mod.extract_bearer(request.headers.get("authorization"))
+    if token is None:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "missing credentials"},
+        )
+    if not auth_mod.verify_bearer(token):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "invalid credentials"},
+        )
+    return await call_next(request)
+
+
+def _body_cap() -> int:
+    """Global request-body ceiling in bytes (MECH_MAX_BODY_BYTES override).
+
+    Prompts have their own 2048-char bound and SAE corpora 200k chars, but
+    the rest of the control plane accepts untyped `Dict[str, Any]` bodies.
+    Without a ceiling an authenticated caller can push arbitrary megabytes at
+    the dispatcher, so bound at the edge and let endpoint schemas be tighter.
+    """
+    raw = os.environ.get("MECH_MAX_BODY_BYTES", "").strip()
+    try:
+        value = int(raw) if raw else 2 * 1024 * 1024
+    except ValueError:
+        value = 2 * 1024 * 1024
+    return max(1024, min(value, 64 * 1024 * 1024))
+
+
+@app.middleware("http")
+async def _body_size_middleware(request: Request, call_next):
+    """Reject oversized bodies before they are read into memory.
+
+    Checks the declared Content-Length first (cheap, catches the honest
+    client) and counts actual streamed bytes otherwise, so a lying or
+    chunked header cannot slip a large payload past. 413 is a client error;
+    nothing downstream ever sees the oversized body.
+    """
+    cap = _body_cap()
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > cap:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"request body exceeds {cap} bytes"},
+                )
+        except ValueError:
+            return JSONResponse(
+                status_code=400, content={"detail": "malformed content-length"},
+            )
+    if "content-length" not in request.headers:
+        total = 0
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > cap:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"request body exceeds {cap} bytes"},
+                )
+    return await call_next(request)
+
+
 @app.get("/")
 def root():
     return {"name": "MECH Platform", "version": "2.0.0", "status": "running"}
@@ -216,6 +311,58 @@ try:
 except Exception:
     logger.exception("Runtime v2 API module exists but failed to load; "
                      "/api/v2 is absent.")
+
+
+# MCP control plane: same Core API the UI calls, exposed as tools so external
+# agents drive MECH without UI automation. Optional: a failed mount must not
+# take the REST API or the UI down with it.
+try:
+    from backend.mcp_server.server import mcp as _mech_mcp
+
+    app.mount("/mcp", _mech_mcp.streamable_http_app())
+    logger.info("MCP control plane mounted at /mcp (tools: mech_*).")
+except Exception:
+    logger.exception("MCP control plane failed to mount; /mcp is absent.")
+
+
+def _find_frontend_dist() -> Optional[str]:
+    """Locate the built Vue frontend (frontend/dist) for standalone mode.
+
+    Standalone = one process serves both UI and API, so the browser can just
+    open http://127.0.0.1:8000 with no Electron and no second server.
+    Returns the dist directory path, or None when not built / not bundled.
+    """
+    candidates = [
+        os.path.join(_REPO_ROOT, "frontend", "dist"),  # repo checkout
+        os.path.join(os.getcwd(), "frontend", "dist"),  # launched from root
+        os.path.join(os.getcwd(), "dist"),  # portable MECH-standalone/dist
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dist"),
+        os.path.join(getattr(sys, "_MECH_RESOURCES", ""), "app", "dist"),
+    ]
+    for cand in candidates:
+        if not cand:
+            continue
+        norm = os.path.normpath(cand)
+        index_html = os.path.join(norm, "index.html")
+        if os.path.isdir(norm) and os.path.isfile(index_html):
+            return norm
+    return None
+
+
+try:
+    _DIST_DIR = _find_frontend_dist()
+    if _DIST_DIR is not None:
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=_DIST_DIR, html=True), name="frontend")
+        logger.info("Serving standalone frontend from %s at /", _DIST_DIR)
+    else:
+        logger.info(
+            "No frontend dist found; running API-only. "
+            "Build it with: cd frontend && npm run build:renderer"
+        )
+except Exception:
+    logger.exception("Frontend static mount failed; running API-only.")
 
 
 if __name__ == "__main__":
