@@ -1,4 +1,4 @@
-"""Research Society v2 — Supervisor (ReAct: plan -> dispatch -> execute -> reflect).
+"""Research Society v2 â€” Supervisor (ReAct: plan -> dispatch -> execute -> reflect).
 
 Replaces backend/agents/research_society.py::ResearchSociety.
 run_society_collaboration (stub: hardcoded "Step 1/Step 2", fake 0.95 scores)
@@ -15,7 +15,7 @@ never requires torch/transformers. Agent-to-op dispatch falls back to
 CAPABILITY_MAP keyword matching when no LLM dispatcher is configured.
 
 Emits backend.core.event_schema.ResearchEvent (valid types only) into the
-returned trace — the per-run evidence trail.
+returned trace â€” the per-run evidence trail.
 """
 
 from __future__ import annotations
@@ -124,9 +124,46 @@ class ResearchSocietyV2:
         if fn is None:
             return {"status": "error",
                     "error": f"unknown op '{op}' for agent '{agent_name}'"}
+
+        # Check the call before making it. `fn(**args)` on a signature that
+        # cannot accept them raises TypeError, which used to propagate out of the
+        # whole workflow and surface as "Society run failed" naming only the
+        # offending keyword. Reporting it as a failed step -- with the node, the
+        # op and the accepted parameters -- keeps one bad step from destroying
+        # the run's trace, and names what to fix.
+        #
+        # This was the second half of the contract mismatch: the planner's
+        # anchor node named `reproduce` but supplied `ensure_model`'s argument.
+        # See docs/audit/society-contract-mismatch.md.
+        import inspect as _inspect
+        try:
+            _inspect.signature(fn).bind(**args)
+        except (TypeError, ValueError) as exc:
+            return {
+                "status": "error",
+                "error": (
+                    f"step '{node.get('id')}' cannot call "
+                    f"{agent_name}.{op} with {sorted(args)}: {exc}"),
+                "accepted": sorted(self._accepted_params(fn)),
+            }
+
         if asyncio.iscoroutinefunction(fn):
             return await fn(**args)
         return await asyncio.to_thread(fn, **args)
+
+    @staticmethod
+    def _accepted_params(fn) -> List[str]:
+        """Parameter names `fn` accepts, excluding `self`.
+
+        Included in an error payload so a reader can see what the call wanted
+        without opening the agent's source.
+        """
+        import inspect as _inspect
+        try:
+            params = _inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return []
+        return [n for n in params if n not in ("self", "cls")]
 
     @staticmethod
     def _failed(res: Dict[str, Any]) -> bool:
@@ -211,7 +248,7 @@ class ResearchSocietyV2:
                             "reason": str(res.get("error") or res.get("reason", ""))[:200]})
                 break  # fail-fast: GPU/executor failure poisons later stages
 
-        # Reflection (Critic) — one replan allowed when confidence is low.
+        # Reflection (Critic) â€” one replan allowed when confidence is low.
         successful = [t["node"] for t in trace if not self._failed(t)]
         failed = [t["node"] for t in trace if self._failed(t)]
         reflection = self.critic.reflect(

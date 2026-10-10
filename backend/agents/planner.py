@@ -64,6 +64,83 @@ _IOI_INSPECTION_HEAD = {"layer": 10, "head": 7}
 _IOI_PATCH_HEAD = {"layer": 9, "head": 9}
 
 
+def _agent_method(agent: str, op: str):
+    """The real bound method for `agent.op`, or None if there is not one.
+
+    Read from the live objects rather than from a hand-written table, so this
+    cannot drift from the signatures it is checking.
+    """
+    try:
+        from backend.agents.society import ResearchSocietyV2
+        obj = getattr(ResearchSocietyV2(), agent, None)
+        return getattr(obj, op, None) if obj is not None else None
+    except Exception:
+        return None
+
+
+def _argument_mismatch(agent: str, op: str,
+                       args: Dict[str, Any]) -> Optional[str]:
+    """A description of why `args` would not bind, or None if they would.
+
+    Requires the call to be *complete*: a missing required parameter is a
+    mismatch. Use `_supplied_keys_rejected` for planning, where the supervisor
+    may still fill in context.
+
+    Returns the problem rather than a bool so a dropped node can say what was
+    wrong with it -- "unknown op" is actionable, "the plan is broken" is not.
+
+    A method that cannot be introspected returns None (not a mismatch): refusing
+    to plan because a signature could not be read would be worse than the bug
+    this guards against.
+    """
+    import inspect
+
+    method = _agent_method(agent, op)
+    if method is None:
+        return None
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        return None
+    # `bind` on a bound method must not receive `self`.
+    try:
+        signature.bind(**args)
+    except TypeError as exc:
+        return str(exc)
+    return None
+
+
+def _supplied_keys_rejected(agent: str, op: str,
+                           args: Dict[str, Any]) -> Optional[str]:
+    """Whether any *supplied* key is one the method cannot accept.
+
+    Deliberately weaker than `_argument_mismatch`, and that is the whole point.
+    A plan node is allowed to be incomplete -- the supervisor supplies run
+    context such as `discovery_id` at execution time -- but it is never allowed
+    to supply a keyword the target does not accept. That asymmetry is what this
+    defect was: a complete-looking call carrying an argument with nowhere to go.
+
+    A method that accepts `**kwargs` accepts anything.
+    """
+    import inspect
+
+    method = _agent_method(agent, op)
+    if method is None or not args:
+        return None
+    try:
+        parameters = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return None
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD
+           for p in parameters.values()):
+        return None
+    unexpected = sorted(k for k in args if k not in parameters)
+    if unexpected:
+        return (f"unexpected argument(s) {unexpected}; "
+                f"{op} accepts {sorted(parameters)}")
+    return None
+
+
 def _agent_methods() -> Dict[str, Set[str]]:
     """The methods each agent actually exposes, read from the real classes.
 
@@ -155,7 +232,32 @@ class Planner:
         dropped: List[Dict[str, Any]] = []
 
         def offer(node: Dict[str, Any], because: str) -> None:
-            """Add a node if its agent method exists, recording it either way."""
+            """Add a node if the supervisor could actually run it.
+
+            Two checks, because they catch different failures. The first asks
+            whether the op exists at all; the second asks whether the op accepts
+            the arguments being handed to it.
+
+            The second check was added after the anchor node named
+            `op="reproduce"` with `args={"model_name": ...}`: `reproduce` exists,
+            so the first check passed, and the plan failed at execution with
+            `unexpected keyword argument 'model_name'`. A node whose args cannot
+            bind is a plan that cannot run, so it belongs in `dropped` for the
+            same reason an unknown op does -- reported, not deferred.
+
+            Some nodes are legitimately incomplete here, because the supervisor
+            supplies context the planner cannot know upfront:
+            `critic.validate` gets `discovery_id` and `discovery_result` from the
+            run, and `scribe.publish` gets `goal`, `trace` and `reflection`. So
+            the check asks whether the *supplied* keys are accepted, not whether
+            the node alone would satisfy the signature.
+
+            That distinction matters: `validate` carries only `hypothesis` and
+            `Critic.validate` also requires `discovery_id`, so a strict
+            `signature.bind` would have dropped the validation gate from every
+            plan -- silently removing the step that gates publication, which is
+            the opposite of a safety improvement.
+            """
             agent = str(node.get("agent", ""))
             op = str(node.get("op", ""))
             methods = available.get(agent)
@@ -168,12 +270,35 @@ class Planner:
                                     f"the {agent} agent exposes no {op!r} method, "
                                     f"so the supervisor could not dispatch it")})
                 return
+            mismatch = _supplied_keys_rejected(agent, op, node.get("args", {}))
+            if mismatch is not None:
+                    dropped.append({
+                        "id": node.get("id"), "agent": agent, "op": op,
+                        "why": (
+                            f"the {agent} agent's {op!r} does not accept the "
+                            f"arguments this node supplies: {mismatch}. Keeping "
+                            f"it would fail the run at execution time.")})
+                    return
             node["because"] = because
             nodes.append(node)
 
         # 1. Anchor. Genuinely unconditional: nothing can be measured without
         #    weights, so this node is in every plan for a real reason.
-        offer({"id": "load", "agent": "executor", "op": "reproduce",
+        #
+        #    The op is `ensure_model`, which is the method that takes
+        #    `model_name` and calls the engine's load. This used to read
+        #    `reproduce`, carried over from the reproduce node below it, and it
+        #    raised `Executor.reproduce() got an unexpected keyword argument
+        #    'model_name'` for every goal -- the anchor is unconditional, so the
+        #    whole Society workflow failed at its first step. The `id`,
+        #    `rationale` and `args` all describe a model load; only the `op`
+        #    disagreed. See docs/audit/society-contract-mismatch.md.
+        #
+        #    Note this is *not* a `model_name` -> `model_variant` mapping:
+        #    `model_variant` ("small"/"medium", composed as
+        #    `gpt2-{variant}`) is an IOIPipeline.run parameter, a different
+        #    concept from a loaded model identity.
+        offer({"id": "load", "agent": "executor", "op": "ensure_model",
                "args": {"model_name": "gpt2"}, "state": "Experiment",
                "rationale": "Every downstream step needs live weights."},
               "unconditional: no measurement is possible without weights")
