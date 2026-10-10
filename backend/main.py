@@ -209,17 +209,34 @@ def _body_cap() -> int:
     return max(1024, min(value, 64 * 1024 * 1024))
 
 
+async def _read_limited_body(request: Request, cap: int) -> bytes:
+    """Read request body up to `cap + 1` bytes, enforcing the limit.
+
+    Always counts actual bytes streamed, regardless of Content-Length header.
+    Returns the complete body (buffered) so downstream can re-read it.
+    """
+    total = 0
+    chunks = []
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > cap:
+            raise ValueError(f"request body exceeds {cap} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @app.middleware("http")
 async def _body_size_middleware(request: Request, call_next):
-    """Reject oversized bodies before they are read into memory.
+    """Reject oversized bodies before they reach the application.
 
-    Checks the declared Content-Length first (cheap, catches the honest
-    client) and counts actual streamed bytes otherwise, so a lying or
-    chunked header cannot slip a large payload past. 413 is a client error;
-    nothing downstream ever sees the oversized body.
+    Always counts actual bytes streamed, regardless of Content-Length header.
+    A lying or chunked header cannot slip a large payload past.
+    Buffers the body so downstream (FastAPI, Pydantic) can re-read it.
     """
     cap = _body_cap()
     content_length = request.headers.get("content-length")
+
+    # Fast path: declared length exceeds cap -> reject immediately
     if content_length is not None:
         try:
             if int(content_length) > cap:
@@ -231,15 +248,21 @@ async def _body_size_middleware(request: Request, call_next):
             return JSONResponse(
                 status_code=400, content={"detail": "malformed content-length"},
             )
-    if "content-length" not in request.headers:
-        total = 0
-        async for chunk in request.stream():
-            total += len(chunk)
-            if total > cap:
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": f"request body exceeds {cap} bytes"},
-                )
+
+    # Read and count actual bytes, buffering for downstream
+    try:
+        body = await _read_limited_body(request, cap)
+    except ValueError as exc:
+        return JSONResponse(status_code=413, content={"detail": str(exc)})
+
+    # Replace request._body so downstream (FastAPI, Pydantic) can read it
+    request._body = body
+
+    # Also set content-length so downstream sees consistent header
+    request.headers.__dict__["_list"] = [
+        (k, v) for k, v in request.headers.raw if k != b"content-length"
+    ] + [(b"content-length", str(len(body)).encode())]
+
     return await call_next(request)
 
 
