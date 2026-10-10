@@ -1969,7 +1969,59 @@ _SOCIETY_MAX_GOAL_CHARS = 4096
 _SOCIETY_MAX_MODEL_NAME_CHARS = 128
 
 
+def _society_admit_and_reserve() -> tuple[str, dict | None]:
+    """Check admission and reserve a slot atomically under one lock.
+
+    Returns (reason, run_dict_or_None). If reason is empty string, admission
+    was granted and run dict (with run_id, etc.) is returned. If reason is
+    non-empty, admission was denied and None is returned.
+    """
+    with _society_lock:
+        active = sum(1 for r in _society_runs.values()
+                     if r.get("status") == "running")
+        queued = sum(1 for r in _society_runs.values()
+                     if r.get("status") == "queued")
+        if active >= _SOCIETY_MAX_ACTIVE_RUNS:
+            return (f"active run limit reached ({active}/"
+                    f"{_SOCIETY_MAX_ACTIVE_RUNS})", None)
+        if queued >= _SOCIETY_MAX_QUEUED_RUNS:
+            return (f"queue capacity reached ({queued}/"
+                    f"{_SOCIETY_MAX_QUEUED_RUNS} queued)", None)
+        
+        # Admission granted — create and reserve the run slot atomically
+        run_id = "r" + uuid.uuid4().hex[:12]
+        run: Dict[str, Any] = {
+            "run_id": run_id,
+            "goal": "",  # will be set by caller
+            "model_name": "",  # will be set by caller
+            "status": "running",
+            "cancel_requested": False,
+            "events": [],
+            "result": None,
+            "queue": queue.Queue(maxsize=1000),
+            "created": time.time(),
+        }
+        _society_runs[run_id] = run
+        
+        # Prune oldest finished runs
+        if len(_society_runs) > _SOCIETY_MAX_RUNS:
+            finished = sorted(
+                ((rid, r) for rid, r in _society_runs.items()
+                 if r.get("status") != "running"),
+                key=lambda kv: kv[1].get("created", 0),
+            )
+            for rid, _ in finished[: len(_society_runs) - _SOCIETY_MAX_RUNS]:
+                _society_runs.pop(rid, None)
+        
+        return ("", run)
+
+
 def _society_admission_reason() -> str:
+    """Check admission without reserving a slot.
+
+    Returns reason string if denied, empty string if admitted.
+    This is kept for backward compatibility with other callers.
+    """
     with _society_lock:
         active = sum(1 for r in _society_runs.values()
                      if r.get("status") == "running")
@@ -1978,9 +2030,6 @@ def _society_admission_reason() -> str:
     if active >= _SOCIETY_MAX_ACTIVE_RUNS:
         return (f"active run limit reached ({active}/"
                 f"{_SOCIETY_MAX_ACTIVE_RUNS})")
-    # Queue capacity is a cap on queued work in its own right: admitting
-    # another run when MAX_QUEUED are already waiting would exceed it
-    # regardless of how much room the active slot has.
     if queued >= _SOCIETY_MAX_QUEUED_RUNS:
         return (f"queue capacity reached ({queued}/"
                 f"{_SOCIETY_MAX_QUEUED_RUNS} queued)")
@@ -2058,40 +2107,25 @@ def society_run(payload: Dict[str, Any]) -> Dict[str, Any]:
     model_name = str((payload or {}).get("model_name", "gpt2"))
     if len(model_name) > _SOCIETY_MAX_MODEL_NAME_CHARS:
         return {"status": "error", "error": "model_name is too long"}
-    # Admission control before any state is allocated.
-    reason = _society_admission_reason()
+    
+    # Atomic admission check + slot reservation under one lock.
+    # This eliminates the check-then-act race where concurrent requests
+    # could both pass the admission check and exceed limits.
+    reason, run = _society_admit_and_reserve()
     if reason:
         return {"status": "busy", "error": reason,
                 "queue": {"active": _SOCIETY_MAX_ACTIVE_RUNS,
                           "max_queued": _SOCIETY_MAX_QUEUED_RUNS}}
-    run_id = "r" + uuid.uuid4().hex[:12]
-    run: Dict[str, Any] = {
-        "run_id": run_id,
-        "goal": goal,
-        "model_name": model_name,
-        "status": "running",
-        "cancel_requested": False,
-        "events": [],
-        "result": None,
-        "queue": queue.Queue(maxsize=1000),
-        "created": time.time(),
-    }
-    with _society_lock:
-        _society_runs[run_id] = run
-        # Prune oldest finished runs so long-lived desktop sessions stay lean.
-        if len(_society_runs) > _SOCIETY_MAX_RUNS:
-            finished = sorted(
-                ((rid, r) for rid, r in _society_runs.items()
-                 if r.get("status") != "running"),
-                key=lambda kv: kv[1].get("created", 0),
-            )
-            for rid, _ in finished[: len(_society_runs) - _SOCIETY_MAX_RUNS]:
-                _society_runs.pop(rid, None)
+    
+    # Fill in the caller-provided fields
+    run["goal"] = goal
+    run["model_name"] = model_name
+    
     worker = threading.Thread(
-        target=_society_worker, args=(run_id, goal, model_name), daemon=True)
+        target=_society_worker, args=(run["run_id"], goal, model_name), daemon=True)
     worker.start()
-    return {"runId": run_id, "status": "started",
-            "stream": f"/api/society/stream?runId={run_id}"}
+    return {"runId": run["run_id"], "status": "started",
+            "stream": f"/api/society/stream?runId={run['run_id']}"}
 
 
 @router.get("/society/runs")
