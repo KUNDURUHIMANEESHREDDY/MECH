@@ -49,12 +49,20 @@ failed, so even a mistaken caller cannot manufacture a live claim.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import time
+import uuid
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 LIVE = "live"
 SEEDED = "seeded"
 REFERENCE = "reference"
 UNAVAILABLE = "unavailable"
+
+#: A unique ID for this measurement boundary instance. Generated once at import.
+#: All measurements from this boundary instance carry this ID for traceability.
+_MEASUREMENT_BOUNDARY_ID = uuid.uuid4().hex[:16]
 
 #: Statuses that mean the work did not happen. A measurement layer must not
 #: stamp `live` on any of these regardless of what it was asked to attest.
@@ -70,7 +78,62 @@ _FRAME_KEYS = frozenset({
     "provenance_note", "model_loaded", "model_requested", "model_mismatch",
     "attested",
     "measured", "elapsed_ms", "runtime_ms", "timestamp",
+    "measurement_record",
 })
+
+
+def _canonical_json(data: Any) -> str:
+    """Canonical JSON serialization for hashing."""
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _hash_data(data: Any) -> str:
+    """SHA-256 hash of canonical JSON, truncated to 32 hex chars."""
+    return hashlib.sha256(_canonical_json(data).encode()).hexdigest()[:32]
+
+
+def _create_measurement_record(
+    result: Dict[str, Any],
+    model_loaded: Optional[str],
+    model_requested: Optional[str],
+) -> Dict[str, Any]:
+    """Create a cryptographically bound measurement record.
+
+    Binds model identity, inputs, outputs, execution context, and boundary ID.
+    """
+    now = time.time()
+    
+    # Model identity: name + content hash (if available)
+    model_identity = {"name": model_loaded or "unknown"}
+    if model_loaded:
+        # In a real deployment, this would be the actual model content hash.
+        # For now, use the model name as a placeholder for the content hash.
+        model_identity["content_hash"] = hashlib.sha256(
+            model_loaded.encode()
+        ).hexdigest()[:32]
+
+    # Input commitment: hash of the result's input-relevant fields
+    input_data = {k: v for k, v in result.items() if k in ("input", "prompt", "prompt_ids", "tokens")}
+    if not input_data:
+        # If no explicit input fields, hash the whole result minus framing
+        input_data = {k: v for k, v in result.items() if k not in _FRAME_KEYS}
+    input_commitment = _hash_data(input_data)
+
+    # Output commitment: hash of output-relevant fields
+    output_data = {k: v for k, v in result.items() if k in ("output", "result", "value", "predictions", "logits", "activations")}
+    if not output_data:
+        output_data = {k: v for k, v in result.items() if k not in _FRAME_KEYS}
+    output_commitment = _hash_data(output_data)
+
+    return {
+        "model_identity": model_identity,
+        "input_commitment": input_commitment,
+        "output_commitment": output_commitment,
+        "execution_context": {
+            "timestamp": now,
+            "measurement_boundary_id": _MEASUREMENT_BOUNDARY_ID,
+        },
+    }
 
 
 def is_failure_status(status: Any) -> bool:
@@ -143,6 +206,12 @@ def attest_measurement(
 
     result["provenance"] = LIVE
     result["attested"] = True
+
+    # Create and attach the cryptographically bound measurement record.
+    result["measurement_record"] = _create_measurement_record(
+        result, model_loaded, model_requested
+    )
+
     keys = list(fields) if fields is not None else [
         k for k in result if k not in _FRAME_KEYS
     ]
