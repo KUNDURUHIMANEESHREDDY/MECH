@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.core.identifiers import entity_id
+
 from typing import Any, Dict, List
 
 
@@ -42,7 +44,7 @@ class AutonomousPlannerEngine:
         })
 
         return {
-            "plan_id": f"plan_{hash(goal) & 0xffffffff:08x}",
+            "plan_id": entity_id("plan_"),
             "goal": goal,
             "experiment_stages": stages,
             "status": "planned",

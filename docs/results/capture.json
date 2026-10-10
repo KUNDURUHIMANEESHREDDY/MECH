@@ -1,11 +1,130 @@
 {
   "meta": {
-    "model": "gpt2 (124M)",
-    "library": "transformers + torch",
-    "provenance": "live",
     "generated_by": "scripts/capture_results.py",
+    "run_started_at": "2026-10-08T17:36:14+00:00",
     "note": "Every value is measured from live GPT-2 weights by a real forward pass. No synthetic, sampled or literature-copied values.",
-    "torch": "2.14.0+cu126"
+    "model": "gpt2 (124,439,808 parameters, revision 607a30d783dfa663caf39e06633721c8d4cfcd7e)",
+    "weights_sha256": "sha256:113687a222f8cf98039222c27b39aaf716493e5e8c1db94ea4e6544e0814088c",
+    "library": "transformers + torch 2.14.0+cu126",
+    "model_identity": "data['identity']",
+    "measured_sections": "9/9",
+    "provenance": "live"
+  },
+  "identity": {
+    "status": "ok",
+    "attested": true,
+    "model_id": "gpt2",
+    "model_type": "gpt2",
+    "architectures": [
+      "GPT2LMHeadModel"
+    ],
+    "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "weights_sha256": "sha256:113687a222f8cf98039222c27b39aaf716493e5e8c1db94ea4e6544e0814088c",
+    "config_sha256": "sha256:a967b17514ce758287104a9fcb608fd5a2be10f38f0c81f611f3567c69db2692",
+    "tokenizer_sha256": "sha256:5e4da8ba30f9c37729f48968ba18363856aa85865aa099973c00c7e0a3a72017",
+    "tokenizer_class": "GPT2TokenizerFast",
+    "tokenizer_vocab_size": 50257,
+    "parameter_count": 124439808,
+    "dtype": "torch.float32",
+    "device": "cpu",
+    "n_layers": 12,
+    "n_heads": 12,
+    "d_model": 768,
+    "d_head": 64,
+    "d_mlp": 3072,
+    "vocab_size": 50257,
+    "n_positions": 1024,
+    "activation": "gelu_new",
+    "environment": {
+      "versions": {
+        "python": "3.11.9",
+        "torch": "2.14.0+cu126",
+        "numpy": "1.26.4",
+        "transformers": "4.57.6"
+      },
+      "implementation": "CPython",
+      "platform": "Windows-10-10.0.26340-SP0",
+      "git_commit": "b19f393f63a46ad16c3ca92e995181d7f7b57bd0",
+      "git_dirty": true,
+      "script": "scripts/capture_results.py",
+      "script_sha256": "sha256:ede524d4c3dcddd5692e9148f11aaa7511c6e3d2d7bf232df8f03efa6e553275",
+      "sampling": "none; every capture is a deterministic forward pass with argmax decoding, so no random seed affects these numbers",
+      "torch_default_seed": 20814163765200
+    },
+    "protocol": {
+      "inputs": {
+        "ioi_templates": [
+          [
+            "Then John and Mary went to the store. John gave a bottle of milk to",
+            " Mary",
+            " John"
+          ],
+          [
+            "Then John and Mary went to the park. John gave a bottle of milk to",
+            " Mary",
+            " John"
+          ],
+          [
+            "Then John and Mary went to the office. John gave a key to",
+            " Mary",
+            " John"
+          ]
+        ],
+        "capital_prompt": "The capital of France is",
+        "steer_positive": "The capital of France is",
+        "steer_negative": "The capital of Japan is",
+        "steer_alphas": [
+          5.0,
+          10.0,
+          20.0,
+          40.0,
+          80.0
+        ],
+        "sanity_checks": [
+          [
+            "induction",
+            "Hello, my name is Julien. Hello, my name is",
+            "Jul",
+            "repeats the name stem ' Jul'"
+          ],
+          [
+            "counting",
+            "1, 2, 3, 4, 5, 6,",
+            "7",
+            "continues with ' 7'"
+          ]
+        ]
+      },
+      "inputs_sha256": "sha256:3830ae5b3962fc8c88de4809136c85da84f4724c569e8b5f6fd8ca57a1bb84ca",
+      "selection": {
+        "steering_layers": [
+          6,
+          8,
+          10
+        ],
+        "steering_layer_fractions": [
+          0.5,
+          0.6666666666666666,
+          0.8333333333333334
+        ],
+        "inspection_neuron_layer": 8,
+        "inspection_head_layer": 9,
+        "inspection_head": 9,
+        "inspection_fractions": {
+          "neuron_layer": 0.6666666666666666,
+          "head_layer": 0.75,
+          "head": 0.75
+        },
+        "note": "Resolved from the loaded architecture. Which layers to use is a choice; the indices they resolve to are properties of this checkpoint, so they are recorded here rather than assumed."
+      },
+      "reference_architecture": {
+        "model_id": "gpt2",
+        "n_layers": 12,
+        "n_heads": 12,
+        "d_model": 768,
+        "vocab_size": 50257
+      }
+    }
   },
   "architecture": {
     "load_status": "loaded",
@@ -52,7 +171,9 @@
           "prob": 0.007707
         }
       ],
+      "expected_top_token": "Jul",
       "expectation": "repeats the name stem ' Jul'",
+      "observed_top_token": " Jul",
       "passes": true
     },
     "counting": {
@@ -84,7 +205,9 @@
           "prob": 0.002337
         }
       ],
+      "expected_top_token": "7",
       "expectation": "continues with ' 7'",
+      "observed_top_token": " 7",
       "passes": true
     }
   },
@@ -458,44 +581,34 @@
   },
   "head_sweep": {
     "prompt": "Then John and Mary went to the store. John gave a bottle of milk to",
+    "n_layers": 12,
+    "n_heads": 12,
+    "n_heads_expected": 144,
     "n_heads_swept": 144,
     "baseline_clean_ld": 2.1681,
+    "ranking": {
+      "key": "effect",
+      "definition": "effect = clean_ld - patched_ld (signed)",
+      "order": "descending; destructive ablations first, opposing heads last",
+      "rationale": "Ranked on the signed causal effect of the ablation, not on its magnitude. A head whose removal *increases* the IOI logit difference is working against the behaviour, and ranking it alongside heads whose removal destroys it conflated the two."
+    },
+    "roles": {
+      "supports_ioi": 68,
+      "opposes_ioi": 76,
+      "neutral": 0
+    },
     "top_heads": [
       {
-        "layer": 0,
-        "head": 7,
-        "label": "L0H7",
-        "clean_ld": 2.1681,
-        "patched_ld": 3.6692,
-        "delta": 1.5011,
-        "drop_ratio": 0.6924
-      },
-      {
-        "layer": 0,
-        "head": 0,
-        "label": "L0H0",
-        "clean_ld": 2.1681,
-        "patched_ld": 3.4965,
-        "delta": 1.3284,
-        "drop_ratio": 0.6127
-      },
-      {
-        "layer": 2,
-        "head": 3,
-        "label": "L2H3",
-        "clean_ld": 2.1681,
-        "patched_ld": 3.3778,
-        "delta": 1.2097,
-        "drop_ratio": 0.558
-      },
-      {
         "layer": 2,
         "head": 0,
         "label": "L2H0",
         "clean_ld": 2.1681,
         "patched_ld": 1.229,
         "delta": -0.9391,
-        "drop_ratio": 0.4331
+        "effect": 0.9391,
+        "effect_abs": 0.9391,
+        "effect_fraction": 0.4331,
+        "role": "supports_ioi"
       },
       {
         "layer": 8,
@@ -504,16 +617,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.2671,
         "delta": -0.901,
-        "drop_ratio": 0.4156
-      },
-      {
-        "layer": 5,
-        "head": 9,
-        "label": "L5H9",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.9457,
-        "delta": 0.7776,
-        "drop_ratio": 0.3587
+        "effect": 0.901,
+        "effect_abs": 0.901,
+        "effect_fraction": 0.4156,
+        "role": "supports_ioi"
       },
       {
         "layer": 8,
@@ -522,162 +629,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.4272,
         "delta": -0.7409,
-        "drop_ratio": 0.3417
-      },
-      {
-        "layer": 10,
-        "head": 7,
-        "label": "L10H7",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.8598,
-        "delta": 0.6917,
-        "drop_ratio": 0.319
-      },
-      {
-        "layer": 11,
-        "head": 10,
-        "label": "L11H10",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.8378,
-        "delta": 0.6697,
-        "drop_ratio": 0.3089
-      },
-      {
-        "layer": 0,
-        "head": 6,
-        "label": "L0H6",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.7695,
-        "delta": 0.6014,
-        "drop_ratio": 0.2774
-      },
-      {
-        "layer": 0,
-        "head": 9,
-        "label": "L0H9",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.687,
-        "delta": 0.5189,
-        "drop_ratio": 0.2393
-      },
-      {
-        "layer": 11,
-        "head": 1,
-        "label": "L11H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.6699,
-        "delta": 0.5018,
-        "drop_ratio": 0.2314
-      }
-    ],
-    "all_heads": [
-      {
-        "layer": 0,
-        "head": 7,
-        "label": "L0H7",
-        "clean_ld": 2.1681,
-        "patched_ld": 3.6692,
-        "delta": 1.5011,
-        "drop_ratio": 0.6924
-      },
-      {
-        "layer": 0,
-        "head": 0,
-        "label": "L0H0",
-        "clean_ld": 2.1681,
-        "patched_ld": 3.4965,
-        "delta": 1.3284,
-        "drop_ratio": 0.6127
-      },
-      {
-        "layer": 2,
-        "head": 3,
-        "label": "L2H3",
-        "clean_ld": 2.1681,
-        "patched_ld": 3.3778,
-        "delta": 1.2097,
-        "drop_ratio": 0.558
-      },
-      {
-        "layer": 2,
-        "head": 0,
-        "label": "L2H0",
-        "clean_ld": 2.1681,
-        "patched_ld": 1.229,
-        "delta": -0.9391,
-        "drop_ratio": 0.4331
-      },
-      {
-        "layer": 8,
-        "head": 10,
-        "label": "L8H10",
-        "clean_ld": 2.1681,
-        "patched_ld": 1.2671,
-        "delta": -0.901,
-        "drop_ratio": 0.4156
-      },
-      {
-        "layer": 5,
-        "head": 9,
-        "label": "L5H9",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.9457,
-        "delta": 0.7776,
-        "drop_ratio": 0.3587
-      },
-      {
-        "layer": 8,
-        "head": 6,
-        "label": "L8H6",
-        "clean_ld": 2.1681,
-        "patched_ld": 1.4272,
-        "delta": -0.7409,
-        "drop_ratio": 0.3417
-      },
-      {
-        "layer": 10,
-        "head": 7,
-        "label": "L10H7",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.8598,
-        "delta": 0.6917,
-        "drop_ratio": 0.319
-      },
-      {
-        "layer": 11,
-        "head": 10,
-        "label": "L11H10",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.8378,
-        "delta": 0.6697,
-        "drop_ratio": 0.3089
-      },
-      {
-        "layer": 0,
-        "head": 6,
-        "label": "L0H6",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.7695,
-        "delta": 0.6014,
-        "drop_ratio": 0.2774
-      },
-      {
-        "layer": 0,
-        "head": 9,
-        "label": "L0H9",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.687,
-        "delta": 0.5189,
-        "drop_ratio": 0.2393
-      },
-      {
-        "layer": 11,
-        "head": 1,
-        "label": "L11H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.6699,
-        "delta": 0.5018,
-        "drop_ratio": 0.2314
+        "effect": 0.7409,
+        "effect_abs": 0.7409,
+        "effect_fraction": 0.3417,
+        "role": "supports_ioi"
       },
       {
         "layer": 10,
@@ -686,7 +641,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.6983,
         "delta": -0.4698,
-        "drop_ratio": 0.2167
+        "effect": 0.4698,
+        "effect_abs": 0.4698,
+        "effect_fraction": 0.2167,
+        "role": "supports_ioi"
       },
       {
         "layer": 2,
@@ -695,16 +653,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.735,
         "delta": -0.4331,
-        "drop_ratio": 0.1998
-      },
-      {
-        "layer": 10,
-        "head": 6,
-        "label": "L10H6",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.5853,
-        "delta": 0.4172,
-        "drop_ratio": 0.1924
+        "effect": 0.4331,
+        "effect_abs": 0.4331,
+        "effect_fraction": 0.1998,
+        "role": "supports_ioi"
       },
       {
         "layer": 7,
@@ -713,16 +665,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.7511,
         "delta": -0.417,
-        "drop_ratio": 0.1923
-      },
-      {
-        "layer": 0,
-        "head": 3,
-        "label": "L0H3",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.5829,
-        "delta": 0.4148,
-        "drop_ratio": 0.1913
+        "effect": 0.417,
+        "effect_abs": 0.417,
+        "effect_fraction": 0.1923,
+        "role": "supports_ioi"
       },
       {
         "layer": 7,
@@ -731,7 +677,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.7596,
         "delta": -0.4085,
-        "drop_ratio": 0.1884
+        "effect": 0.4085,
+        "effect_abs": 0.4085,
+        "effect_fraction": 0.1884,
+        "role": "supports_ioi"
       },
       {
         "layer": 11,
@@ -740,7 +689,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.7819,
         "delta": -0.3862,
-        "drop_ratio": 0.1781
+        "effect": 0.3862,
+        "effect_abs": 0.3862,
+        "effect_fraction": 0.1781,
+        "role": "supports_ioi"
       },
       {
         "layer": 2,
@@ -749,16 +701,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.7872,
         "delta": -0.3809,
-        "drop_ratio": 0.1757
-      },
-      {
-        "layer": 9,
-        "head": 4,
-        "label": "L9H4",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.5438,
-        "delta": 0.3757,
-        "drop_ratio": 0.1733
+        "effect": 0.3809,
+        "effect_abs": 0.3809,
+        "effect_fraction": 0.1757,
+        "role": "supports_ioi"
       },
       {
         "layer": 9,
@@ -767,7 +713,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.8054,
         "delta": -0.3627,
-        "drop_ratio": 0.1673
+        "effect": 0.3627,
+        "effect_abs": 0.3627,
+        "effect_fraction": 0.1673,
+        "role": "supports_ioi"
       },
       {
         "layer": 1,
@@ -776,25 +725,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.8069,
         "delta": -0.3612,
-        "drop_ratio": 0.1666
-      },
-      {
-        "layer": 2,
-        "head": 6,
-        "label": "L2H6",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.5245,
-        "delta": 0.3564,
-        "drop_ratio": 0.1644
-      },
-      {
-        "layer": 10,
-        "head": 2,
-        "label": "L10H2",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.52,
-        "delta": 0.3519,
-        "drop_ratio": 0.1623
+        "effect": 0.3612,
+        "effect_abs": 0.3612,
+        "effect_fraction": 0.1666,
+        "role": "supports_ioi"
       },
       {
         "layer": 0,
@@ -803,34 +737,156 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.8215,
         "delta": -0.3466,
-        "drop_ratio": 0.1599
-      },
+        "effect": 0.3466,
+        "effect_abs": 0.3466,
+        "effect_fraction": 0.1599,
+        "role": "supports_ioi"
+      }
+    ],
+    "supporting_heads": [
       {
-        "layer": 1,
-        "head": 6,
-        "label": "L1H6",
+        "layer": 2,
+        "head": 0,
+        "label": "L2H0",
         "clean_ld": 2.1681,
-        "patched_ld": 2.4972,
-        "delta": 0.3291,
-        "drop_ratio": 0.1518
+        "patched_ld": 1.229,
+        "delta": -0.9391,
+        "effect": 0.9391,
+        "effect_abs": 0.9391,
+        "effect_fraction": 0.4331,
+        "role": "supports_ioi"
       },
       {
         "layer": 8,
-        "head": 3,
-        "label": "L8H3",
+        "head": 10,
+        "label": "L8H10",
         "clean_ld": 2.1681,
-        "patched_ld": 2.4963,
-        "delta": 0.3282,
-        "drop_ratio": 0.1514
+        "patched_ld": 1.2671,
+        "delta": -0.901,
+        "effect": 0.901,
+        "effect_abs": 0.901,
+        "effect_fraction": 0.4156,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 6,
+        "label": "L8H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.4272,
+        "delta": -0.7409,
+        "effect": 0.7409,
+        "effect_abs": 0.7409,
+        "effect_fraction": 0.3417,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 0,
+        "label": "L10H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.6983,
+        "delta": -0.4698,
+        "effect": 0.4698,
+        "effect_abs": 0.4698,
+        "effect_fraction": 0.2167,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 5,
+        "label": "L2H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.735,
+        "delta": -0.4331,
+        "effect": 0.4331,
+        "effect_abs": 0.4331,
+        "effect_fraction": 0.1998,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 3,
+        "label": "L7H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.7511,
+        "delta": -0.417,
+        "effect": 0.417,
+        "effect_abs": 0.417,
+        "effect_fraction": 0.1923,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 9,
+        "label": "L7H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.7596,
+        "delta": -0.4085,
+        "effect": 0.4085,
+        "effect_abs": 0.4085,
+        "effect_fraction": 0.1884,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 0,
+        "label": "L11H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.7819,
+        "delta": -0.3862,
+        "effect": 0.3862,
+        "effect_abs": 0.3862,
+        "effect_fraction": 0.1781,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 9,
+        "label": "L2H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.7872,
+        "delta": -0.3809,
+        "effect": 0.3809,
+        "effect_abs": 0.3809,
+        "effect_fraction": 0.1757,
+        "role": "supports_ioi"
       },
       {
         "layer": 9,
-        "head": 6,
-        "label": "L9H6",
+        "head": 7,
+        "label": "L9H7",
         "clean_ld": 2.1681,
-        "patched_ld": 2.4813,
-        "delta": 0.3132,
-        "drop_ratio": 0.1445
+        "patched_ld": 1.8054,
+        "delta": -0.3627,
+        "effect": 0.3627,
+        "effect_abs": 0.3627,
+        "effect_fraction": 0.1673,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 3,
+        "label": "L1H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.8069,
+        "delta": -0.3612,
+        "effect": 0.3612,
+        "effect_abs": 0.3612,
+        "effect_fraction": 0.1666,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 10,
+        "label": "L0H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.8215,
+        "delta": -0.3466,
+        "effect": 0.3466,
+        "effect_abs": 0.3466,
+        "effect_fraction": 0.1599,
+        "role": "supports_ioi"
       },
       {
         "layer": 4,
@@ -839,25 +895,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.8671,
         "delta": -0.301,
-        "drop_ratio": 0.1388
-      },
-      {
-        "layer": 3,
-        "head": 6,
-        "label": "L3H6",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.4685,
-        "delta": 0.3004,
-        "drop_ratio": 0.1386
-      },
-      {
-        "layer": 4,
-        "head": 7,
-        "label": "L4H7",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.4471,
-        "delta": 0.279,
-        "drop_ratio": 0.1287
+        "effect": 0.301,
+        "effect_abs": 0.301,
+        "effect_fraction": 0.1388,
+        "role": "supports_ioi"
       },
       {
         "layer": 1,
@@ -866,7 +907,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.8977,
         "delta": -0.2704,
-        "drop_ratio": 0.1247
+        "effect": 0.2704,
+        "effect_abs": 0.2704,
+        "effect_fraction": 0.1247,
+        "role": "supports_ioi"
       },
       {
         "layer": 2,
@@ -875,7 +919,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.9152,
         "delta": -0.2529,
-        "drop_ratio": 0.1166
+        "effect": 0.2529,
+        "effect_abs": 0.2529,
+        "effect_fraction": 0.1166,
+        "role": "supports_ioi"
       },
       {
         "layer": 11,
@@ -884,16 +931,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.9156,
         "delta": -0.2525,
-        "drop_ratio": 0.1165
-      },
-      {
-        "layer": 3,
-        "head": 10,
-        "label": "L3H10",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.4165,
-        "delta": 0.2484,
-        "drop_ratio": 0.1146
+        "effect": 0.2525,
+        "effect_abs": 0.2525,
+        "effect_fraction": 0.1165,
+        "role": "supports_ioi"
       },
       {
         "layer": 3,
@@ -902,7 +943,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.9279,
         "delta": -0.2402,
-        "drop_ratio": 0.1108
+        "effect": 0.2402,
+        "effect_abs": 0.2402,
+        "effect_fraction": 0.1108,
+        "role": "supports_ioi"
       },
       {
         "layer": 4,
@@ -911,7 +955,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.9401,
         "delta": -0.228,
-        "drop_ratio": 0.1052
+        "effect": 0.228,
+        "effect_abs": 0.228,
+        "effect_fraction": 0.1052,
+        "role": "supports_ioi"
       },
       {
         "layer": 11,
@@ -920,16 +967,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.9436,
         "delta": -0.2245,
-        "drop_ratio": 0.1035
-      },
-      {
-        "layer": 2,
-        "head": 11,
-        "label": "L2H11",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3738,
-        "delta": 0.2057,
-        "drop_ratio": 0.0949
+        "effect": 0.2245,
+        "effect_abs": 0.2245,
+        "effect_fraction": 0.1035,
+        "role": "supports_ioi"
       },
       {
         "layer": 4,
@@ -938,34 +979,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.9676,
         "delta": -0.2005,
-        "drop_ratio": 0.0925
-      },
-      {
-        "layer": 1,
-        "head": 7,
-        "label": "L1H7",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3673,
-        "delta": 0.1992,
-        "drop_ratio": 0.0919
-      },
-      {
-        "layer": 3,
-        "head": 9,
-        "label": "L3H9",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.363,
-        "delta": 0.1949,
-        "drop_ratio": 0.0899
-      },
-      {
-        "layer": 8,
-        "head": 5,
-        "label": "L8H5",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3561,
-        "delta": 0.188,
-        "drop_ratio": 0.0867
+        "effect": 0.2005,
+        "effect_abs": 0.2005,
+        "effect_fraction": 0.0925,
+        "role": "supports_ioi"
       },
       {
         "layer": 5,
@@ -974,16 +991,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.9822,
         "delta": -0.1859,
-        "drop_ratio": 0.0857
-      },
-      {
-        "layer": 1,
-        "head": 0,
-        "label": "L1H0",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.346,
-        "delta": 0.1779,
-        "drop_ratio": 0.0821
+        "effect": 0.1859,
+        "effect_abs": 0.1859,
+        "effect_fraction": 0.0857,
+        "role": "supports_ioi"
       },
       {
         "layer": 2,
@@ -992,7 +1003,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.991,
         "delta": -0.1771,
-        "drop_ratio": 0.0817
+        "effect": 0.1771,
+        "effect_abs": 0.1771,
+        "effect_fraction": 0.0817,
+        "role": "supports_ioi"
       },
       {
         "layer": 10,
@@ -1001,34 +1015,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 1.9911,
         "delta": -0.177,
-        "drop_ratio": 0.0816
-      },
-      {
-        "layer": 7,
-        "head": 10,
-        "label": "L7H10",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3415,
-        "delta": 0.1734,
-        "drop_ratio": 0.08
-      },
-      {
-        "layer": 2,
-        "head": 4,
-        "label": "L2H4",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3339,
-        "delta": 0.1658,
-        "drop_ratio": 0.0765
-      },
-      {
-        "layer": 0,
-        "head": 4,
-        "label": "L0H4",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3322,
-        "delta": 0.1641,
-        "drop_ratio": 0.0757
+        "effect": 0.177,
+        "effect_abs": 0.177,
+        "effect_fraction": 0.0816,
+        "role": "supports_ioi"
       },
       {
         "layer": 7,
@@ -1037,25 +1027,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.011,
         "delta": -0.1571,
-        "drop_ratio": 0.0725
-      },
-      {
-        "layer": 5,
-        "head": 5,
-        "label": "L5H5",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.325,
-        "delta": 0.1569,
-        "drop_ratio": 0.0724
-      },
-      {
-        "layer": 3,
-        "head": 11,
-        "label": "L3H11",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3235,
-        "delta": 0.1554,
-        "drop_ratio": 0.0717
+        "effect": 0.1571,
+        "effect_abs": 0.1571,
+        "effect_fraction": 0.0725,
+        "role": "supports_ioi"
       },
       {
         "layer": 6,
@@ -1064,7 +1039,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0128,
         "delta": -0.1553,
-        "drop_ratio": 0.0716
+        "effect": 0.1553,
+        "effect_abs": 0.1553,
+        "effect_fraction": 0.0716,
+        "role": "supports_ioi"
       },
       {
         "layer": 1,
@@ -1073,52 +1051,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0129,
         "delta": -0.1552,
-        "drop_ratio": 0.0716
-      },
-      {
-        "layer": 6,
-        "head": 10,
-        "label": "L6H10",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3224,
-        "delta": 0.1543,
-        "drop_ratio": 0.0712
-      },
-      {
-        "layer": 1,
-        "head": 10,
-        "label": "L1H10",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3206,
-        "delta": 0.1525,
-        "drop_ratio": 0.0703
-      },
-      {
-        "layer": 3,
-        "head": 4,
-        "label": "L3H4",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3165,
-        "delta": 0.1484,
-        "drop_ratio": 0.0684
-      },
-      {
-        "layer": 7,
-        "head": 6,
-        "label": "L7H6",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3159,
-        "delta": 0.1478,
-        "drop_ratio": 0.0682
-      },
-      {
-        "layer": 4,
-        "head": 8,
-        "label": "L4H8",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3145,
-        "delta": 0.1464,
-        "drop_ratio": 0.0675
+        "effect": 0.1552,
+        "effect_abs": 0.1552,
+        "effect_fraction": 0.0716,
+        "role": "supports_ioi"
       },
       {
         "layer": 3,
@@ -1127,7 +1063,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0226,
         "delta": -0.1455,
-        "drop_ratio": 0.0671
+        "effect": 0.1455,
+        "effect_abs": 0.1455,
+        "effect_fraction": 0.0671,
+        "role": "supports_ioi"
       },
       {
         "layer": 8,
@@ -1136,16 +1075,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0231,
         "delta": -0.145,
-        "drop_ratio": 0.0669
-      },
-      {
-        "layer": 6,
-        "head": 4,
-        "label": "L6H4",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.3122,
-        "delta": 0.1441,
-        "drop_ratio": 0.0665
+        "effect": 0.145,
+        "effect_abs": 0.145,
+        "effect_fraction": 0.0669,
+        "role": "supports_ioi"
       },
       {
         "layer": 6,
@@ -1154,7 +1087,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0245,
         "delta": -0.1436,
-        "drop_ratio": 0.0662
+        "effect": 0.1436,
+        "effect_abs": 0.1436,
+        "effect_fraction": 0.0662,
+        "role": "supports_ioi"
       },
       {
         "layer": 10,
@@ -1163,7 +1099,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0255,
         "delta": -0.1426,
-        "drop_ratio": 0.0658
+        "effect": 0.1426,
+        "effect_abs": 0.1426,
+        "effect_fraction": 0.0658,
+        "role": "supports_ioi"
       },
       {
         "layer": 6,
@@ -1172,7 +1111,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0262,
         "delta": -0.1419,
-        "drop_ratio": 0.0654
+        "effect": 0.1419,
+        "effect_abs": 0.1419,
+        "effect_fraction": 0.0654,
+        "role": "supports_ioi"
       },
       {
         "layer": 6,
@@ -1181,7 +1123,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0264,
         "delta": -0.1417,
-        "drop_ratio": 0.0654
+        "effect": 0.1417,
+        "effect_abs": 0.1417,
+        "effect_fraction": 0.0654,
+        "role": "supports_ioi"
       },
       {
         "layer": 5,
@@ -1190,7 +1135,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0274,
         "delta": -0.1407,
-        "drop_ratio": 0.0649
+        "effect": 0.1407,
+        "effect_abs": 0.1407,
+        "effect_fraction": 0.0649,
+        "role": "supports_ioi"
       },
       {
         "layer": 2,
@@ -1199,16 +1147,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0361,
         "delta": -0.132,
-        "drop_ratio": 0.0609
-      },
-      {
-        "layer": 4,
-        "head": 1,
-        "label": "L4H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2989,
-        "delta": 0.1308,
-        "drop_ratio": 0.0603
+        "effect": 0.132,
+        "effect_abs": 0.132,
+        "effect_fraction": 0.0609,
+        "role": "supports_ioi"
       },
       {
         "layer": 8,
@@ -1217,7 +1159,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0399,
         "delta": -0.1282,
-        "drop_ratio": 0.0591
+        "effect": 0.1282,
+        "effect_abs": 0.1282,
+        "effect_fraction": 0.0591,
+        "role": "supports_ioi"
       },
       {
         "layer": 7,
@@ -1226,25 +1171,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0464,
         "delta": -0.1217,
-        "drop_ratio": 0.0561
-      },
-      {
-        "layer": 5,
-        "head": 1,
-        "label": "L5H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2887,
-        "delta": 0.1206,
-        "drop_ratio": 0.0556
-      },
-      {
-        "layer": 5,
-        "head": 3,
-        "label": "L5H3",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2869,
-        "delta": 0.1188,
-        "drop_ratio": 0.0548
+        "effect": 0.1217,
+        "effect_abs": 0.1217,
+        "effect_fraction": 0.0561,
+        "role": "supports_ioi"
       },
       {
         "layer": 5,
@@ -1253,16 +1183,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0501,
         "delta": -0.118,
-        "drop_ratio": 0.0544
-      },
-      {
-        "layer": 9,
-        "head": 0,
-        "label": "L9H0",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2848,
-        "delta": 0.1167,
-        "drop_ratio": 0.0538
+        "effect": 0.118,
+        "effect_abs": 0.118,
+        "effect_fraction": 0.0544,
+        "role": "supports_ioi"
       },
       {
         "layer": 3,
@@ -1271,16 +1195,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0554,
         "delta": -0.1127,
-        "drop_ratio": 0.052
-      },
-      {
-        "layer": 6,
-        "head": 3,
-        "label": "L6H3",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2773,
-        "delta": 0.1092,
-        "drop_ratio": 0.0504
+        "effect": 0.1127,
+        "effect_abs": 0.1127,
+        "effect_fraction": 0.052,
+        "role": "supports_ioi"
       },
       {
         "layer": 10,
@@ -1289,16 +1207,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0622,
         "delta": -0.1059,
-        "drop_ratio": 0.0488
-      },
-      {
-        "layer": 3,
-        "head": 1,
-        "label": "L3H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.0625,
-        "delta": -0.1056,
-        "drop_ratio": 0.0487
+        "effect": 0.1059,
+        "effect_abs": 0.1059,
+        "effect_fraction": 0.0488,
+        "role": "supports_ioi"
       },
       {
         "layer": 11,
@@ -1307,7 +1219,22 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0625,
         "delta": -0.1056,
-        "drop_ratio": 0.0487
+        "effect": 0.1056,
+        "effect_abs": 0.1056,
+        "effect_fraction": 0.0487,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 1,
+        "label": "L3H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0625,
+        "delta": -0.1056,
+        "effect": 0.1056,
+        "effect_abs": 0.1056,
+        "effect_fraction": 0.0487,
+        "role": "supports_ioi"
       },
       {
         "layer": 8,
@@ -1316,7 +1243,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0713,
         "delta": -0.0968,
-        "drop_ratio": 0.0446
+        "effect": 0.0968,
+        "effect_abs": 0.0968,
+        "effect_fraction": 0.0446,
+        "role": "supports_ioi"
       },
       {
         "layer": 9,
@@ -1325,7 +1255,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0721,
         "delta": -0.096,
-        "drop_ratio": 0.0443
+        "effect": 0.096,
+        "effect_abs": 0.096,
+        "effect_fraction": 0.0443,
+        "role": "supports_ioi"
       },
       {
         "layer": 4,
@@ -1334,25 +1267,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0817,
         "delta": -0.0864,
-        "drop_ratio": 0.0399
-      },
-      {
-        "layer": 8,
-        "head": 2,
-        "label": "L8H2",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2541,
-        "delta": 0.086,
-        "drop_ratio": 0.0397
-      },
-      {
-        "layer": 1,
-        "head": 8,
-        "label": "L1H8",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2465,
-        "delta": 0.0784,
-        "drop_ratio": 0.0362
+        "effect": 0.0864,
+        "effect_abs": 0.0864,
+        "effect_fraction": 0.0399,
+        "role": "supports_ioi"
       },
       {
         "layer": 5,
@@ -1361,7 +1279,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0911,
         "delta": -0.077,
-        "drop_ratio": 0.0355
+        "effect": 0.077,
+        "effect_abs": 0.077,
+        "effect_fraction": 0.0355,
+        "role": "supports_ioi"
       },
       {
         "layer": 9,
@@ -1370,34 +1291,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0914,
         "delta": -0.0767,
-        "drop_ratio": 0.0354
-      },
-      {
-        "layer": 6,
-        "head": 11,
-        "label": "L6H11",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2447,
-        "delta": 0.0766,
-        "drop_ratio": 0.0353
-      },
-      {
-        "layer": 3,
-        "head": 0,
-        "label": "L3H0",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2412,
-        "delta": 0.0731,
-        "drop_ratio": 0.0337
-      },
-      {
-        "layer": 7,
-        "head": 5,
-        "label": "L7H5",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2397,
-        "delta": 0.0716,
-        "drop_ratio": 0.033
+        "effect": 0.0767,
+        "effect_abs": 0.0767,
+        "effect_fraction": 0.0354,
+        "role": "supports_ioi"
       },
       {
         "layer": 9,
@@ -1406,7 +1303,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.098,
         "delta": -0.0701,
-        "drop_ratio": 0.0323
+        "effect": 0.0701,
+        "effect_abs": 0.0701,
+        "effect_fraction": 0.0323,
+        "role": "supports_ioi"
       },
       {
         "layer": 4,
@@ -1415,43 +1315,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.0991,
         "delta": -0.069,
-        "drop_ratio": 0.0318
-      },
-      {
-        "layer": 5,
-        "head": 7,
-        "label": "L5H7",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2361,
-        "delta": 0.068,
-        "drop_ratio": 0.0314
-      },
-      {
-        "layer": 4,
-        "head": 0,
-        "label": "L4H0",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2346,
-        "delta": 0.0665,
-        "drop_ratio": 0.0307
-      },
-      {
-        "layer": 8,
-        "head": 0,
-        "label": "L8H0",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2343,
-        "delta": 0.0662,
-        "drop_ratio": 0.0305
-      },
-      {
-        "layer": 0,
-        "head": 11,
-        "label": "L0H11",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2304,
-        "delta": 0.0623,
-        "drop_ratio": 0.0287
+        "effect": 0.069,
+        "effect_abs": 0.069,
+        "effect_fraction": 0.0318,
+        "role": "supports_ioi"
       },
       {
         "layer": 6,
@@ -1460,7 +1327,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1083,
         "delta": -0.0598,
-        "drop_ratio": 0.0276
+        "effect": 0.0598,
+        "effect_abs": 0.0598,
+        "effect_fraction": 0.0276,
+        "role": "supports_ioi"
       },
       {
         "layer": 6,
@@ -1469,16 +1339,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1113,
         "delta": -0.0568,
-        "drop_ratio": 0.0262
-      },
-      {
-        "layer": 0,
-        "head": 1,
-        "label": "L0H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2242,
-        "delta": 0.0561,
-        "drop_ratio": 0.0259
+        "effect": 0.0568,
+        "effect_abs": 0.0568,
+        "effect_fraction": 0.0262,
+        "role": "supports_ioi"
       },
       {
         "layer": 5,
@@ -1487,34 +1351,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1121,
         "delta": -0.056,
-        "drop_ratio": 0.0258
-      },
-      {
-        "layer": 2,
-        "head": 1,
-        "label": "L2H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2172,
-        "delta": 0.0491,
-        "drop_ratio": 0.0226
-      },
-      {
-        "layer": 0,
-        "head": 5,
-        "label": "L0H5",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2127,
-        "delta": 0.0446,
-        "drop_ratio": 0.0206
-      },
-      {
-        "layer": 9,
-        "head": 5,
-        "label": "L9H5",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2127,
-        "delta": 0.0446,
-        "drop_ratio": 0.0206
+        "effect": 0.056,
+        "effect_abs": 0.056,
+        "effect_fraction": 0.0258,
+        "role": "supports_ioi"
       },
       {
         "layer": 5,
@@ -1523,16 +1363,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1242,
         "delta": -0.0439,
-        "drop_ratio": 0.0202
-      },
-      {
-        "layer": 7,
-        "head": 11,
-        "label": "L7H11",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.211,
-        "delta": 0.0429,
-        "drop_ratio": 0.0198
+        "effect": 0.0439,
+        "effect_abs": 0.0439,
+        "effect_fraction": 0.0202,
+        "role": "supports_ioi"
       },
       {
         "layer": 8,
@@ -1541,16 +1375,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1256,
         "delta": -0.0425,
-        "drop_ratio": 0.0196
-      },
-      {
-        "layer": 6,
-        "head": 8,
-        "label": "L6H8",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2103,
-        "delta": 0.0422,
-        "drop_ratio": 0.0195
+        "effect": 0.0425,
+        "effect_abs": 0.0425,
+        "effect_fraction": 0.0196,
+        "role": "supports_ioi"
       },
       {
         "layer": 4,
@@ -1559,34 +1387,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1287,
         "delta": -0.0394,
-        "drop_ratio": 0.0182
-      },
-      {
-        "layer": 4,
-        "head": 4,
-        "label": "L4H4",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2067,
-        "delta": 0.0386,
-        "drop_ratio": 0.0178
-      },
-      {
-        "layer": 11,
-        "head": 8,
-        "label": "L11H8",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2055,
-        "delta": 0.0374,
-        "drop_ratio": 0.0173
-      },
-      {
-        "layer": 11,
-        "head": 7,
-        "label": "L11H7",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2043,
-        "delta": 0.0362,
-        "drop_ratio": 0.0167
+        "effect": 0.0394,
+        "effect_abs": 0.0394,
+        "effect_fraction": 0.0182,
+        "role": "supports_ioi"
       },
       {
         "layer": 6,
@@ -1595,16 +1399,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1334,
         "delta": -0.0347,
-        "drop_ratio": 0.016
-      },
-      {
-        "layer": 11,
-        "head": 5,
-        "label": "L11H5",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.2002,
-        "delta": 0.0321,
-        "drop_ratio": 0.0148
+        "effect": 0.0347,
+        "effect_abs": 0.0347,
+        "effect_fraction": 0.016,
+        "role": "supports_ioi"
       },
       {
         "layer": 7,
@@ -1613,7 +1411,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1381,
         "delta": -0.03,
-        "drop_ratio": 0.0138
+        "effect": 0.03,
+        "effect_abs": 0.03,
+        "effect_fraction": 0.0138,
+        "role": "supports_ioi"
       },
       {
         "layer": 8,
@@ -1622,16 +1423,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1382,
         "delta": -0.0299,
-        "drop_ratio": 0.0138
-      },
-      {
-        "layer": 9,
-        "head": 1,
-        "label": "L9H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1972,
-        "delta": 0.0291,
-        "drop_ratio": 0.0134
+        "effect": 0.0299,
+        "effect_abs": 0.0299,
+        "effect_fraction": 0.0138,
+        "role": "supports_ioi"
       },
       {
         "layer": 10,
@@ -1640,43 +1435,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1397,
         "delta": -0.0284,
-        "drop_ratio": 0.0131
-      },
-      {
-        "layer": 11,
-        "head": 6,
-        "label": "L11H6",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1963,
-        "delta": 0.0282,
-        "drop_ratio": 0.013
-      },
-      {
-        "layer": 8,
-        "head": 8,
-        "label": "L8H8",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1962,
-        "delta": 0.0281,
-        "drop_ratio": 0.013
-      },
-      {
-        "layer": 11,
-        "head": 11,
-        "label": "L11H11",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1933,
-        "delta": 0.0252,
-        "drop_ratio": 0.0116
-      },
-      {
-        "layer": 1,
-        "head": 2,
-        "label": "L1H2",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1925,
-        "delta": 0.0244,
-        "drop_ratio": 0.0113
+        "effect": 0.0284,
+        "effect_abs": 0.0284,
+        "effect_fraction": 0.0131,
+        "role": "supports_ioi"
       },
       {
         "layer": 5,
@@ -1685,7 +1447,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1437,
         "delta": -0.0244,
-        "drop_ratio": 0.0113
+        "effect": 0.0244,
+        "effect_abs": 0.0244,
+        "effect_fraction": 0.0113,
+        "role": "supports_ioi"
       },
       {
         "layer": 4,
@@ -1694,16 +1459,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1445,
         "delta": -0.0236,
-        "drop_ratio": 0.0109
-      },
-      {
-        "layer": 7,
-        "head": 8,
-        "label": "L7H8",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1914,
-        "delta": 0.0233,
-        "drop_ratio": 0.0107
+        "effect": 0.0236,
+        "effect_abs": 0.0236,
+        "effect_fraction": 0.0109,
+        "role": "supports_ioi"
       },
       {
         "layer": 1,
@@ -1712,25 +1471,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.146,
         "delta": -0.0221,
-        "drop_ratio": 0.0102
-      },
-      {
-        "layer": 1,
-        "head": 9,
-        "label": "L1H9",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1878,
-        "delta": 0.0197,
-        "drop_ratio": 0.0091
-      },
-      {
-        "layer": 9,
-        "head": 8,
-        "label": "L9H8",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1876,
-        "delta": 0.0195,
-        "drop_ratio": 0.009
+        "effect": 0.0221,
+        "effect_abs": 0.0221,
+        "effect_fraction": 0.0102,
+        "role": "supports_ioi"
       },
       {
         "layer": 9,
@@ -1739,43 +1483,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1488,
         "delta": -0.0193,
-        "drop_ratio": 0.0089
-      },
-      {
-        "layer": 0,
-        "head": 2,
-        "label": "L0H2",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1869,
-        "delta": 0.0188,
-        "drop_ratio": 0.0087
-      },
-      {
-        "layer": 9,
-        "head": 2,
-        "label": "L9H2",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1867,
-        "delta": 0.0186,
-        "drop_ratio": 0.0086
-      },
-      {
-        "layer": 10,
-        "head": 1,
-        "label": "L10H1",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1858,
-        "delta": 0.0177,
-        "drop_ratio": 0.0082
-      },
-      {
-        "layer": 11,
-        "head": 9,
-        "label": "L11H9",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1857,
-        "delta": 0.0176,
-        "drop_ratio": 0.0081
+        "effect": 0.0193,
+        "effect_abs": 0.0193,
+        "effect_fraction": 0.0089,
+        "role": "supports_ioi"
       },
       {
         "layer": 7,
@@ -1784,16 +1495,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1509,
         "delta": -0.0172,
-        "drop_ratio": 0.0079
-      },
-      {
-        "layer": 1,
-        "head": 11,
-        "label": "L1H11",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1851,
-        "delta": 0.017,
-        "drop_ratio": 0.0078
+        "effect": 0.0172,
+        "effect_abs": 0.0172,
+        "effect_fraction": 0.0079,
+        "role": "supports_ioi"
       },
       {
         "layer": 10,
@@ -1802,16 +1507,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1518,
         "delta": -0.0163,
-        "drop_ratio": 0.0075
-      },
-      {
-        "layer": 10,
-        "head": 5,
-        "label": "L10H5",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1826,
-        "delta": 0.0145,
-        "drop_ratio": 0.0067
+        "effect": 0.0163,
+        "effect_abs": 0.0163,
+        "effect_fraction": 0.0075,
+        "role": "supports_ioi"
       },
       {
         "layer": 10,
@@ -1820,16 +1519,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1544,
         "delta": -0.0137,
-        "drop_ratio": 0.0063
-      },
-      {
-        "layer": 3,
-        "head": 3,
-        "label": "L3H3",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.1789,
-        "delta": 0.0108,
-        "drop_ratio": 0.005
+        "effect": 0.0137,
+        "effect_abs": 0.0137,
+        "effect_fraction": 0.0063,
+        "role": "supports_ioi"
       },
       {
         "layer": 2,
@@ -1838,7 +1531,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1579,
         "delta": -0.0102,
-        "drop_ratio": 0.0047
+        "effect": 0.0102,
+        "effect_abs": 0.0102,
+        "effect_fraction": 0.0047,
+        "role": "supports_ioi"
       },
       {
         "layer": 7,
@@ -1847,16 +1543,10 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1585,
         "delta": -0.0096,
-        "drop_ratio": 0.0044
-      },
-      {
-        "layer": 0,
-        "head": 8,
-        "label": "L0H8",
-        "clean_ld": 2.1681,
-        "patched_ld": 2.173,
-        "delta": 0.0049,
-        "drop_ratio": 0.0023
+        "effect": 0.0096,
+        "effect_abs": 0.0096,
+        "effect_fraction": 0.0044,
+        "role": "supports_ioi"
       },
       {
         "layer": 3,
@@ -1865,7 +1555,2654 @@
         "clean_ld": 2.1681,
         "patched_ld": 2.1655,
         "delta": -0.0026,
-        "drop_ratio": 0.0012
+        "effect": 0.0026,
+        "effect_abs": 0.0026,
+        "effect_fraction": 0.0012,
+        "role": "supports_ioi"
+      }
+    ],
+    "opposing_heads": [
+      {
+        "layer": 0,
+        "head": 7,
+        "label": "L0H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 3.6692,
+        "delta": 1.5011,
+        "effect": -1.5011,
+        "effect_abs": 1.5011,
+        "effect_fraction": -0.6924,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 0,
+        "label": "L0H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 3.4965,
+        "delta": 1.3284,
+        "effect": -1.3284,
+        "effect_abs": 1.3284,
+        "effect_fraction": -0.6127,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 3,
+        "label": "L2H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 3.3778,
+        "delta": 1.2097,
+        "effect": -1.2097,
+        "effect_abs": 1.2097,
+        "effect_fraction": -0.558,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 9,
+        "label": "L5H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.9457,
+        "delta": 0.7776,
+        "effect": -0.7776,
+        "effect_abs": 0.7776,
+        "effect_fraction": -0.3587,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 7,
+        "label": "L10H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.8598,
+        "delta": 0.6917,
+        "effect": -0.6917,
+        "effect_abs": 0.6917,
+        "effect_fraction": -0.319,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 10,
+        "label": "L11H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.8378,
+        "delta": 0.6697,
+        "effect": -0.6697,
+        "effect_abs": 0.6697,
+        "effect_fraction": -0.3089,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 6,
+        "label": "L0H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.7695,
+        "delta": 0.6014,
+        "effect": -0.6014,
+        "effect_abs": 0.6014,
+        "effect_fraction": -0.2774,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 9,
+        "label": "L0H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.687,
+        "delta": 0.5189,
+        "effect": -0.5189,
+        "effect_abs": 0.5189,
+        "effect_fraction": -0.2393,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 1,
+        "label": "L11H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.6699,
+        "delta": 0.5018,
+        "effect": -0.5018,
+        "effect_abs": 0.5018,
+        "effect_fraction": -0.2314,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 6,
+        "label": "L10H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.5853,
+        "delta": 0.4172,
+        "effect": -0.4172,
+        "effect_abs": 0.4172,
+        "effect_fraction": -0.1924,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 3,
+        "label": "L0H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.5829,
+        "delta": 0.4148,
+        "effect": -0.4148,
+        "effect_abs": 0.4148,
+        "effect_fraction": -0.1913,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 4,
+        "label": "L9H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.5438,
+        "delta": 0.3757,
+        "effect": -0.3757,
+        "effect_abs": 0.3757,
+        "effect_fraction": -0.1733,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 6,
+        "label": "L2H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.5245,
+        "delta": 0.3564,
+        "effect": -0.3564,
+        "effect_abs": 0.3564,
+        "effect_fraction": -0.1644,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 2,
+        "label": "L10H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.52,
+        "delta": 0.3519,
+        "effect": -0.3519,
+        "effect_abs": 0.3519,
+        "effect_fraction": -0.1623,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 6,
+        "label": "L1H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4972,
+        "delta": 0.3291,
+        "effect": -0.3291,
+        "effect_abs": 0.3291,
+        "effect_fraction": -0.1518,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 3,
+        "label": "L8H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4963,
+        "delta": 0.3282,
+        "effect": -0.3282,
+        "effect_abs": 0.3282,
+        "effect_fraction": -0.1514,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 6,
+        "label": "L9H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4813,
+        "delta": 0.3132,
+        "effect": -0.3132,
+        "effect_abs": 0.3132,
+        "effect_fraction": -0.1445,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 6,
+        "label": "L3H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4685,
+        "delta": 0.3004,
+        "effect": -0.3004,
+        "effect_abs": 0.3004,
+        "effect_fraction": -0.1386,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 7,
+        "label": "L4H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4471,
+        "delta": 0.279,
+        "effect": -0.279,
+        "effect_abs": 0.279,
+        "effect_fraction": -0.1287,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 10,
+        "label": "L3H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4165,
+        "delta": 0.2484,
+        "effect": -0.2484,
+        "effect_abs": 0.2484,
+        "effect_fraction": -0.1146,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 11,
+        "label": "L2H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3738,
+        "delta": 0.2057,
+        "effect": -0.2057,
+        "effect_abs": 0.2057,
+        "effect_fraction": -0.0949,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 7,
+        "label": "L1H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3673,
+        "delta": 0.1992,
+        "effect": -0.1992,
+        "effect_abs": 0.1992,
+        "effect_fraction": -0.0919,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 9,
+        "label": "L3H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.363,
+        "delta": 0.1949,
+        "effect": -0.1949,
+        "effect_abs": 0.1949,
+        "effect_fraction": -0.0899,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 5,
+        "label": "L8H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3561,
+        "delta": 0.188,
+        "effect": -0.188,
+        "effect_abs": 0.188,
+        "effect_fraction": -0.0867,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 0,
+        "label": "L1H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.346,
+        "delta": 0.1779,
+        "effect": -0.1779,
+        "effect_abs": 0.1779,
+        "effect_fraction": -0.0821,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 10,
+        "label": "L7H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3415,
+        "delta": 0.1734,
+        "effect": -0.1734,
+        "effect_abs": 0.1734,
+        "effect_fraction": -0.08,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 4,
+        "label": "L2H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3339,
+        "delta": 0.1658,
+        "effect": -0.1658,
+        "effect_abs": 0.1658,
+        "effect_fraction": -0.0765,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 4,
+        "label": "L0H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3322,
+        "delta": 0.1641,
+        "effect": -0.1641,
+        "effect_abs": 0.1641,
+        "effect_fraction": -0.0757,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 5,
+        "label": "L5H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.325,
+        "delta": 0.1569,
+        "effect": -0.1569,
+        "effect_abs": 0.1569,
+        "effect_fraction": -0.0724,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 11,
+        "label": "L3H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3235,
+        "delta": 0.1554,
+        "effect": -0.1554,
+        "effect_abs": 0.1554,
+        "effect_fraction": -0.0717,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 10,
+        "label": "L6H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3224,
+        "delta": 0.1543,
+        "effect": -0.1543,
+        "effect_abs": 0.1543,
+        "effect_fraction": -0.0712,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 10,
+        "label": "L1H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3206,
+        "delta": 0.1525,
+        "effect": -0.1525,
+        "effect_abs": 0.1525,
+        "effect_fraction": -0.0703,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 4,
+        "label": "L3H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3165,
+        "delta": 0.1484,
+        "effect": -0.1484,
+        "effect_abs": 0.1484,
+        "effect_fraction": -0.0684,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 6,
+        "label": "L7H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3159,
+        "delta": 0.1478,
+        "effect": -0.1478,
+        "effect_abs": 0.1478,
+        "effect_fraction": -0.0682,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 8,
+        "label": "L4H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3145,
+        "delta": 0.1464,
+        "effect": -0.1464,
+        "effect_abs": 0.1464,
+        "effect_fraction": -0.0675,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 4,
+        "label": "L6H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3122,
+        "delta": 0.1441,
+        "effect": -0.1441,
+        "effect_abs": 0.1441,
+        "effect_fraction": -0.0665,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 1,
+        "label": "L4H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2989,
+        "delta": 0.1308,
+        "effect": -0.1308,
+        "effect_abs": 0.1308,
+        "effect_fraction": -0.0603,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 1,
+        "label": "L5H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2887,
+        "delta": 0.1206,
+        "effect": -0.1206,
+        "effect_abs": 0.1206,
+        "effect_fraction": -0.0556,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 3,
+        "label": "L5H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2869,
+        "delta": 0.1188,
+        "effect": -0.1188,
+        "effect_abs": 0.1188,
+        "effect_fraction": -0.0548,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 0,
+        "label": "L9H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2848,
+        "delta": 0.1167,
+        "effect": -0.1167,
+        "effect_abs": 0.1167,
+        "effect_fraction": -0.0538,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 3,
+        "label": "L6H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2773,
+        "delta": 0.1092,
+        "effect": -0.1092,
+        "effect_abs": 0.1092,
+        "effect_fraction": -0.0504,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 2,
+        "label": "L8H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2541,
+        "delta": 0.086,
+        "effect": -0.086,
+        "effect_abs": 0.086,
+        "effect_fraction": -0.0397,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 8,
+        "label": "L1H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2465,
+        "delta": 0.0784,
+        "effect": -0.0784,
+        "effect_abs": 0.0784,
+        "effect_fraction": -0.0362,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 11,
+        "label": "L6H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2447,
+        "delta": 0.0766,
+        "effect": -0.0766,
+        "effect_abs": 0.0766,
+        "effect_fraction": -0.0353,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 0,
+        "label": "L3H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2412,
+        "delta": 0.0731,
+        "effect": -0.0731,
+        "effect_abs": 0.0731,
+        "effect_fraction": -0.0337,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 5,
+        "label": "L7H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2397,
+        "delta": 0.0716,
+        "effect": -0.0716,
+        "effect_abs": 0.0716,
+        "effect_fraction": -0.033,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 7,
+        "label": "L5H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2361,
+        "delta": 0.068,
+        "effect": -0.068,
+        "effect_abs": 0.068,
+        "effect_fraction": -0.0314,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 0,
+        "label": "L4H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2346,
+        "delta": 0.0665,
+        "effect": -0.0665,
+        "effect_abs": 0.0665,
+        "effect_fraction": -0.0307,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 0,
+        "label": "L8H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2343,
+        "delta": 0.0662,
+        "effect": -0.0662,
+        "effect_abs": 0.0662,
+        "effect_fraction": -0.0305,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 11,
+        "label": "L0H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2304,
+        "delta": 0.0623,
+        "effect": -0.0623,
+        "effect_abs": 0.0623,
+        "effect_fraction": -0.0287,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 1,
+        "label": "L0H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2242,
+        "delta": 0.0561,
+        "effect": -0.0561,
+        "effect_abs": 0.0561,
+        "effect_fraction": -0.0259,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 1,
+        "label": "L2H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2172,
+        "delta": 0.0491,
+        "effect": -0.0491,
+        "effect_abs": 0.0491,
+        "effect_fraction": -0.0226,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 5,
+        "label": "L0H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2127,
+        "delta": 0.0446,
+        "effect": -0.0446,
+        "effect_abs": 0.0446,
+        "effect_fraction": -0.0206,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 5,
+        "label": "L9H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2127,
+        "delta": 0.0446,
+        "effect": -0.0446,
+        "effect_abs": 0.0446,
+        "effect_fraction": -0.0206,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 11,
+        "label": "L7H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.211,
+        "delta": 0.0429,
+        "effect": -0.0429,
+        "effect_abs": 0.0429,
+        "effect_fraction": -0.0198,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 8,
+        "label": "L6H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2103,
+        "delta": 0.0422,
+        "effect": -0.0422,
+        "effect_abs": 0.0422,
+        "effect_fraction": -0.0195,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 4,
+        "label": "L4H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2067,
+        "delta": 0.0386,
+        "effect": -0.0386,
+        "effect_abs": 0.0386,
+        "effect_fraction": -0.0178,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 8,
+        "label": "L11H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2055,
+        "delta": 0.0374,
+        "effect": -0.0374,
+        "effect_abs": 0.0374,
+        "effect_fraction": -0.0173,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 7,
+        "label": "L11H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2043,
+        "delta": 0.0362,
+        "effect": -0.0362,
+        "effect_abs": 0.0362,
+        "effect_fraction": -0.0167,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 5,
+        "label": "L11H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2002,
+        "delta": 0.0321,
+        "effect": -0.0321,
+        "effect_abs": 0.0321,
+        "effect_fraction": -0.0148,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 1,
+        "label": "L9H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1972,
+        "delta": 0.0291,
+        "effect": -0.0291,
+        "effect_abs": 0.0291,
+        "effect_fraction": -0.0134,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 6,
+        "label": "L11H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1963,
+        "delta": 0.0282,
+        "effect": -0.0282,
+        "effect_abs": 0.0282,
+        "effect_fraction": -0.013,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 8,
+        "label": "L8H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1962,
+        "delta": 0.0281,
+        "effect": -0.0281,
+        "effect_abs": 0.0281,
+        "effect_fraction": -0.013,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 11,
+        "label": "L11H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1933,
+        "delta": 0.0252,
+        "effect": -0.0252,
+        "effect_abs": 0.0252,
+        "effect_fraction": -0.0116,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 2,
+        "label": "L1H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1925,
+        "delta": 0.0244,
+        "effect": -0.0244,
+        "effect_abs": 0.0244,
+        "effect_fraction": -0.0113,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 8,
+        "label": "L7H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1914,
+        "delta": 0.0233,
+        "effect": -0.0233,
+        "effect_abs": 0.0233,
+        "effect_fraction": -0.0107,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 9,
+        "label": "L1H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1878,
+        "delta": 0.0197,
+        "effect": -0.0197,
+        "effect_abs": 0.0197,
+        "effect_fraction": -0.0091,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 8,
+        "label": "L9H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1876,
+        "delta": 0.0195,
+        "effect": -0.0195,
+        "effect_abs": 0.0195,
+        "effect_fraction": -0.009,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 2,
+        "label": "L0H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1869,
+        "delta": 0.0188,
+        "effect": -0.0188,
+        "effect_abs": 0.0188,
+        "effect_fraction": -0.0087,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 2,
+        "label": "L9H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1867,
+        "delta": 0.0186,
+        "effect": -0.0186,
+        "effect_abs": 0.0186,
+        "effect_fraction": -0.0086,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 1,
+        "label": "L10H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1858,
+        "delta": 0.0177,
+        "effect": -0.0177,
+        "effect_abs": 0.0177,
+        "effect_fraction": -0.0082,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 9,
+        "label": "L11H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1857,
+        "delta": 0.0176,
+        "effect": -0.0176,
+        "effect_abs": 0.0176,
+        "effect_fraction": -0.0081,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 11,
+        "label": "L1H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1851,
+        "delta": 0.017,
+        "effect": -0.017,
+        "effect_abs": 0.017,
+        "effect_fraction": -0.0078,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 5,
+        "label": "L10H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1826,
+        "delta": 0.0145,
+        "effect": -0.0145,
+        "effect_abs": 0.0145,
+        "effect_fraction": -0.0067,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 3,
+        "label": "L3H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1789,
+        "delta": 0.0108,
+        "effect": -0.0108,
+        "effect_abs": 0.0108,
+        "effect_fraction": -0.005,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 8,
+        "label": "L0H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.173,
+        "delta": 0.0049,
+        "effect": -0.0049,
+        "effect_abs": 0.0049,
+        "effect_fraction": -0.0023,
+        "role": "opposes_ioi"
+      }
+    ],
+    "all_heads": [
+      {
+        "layer": 2,
+        "head": 0,
+        "label": "L2H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.229,
+        "delta": -0.9391,
+        "effect": 0.9391,
+        "effect_abs": 0.9391,
+        "effect_fraction": 0.4331,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 10,
+        "label": "L8H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.2671,
+        "delta": -0.901,
+        "effect": 0.901,
+        "effect_abs": 0.901,
+        "effect_fraction": 0.4156,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 6,
+        "label": "L8H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.4272,
+        "delta": -0.7409,
+        "effect": 0.7409,
+        "effect_abs": 0.7409,
+        "effect_fraction": 0.3417,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 0,
+        "label": "L10H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.6983,
+        "delta": -0.4698,
+        "effect": 0.4698,
+        "effect_abs": 0.4698,
+        "effect_fraction": 0.2167,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 5,
+        "label": "L2H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.735,
+        "delta": -0.4331,
+        "effect": 0.4331,
+        "effect_abs": 0.4331,
+        "effect_fraction": 0.1998,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 3,
+        "label": "L7H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.7511,
+        "delta": -0.417,
+        "effect": 0.417,
+        "effect_abs": 0.417,
+        "effect_fraction": 0.1923,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 9,
+        "label": "L7H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.7596,
+        "delta": -0.4085,
+        "effect": 0.4085,
+        "effect_abs": 0.4085,
+        "effect_fraction": 0.1884,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 0,
+        "label": "L11H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.7819,
+        "delta": -0.3862,
+        "effect": 0.3862,
+        "effect_abs": 0.3862,
+        "effect_fraction": 0.1781,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 9,
+        "label": "L2H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.7872,
+        "delta": -0.3809,
+        "effect": 0.3809,
+        "effect_abs": 0.3809,
+        "effect_fraction": 0.1757,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 7,
+        "label": "L9H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.8054,
+        "delta": -0.3627,
+        "effect": 0.3627,
+        "effect_abs": 0.3627,
+        "effect_fraction": 0.1673,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 3,
+        "label": "L1H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.8069,
+        "delta": -0.3612,
+        "effect": 0.3612,
+        "effect_abs": 0.3612,
+        "effect_fraction": 0.1666,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 10,
+        "label": "L0H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.8215,
+        "delta": -0.3466,
+        "effect": 0.3466,
+        "effect_abs": 0.3466,
+        "effect_fraction": 0.1599,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 3,
+        "label": "L4H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.8671,
+        "delta": -0.301,
+        "effect": 0.301,
+        "effect_abs": 0.301,
+        "effect_fraction": 0.1388,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 4,
+        "label": "L1H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.8977,
+        "delta": -0.2704,
+        "effect": 0.2704,
+        "effect_abs": 0.2704,
+        "effect_fraction": 0.1247,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 7,
+        "label": "L2H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.9152,
+        "delta": -0.2529,
+        "effect": 0.2529,
+        "effect_abs": 0.2529,
+        "effect_fraction": 0.1166,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 3,
+        "label": "L11H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.9156,
+        "delta": -0.2525,
+        "effect": 0.2525,
+        "effect_abs": 0.2525,
+        "effect_fraction": 0.1165,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 2,
+        "label": "L3H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.9279,
+        "delta": -0.2402,
+        "effect": 0.2402,
+        "effect_abs": 0.2402,
+        "effect_fraction": 0.1108,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 11,
+        "label": "L4H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.9401,
+        "delta": -0.228,
+        "effect": 0.228,
+        "effect_abs": 0.228,
+        "effect_fraction": 0.1052,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 2,
+        "label": "L11H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.9436,
+        "delta": -0.2245,
+        "effect": 0.2245,
+        "effect_abs": 0.2245,
+        "effect_fraction": 0.1035,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 6,
+        "label": "L4H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.9676,
+        "delta": -0.2005,
+        "effect": 0.2005,
+        "effect_abs": 0.2005,
+        "effect_fraction": 0.0925,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 8,
+        "label": "L5H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.9822,
+        "delta": -0.1859,
+        "effect": 0.1859,
+        "effect_abs": 0.1859,
+        "effect_fraction": 0.0857,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 8,
+        "label": "L2H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.991,
+        "delta": -0.1771,
+        "effect": 0.1771,
+        "effect_abs": 0.1771,
+        "effect_fraction": 0.0817,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 10,
+        "label": "L10H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 1.9911,
+        "delta": -0.177,
+        "effect": 0.177,
+        "effect_abs": 0.177,
+        "effect_fraction": 0.0816,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 1,
+        "label": "L7H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.011,
+        "delta": -0.1571,
+        "effect": 0.1571,
+        "effect_abs": 0.1571,
+        "effect_fraction": 0.0725,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 9,
+        "label": "L6H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0128,
+        "delta": -0.1553,
+        "effect": 0.1553,
+        "effect_abs": 0.1553,
+        "effect_fraction": 0.0716,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 5,
+        "label": "L1H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0129,
+        "delta": -0.1552,
+        "effect": 0.1552,
+        "effect_abs": 0.1552,
+        "effect_fraction": 0.0716,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 7,
+        "label": "L3H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0226,
+        "delta": -0.1455,
+        "effect": 0.1455,
+        "effect_abs": 0.1455,
+        "effect_fraction": 0.0671,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 4,
+        "label": "L8H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0231,
+        "delta": -0.145,
+        "effect": 0.145,
+        "effect_abs": 0.145,
+        "effect_fraction": 0.0669,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 0,
+        "label": "L6H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0245,
+        "delta": -0.1436,
+        "effect": 0.1436,
+        "effect_abs": 0.1436,
+        "effect_fraction": 0.0662,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 9,
+        "label": "L10H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0255,
+        "delta": -0.1426,
+        "effect": 0.1426,
+        "effect_abs": 0.1426,
+        "effect_fraction": 0.0658,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 1,
+        "label": "L6H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0262,
+        "delta": -0.1419,
+        "effect": 0.1419,
+        "effect_abs": 0.1419,
+        "effect_fraction": 0.0654,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 6,
+        "label": "L6H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0264,
+        "delta": -0.1417,
+        "effect": 0.1417,
+        "effect_abs": 0.1417,
+        "effect_fraction": 0.0654,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 10,
+        "label": "L5H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0274,
+        "delta": -0.1407,
+        "effect": 0.1407,
+        "effect_abs": 0.1407,
+        "effect_fraction": 0.0649,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 10,
+        "label": "L2H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0361,
+        "delta": -0.132,
+        "effect": 0.132,
+        "effect_abs": 0.132,
+        "effect_fraction": 0.0609,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 9,
+        "label": "L8H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0399,
+        "delta": -0.1282,
+        "effect": 0.1282,
+        "effect_abs": 0.1282,
+        "effect_fraction": 0.0591,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 4,
+        "label": "L7H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0464,
+        "delta": -0.1217,
+        "effect": 0.1217,
+        "effect_abs": 0.1217,
+        "effect_fraction": 0.0561,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 0,
+        "label": "L5H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0501,
+        "delta": -0.118,
+        "effect": 0.118,
+        "effect_abs": 0.118,
+        "effect_fraction": 0.0544,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 5,
+        "label": "L3H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0554,
+        "delta": -0.1127,
+        "effect": 0.1127,
+        "effect_abs": 0.1127,
+        "effect_fraction": 0.052,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 4,
+        "label": "L10H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0622,
+        "delta": -0.1059,
+        "effect": 0.1059,
+        "effect_abs": 0.1059,
+        "effect_fraction": 0.0488,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 4,
+        "label": "L11H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0625,
+        "delta": -0.1056,
+        "effect": 0.1056,
+        "effect_abs": 0.1056,
+        "effect_fraction": 0.0487,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 1,
+        "label": "L3H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0625,
+        "delta": -0.1056,
+        "effect": 0.1056,
+        "effect_abs": 0.1056,
+        "effect_fraction": 0.0487,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 11,
+        "label": "L8H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0713,
+        "delta": -0.0968,
+        "effect": 0.0968,
+        "effect_abs": 0.0968,
+        "effect_fraction": 0.0446,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 9,
+        "label": "L9H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0721,
+        "delta": -0.096,
+        "effect": 0.096,
+        "effect_abs": 0.096,
+        "effect_fraction": 0.0443,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 9,
+        "label": "L4H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0817,
+        "delta": -0.0864,
+        "effect": 0.0864,
+        "effect_abs": 0.0864,
+        "effect_fraction": 0.0399,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 6,
+        "label": "L5H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0911,
+        "delta": -0.077,
+        "effect": 0.077,
+        "effect_abs": 0.077,
+        "effect_fraction": 0.0355,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 11,
+        "label": "L9H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0914,
+        "delta": -0.0767,
+        "effect": 0.0767,
+        "effect_abs": 0.0767,
+        "effect_fraction": 0.0354,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 3,
+        "label": "L9H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.098,
+        "delta": -0.0701,
+        "effect": 0.0701,
+        "effect_abs": 0.0701,
+        "effect_fraction": 0.0323,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 10,
+        "label": "L4H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.0991,
+        "delta": -0.069,
+        "effect": 0.069,
+        "effect_abs": 0.069,
+        "effect_fraction": 0.0318,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 5,
+        "label": "L6H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1083,
+        "delta": -0.0598,
+        "effect": 0.0598,
+        "effect_abs": 0.0598,
+        "effect_fraction": 0.0276,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 2,
+        "label": "L6H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1113,
+        "delta": -0.0568,
+        "effect": 0.0568,
+        "effect_abs": 0.0568,
+        "effect_fraction": 0.0262,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 2,
+        "label": "L5H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1121,
+        "delta": -0.056,
+        "effect": 0.056,
+        "effect_abs": 0.056,
+        "effect_fraction": 0.0258,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 11,
+        "label": "L5H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1242,
+        "delta": -0.0439,
+        "effect": 0.0439,
+        "effect_abs": 0.0439,
+        "effect_fraction": 0.0202,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 1,
+        "label": "L8H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1256,
+        "delta": -0.0425,
+        "effect": 0.0425,
+        "effect_abs": 0.0425,
+        "effect_fraction": 0.0196,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 5,
+        "label": "L4H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1287,
+        "delta": -0.0394,
+        "effect": 0.0394,
+        "effect_abs": 0.0394,
+        "effect_fraction": 0.0182,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 7,
+        "label": "L6H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1334,
+        "delta": -0.0347,
+        "effect": 0.0347,
+        "effect_abs": 0.0347,
+        "effect_fraction": 0.016,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 7,
+        "label": "L7H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1381,
+        "delta": -0.03,
+        "effect": 0.03,
+        "effect_abs": 0.03,
+        "effect_fraction": 0.0138,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 7,
+        "label": "L8H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1382,
+        "delta": -0.0299,
+        "effect": 0.0299,
+        "effect_abs": 0.0299,
+        "effect_fraction": 0.0138,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 8,
+        "label": "L10H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1397,
+        "delta": -0.0284,
+        "effect": 0.0284,
+        "effect_abs": 0.0284,
+        "effect_fraction": 0.0131,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 4,
+        "label": "L5H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1437,
+        "delta": -0.0244,
+        "effect": 0.0244,
+        "effect_abs": 0.0244,
+        "effect_fraction": 0.0113,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 2,
+        "label": "L4H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1445,
+        "delta": -0.0236,
+        "effect": 0.0236,
+        "effect_abs": 0.0236,
+        "effect_fraction": 0.0109,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 1,
+        "label": "L1H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.146,
+        "delta": -0.0221,
+        "effect": 0.0221,
+        "effect_abs": 0.0221,
+        "effect_fraction": 0.0102,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 10,
+        "label": "L9H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1488,
+        "delta": -0.0193,
+        "effect": 0.0193,
+        "effect_abs": 0.0193,
+        "effect_fraction": 0.0089,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 0,
+        "label": "L7H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1509,
+        "delta": -0.0172,
+        "effect": 0.0172,
+        "effect_abs": 0.0172,
+        "effect_fraction": 0.0079,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 3,
+        "label": "L10H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1518,
+        "delta": -0.0163,
+        "effect": 0.0163,
+        "effect_abs": 0.0163,
+        "effect_fraction": 0.0075,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 11,
+        "label": "L10H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1544,
+        "delta": -0.0137,
+        "effect": 0.0137,
+        "effect_abs": 0.0137,
+        "effect_fraction": 0.0063,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 2,
+        "label": "L2H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1579,
+        "delta": -0.0102,
+        "effect": 0.0102,
+        "effect_abs": 0.0102,
+        "effect_fraction": 0.0047,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 2,
+        "label": "L7H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1585,
+        "delta": -0.0096,
+        "effect": 0.0096,
+        "effect_abs": 0.0096,
+        "effect_fraction": 0.0044,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 8,
+        "label": "L3H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1655,
+        "delta": -0.0026,
+        "effect": 0.0026,
+        "effect_abs": 0.0026,
+        "effect_fraction": 0.0012,
+        "role": "supports_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 8,
+        "label": "L0H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.173,
+        "delta": 0.0049,
+        "effect": -0.0049,
+        "effect_abs": 0.0049,
+        "effect_fraction": -0.0023,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 3,
+        "label": "L3H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1789,
+        "delta": 0.0108,
+        "effect": -0.0108,
+        "effect_abs": 0.0108,
+        "effect_fraction": -0.005,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 5,
+        "label": "L10H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1826,
+        "delta": 0.0145,
+        "effect": -0.0145,
+        "effect_abs": 0.0145,
+        "effect_fraction": -0.0067,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 11,
+        "label": "L1H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1851,
+        "delta": 0.017,
+        "effect": -0.017,
+        "effect_abs": 0.017,
+        "effect_fraction": -0.0078,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 9,
+        "label": "L11H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1857,
+        "delta": 0.0176,
+        "effect": -0.0176,
+        "effect_abs": 0.0176,
+        "effect_fraction": -0.0081,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 1,
+        "label": "L10H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1858,
+        "delta": 0.0177,
+        "effect": -0.0177,
+        "effect_abs": 0.0177,
+        "effect_fraction": -0.0082,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 2,
+        "label": "L9H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1867,
+        "delta": 0.0186,
+        "effect": -0.0186,
+        "effect_abs": 0.0186,
+        "effect_fraction": -0.0086,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 2,
+        "label": "L0H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1869,
+        "delta": 0.0188,
+        "effect": -0.0188,
+        "effect_abs": 0.0188,
+        "effect_fraction": -0.0087,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 8,
+        "label": "L9H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1876,
+        "delta": 0.0195,
+        "effect": -0.0195,
+        "effect_abs": 0.0195,
+        "effect_fraction": -0.009,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 9,
+        "label": "L1H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1878,
+        "delta": 0.0197,
+        "effect": -0.0197,
+        "effect_abs": 0.0197,
+        "effect_fraction": -0.0091,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 8,
+        "label": "L7H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1914,
+        "delta": 0.0233,
+        "effect": -0.0233,
+        "effect_abs": 0.0233,
+        "effect_fraction": -0.0107,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 2,
+        "label": "L1H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1925,
+        "delta": 0.0244,
+        "effect": -0.0244,
+        "effect_abs": 0.0244,
+        "effect_fraction": -0.0113,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 11,
+        "label": "L11H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1933,
+        "delta": 0.0252,
+        "effect": -0.0252,
+        "effect_abs": 0.0252,
+        "effect_fraction": -0.0116,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 8,
+        "label": "L8H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1962,
+        "delta": 0.0281,
+        "effect": -0.0281,
+        "effect_abs": 0.0281,
+        "effect_fraction": -0.013,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 6,
+        "label": "L11H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1963,
+        "delta": 0.0282,
+        "effect": -0.0282,
+        "effect_abs": 0.0282,
+        "effect_fraction": -0.013,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 1,
+        "label": "L9H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.1972,
+        "delta": 0.0291,
+        "effect": -0.0291,
+        "effect_abs": 0.0291,
+        "effect_fraction": -0.0134,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 5,
+        "label": "L11H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2002,
+        "delta": 0.0321,
+        "effect": -0.0321,
+        "effect_abs": 0.0321,
+        "effect_fraction": -0.0148,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 7,
+        "label": "L11H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2043,
+        "delta": 0.0362,
+        "effect": -0.0362,
+        "effect_abs": 0.0362,
+        "effect_fraction": -0.0167,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 8,
+        "label": "L11H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2055,
+        "delta": 0.0374,
+        "effect": -0.0374,
+        "effect_abs": 0.0374,
+        "effect_fraction": -0.0173,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 4,
+        "label": "L4H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2067,
+        "delta": 0.0386,
+        "effect": -0.0386,
+        "effect_abs": 0.0386,
+        "effect_fraction": -0.0178,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 8,
+        "label": "L6H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2103,
+        "delta": 0.0422,
+        "effect": -0.0422,
+        "effect_abs": 0.0422,
+        "effect_fraction": -0.0195,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 11,
+        "label": "L7H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.211,
+        "delta": 0.0429,
+        "effect": -0.0429,
+        "effect_abs": 0.0429,
+        "effect_fraction": -0.0198,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 5,
+        "label": "L0H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2127,
+        "delta": 0.0446,
+        "effect": -0.0446,
+        "effect_abs": 0.0446,
+        "effect_fraction": -0.0206,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 5,
+        "label": "L9H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2127,
+        "delta": 0.0446,
+        "effect": -0.0446,
+        "effect_abs": 0.0446,
+        "effect_fraction": -0.0206,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 1,
+        "label": "L2H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2172,
+        "delta": 0.0491,
+        "effect": -0.0491,
+        "effect_abs": 0.0491,
+        "effect_fraction": -0.0226,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 1,
+        "label": "L0H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2242,
+        "delta": 0.0561,
+        "effect": -0.0561,
+        "effect_abs": 0.0561,
+        "effect_fraction": -0.0259,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 11,
+        "label": "L0H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2304,
+        "delta": 0.0623,
+        "effect": -0.0623,
+        "effect_abs": 0.0623,
+        "effect_fraction": -0.0287,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 0,
+        "label": "L8H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2343,
+        "delta": 0.0662,
+        "effect": -0.0662,
+        "effect_abs": 0.0662,
+        "effect_fraction": -0.0305,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 0,
+        "label": "L4H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2346,
+        "delta": 0.0665,
+        "effect": -0.0665,
+        "effect_abs": 0.0665,
+        "effect_fraction": -0.0307,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 7,
+        "label": "L5H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2361,
+        "delta": 0.068,
+        "effect": -0.068,
+        "effect_abs": 0.068,
+        "effect_fraction": -0.0314,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 5,
+        "label": "L7H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2397,
+        "delta": 0.0716,
+        "effect": -0.0716,
+        "effect_abs": 0.0716,
+        "effect_fraction": -0.033,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 0,
+        "label": "L3H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2412,
+        "delta": 0.0731,
+        "effect": -0.0731,
+        "effect_abs": 0.0731,
+        "effect_fraction": -0.0337,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 11,
+        "label": "L6H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2447,
+        "delta": 0.0766,
+        "effect": -0.0766,
+        "effect_abs": 0.0766,
+        "effect_fraction": -0.0353,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 8,
+        "label": "L1H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2465,
+        "delta": 0.0784,
+        "effect": -0.0784,
+        "effect_abs": 0.0784,
+        "effect_fraction": -0.0362,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 2,
+        "label": "L8H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2541,
+        "delta": 0.086,
+        "effect": -0.086,
+        "effect_abs": 0.086,
+        "effect_fraction": -0.0397,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 3,
+        "label": "L6H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2773,
+        "delta": 0.1092,
+        "effect": -0.1092,
+        "effect_abs": 0.1092,
+        "effect_fraction": -0.0504,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 0,
+        "label": "L9H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2848,
+        "delta": 0.1167,
+        "effect": -0.1167,
+        "effect_abs": 0.1167,
+        "effect_fraction": -0.0538,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 3,
+        "label": "L5H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2869,
+        "delta": 0.1188,
+        "effect": -0.1188,
+        "effect_abs": 0.1188,
+        "effect_fraction": -0.0548,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 1,
+        "label": "L5H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2887,
+        "delta": 0.1206,
+        "effect": -0.1206,
+        "effect_abs": 0.1206,
+        "effect_fraction": -0.0556,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 1,
+        "label": "L4H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.2989,
+        "delta": 0.1308,
+        "effect": -0.1308,
+        "effect_abs": 0.1308,
+        "effect_fraction": -0.0603,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 4,
+        "label": "L6H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3122,
+        "delta": 0.1441,
+        "effect": -0.1441,
+        "effect_abs": 0.1441,
+        "effect_fraction": -0.0665,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 8,
+        "label": "L4H8",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3145,
+        "delta": 0.1464,
+        "effect": -0.1464,
+        "effect_abs": 0.1464,
+        "effect_fraction": -0.0675,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 6,
+        "label": "L7H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3159,
+        "delta": 0.1478,
+        "effect": -0.1478,
+        "effect_abs": 0.1478,
+        "effect_fraction": -0.0682,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 4,
+        "label": "L3H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3165,
+        "delta": 0.1484,
+        "effect": -0.1484,
+        "effect_abs": 0.1484,
+        "effect_fraction": -0.0684,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 10,
+        "label": "L1H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3206,
+        "delta": 0.1525,
+        "effect": -0.1525,
+        "effect_abs": 0.1525,
+        "effect_fraction": -0.0703,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 6,
+        "head": 10,
+        "label": "L6H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3224,
+        "delta": 0.1543,
+        "effect": -0.1543,
+        "effect_abs": 0.1543,
+        "effect_fraction": -0.0712,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 11,
+        "label": "L3H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3235,
+        "delta": 0.1554,
+        "effect": -0.1554,
+        "effect_abs": 0.1554,
+        "effect_fraction": -0.0717,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 5,
+        "label": "L5H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.325,
+        "delta": 0.1569,
+        "effect": -0.1569,
+        "effect_abs": 0.1569,
+        "effect_fraction": -0.0724,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 4,
+        "label": "L0H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3322,
+        "delta": 0.1641,
+        "effect": -0.1641,
+        "effect_abs": 0.1641,
+        "effect_fraction": -0.0757,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 4,
+        "label": "L2H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3339,
+        "delta": 0.1658,
+        "effect": -0.1658,
+        "effect_abs": 0.1658,
+        "effect_fraction": -0.0765,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 7,
+        "head": 10,
+        "label": "L7H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3415,
+        "delta": 0.1734,
+        "effect": -0.1734,
+        "effect_abs": 0.1734,
+        "effect_fraction": -0.08,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 0,
+        "label": "L1H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.346,
+        "delta": 0.1779,
+        "effect": -0.1779,
+        "effect_abs": 0.1779,
+        "effect_fraction": -0.0821,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 5,
+        "label": "L8H5",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3561,
+        "delta": 0.188,
+        "effect": -0.188,
+        "effect_abs": 0.188,
+        "effect_fraction": -0.0867,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 9,
+        "label": "L3H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.363,
+        "delta": 0.1949,
+        "effect": -0.1949,
+        "effect_abs": 0.1949,
+        "effect_fraction": -0.0899,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 7,
+        "label": "L1H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3673,
+        "delta": 0.1992,
+        "effect": -0.1992,
+        "effect_abs": 0.1992,
+        "effect_fraction": -0.0919,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 11,
+        "label": "L2H11",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.3738,
+        "delta": 0.2057,
+        "effect": -0.2057,
+        "effect_abs": 0.2057,
+        "effect_fraction": -0.0949,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 10,
+        "label": "L3H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4165,
+        "delta": 0.2484,
+        "effect": -0.2484,
+        "effect_abs": 0.2484,
+        "effect_fraction": -0.1146,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 4,
+        "head": 7,
+        "label": "L4H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4471,
+        "delta": 0.279,
+        "effect": -0.279,
+        "effect_abs": 0.279,
+        "effect_fraction": -0.1287,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 3,
+        "head": 6,
+        "label": "L3H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4685,
+        "delta": 0.3004,
+        "effect": -0.3004,
+        "effect_abs": 0.3004,
+        "effect_fraction": -0.1386,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 6,
+        "label": "L9H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4813,
+        "delta": 0.3132,
+        "effect": -0.3132,
+        "effect_abs": 0.3132,
+        "effect_fraction": -0.1445,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 8,
+        "head": 3,
+        "label": "L8H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4963,
+        "delta": 0.3282,
+        "effect": -0.3282,
+        "effect_abs": 0.3282,
+        "effect_fraction": -0.1514,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 1,
+        "head": 6,
+        "label": "L1H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.4972,
+        "delta": 0.3291,
+        "effect": -0.3291,
+        "effect_abs": 0.3291,
+        "effect_fraction": -0.1518,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 2,
+        "label": "L10H2",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.52,
+        "delta": 0.3519,
+        "effect": -0.3519,
+        "effect_abs": 0.3519,
+        "effect_fraction": -0.1623,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 6,
+        "label": "L2H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.5245,
+        "delta": 0.3564,
+        "effect": -0.3564,
+        "effect_abs": 0.3564,
+        "effect_fraction": -0.1644,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 9,
+        "head": 4,
+        "label": "L9H4",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.5438,
+        "delta": 0.3757,
+        "effect": -0.3757,
+        "effect_abs": 0.3757,
+        "effect_fraction": -0.1733,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 3,
+        "label": "L0H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.5829,
+        "delta": 0.4148,
+        "effect": -0.4148,
+        "effect_abs": 0.4148,
+        "effect_fraction": -0.1913,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 6,
+        "label": "L10H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.5853,
+        "delta": 0.4172,
+        "effect": -0.4172,
+        "effect_abs": 0.4172,
+        "effect_fraction": -0.1924,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 1,
+        "label": "L11H1",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.6699,
+        "delta": 0.5018,
+        "effect": -0.5018,
+        "effect_abs": 0.5018,
+        "effect_fraction": -0.2314,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 9,
+        "label": "L0H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.687,
+        "delta": 0.5189,
+        "effect": -0.5189,
+        "effect_abs": 0.5189,
+        "effect_fraction": -0.2393,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 6,
+        "label": "L0H6",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.7695,
+        "delta": 0.6014,
+        "effect": -0.6014,
+        "effect_abs": 0.6014,
+        "effect_fraction": -0.2774,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 11,
+        "head": 10,
+        "label": "L11H10",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.8378,
+        "delta": 0.6697,
+        "effect": -0.6697,
+        "effect_abs": 0.6697,
+        "effect_fraction": -0.3089,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 10,
+        "head": 7,
+        "label": "L10H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.8598,
+        "delta": 0.6917,
+        "effect": -0.6917,
+        "effect_abs": 0.6917,
+        "effect_fraction": -0.319,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 5,
+        "head": 9,
+        "label": "L5H9",
+        "clean_ld": 2.1681,
+        "patched_ld": 2.9457,
+        "delta": 0.7776,
+        "effect": -0.7776,
+        "effect_abs": 0.7776,
+        "effect_fraction": -0.3587,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 2,
+        "head": 3,
+        "label": "L2H3",
+        "clean_ld": 2.1681,
+        "patched_ld": 3.3778,
+        "delta": 1.2097,
+        "effect": -1.2097,
+        "effect_abs": 1.2097,
+        "effect_fraction": -0.558,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 0,
+        "label": "L0H0",
+        "clean_ld": 2.1681,
+        "patched_ld": 3.4965,
+        "delta": 1.3284,
+        "effect": -1.3284,
+        "effect_abs": 1.3284,
+        "effect_fraction": -0.6127,
+        "role": "opposes_ioi"
+      },
+      {
+        "layer": 0,
+        "head": 7,
+        "label": "L0H7",
+        "clean_ld": 2.1681,
+        "patched_ld": 3.6692,
+        "delta": 1.5011,
+        "effect": -1.5011,
+        "effect_abs": 1.5011,
+        "effect_fraction": -0.6924,
+        "role": "opposes_ioi"
       }
     ]
   },
@@ -1961,6 +4298,20 @@
   "steering": {
     "positive_prompt": "The capital of France is",
     "negative_prompt": "The capital of Japan is",
+    "prompt": "The capital of France is",
+    "layers": [
+      6,
+      8,
+      10
+    ],
+    "alphas": [
+      5.0,
+      10.0,
+      20.0,
+      40.0,
+      80.0
+    ],
+    "n_layers_swept": 12,
     "sweep": [
       {
         "layer": 6,
@@ -2319,479 +4670,490 @@
     ]
   },
   "inspection": {
-    "top_neurons_L8_by_in_norm": [
-      {
-        "neuron_index": 3071,
-        "label": "L8.mlp.N3071",
-        "component": "mlp",
-        "in_weight_l2": 3.798283,
-        "out_weight_l2": 3.47281,
-        "bias": -0.104466,
-        "activation": -0.054703,
-        "mean_activation": -0.030363,
-        "top_token": " store",
-        "top_token_activation": 0.278123
-      },
-      {
-        "neuron_index": 3070,
-        "label": "L8.mlp.N3070",
-        "component": "mlp",
-        "in_weight_l2": 3.135022,
-        "out_weight_l2": 3.922344,
-        "bias": -0.001768,
-        "activation": -0.085597,
-        "mean_activation": -0.070595,
-        "top_token": " went",
-        "top_token_activation": -0.001054
-      },
-      {
-        "neuron_index": 3069,
-        "label": "L8.mlp.N3069",
-        "component": "mlp",
-        "in_weight_l2": 3.619308,
-        "out_weight_l2": 3.471472,
-        "bias": -0.064467,
-        "activation": -0.100245,
-        "mean_activation": -0.089941,
-        "top_token": " store",
-        "top_token_activation": 0.053885
-      },
-      {
-        "neuron_index": 3068,
-        "label": "L8.mlp.N3068",
-        "component": "mlp",
-        "in_weight_l2": 3.735893,
-        "out_weight_l2": 3.682109,
-        "bias": -0.006773,
-        "activation": 0.808437,
-        "mean_activation": 0.106423,
-        "top_token": " to",
-        "top_token_activation": 0.808437
-      },
-      {
-        "neuron_index": 3067,
-        "label": "L8.mlp.N3067",
-        "component": "mlp",
-        "in_weight_l2": 3.637488,
-        "out_weight_l2": 3.457814,
-        "bias": -0.11603,
-        "activation": -0.142531,
-        "mean_activation": -0.103263,
-        "top_token": " a",
-        "top_token_activation": 0.24145
-      },
-      {
-        "neuron_index": 3066,
-        "label": "L8.mlp.N3066",
-        "component": "mlp",
-        "in_weight_l2": 3.545424,
-        "out_weight_l2": 3.01908,
-        "bias": -0.03577,
-        "activation": 0.380392,
-        "mean_activation": -0.002536,
-        "top_token": " to",
-        "top_token_activation": 0.380392
-      },
-      {
-        "neuron_index": 3065,
-        "label": "L8.mlp.N3065",
-        "component": "mlp",
-        "in_weight_l2": 3.60064,
-        "out_weight_l2": 3.299363,
-        "bias": -0.158275,
-        "activation": -0.016553,
-        "mean_activation": -0.012016,
-        "top_token": " went",
-        "top_token_activation": 1.264393
-      },
-      {
-        "neuron_index": 3064,
-        "label": "L8.mlp.N3064",
-        "component": "mlp",
-        "in_weight_l2": 3.499065,
-        "out_weight_l2": 3.206465,
-        "bias": -0.034062,
-        "activation": -0.068487,
-        "mean_activation": -0.117559,
-        "top_token": "Then",
-        "top_token_activation": 0.07568
-      },
-      {
-        "neuron_index": 3063,
-        "label": "L8.mlp.N3063",
-        "component": "mlp",
-        "in_weight_l2": 3.402074,
-        "out_weight_l2": 3.116823,
-        "bias": 0.067824,
-        "activation": -0.149635,
-        "mean_activation": -0.003258,
-        "top_token": " Mary",
-        "top_token_activation": 0.825769
-      },
-      {
-        "neuron_index": 3062,
-        "label": "L8.mlp.N3062",
-        "component": "mlp",
-        "in_weight_l2": 2.975048,
-        "out_weight_l2": 3.153633,
-        "bias": -0.017714,
-        "activation": 0.457258,
-        "mean_activation": 0.237932,
-        "top_token": " a",
-        "top_token_activation": 1.414102
-      }
-    ],
-    "head_L9H9": {
-      "status": "ok",
+    "top_neurons": {
+      "layer": 8,
+      "component": "mlp",
+      "rank_by": "in_norm",
+      "order": "desc",
+      "neurons": [
+        {
+          "neuron_index": 3071,
+          "label": "L8.mlp.N3071",
+          "component": "mlp",
+          "in_weight_l2": 3.798283,
+          "out_weight_l2": 3.47281,
+          "bias": -0.104466,
+          "activation": -0.054703,
+          "mean_activation": -0.030363,
+          "top_token": " store",
+          "top_token_activation": 0.278123
+        },
+        {
+          "neuron_index": 3070,
+          "label": "L8.mlp.N3070",
+          "component": "mlp",
+          "in_weight_l2": 3.135022,
+          "out_weight_l2": 3.922344,
+          "bias": -0.001768,
+          "activation": -0.085597,
+          "mean_activation": -0.070595,
+          "top_token": " went",
+          "top_token_activation": -0.001054
+        },
+        {
+          "neuron_index": 3069,
+          "label": "L8.mlp.N3069",
+          "component": "mlp",
+          "in_weight_l2": 3.619308,
+          "out_weight_l2": 3.471472,
+          "bias": -0.064467,
+          "activation": -0.100245,
+          "mean_activation": -0.089941,
+          "top_token": " store",
+          "top_token_activation": 0.053885
+        },
+        {
+          "neuron_index": 3068,
+          "label": "L8.mlp.N3068",
+          "component": "mlp",
+          "in_weight_l2": 3.735893,
+          "out_weight_l2": 3.682109,
+          "bias": -0.006773,
+          "activation": 0.808437,
+          "mean_activation": 0.106423,
+          "top_token": " to",
+          "top_token_activation": 0.808437
+        },
+        {
+          "neuron_index": 3067,
+          "label": "L8.mlp.N3067",
+          "component": "mlp",
+          "in_weight_l2": 3.637488,
+          "out_weight_l2": 3.457814,
+          "bias": -0.11603,
+          "activation": -0.142531,
+          "mean_activation": -0.103263,
+          "top_token": " a",
+          "top_token_activation": 0.24145
+        },
+        {
+          "neuron_index": 3066,
+          "label": "L8.mlp.N3066",
+          "component": "mlp",
+          "in_weight_l2": 3.545424,
+          "out_weight_l2": 3.01908,
+          "bias": -0.03577,
+          "activation": 0.380392,
+          "mean_activation": -0.002536,
+          "top_token": " to",
+          "top_token_activation": 0.380392
+        },
+        {
+          "neuron_index": 3065,
+          "label": "L8.mlp.N3065",
+          "component": "mlp",
+          "in_weight_l2": 3.60064,
+          "out_weight_l2": 3.299363,
+          "bias": -0.158275,
+          "activation": -0.016553,
+          "mean_activation": -0.012016,
+          "top_token": " went",
+          "top_token_activation": 1.264393
+        },
+        {
+          "neuron_index": 3064,
+          "label": "L8.mlp.N3064",
+          "component": "mlp",
+          "in_weight_l2": 3.499065,
+          "out_weight_l2": 3.206465,
+          "bias": -0.034062,
+          "activation": -0.068487,
+          "mean_activation": -0.117559,
+          "top_token": "Then",
+          "top_token_activation": 0.07568
+        },
+        {
+          "neuron_index": 3063,
+          "label": "L8.mlp.N3063",
+          "component": "mlp",
+          "in_weight_l2": 3.402074,
+          "out_weight_l2": 3.116823,
+          "bias": 0.067824,
+          "activation": -0.149635,
+          "mean_activation": -0.003258,
+          "top_token": " Mary",
+          "top_token_activation": 0.825769
+        },
+        {
+          "neuron_index": 3062,
+          "label": "L8.mlp.N3062",
+          "component": "mlp",
+          "in_weight_l2": 2.975048,
+          "out_weight_l2": 3.153633,
+          "bias": -0.017714,
+          "activation": 0.457258,
+          "mean_activation": 0.237932,
+          "top_token": " a",
+          "top_token_activation": 1.414102
+        }
+      ]
+    },
+    "head_detail": {
       "layer": 9,
       "head": 9,
-      "id": "L9H9",
-      "path": "transformer.h.9.attn head 9",
-      "d_head": 64,
-      "d_model": 768,
-      "q_stats": {
-        "mean": -0.001153,
-        "std": 0.128318,
-        "min": -0.55052,
-        "max": 0.5372,
-        "l2": 28.449486,
-        "abs_mean": 0.102176
-      },
-      "k_stats": {
-        "mean": 0.000162,
-        "std": 0.12594,
-        "min": -0.768334,
-        "max": 0.787806,
-        "l2": 27.921125,
-        "abs_mean": 0.099959
-      },
-      "v_stats": {
-        "mean": -0.000826,
-        "std": 0.15343,
-        "min": -0.713628,
-        "max": 0.840737,
-        "l2": 34.016251,
-        "abs_mean": 0.120845
-      },
-      "o_stats": {
-        "mean": -3.2e-05,
-        "std": 0.15174,
-        "min": -0.937102,
-        "max": 0.799109,
-        "l2": 33.641224,
-        "abs_mean": 0.117078
-      },
-      "attention_matrix": [
-        [
-          1.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
+      "label": "L9H9",
+      "detail": {
+        "status": "ok",
+        "layer": 9,
+        "head": 9,
+        "id": "L9H9",
+        "path": "transformer.h.9.attn head 9",
+        "d_head": 64,
+        "d_model": 768,
+        "q_stats": {
+          "mean": -0.001153,
+          "std": 0.128318,
+          "min": -0.55052,
+          "max": 0.5372,
+          "l2": 28.449486,
+          "abs_mean": 0.102176
+        },
+        "k_stats": {
+          "mean": 0.000162,
+          "std": 0.12594,
+          "min": -0.768334,
+          "max": 0.787806,
+          "l2": 27.921125,
+          "abs_mean": 0.099959
+        },
+        "v_stats": {
+          "mean": -0.000826,
+          "std": 0.15343,
+          "min": -0.713628,
+          "max": 0.840737,
+          "l2": 34.016251,
+          "abs_mean": 0.120845
+        },
+        "o_stats": {
+          "mean": -3.2e-05,
+          "std": 0.15174,
+          "min": -0.937102,
+          "max": 0.799109,
+          "l2": 33.641224,
+          "abs_mean": 0.117078
+        },
+        "attention_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.9898,
+            0.0102,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.9622,
+            0.0355,
+            0.0023,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.9803,
+            0.0135,
+            0.0019,
+            0.0044,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.994,
+            0.0023,
+            0.0004,
+            0.0005,
+            0.0028,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.9745,
+            0.0106,
+            0.0003,
+            0.0116,
+            0.0008,
+            0.0022,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.995,
+            0.0009,
+            0.0002,
+            0.0007,
+            0.0002,
+            0.0002,
+            0.0028,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.9918,
+            0.0011,
+            0.0002,
+            0.0004,
+            0.0004,
+            0.0002,
+            0.0004,
+            0.0055,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5403,
+            0.3174,
+            0.0027,
+            0.1096,
+            0.0006,
+            0.0006,
+            0.0028,
+            0.0039,
+            0.0222,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.8093,
+            0.0162,
+            0.0858,
+            0.0503,
+            0.0254,
+            0.0025,
+            0.0017,
+            0.002,
+            0.0035,
+            0.0033,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.5432,
+            0.1648,
+            0.0204,
+            0.1696,
+            0.0013,
+            0.0011,
+            0.0066,
+            0.0056,
+            0.0264,
+            0.0514,
+            0.0098,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.9722,
+            0.0032,
+            0.0016,
+            0.0005,
+            0.0007,
+            0.0004,
+            0.0002,
+            0.0046,
+            0.0054,
+            0.0004,
+            0.0033,
+            0.0075,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.9484,
+            0.0036,
+            0.0005,
+            0.0005,
+            0.0008,
+            0.0013,
+            0.0004,
+            0.0023,
+            0.0036,
+            0.001,
+            0.0019,
+            0.003,
+            0.0327,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.9693,
+            0.0069,
+            0.0001,
+            0.002,
+            0.0,
+            0.0,
+            0.0002,
+            0.001,
+            0.0022,
+            0.0006,
+            0.0003,
+            0.005,
+            0.0115,
+            0.0009,
+            0.0,
+            0.0
+          ],
+          [
+            0.9431,
+            0.0032,
+            0.0007,
+            0.0006,
+            0.0006,
+            0.0011,
+            0.0003,
+            0.0015,
+            0.0032,
+            0.0008,
+            0.0013,
+            0.004,
+            0.0166,
+            0.0036,
+            0.0195,
+            0.0
+          ],
+          [
+            0.1714,
+            0.1904,
+            0.0056,
+            0.5377,
+            0.0003,
+            0.0003,
+            0.0059,
+            0.0006,
+            0.0122,
+            0.066,
+            0.0006,
+            0.0023,
+            0.0009,
+            0.0002,
+            0.002,
+            0.0038
+          ]
         ],
-        [
-          0.9898,
-          0.0102,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
+        "str_tokens": [
+          "Then",
+          " John",
+          " and",
+          " Mary",
+          " went",
+          " to",
+          " the",
+          " store",
+          ".",
+          " John",
+          " gave",
+          " a",
+          " bottle",
+          " of",
+          " milk",
+          " to"
         ],
-        [
-          0.9622,
-          0.0355,
-          0.0023,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.9803,
-          0.0135,
-          0.0019,
-          0.0044,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.994,
-          0.0023,
-          0.0004,
-          0.0005,
-          0.0028,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.9745,
-          0.0106,
-          0.0003,
-          0.0116,
-          0.0008,
-          0.0022,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.995,
-          0.0009,
-          0.0002,
-          0.0007,
-          0.0002,
-          0.0002,
-          0.0028,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.9918,
-          0.0011,
-          0.0002,
-          0.0004,
-          0.0004,
-          0.0002,
-          0.0004,
-          0.0055,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.5403,
-          0.3174,
-          0.0027,
-          0.1096,
-          0.0006,
-          0.0006,
-          0.0028,
-          0.0039,
-          0.0222,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.8093,
-          0.0162,
-          0.0858,
-          0.0503,
-          0.0254,
-          0.0025,
-          0.0017,
-          0.002,
-          0.0035,
-          0.0033,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.5432,
-          0.1648,
-          0.0204,
-          0.1696,
-          0.0013,
-          0.0011,
-          0.0066,
-          0.0056,
-          0.0264,
-          0.0514,
-          0.0098,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.9722,
-          0.0032,
-          0.0016,
-          0.0005,
-          0.0007,
-          0.0004,
-          0.0002,
-          0.0046,
-          0.0054,
-          0.0004,
-          0.0033,
-          0.0075,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.9484,
-          0.0036,
-          0.0005,
-          0.0005,
-          0.0008,
-          0.0013,
-          0.0004,
-          0.0023,
-          0.0036,
-          0.001,
-          0.0019,
-          0.003,
-          0.0327,
-          0.0,
-          0.0,
-          0.0
-        ],
-        [
-          0.9693,
-          0.0069,
-          0.0001,
-          0.002,
-          0.0,
-          0.0,
-          0.0002,
-          0.001,
-          0.0022,
-          0.0006,
-          0.0003,
-          0.005,
-          0.0115,
-          0.0009,
-          0.0,
-          0.0
-        ],
-        [
-          0.9431,
-          0.0032,
-          0.0007,
-          0.0006,
-          0.0006,
-          0.0011,
-          0.0003,
-          0.0015,
-          0.0032,
-          0.0008,
-          0.0013,
-          0.004,
-          0.0166,
-          0.0036,
-          0.0195,
-          0.0
-        ],
-        [
-          0.1714,
-          0.1904,
-          0.0056,
-          0.5377,
-          0.0003,
-          0.0003,
-          0.0059,
-          0.0006,
-          0.0122,
-          0.066,
-          0.0006,
-          0.0023,
-          0.0009,
-          0.0002,
-          0.002,
-          0.0038
-        ]
-      ],
-      "str_tokens": [
-        "Then",
-        " John",
-        " and",
-        " Mary",
-        " went",
-        " to",
-        " the",
-        " store",
-        ".",
-        " John",
-        " gave",
-        " a",
-        " bottle",
-        " of",
-        " milk",
-        " to"
-      ],
-      "has_pattern": true,
-      "prompt": "Then John and Mary went to the store. John gave a bottle of milk to",
-      "description": "Attention head 9 in block 9. Q/K/V slices of c_attn, output via c_proj rows [576:640]."
+        "has_pattern": true,
+        "prompt": "Then John and Mary went to the store. John gave a bottle of milk to",
+        "description": "Attention head 9 in block 9. Q/K/V slices of c_attn, output via c_proj rows [576:640]."
+      }
     }
   },
   "figures": [
@@ -2799,5 +5161,61 @@
     "docs/images/ioi-layer-ablation.png",
     "docs/images/logit-lens-paris.png",
     "docs/images/steering-sweep.png"
-  ]
+  ],
+  "sections": {
+    "identity": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:14+00:00",
+      "finished_at": "2026-10-08T17:36:16+00:00",
+      "duration_s": 2.427
+    },
+    "architecture": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:16+00:00",
+      "finished_at": "2026-10-08T17:36:16+00:00",
+      "duration_s": 0.003
+    },
+    "sanity_checks": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:16+00:00",
+      "finished_at": "2026-10-08T17:36:16+00:00",
+      "duration_s": 0.237
+    },
+    "ioi": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:16+00:00",
+      "finished_at": "2026-10-08T17:36:17+00:00",
+      "duration_s": 0.917
+    },
+    "logit_lens": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:17+00:00",
+      "finished_at": "2026-10-08T17:36:17+00:00",
+      "duration_s": 0.226
+    },
+    "head_sweep": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:17+00:00",
+      "finished_at": "2026-10-08T17:36:47+00:00",
+      "duration_s": 29.663
+    },
+    "layer_ablation": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:47+00:00",
+      "finished_at": "2026-10-08T17:36:48+00:00",
+      "duration_s": 1.184
+    },
+    "steering": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:48+00:00",
+      "finished_at": "2026-10-08T17:36:52+00:00",
+      "duration_s": 4.244
+    },
+    "inspection": {
+      "status": "ok",
+      "started_at": "2026-10-08T17:36:52+00:00",
+      "finished_at": "2026-10-08T17:36:53+00:00",
+      "duration_s": 0.129
+    }
+  }
 }

@@ -13,6 +13,8 @@ the reason.
 
 from __future__ import annotations
 
+from backend.core.identifiers import content_id
+
 from typing import Any, Dict
 from .discovery_result import DiscoveryResultDTO
 
@@ -35,7 +37,7 @@ class CrossModelCircuitsEngine:
             "causal_similarity": 0.91,
         }
         res = DiscoveryResultDTO(
-            discovery_id=f"cross_{hash(source_model + target_model) & 0xffffffff:08x}",
+            discovery_id=content_id(source_model, target_model, prefix="cross_"),
             discovery_type="CrossModelAlignment",
             title=f"Circuit Alignment: {source_model} ↔ {target_model}",
             evidence=[],

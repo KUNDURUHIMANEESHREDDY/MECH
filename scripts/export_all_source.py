@@ -5,6 +5,13 @@ Generates a unified text file containing every source code file in MECH
 prefaced with an exact index indicating line numbers and line counts for
 each file.
 
+Every candidate passes `scripts.export_guard` before it is embedded: known
+credential paths are dropped, high-confidence secret contents are dropped, and
+unrecognised file types are dropped rather than published. The declined files
+and the reason for each are written to `export_all_source_manifest.json` beside
+the output, and summarised in the output header -- so the "Complete Source
+Code Repository" title now comes with the counts of what was withheld.
+
 Usage:
     python scripts/export_all_source.py [--output PATH]
 """
@@ -15,104 +22,130 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Set, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.export_guard import (  # noqa: E402
+    ScreenReport,
+    format_summary,
+    screen_file,
+    write_manifest,
+)
 
 EXCLUDE_DIRS = {
     ".git", ".claude", ".agents", ".agent-factory", "__pycache__",
     "node_modules", ".pytest-tmp", "dist", "build", "release",
     ".venv", "venv", ".cache", "coverage", ".idea", ".vscode",
-    ".pytest_cache", ".omo", "screenshots", "test-results", "design-demos"
+    ".pytest_cache", ".omo", "screenshots", "test-results", "design-demos",
+    "exports",
 }
 
+#: Known prior-export names. The *resolved* output path is excluded separately
+#: and unconditionally, because `--output snapshot.txt` is not in this set and
+#: excluding the default name is not a general defence.
 EXCLUDE_FILES = {
     "MECH_all_source.txt", "MECH_all_source_old.txt", "_full.txt", "_ma.txt",
+    "MECH_backend.txt", "MECH_frontend.txt", "MECH_tests.txt",
+    "MECH_scripts.txt", "MECH_root.txt",
     "package-lock.json"
 }
 
-EXCLUDE_EXTS = {
-    ".png", ".ico", ".jpg", ".jpeg", ".gif", ".svg", ".exe", ".dll",
-    ".pak", ".bin", ".zip", ".asar", ".db", ".sqlite", ".sqlite3",
-    ".pyc", ".pyo", ".pyd", ".blockmap", ".dat", ".err", ".patch"
-}
+#: Areas walked whole, every recognised text file included. Previously each area
+#: carried its own inline suffix allow-list and the root scan accepted only
+#: `.py/.js/.ini/.txt`, so `package.json`, `pyproject.toml`, `Makefile` and
+#: `.pre-commit-config.yaml` were silently missing from a file titled
+#: "Complete Source Code Repository". Coverage is now a property of the walk
+#: and the guard alone decides publishability.
+SOURCE_AREAS = ("backend", "tests", "scripts", "frontend/src",
+                "frontend/electron", "frontend/tests", "frontend/scripts")
 
 
-def collect_files() -> List[str]:
-    """Collect all genuine source files across the project."""
-    files_to_include = []
+def _escapes_repo(path: Path) -> bool:
+    """Whether `path` is a symlink resolving outside the repository."""
+    try:
+        return not path.resolve().is_relative_to(ROOT.resolve())
+    except (OSError, ValueError):
+        return True
 
-    # 1. Root code files
-    for f in os.listdir(ROOT):
-        p = ROOT / f
-        if p.is_file() and f not in EXCLUDE_FILES and not f.startswith("."):
-            if f.endswith((".py", ".js", ".ini", ".txt")):
-                files_to_include.append(f)
 
-    # 2. CI workflow
-    ci_path = ROOT / ".github" / "workflows" / "ci.yml"
-    if ci_path.exists():
-        files_to_include.append(".github/workflows/ci.yml")
+def collect_files(report: ScreenReport,
+                  excluded_paths: Optional[Set[Path]] = None) -> List[str]:
+    """Collect every publishable source file, recording what was declined.
 
-    # 3. backend
-    for root, dirs, files in os.walk(ROOT / "backend"):
-        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
-        for f in files:
-            if f.endswith(".py"):
-                rel = Path(root, f).relative_to(ROOT).as_posix()
-                files_to_include.append(rel)
+    Returns the sorted relative paths to embed. Every decline lands on `report`,
+    so the caller's counts account for the whole tree rather than for the part
+    of it that survived.
+    """
+    files_to_include: List[str] = []
+    seen: Set[str] = set()
+    skip = excluded_paths or set()
 
-    # 4. tests
-    for root, dirs, files in os.walk(ROOT / "tests"):
-        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
-        for f in files:
-            if f.endswith(".py"):
-                rel = Path(root, f).relative_to(ROOT).as_posix()
-                files_to_include.append(rel)
+    def consider(path: Path, rel: str) -> None:
+        if rel in seen:
+            return
+        seen.add(rel)
+        if path in skip:
+            report.reject(rel, "exporter-output")
+            return
+        if rel in EXCLUDE_FILES or rel.endswith(".log.err"):
+            report.reject(rel, "excluded-by-name")
+            return
+        if path.is_symlink() and _escapes_repo(path):
+            # A link to $HOME/.ssh/id_rsa or to a path outside the tree would
+            # otherwise be read and embedded verbatim.
+            report.reject(rel, "symlink-escapes-repo")
+            return
+        if screen_file(path, rel, report):
+            report.accept(rel)
+            files_to_include.append(rel)
 
-    # 5. scripts
-    for root, dirs, files in os.walk(ROOT / "scripts"):
-        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
-        for f in files:
-            if f.endswith((".py", ".js", ".cjs")):
-                rel = Path(root, f).relative_to(ROOT).as_posix()
-                files_to_include.append(rel)
+    # 1. Root-level files and dotfiles, project config included.
+    for entry in sorted(ROOT.iterdir()):
+        if entry.is_file():
+            consider(entry, entry.name)
 
-    # 6. frontend
-    for sub in ["frontend/src", "frontend/electron", "frontend/tests", "frontend/scripts"]:
-        sub_dir = ROOT / sub
-        if not sub_dir.exists():
+    # 2. CI workflows, all of them. The previous scan hardcoded `ci.yml`, so
+    #    every other workflow was absent.
+    workflows = ROOT / ".github" / "workflows"
+    if workflows.is_dir():
+        for entry in sorted(workflows.rglob("*")):
+            if entry.is_file():
+                consider(entry, entry.relative_to(ROOT).as_posix())
+
+    # 3. Source areas, and frontend's own root-level configs.
+    for area in SOURCE_AREAS:
+        base = ROOT / area
+        if not base.is_dir():
             continue
-        for root, dirs, files in os.walk(sub_dir):
-            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
-            for f in files:
-                if f.endswith((".vue", ".ts", ".js", ".css", ".html")):
-                    rel = Path(root, f).relative_to(ROOT).as_posix()
-                    files_to_include.append(rel)
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDE_DIRS)
+            for name in sorted(filenames):
+                path = Path(dirpath) / name
+                consider(path, path.relative_to(ROOT).as_posix())
 
-    frontend_configs = [
-        "frontend/package.json",
-        "frontend/vite.config.mts",
-        "frontend/vitest.config.js",
-        "frontend/playwright.config.js",
-        "frontend/tsconfig.json",
-        "frontend/index.html",
-    ]
-    for cfg in frontend_configs:
-        p = ROOT / cfg
-        if p.exists():
-            files_to_include.append(cfg)
+    frontend = ROOT / "frontend"
+    if frontend.is_dir():
+        for entry in sorted(frontend.iterdir()):
+            if entry.is_file():
+                consider(entry, entry.relative_to(ROOT).as_posix())
 
-    # Sort deterministically
     return sorted(set(files_to_include))
 
 
-def export_all(output_path: Path) -> Tuple[int, int]:
+def export_all(output_path: Path) -> Tuple[int, int, ScreenReport]:
     """Assemble and write all source files into a single text file.
 
-    Returns (file_count, total_lines).
+    Returns (file_count, total_lines, report).
     """
-    file_list = collect_files()
+    report = ScreenReport()
+    # The output path is excluded whether or not it matches EXCLUDE_FILES: a
+    # custom `--output` inside the repository would otherwise be discovered as
+    # a root `.txt` file and embedded in the snapshot it just wrote.
+    excluded_paths = {output_path.resolve()}
+    file_list = collect_files(report, excluded_paths)
 
     # Pass 1: Read all contents and normalize newlines
     loaded_files: List[Tuple[str, List[str]]] = []
@@ -191,7 +224,8 @@ def export_all(output_path: Path) -> Tuple[int, int]:
         out.write(f"  Includes all {package_inits} package __init__.py files.\n")
         out.write("  Contains backend, tests, frontend, scripts, automation, CI and configs.\n")
         out.write("  Excluded: __pycache__, node_modules, .git, .claude worktrees,\n")
-        out.write("  build output, test artifacts, binaries, and scratch scripts.\n\n\n")
+        out.write("  build output, test artifacts, binaries, and scratch scripts.\n")
+        out.write(f"  Secret / unknown-type screening: {format_summary(report)}.\n\n\n")
         out.write(f"INDEX  ({len(loaded_files)} files)\n")
         out.write("------------------------------------------------------------------------------\n")
         out.write("   Content   Lines  Path\n")
@@ -208,7 +242,12 @@ def export_all(output_path: Path) -> Tuple[int, int]:
                 out.write(line + "\n")
             out.write("\n")
 
-    return len(loaded_files), total_code_lines
+    # Named after the output it describes, so `--output snapshot.txt` does not
+    # leave a manifest called `export_all_source_*` next to it, and so the
+    # ignore rule can follow the output rather than the script.
+    stem = output_path.stem or "export_all_source"
+    write_manifest(output_path.parent, report, prefix=stem)
+    return len(loaded_files), total_code_lines, report
 
 
 def main():
@@ -224,11 +263,12 @@ def main():
     if not out_path.is_absolute():
         out_path = ROOT / out_path
 
-    print(f"Collecting files and building unified source export...")
-    file_count, line_count = export_all(out_path)
+    print("Collecting files and building unified source export...")
+    file_count, line_count, report = export_all(out_path)
     size_mb = out_path.stat().st_size / (1024 * 1024)
     print(f"Done! Wrote {file_count} files ({line_count} lines of code) to {out_path.name}")
     print(f"File size: {size_mb:.2f} MB ({out_path.stat().st_size:,} bytes)")
+    print(f"GUARD: {format_summary(report)}")
 
 
 if __name__ == "__main__":

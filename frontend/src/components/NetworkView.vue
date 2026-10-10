@@ -102,12 +102,12 @@
         Run a prompt to light up real connections: token-to-token attention wires for one head,
         and input/output weight wires for one MLP neuron. Both come from live forward passes.
       </p>
-      <form class="wire-form" @submit.prevent="runWiringPrompt">
+      <form class="wire-form" data-testid="network-wire-form" @submit.prevent="runWiringPrompt">
         <label class="wire-field">
           <span>Prompt</span>
-          <input v-model="wirePrompt" type="text" class="control" placeholder="The capital of France is" />
+          <input v-model="wirePrompt" type="text" class="control" data-testid="network-wire-prompt" placeholder="The capital of France is" />
         </label>
-        <button class="tool-button tool-button--primary" type="submit" :disabled="wiringLoading">
+        <button class="tool-button tool-button--primary" type="submit" data-testid="network-wire-run" :disabled="wiringLoading">
           {{ wiringLoading ? 'Running…' : 'Light up wires' }}
         </button>
         <button
@@ -124,7 +124,7 @@
         <span>New model-created prompt every minute</span>
       </label>
       <p v-if="freshPromptNote" class="wire-note">{{ freshPromptNote }}</p>
-      <div v-if="wiringError" class="tool-notice tool-notice--error" role="alert">
+      <div v-if="wiringError" class="tool-notice tool-notice--error" role="alert" data-testid="network-wire-error">
         <strong>Wiring run failed</strong>
         <span>{{ wiringError }}</span>
       </div>
@@ -146,9 +146,11 @@
               </label>
             </div>
           </div>
-          <p class="wire-caption">{{ attentionEdgeCount }} wires above 0.08 · final-token focus: {{ finalFocusToken }}</p>
+          <p class="wire-caption" data-testid="network-wire-caption">{{ attentionEdgeCount }} wires above 0.08 · final-token focus: {{ finalFocusToken }}</p>
           <svg
             class="wire-svg"
+            data-testid="network-wire-svg"
+            :data-edge-count="attentionSvg.edges.length"
             :viewBox="`0 0 ${attentionSvg.width} ${attentionSvg.height}`"
             role="img"
             :aria-label="`Attention wiring for layer ${wireLayer} head ${wireHead}`"
@@ -160,6 +162,7 @@
               class="wire wire--attention"
               :stroke-width="edge.width"
               :opacity="edge.opacity"
+              data-testid="network-wire-edge"
             />
             <g v-for="node in attentionSvg.nodes" :key="node.index">
               <rect :x="node.x" :y="node.y" width="10" height="10" rx="5" class="wire-node" />

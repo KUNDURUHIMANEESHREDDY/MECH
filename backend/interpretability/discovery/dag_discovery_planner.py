@@ -19,6 +19,8 @@ Example DAG Structure:
 
 from __future__ import annotations
 
+from backend.core.identifiers import entity_id
+
 import datetime as _dt
 import time
 from dataclasses import dataclass, field
@@ -165,7 +167,7 @@ class DynamicDAGPlanner:
             edges.append({"source": p, "target": "fusion"})
 
         return DynamicDiscoveryDAG(
-            dag_id=f"dag_{hash(goal.goal_id + str(time.time())) & 0xffffffff:08x}",
+            dag_id=entity_id("dag_"),
             goal_id=goal.goal_id,
             nodes=nodes,
             edges=edges

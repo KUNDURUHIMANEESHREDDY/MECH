@@ -286,7 +286,14 @@ def test_wal_checkpoint_under_lock_contention():
         # Open raw connection and hold an exclusive/immediate write lock
         raw_conn = sqlite3.connect(test_db, timeout=0.1)
         raw_conn.execute("BEGIN IMMEDIATE")
-        raw_conn.execute("INSERT INTO experiments VALUES (?, ?, ?)", ("lock-1", "{}", "2026-01-01"))
+        # Columns are named, not positional. The `experiments` table gained an
+        # `updated_at` column, and a positional `VALUES (?, ?, ?)` binds to
+        # arity rather than meaning -- it broke on the schema change even
+        # though this test is about lock contention, not the row shape.
+        raw_conn.execute(
+            "INSERT INTO experiments (item_id, payload, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?)",
+            ("lock-1", "{}", "2026-01-01", "2026-01-01"))
 
         try:
             # Checkpoint attempt while locked

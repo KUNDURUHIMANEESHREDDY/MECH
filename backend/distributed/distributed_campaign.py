@@ -9,6 +9,8 @@ Research Campaign ➔ Task Sharding ➔ Distributed Scheduler ➔ Parallel Worke
 
 from __future__ import annotations
 
+from backend.core.identifiers import entity_id
+
 import datetime as _dt
 import time
 from dataclasses import dataclass, field
@@ -64,7 +66,7 @@ class DistributedCampaignOrchestrator:
     def run_distributed_campaign(self, goal: ResearchGoal) -> DistributedCampaignSummary:
         """Executes a multi-task campaign across distributed hardware workers."""
         t0 = time.time()
-        campaign_id = f"dist_camp_{hash(goal.goal_id + str(time.time())) & 0xffffffff:08x}"
+        campaign_id = entity_id("dist_camp_")
 
         planned_algorithms = ["attribution_patching", "acdc", "causal_scrubbing", "transcoders", "feature_universality"]
 

@@ -472,6 +472,9 @@ class InductionHeadsPipeline:
                 ),
             },
             "provenance": "live" if measured else "unavailable",
+            # Attested only when measured: this pipeline ran the sequences
+            # through live attention reads above.
+            "attested": bool(measured),
             "validation_eligible": measured,
             "publication_eligible": False,
             "reproducibility_report": report,

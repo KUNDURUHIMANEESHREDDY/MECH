@@ -64,6 +64,21 @@ class BaseHook(abc.ABC):
     def handle(self, h: HookHandle) -> None:
         self._handle = h
 
+    @property
+    def is_enabled(self) -> bool:
+        """Whether this hook is currently permitted to observe.
+
+        A disabled hook still holds its PyTorch forward hook -- removing and
+        re-registering it would change hook ordering, which other hooks on the
+        same module observe. So disabling is enforced by *consulting* this flag
+        in the capture path and returning early, not by detaching.
+
+        Without this check, `disable_hook` only relabelled the handle: the
+        closure went on capturing, so a caller who disabled a hook to stop the
+        memory cost kept paying it and kept filling the store.
+        """
+        return self.handle is None or self.handle.enabled
+
 
 # ── Concrete hooks ───────────────────────────────────────────────
 
@@ -80,6 +95,8 @@ class EmbeddingHook(BaseHook):
         self._layer_idx = layer_idx
 
         def _hook(module, inputs, outputs):
+            if not self.is_enabled:
+                return
             self._store.append(outputs[0].detach().cpu() if isinstance(outputs, tuple) else outputs.detach().cpu())
 
         self._hook_ref = model.transformer.wte.register_forward_hook(_hook)
@@ -112,9 +129,35 @@ class AttentionHook(BaseHook):
         block = model.transformer.h[layer_idx]
 
         def _hook(module, inputs, outputs):
+            if not self.is_enabled:
+                return
             # outputs[-1] = attention weights [batch, heads, seq, seq]
-            attn = outputs[-1].detach().cpu()
-            self._store.append(attn)
+            #
+            # Only when the attention implementation returns them. Under `sdpa`
+            # -- the default from transformers 4.57 -- the slot is None, and
+            # calling .detach() on it raised AttributeError from inside the
+            # forward pass, so merely *asking* for attention maps crashed an
+            # otherwise healthy run, with a traceback pointing at NoneType
+            # rather than at attention configuration.
+            #
+            # Capturing nothing is the honest outcome: there is nothing to
+            # capture. Silently substituting a zero tensor, or reshaping some
+            # other output into the right number of dimensions, would hand the
+            # caller an attention map that was never computed.
+            attn = outputs[-1] if outputs is not None else None
+            if not isinstance(attn, torch.Tensor):
+                bus.emit(
+                    HOOK_ERROR,
+                    hook_name=self.name,
+                    layer=self._layer_idx,
+                    reason=(
+                        "attention weights are not exposed by this attention "
+                        "implementation; captured nothing. Set "
+                        "attn_implementation='eager' to observe weights."
+                    ),
+                )
+                return
+            self._store.append(attn.detach().cpu())
 
         self._hook_ref = block.attn.register_forward_hook(_hook)
         h = HookHandle(name=self.name, layer_idx=layer_idx, hook_type="attention")
@@ -134,7 +177,13 @@ class AttentionHook(BaseHook):
 
 
 class MLPHook(BaseHook):
-    """Captures MLP GELU activations for a specific layer."""
+    """Captures MLP GELU activations for a specific layer.
+
+    "MLP activations" means the post-`c_fc` hidden state at width
+    `4 * n_embd`, which is what the neurons in this dictionary actually are.
+    It does *not* mean the activation function applied to the block input --
+    that tensor is `n_embd` wide and contains no MLP computation at all.
+    """
 
     def __init__(self, store: list | None = None):
         self._store = store if store is not None else []
@@ -144,12 +193,23 @@ class MLPHook(BaseHook):
     def attach(self, model: nn.Module, layer_idx: int) -> HookHandle:
         self._layer_idx = layer_idx
         block = model.transformer.h[layer_idx]
+        act_fn = block.mlp.act
+
+        # Hook c_fc, not the whole mlp module. The mlp module's forward
+        # *input* is the block's residual stream (width n_embd); c_fc's
+        # forward output is the widened hidden state (width 4 * n_embd).
+        # Hooking the mlp module and calling `act(inputs[0])` therefore
+        # captured gelu(block_input) -- a tensor one-quarter the expected
+        # width, and a quantity the layer's neurons have no relationship to.
 
         def _hook(module, inputs, outputs):
-            h = module.act(inputs[0]).detach().cpu()
-            self._store.append(h)
+            if not self.is_enabled:
+                return
+            hidden = act_fn(outputs) if outputs is not None else None
+            if isinstance(hidden, torch.Tensor):
+                self._store.append(hidden.detach().cpu())
 
-        self._hook_ref = block.mlp.register_forward_hook(_hook)
+        self._hook_ref = block.mlp.c_fc.register_forward_hook(_hook)
         h = HookHandle(name=self.name, layer_idx=layer_idx, hook_type="mlp")
         self.handle = h
         bus.emit(HOOK_REGISTERED, hook_name=self.name, layer=layer_idx)
@@ -179,6 +239,8 @@ class ResidualHook(BaseHook):
         block = model.transformer.h[layer_idx]
 
         def _hook(module, inputs, outputs):
+            if not self.is_enabled:
+                return
             # outputs[0] is the hidden state after the block
             self._store.append(outputs[0].detach().cpu())
 
@@ -212,6 +274,8 @@ class LogitHook(BaseHook):
         self._layer_idx = layer_idx
 
         def _hook(module, inputs, outputs):
+            if not self.is_enabled:
+                return
             self._store.append(outputs.detach().cpu())
 
         self._hook_ref = model.lm_head.register_forward_hook(_hook)
@@ -257,6 +321,8 @@ class CustomHook(BaseHook):
         self._target_module = model.transformer.h[layer_idx]
 
         def _hook(module, inputs, outputs):
+            if not self.is_enabled:
+                return
             result = self._fn(module, inputs, outputs)
             if result is not None:
                 self._store.append(result)

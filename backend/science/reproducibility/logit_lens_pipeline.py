@@ -180,6 +180,9 @@ class LogitLensPipeline:
             "pipeline": "LogitLensPipeline",
             "paper_id": self.PAPER_ID,
             "provenance": "live",
+            # Attested here: every quantity above was read from a real forward
+            # pass (unreachable in mock mode, which returns unavailable early).
+            "attested": True,
             "layer_results": layer_results,
             "observed_metrics": observed_metrics,
             "reproducibility_report": report,

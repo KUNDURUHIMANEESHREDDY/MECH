@@ -180,6 +180,14 @@ def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any]]:
     if not os.path.exists(path):
         raise SAELoadError(f"SAE checkpoint not found: {path}")
     try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        raise SAELoadError(f"SAE checkpoint unreadable: {path}: {exc}")
+    if size > 512 * 1024 * 1024:
+        raise SAELoadError(
+            f"SAE checkpoint is {size} bytes, above the 512 MiB loadable "
+            f"limit; refusing before deserialisation.")
+    try:
         import torch
     except ImportError as exc:
         raise SAELoadError(f"torch is required to load SAE weights: {exc}")

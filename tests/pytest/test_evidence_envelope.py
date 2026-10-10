@@ -16,6 +16,14 @@ if REPO_ROOT not in sys.path:
 
 from backend.core import evidence_graph as eg  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _reset_trusted_key_cache():
+    """Reset the trusted key IDs cache before each test."""
+    eg._reset_trusted_key_ids_cache()
+    yield
+    eg._reset_trusted_key_ids_cache()
+
 VALID = "rab12cd34ef56"
 VALID2 = "rcd34ef56ab12"
 
@@ -33,7 +41,9 @@ def _read_envelope(tmp_path, run_id=VALID):
 
 
 def test_signed_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     record = {"run_id": VALID, "goal": "g", "status": "completed"}
     eg.save_run_record(VALID, record, directory=str(tmp_path))
     env = _read_envelope(tmp_path)
@@ -65,7 +75,9 @@ def test_unsigned_when_no_key(tmp_path, monkeypatch):
 
 
 def test_tampered_record_detected(tmp_path, monkeypatch):
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     eg.save_run_record(VALID, {"run_id": VALID, "score": 0.5}, directory=str(tmp_path))
     path = tmp_path / f"{VALID}.json"
     env = json.loads(path.read_text(encoding="utf-8"))
@@ -76,7 +88,9 @@ def test_tampered_record_detected(tmp_path, monkeypatch):
 
 
 def test_run_id_mismatch_detected(tmp_path, monkeypatch):
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     eg.save_run_record(VALID, {"run_id": VALID}, directory=str(tmp_path))
     path = tmp_path / f"{VALID}.json"
     env = json.loads(path.read_text(encoding="utf-8"))
@@ -88,7 +102,9 @@ def test_run_id_mismatch_detected(tmp_path, monkeypatch):
 
 def test_swapped_key_detected(tmp_path, monkeypatch):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     eg.save_run_record(VALID, {"run_id": VALID}, directory=str(tmp_path))
     other_pub = Ed25519PrivateKey.generate().public_key().public_bytes_raw().hex()
     path = tmp_path / f"{VALID}.json"
@@ -122,7 +138,9 @@ def test_save_rejects_non_dict(tmp_path):
 
 
 def test_list_reads_through_envelopes(tmp_path, monkeypatch):
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     eg.save_run_record(VALID, {"run_id": VALID, "goal": "new",
                                "status": "completed",
                                "publication": {"steps_completed": 3}},
@@ -137,7 +155,9 @@ def test_list_reads_through_envelopes(tmp_path, monkeypatch):
 
 
 def test_algorithm_downgrade_rejected(tmp_path, monkeypatch):
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     eg.save_run_record(VALID, {"run_id": VALID}, directory=str(tmp_path))
     path = tmp_path / f"{VALID}.json"
     env = json.loads(path.read_text(encoding="utf-8"))
@@ -148,7 +168,9 @@ def test_algorithm_downgrade_rejected(tmp_path, monkeypatch):
 
 
 def test_metadata_rewrite_detected(tmp_path, monkeypatch):
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     eg.save_run_record(VALID, {"run_id": VALID}, directory=str(tmp_path))
     path = tmp_path / f"{VALID}.json"
     env = json.loads(path.read_text(encoding="utf-8"))
@@ -159,7 +181,9 @@ def test_metadata_rewrite_detected(tmp_path, monkeypatch):
 
 
 def test_list_uses_envelope_run_id(tmp_path, monkeypatch):
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     eg.save_run_record(VALID, {"run_id": "rdeadbeef1234"}, directory=str(tmp_path))
     summaries = eg.list_run_records(directory=str(tmp_path))
     assert summaries and summaries[0]["run_id"] == VALID
@@ -168,7 +192,9 @@ def test_list_uses_envelope_run_id(tmp_path, monkeypatch):
 def test_route_fallback_carries_envelope_status(tmp_path, monkeypatch):
     import backend.core.evidence_graph as live_eg
     monkeypatch.setattr(live_eg, "EVIDENCE_DIR", str(tmp_path))
-    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _seed_key_file(tmp_path))
+    key_path = _seed_key_file(tmp_path)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", key_path)
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", key_path)
     from backend.api import dispatcher as core
     record = {"run_id": VALID, "goal": "g", "status": "completed"}
     live_eg.save_run_record(VALID, record)

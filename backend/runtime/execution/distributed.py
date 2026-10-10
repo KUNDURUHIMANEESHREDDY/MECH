@@ -6,6 +6,8 @@ hooks and retrieving activations across shards.
 
 from __future__ import annotations
 
+from backend.core.identifiers import entity_id
+
 import datetime as _dt
 import time
 from typing import Any, Dict, List, Optional
@@ -24,7 +26,7 @@ class RPCManager:
             raise ConnectionError("RPC mesh is disconnected.")
         
         # In a real system, this invokes an async RPC call (e.g., ray.remote or dist.rpc_sync)
-        job_id = f"rpc_patch_{hash(f'{rank}_{layer}_{neuron_index}_{patch_value}') & 0xffffffff:08x}"
+        job_id = entity_id("rpc_patch_")
         return job_id
 
     def retrieve_activation_chunk(self, rank: str, layer: int, chunk_idx: int) -> List[Dict[str, Any]]:

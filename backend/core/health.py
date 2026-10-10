@@ -166,7 +166,6 @@ def _probe_evidence() -> Dict[str, Any]:
     """The evidence pipeline must be importable and its policy present."""
     checks = {}
     for label, module in (
-        ("boundary", "backend.core.evidence_boundary"),
         ("evidence_graph", "backend.core.evidence_graph"),
         ("evidence_policy", "backend.agents.evidence_policy"),
     ):

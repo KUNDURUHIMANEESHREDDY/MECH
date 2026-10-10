@@ -1,8 +1,8 @@
-"""Exposure tests for the unauthenticated FastAPI surface.
+"""Exposure tests for the authenticated FastAPI surface.
 
-The API has no authentication and now exposes plugin install/enable plus
-per-runner model weights, so what it binds to and which origins it trusts are
-security-relevant, not preferences.
+The API requires bearer auth (backend/core/auth.py) and exposes plugin
+install/enable plus per-runner model weights, so what it binds to and which
+origins it trusts are security-relevant, not preferences.
 
 Three of these assertions are unchanged from security/plugin-and-path-hardening:
 loopback binding, MECH_BIND_HOST as a deliberate opt-in, and MECH_CORS_ORIGINS
@@ -49,7 +49,7 @@ def _backend_source() -> str:
 
 
 def test_binds_loopback_by_default():
-    """0.0.0.0 put an unauthenticated API on the network."""
+    """0.0.0.0 would put a privileged API on the network."""
     source = _source()
     run = re.search(r"uvicorn\.run\((.*?)\n\s*\)", source, re.S)
     assert run, "could not find the uvicorn.run call"
@@ -61,7 +61,7 @@ def test_binds_loopback_by_default():
     # The host is now an expression (MECH_BIND_HOST with a loopback default),
     # so assert on the default rather than on a literal.
     assert "0.0.0.0" not in host_expr, (
-        f"uvicorn.run binds {host_expr}; this API has no authentication"
+        f"uvicorn.run binds {host_expr}; this API is privileged"
     )
 
 
@@ -115,7 +115,7 @@ def test_cors_loopback_regex_is_anchored():
     This is the reason the allowlist is a regex and not a list. A pattern
     matching "localhost" unanchored would also match
     "http://localhost.evil.com", letting any site on that hostname make
-    credentialed calls to an API that has no authentication.
+    credentialed calls to a privileged API.
     """
     assert not _cors_allows("http://localhost.evil.com")
     assert not _cors_allows("http://127.0.0.1.attacker.org")

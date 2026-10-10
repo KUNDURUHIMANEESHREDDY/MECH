@@ -211,8 +211,20 @@ app.on('activate', () => {
 
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-navigate', (event, url) => {
-    const allowed = [RENDERER_DEV_URL, 'file://'];
-    if (!allowed.some((prefix) => url.startsWith(prefix))) {
+    let allowed = false;
+    try {
+      const target = new URL(url);
+      if (target.protocol === 'http:' || target.protocol === 'https:') {
+        allowed = target.origin === new URL(RENDERER_DEV_URL).origin;
+      } else if (target.protocol === 'file:') {
+        const distRoot = path.join(__dirname, '..', 'dist') + path.sep;
+        const fsPath = require('url').fileURLToPath(target);
+        allowed = fsPath.startsWith(distRoot);
+      }
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) {
       event.preventDefault();
     }
   });

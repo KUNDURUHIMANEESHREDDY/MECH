@@ -290,6 +290,16 @@ MEASUREMENT_LAYERS: Dict[str, str] = {
     "backend/validation/benchmark_runner.py":
         "computes accuracy and robustness from the per-prompt clean/corrupted "
         "runs it just executed",
+    "backend/analysis/experiment_runner.py":
+        "calls engine.list_neurons and derives max/mean/variance/sparsity from "
+        "the returned neurons; returns provenance='unavailable', measured=False "
+        "when the engine reports non-ok, so its 'live' is earned by a "
+        "measurement it made (the container's own defaults are closed)",
+    "backend/experiments/attention_experiment.py":
+        "calls engine.layer_detail and computes per-head importance plus "
+        "max/mean/min statistics from the returned heads; returns status "
+        "'unavailable' rather than stamping 'live' when the engine cannot "
+        "answer",
 }
 
 #: Wrappers that stamp `live` only after verifying an inner claim of liveness.
@@ -329,6 +339,17 @@ LIVE_BY_CONSTRUCTION: Dict[str, str] = {
         "it from a fixture, which is the only distinction this field can make "
         "here. None of these endpoints measures anything scientific and none "
         "opts into validation or publication",
+    "backend/mcp_server/server.py":
+        "every stamp flows through the module `_ok()` helper on MCP tool "
+        "responses -- file listings, loop status, runtime probes, git and "
+        "allowlisted test/build results. Each reports an action this process "
+        "just performed, so `live` distinguishes it from a fixture. The "
+        "module sets no eligibility flag anywhere, so nothing here can "
+        "promote into validation or publication",
+    "backend/mcp_server/allowed_commands.py":
+        "same `_ok()` shape as the MCP server module above, on allowlisted "
+        "test/build execution results. Reports what the spawned command "
+        "returned; sets no eligibility flag anywhere",
 }
 
 #: Modules whose stamp is a claim the code cannot actually support. Kept as its

@@ -85,6 +85,9 @@ class MechanisticBenchmarkRunner:
                 "benchmark_id": benchmark_id,
                 "status": "completed",
                 "provenance": "live",
+                # Attested here: accuracy/robustness were computed from the
+                # per-prompt runs this function just executed above.
+                "attested": True,
                 "field_provenance": field_map(
                     ("benchmark_id", "status", "accuracy",
                      "robustness_score", "eval_samples", "per_prompt"),

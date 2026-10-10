@@ -207,7 +207,8 @@ class SAEReproductionPipeline:
     def run(self, n_features: int = 50, seed: int = 42, *,
             corpus: Optional[str] = None, n_tokens: int = 4096,
             k: Optional[int] = None, steps: int = 400,
-            learning_rate: float = 3e-4, top_tokens: int = 8) -> Dict[str, Any]:
+            learning_rate: float = 3e-4, top_tokens: int = 8,
+            checkpoint_dir: Optional[Any] = None) -> Dict[str, Any]:
         """Train and evaluate a top-k SAE. Raises rather than simulating."""
         torch = self._torch()
         if torch is None:
@@ -243,161 +244,259 @@ class SAEReproductionPipeline:
                 "The corpus is empty, so no activations could be collected. No "
                 "autoencoder was fitted.")
 
+        # Determinism is load-bearing: same seed + params + corpus must pin
+        # the artifact, or "seed" is decoration. Two sources break it:
+        # (1) the global RNG (reset by manual_seed), and (2) multithreaded
+        # CPU reductions, whose summation order varies run to run. The fit
+        # therefore runs single-threaded, restoring the previous setting
+        # afterwards so interactive use keeps its threads.
         torch.manual_seed(seed)
         acts = self._collect_activations(torch, model, tokenizer, corpus, n_tokens)
-        if acts is None or acts.shape[0] == 0:
-            raise LiveUnavailable(
-                "No MLP activations were captured from a forward pass, so no "
-                "autoencoder could be fitted.")
+        prev_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        try:
+            if acts is None or acts.shape[0] == 0:
+                raise LiveUnavailable(
+                    "No MLP activations were captured from a forward pass, so no "
+                    "autoencoder could be fitted.")
 
-        # Hold out tokens so the reported reconstruction is not the training fit.
-        split = max(1, int(0.8 * acts.shape[0]))
-        fit_x, held_x = acts[:split], acts[split:]
-        if held_x.shape[0] == 0:
-            held_x = fit_x
+            # Hold out tokens so the reported reconstruction is not the training fit.
+            split = max(1, int(0.8 * acts.shape[0]))
+            fit_x, held_x = acts[:split], acts[split:]
+            if held_x.shape[0] == 0:
+                held_x = fit_x
 
-        d_model = acts.shape[1]
-        n_features = max(2, min(int(n_features), 4 * d_model))
-        top_k = int(k) if k else max(2, min(16, n_features // 4))
+            d_model = acts.shape[1]
+            n_features = max(2, min(int(n_features), 4 * d_model))
+            top_k = int(k) if k else max(2, min(16, n_features // 4))
 
-        sae = _sae_class()(d_model, n_features, top_k).to(acts.device)
-        optimiser = torch.optim.Adam(sae.parameters(), lr=learning_rate)
+            sae = _sae_class()(d_model, n_features, top_k).to(acts.device)
+            optimiser = torch.optim.Adam(sae.parameters(), lr=learning_rate)
 
-        # Per-element variance, and the summed squared deviation it corresponds
-        # to. The squared error below is summed over the feature dimension while
-        # `var()` is per element, so normalising one against the other divides by
-        # d_model too few -- it reported NMSE 303 for a fit whose true NMSE was
-        # 0.395, and I nearly wrote off a working reconstruction as a failure.
-        variance = float(fit_x.var())
-        variance_sum = variance * d_model
-        history: List[Dict[str, float]] = []
-        for step in range(int(steps)):
-            optimiser.zero_grad()
-            recon, sparse, _ = sae(fit_x)
-            loss = ((recon - fit_x) ** 2).sum(dim=-1).mean()
-            loss.backward()
-            optimiser.step()
-            sae.unit_normalise_decoders()
-            if step % max(1, int(steps) // 8) == 0 or step == int(steps) - 1:
-                history.append({"step": step,
-                                "train_mse": round(float(loss.detach()), 8)})
+            # Per-element variance, and the summed squared deviation it corresponds
+            # to. The squared error below is summed over the feature dimension while
+            # `var()` is per element, so normalising one against the other divides by
+            # d_model too few -- it reported NMSE 303 for a fit whose true NMSE was
+            # 0.395, and I nearly wrote off a working reconstruction as a failure.
+            variance = float(fit_x.var())
+            variance_sum = variance * d_model
+            history: List[Dict[str, float]] = []
+            for step in range(int(steps)):
+                optimiser.zero_grad()
+                recon, sparse, _ = sae(fit_x)
+                loss = ((recon - fit_x) ** 2).sum(dim=-1).mean()
+                loss.backward()
+                optimiser.step()
+                sae.unit_normalise_decoders()
+                if step % max(1, int(steps) // 8) == 0 or step == int(steps) - 1:
+                    history.append({"step": step,
+                                    "train_mse": round(float(loss.detach()), 8)})
 
-        with torch.no_grad():
-            fit_recon, fit_sparse, _ = sae(fit_x)
-            held_recon, held_sparse, _ = sae(held_x)
+            with torch.no_grad():
+                fit_recon, fit_sparse, _ = sae(fit_x)
+                held_recon, held_sparse, _ = sae(held_x)
 
-            fit_mse = float(((fit_recon - fit_x) ** 2).sum(-1).mean())
-            held_mse = float(((held_recon - held_x) ** 2).sum(-1).mean())
-            held_l0 = sae.l0(held_sparse)
-            dead = sae.dead_fraction(held_sparse)
+                fit_mse = float(((fit_recon - fit_x) ** 2).sum(-1).mean())
+                held_mse = float(((held_recon - held_x) ** 2).sum(-1).mean())
+                held_l0 = sae.l0(held_sparse)
+                dead = sae.dead_fraction(held_sparse)
 
-        # Fraction of activation variance left unexplained. Both terms are
-        # summed over the feature dimension, so the ratio is dimensionless and
-        # comparable across models and layers.
-        nmse = held_mse / variance_sum if variance_sum > 0 else None
+            # Fraction of activation variance left unexplained. Both terms are
+            # summed over the feature dimension, so the ratio is dimensionless and
+            # comparable across models and layers.
+            nmse = held_mse / variance_sum if variance_sum > 0 else None
 
-        # An NMSE at or above 1 means the reconstruction is worse than predicting
-        # the mean, so it is not a reconstruction at all. Reported as a failure
-        # rather than left for a reader to notice.
-        reconstruction_useful = bool(nmse is not None and nmse < 1.0)
+            # An NMSE at or above 1 means the reconstruction is worse than predicting
+            # the mean, so it is not a reconstruction at all. Reported as a failure
+            # rather than left for a reader to notice.
+            reconstruction_useful = bool(nmse is not None and nmse < 1.0)
 
-        attributions = self._attribute(torch, sae, held_x, held_sparse,
-                                       tokenizer, top_tokens)
+            attributions = self._attribute(torch, sae, held_x, held_sparse,
+                                           tokenizer, top_tokens)
 
-        metrics = {
-            # The measured reconstruction error, from a real encode/decode.
-            "reconstruction_mse": round(held_mse, 8),
-            "train_reconstruction_mse": round(fit_mse, 8),
-            "held_out_fraction": round(held_x.shape[0] / acts.shape[0], 4),
-            # Measured, not the requested k.
-            "l0_mean_active_features": round(held_l0, 4),
-            "requested_k": top_k,
-            "dictionary_size": n_features,
-            "activation_variance": round(variance, 8),
-            "activation_variance_summed": round(variance_sum, 6),
-            "mse_units": "sum of squared error over the feature dimension",
-            "reconstruction_useful": reconstruction_useful,
-            "normalized_mse": (round(nmse, 6) if nmse is not None else None),
-            "dead_feature_fraction": round(dead, 4),
-            "n_activations": int(held_x.shape[0]),
-            "n_features": n_features,
-            "topk_k": top_k,
-            "top_activating_tokens": attributions,
-            "training_history": history,
-            # Stated because it bounds what the attributions mean.
-            "monosemanticity_scored": False,
-            "monosemanticity_reason": (
-                "Not scored. A monosemanticity score needs a stated "
-                "interpretability criterion evaluated against an independent "
-                "judge; max-activation token attribution is not that, and "
-                "inventing a scalar from it would repeat the defect this "
-                "pipeline previously had. The per-feature tokens below are "
-                "measurements of which tokens maximise each feature, and "
-                "nothing more."
-            ),
-        }
+            # Persist the fitted weights so train -> inspect is a real chain, not
+            # two endpoints that merely share a name. The file carries the encoder
+            # the loader reads (W_enc, b_enc, b_pre) plus the decoder and the fit
+            # metrics the checkpoint was saved with. A save failure is recorded,
+            # not fatal: the metrics above were still measured.
+            checkpoint_record = self._save_checkpoint(
+                torch, sae, d_model, n_features, top_k, int(seed), int(steps),
+                float(learning_rate), checkpoint_dir)
 
-        # The status reflects whether the fit produced a usable reconstruction.
-        # Training without converging is not "completed": reporting a status that
-        # reads as success alongside an NMSE above 1 would be the same defect as
-        # the one this pipeline was rewritten to remove.
-        if not reconstruction_useful:
-            return {
-                "pipeline": "SAEReproductionPipeline",
-                "status": UNAVAILABLE,
-                "provenance": UNAVAILABLE,
-                "field_provenance": {name: UNAVAILABLE for name in metrics},
-                "mock_mode": False,
-                "validation_eligible": False,
-                "publication_eligible": False,
-                "observed_metrics": metrics,
-                "corpus": corpus_manifest,
-                "seed": int(seed),
-                "steps": int(steps),
-                "reason": (
-                    f"An autoencoder was fitted but its reconstruction is not "
-                    f"usable: normalised MSE {nmse:.4g} is at or above 1, so it "
-                    f"explains less of the held-out activation variance than "
-                    f"predicting the mean would. Reported rather than presented "
-                    f"as a reconstruction. The training history is in "
-                    f"`observed_metrics.training_history`; more steps or a higher "
-                    f"learning rate may fix it, and a corpus with narrower "
-                    f"activation outliers may help more."
+            metrics = {
+                # The measured reconstruction error, from a real encode/decode.
+                "reconstruction_mse": round(held_mse, 8),
+                "train_reconstruction_mse": round(fit_mse, 8),
+                "held_out_fraction": round(held_x.shape[0] / acts.shape[0], 4),
+                # Measured, not the requested k.
+                "l0_mean_active_features": round(held_l0, 4),
+                "requested_k": top_k,
+                "dictionary_size": n_features,
+                "activation_variance": round(variance, 8),
+                "activation_variance_summed": round(variance_sum, 6),
+                "mse_units": "sum of squared error over the feature dimension",
+                "reconstruction_useful": reconstruction_useful,
+                "normalized_mse": (round(nmse, 6) if nmse is not None else None),
+                "dead_feature_fraction": round(dead, 4),
+                "n_activations": int(held_x.shape[0]),
+                "n_features": n_features,
+                "topk_k": top_k,
+                "top_activating_tokens": attributions,
+                "training_history": history,
+                # Stated because it bounds what the attributions mean.
+                "monosemanticity_scored": False,
+                "monosemanticity_reason": (
+                    "Not scored. A monosemanticity score needs a stated "
+                    "interpretability criterion evaluated against an independent "
+                    "judge; max-activation token attribution is not that, and "
+                    "inventing a scalar from it would repeat the defect this "
+                    "pipeline previously had. The per-feature tokens below are "
+                    "measurements of which tokens maximise each feature, and "
+                    "nothing more."
                 ),
             }
 
-        return {
-            "pipeline": "SAEReproductionPipeline",
-            "status": "completed",
-            "provenance": LIVE,
-            "field_provenance": {
-                name: LIVE for name in metrics
-            },
-            "mock_mode": False,
-            "validation_eligible": False,
-            "publication_eligible": False,
-            "model_id": getattr(self.engine, "MODEL_ID", None),
-            "autoencoder": "top_k_sae",
-            "observed_metrics": metrics,
-            "corpus": corpus_manifest,
-            "seed": int(seed),
-            "steps": int(steps),
-            "learning_rate": float(learning_rate),
-            "reason": (
-                f"Top-k SAE with {n_features} dictionary elements and k={top_k} "
-                f"trained for {int(steps)} steps on {int(acts.shape[0])} real "
-                f"GPT-2 MLP post-activation vectors "
-                f"({int(held_x.shape[0])} held out). Reconstruction MSE "
-                f"{held_mse:.6g} on held-out activations, normalised "
-                f"{nmse:.4g} of activation variance, mean L0 {held_l0:.1f}."
-                + (" Corpus is this repository's documentation text, so these "
-                   "are features of technical vocabulary, not findings about "
-                   "GPT-2 in general." if corpus_manifest.get(
-                       "corpus_is_documentation_text") else "")
-            ),
-        }
+            # The status reflects whether the fit produced a usable reconstruction.
+            # Training without converging is not "completed": reporting a status that
+            # reads as success alongside an NMSE above 1 would be the same defect as
+            # the one this pipeline was rewritten to remove.
+            if not reconstruction_useful:
+                return {
+                    "pipeline": "SAEReproductionPipeline",
+                    "status": UNAVAILABLE,
+                    "provenance": UNAVAILABLE,
+                    "field_provenance": {name: UNAVAILABLE for name in metrics},
+                    "mock_mode": False,
+                    "validation_eligible": False,
+                    "publication_eligible": False,
+                    "observed_metrics": metrics,
+                    "checkpoint": checkpoint_record,
+                    "corpus": corpus_manifest,
+                    "seed": int(seed),
+                    "steps": int(steps),
+                    "reason": (
+                        f"An autoencoder was fitted but its reconstruction is not "
+                        f"usable: normalised MSE {nmse:.4g} is at or above 1, so it "
+                        f"explains less of the held-out activation variance than "
+                        f"predicting the mean would. Reported rather than presented "
+                        f"as a reconstruction. The training history is in "
+                        f"`observed_metrics.training_history`; more steps or a higher "
+                        f"learning rate may fix it, and a corpus with narrower "
+                        f"activation outliers may help more."
+                    ),
+                }
+
+            return {
+                "pipeline": "SAEReproductionPipeline",
+                "status": "completed",
+                "provenance": LIVE,
+                "field_provenance": {
+                    name: LIVE for name in metrics
+                },
+                "mock_mode": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "model_id": getattr(self.engine, "MODEL_ID", None),
+                "autoencoder": "top_k_sae",
+                "observed_metrics": metrics,
+                "checkpoint": checkpoint_record,
+                "corpus": corpus_manifest,
+                "seed": int(seed),
+                "steps": int(steps),
+                "learning_rate": float(learning_rate),
+                "reason": (
+                    f"Top-k SAE with {n_features} dictionary elements and k={top_k} "
+                    f"trained for {int(steps)} steps on {int(acts.shape[0])} real "
+                    f"GPT-2 MLP post-activation vectors "
+                    f"({int(held_x.shape[0])} held out). Reconstruction MSE "
+                    f"{held_mse:.6g} on held-out activations, normalised "
+                    f"{nmse:.4g} of activation variance, mean L0 {held_l0:.1f}."
+                    + (" Corpus is this repository's documentation text, so these "
+                       "are features of technical vocabulary, not findings about "
+                       "GPT-2 in general." if corpus_manifest.get(
+                           "corpus_is_documentation_text") else "")
+                ),
+            }
+
+        finally:
+            torch.set_num_threads(prev_threads)
 
     # ── internals ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _default_checkpoint_dir(root: Path) -> Path:
+        return Path(root) / "backend" / "storage" / "sae_checkpoints"
+
+    def _save_checkpoint(self, torch, sae, d_model: int, n_features: int,
+                         top_k: int, seed: int, steps: int,
+                         learning_rate: float,
+                         checkpoint_dir: Optional[Any]) -> Dict[str, Any]:
+        """Persist fitted weights beside the metrics that describe them.
+
+        Keys match what the checkpoint loader reads (`W_enc`, `b_enc`,
+        `b_pre`; the loader centres with `b_pre`, which is this SAE's
+        `b_dec`). A unique filename per run: overwriting a previous
+        checkpoint with a new fit would silently re-point every inspection
+        at different weights.
+        """
+        import uuid
+
+        target = (Path(checkpoint_dir) if checkpoint_dir is not None
+                  else self._default_checkpoint_dir(self.root))
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            name = (f"sae_d{d_model}_n{n_features}_k{top_k}_s{seed}_"
+                    f"{steps}st_{uuid.uuid4().hex[:8]}.pt")
+            path = target / name
+            with torch.no_grad():
+                payload = {
+                    "W_enc": sae.W_enc.detach().cpu().clone(),
+                    "b_enc": sae.b_enc.detach().cpu().clone(),
+                    "b_pre": sae.b_dec.detach().cpu().clone(),
+                    "W_dec": sae.W_dec.detach().cpu().clone(),
+                    "b_dec": sae.b_dec.detach().cpu().clone(),
+                    "d_model": int(d_model),
+                    "n_features": int(n_features),
+                    "top_k": int(top_k),
+                    "seed": int(seed),
+                    "steps": int(steps),
+                    "learning_rate": float(learning_rate),
+                    "autoencoder": "top_k_sae",
+                }
+                torch.save(payload, str(path))
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            # File bytes identify the artifact instance, but `torch.save`
+            # output is not byte-stable across calls (zip container
+            # metadata), so it cannot pin reproducibility. The content
+            # digest covers dtype + shape + raw bytes of every weight tensor
+            # in sorted key order: same seed must pin the learned weights,
+            # whatever the container does.
+            content = hashlib.sha256()
+            for key in sorted(payload):
+                value = payload[key]
+                if torch.is_tensor(value):
+                    content.update(str(value.dtype).encode("utf-8"))
+                    content.update(str(tuple(value.shape)).encode("utf-8"))
+                    content.update(value.detach().to("cpu").contiguous()
+                                   .numpy().tobytes())
+                else:
+                    content.update(repr(value).encode("utf-8"))
+            return {
+                "checkpoint_saved": True,
+                "checkpoint_path": str(path),
+                "checkpoint_sha256": f"sha256:{digest}",
+                "checkpoint_content_sha256": f"sha256:{content.hexdigest()}",
+                "checkpoint_d_in": int(d_model),
+                "checkpoint_d_sae": int(n_features),
+            }
+        except Exception as exc:
+            return {
+                "checkpoint_saved": False,
+                "checkpoint_path": None,
+                "checkpoint_sha256": None,
+                "reason": (f"Checkpoint could not be written: "
+                           f"{type(exc).__name__}: {exc}"),
+            }
 
     def _attribute(self, torch, sae, acts, sparse, tokenizer,
                    top_tokens: int) -> List[Dict[str, Any]]:

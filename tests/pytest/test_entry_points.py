@@ -81,6 +81,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SKIP_DIRS = {
     "node_modules", "__pycache__", ".git", ".claude", "release",
     "site-packages", ".venv", ".pytest-tmp", ".agents",
+    "MECH-standalone",  # duplicate/standalone copy, not part of shipped package
 }
 
 #: Top-level names that are this project's own, so their absence is a real defect

@@ -56,8 +56,9 @@ class ValidationStats:
 class ScientificValidator:
     """Validator for high-fidelity mechanistic interpretability research."""
 
-    def __init__(self, registry: Optional[CanonicalBenchmarkRegistry] = None) -> None:
+    def __init__(self, registry: Optional[CanonicalBenchmarkRegistry] = None, bootstrap_seed: int = 42) -> None:
         self.registry = registry or CanonicalBenchmarkRegistry()
+        self._bootstrap_seed = bootstrap_seed
         self.audit = ScientificAuditLogger()
         self.snapshot_engine = ResearchSnapshotEngine()
         self.manifest_engine = ResearchManifestEngine()
@@ -76,7 +77,8 @@ class ScientificValidator:
 
     def compute_bootstrap_ci(self, data: List[float], n_bootstrap: int = 2000, ci: float = 0.95) -> Tuple[float, float]:
         if not data: return (0.0, 0.0)
-        means = [sum(random.choices(data, k=len(data))) / len(data) for _ in range(n_bootstrap)]
+        rng = random.Random(self._bootstrap_seed)
+        means = [sum(rng.choices(data, k=len(data))) / len(data) for _ in range(n_bootstrap)]
         means.sort()
         return (means[int((1 - ci) / 2 * n_bootstrap)], means[int((1 + ci) / 2 * n_bootstrap)])
 

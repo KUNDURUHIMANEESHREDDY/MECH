@@ -5,6 +5,8 @@ Parses scientific papers, extracts methods, experiments, and discoveries, and up
 
 from __future__ import annotations
 
+from backend.core.identifiers import content_id
+
 import datetime as _dt
 from typing import Any, Dict, List
 
@@ -23,7 +25,7 @@ class LiteratureLearningPipeline:
         doi_or_url: str = "arxiv:2211.00593",
         text_content: str = "",
     ) -> Dict[str, Any]:
-        paper_id = f"paper_{hash(paper_title) & 0xffffffff:08x}"
+        paper_id = content_id(paper_title, prefix="paper_")
         auth = authors or ["Wang et al."]
 
         methods = ["Path Patching", "Logit Lens", "Activation Interventions", "Causal Tracing"]

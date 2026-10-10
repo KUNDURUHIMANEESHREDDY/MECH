@@ -44,15 +44,24 @@ class TestIOIPipelineAdversarial:
     """Stress tests and edge-case evaluations for IOIReproductionPipeline and GPT2Adapter."""
 
     def test_ioi_pipeline_zero_prompts_handling(self):
-        """Challenge: What happens if n_prompts=0 is requested?
+        """Challenge: n_prompts=0 must fail closed with a clear validation error.
 
-        Does the pipeline fail closed or raise unhandled ZeroDivisionError / IndexError?
+        A raw ZeroDivisionError or IndexError from an unguarded division is a bug.
+        The pipeline must validate input bounds and raise ValueError.
         """
         pipeline = IOIReproductionPipeline(mock_mode=True)
-        # Empirical test: check if n_prompts=0 raises ZeroDivisionError or IndexError
-        with pytest.raises((ZeroDivisionError, IndexError, ValueError)) as excinfo:
+        with pytest.raises(ValueError) as excinfo:
             pipeline.run(n_prompts=0)
-        assert excinfo.type in (ZeroDivisionError, IndexError, ValueError)
+        assert "n_prompts must be > 0" in str(excinfo.value)
+        assert "0" in str(excinfo.value)
+
+    def test_ioi_pipeline_negative_prompts_handling(self):
+        """Negative n_prompts must also fail with clear validation error."""
+        pipeline = IOIReproductionPipeline(mock_mode=True)
+        with pytest.raises(ValueError) as excinfo:
+            pipeline.run(n_prompts=-1)
+        assert "n_prompts must be > 0" in str(excinfo.value)
+        assert "-1" in str(excinfo.value)
 
     def test_gpt2_adapter_mock_does_not_synthesize_ioi_for_arbitrary_names(self):
         """Mock mode must not invent an IOI answer for arbitrary name pairs.

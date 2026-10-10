@@ -217,3 +217,50 @@ def pass_through(result: Any, reason: Optional[str] = None) -> Any:
             "not infer 'live' from the existence of the method."
         ),
     )
+
+
+# Evidence level helpers
+
+#: Evidence levels for scientific claims, from weakest to strongest
+#: OBSERVATIONAL: correlation/activation patterns observed
+#: ATTRIBUTIONAL: attribution methods (attention, gradient, etc.)
+#: INTERVENTIONAL: causal intervention (patching, ablation)
+#: CAUSALLY_VALIDATED: passed held-out validation checks
+#: REPLICATED: replicated across seeds/models/prompts
+EVIDENCE_LEVELS = {
+    "OBSERVATIONAL": 1,
+    "ATTRIBUTIONAL": 2,
+    "INTERVENTIONAL": 3,
+    "CAUSALLY_VALIDATED": 4,
+    "REPLICATED": 5,
+}
+
+
+def evidence_level_rank(level: str) -> int:
+    """Return the numeric rank of an evidence level (higher = stronger)."""
+    return EVIDENCE_LEVELS.get(str(level).upper(), 0)
+
+
+def max_evidence_level(*levels: str) -> str:
+    """Return the strongest evidence level from a list."""
+    if not levels:
+        return "OBSERVATIONAL"
+    return max(levels, key=evidence_level_rank)
+
+
+def set_evidence_level(result: Dict[str, Any], level: str) -> Dict[str, Any]:
+    """Set the evidence level on a result dictionary."""
+    if not isinstance(result, dict):
+        return result
+    level_upper = str(level).upper()
+    if level_upper not in EVIDENCE_LEVELS:
+        raise ValueError(f"Unknown evidence level: {level}. Valid: {list(EVIDENCE_LEVELS.keys())}")
+    result["evidence_level"] = level_upper
+    return result
+
+
+def get_evidence_level(result: Dict[str, Any]) -> str:
+    """Get the evidence level from a result, defaulting to OBSERVATIONAL."""
+    if not isinstance(result, dict):
+        return "OBSERVATIONAL"
+    return str(result.get("evidence_level", "OBSERVATIONAL")).upper()

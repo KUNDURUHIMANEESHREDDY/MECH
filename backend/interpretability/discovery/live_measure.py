@@ -14,7 +14,6 @@ intervention twice in one process lifetime.
 
 from __future__ import annotations
 
-import threading
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
@@ -24,10 +23,23 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 # name is re-exported so existing `except LiveUnavailable` clauses are
 # unaffected.
 from backend.science.models.adapter_base import LiveUnavailable  # noqa: E402,F401
+from backend.services.model_lock import MODEL_LOCK
 
 
-_MEASURE_LOCK = threading.RLock()
+# All model forwards share MODEL_LOCK with gpt2_engine (see
+# backend/services/model_lock.py): hooks are global on the shared model,
+# so any two interleaved forwards corrupt each other's captures.
+# Kept under the old name so existing `with _MEASURE_LOCK:` blocks are
+# unaffected.
+_MEASURE_LOCK = MODEL_LOCK
 _CACHE: Dict[str, Any] = {}
+_CACHE_MAX = 512
+
+
+def _cache_put(key: str, value: Any) -> None:
+    _CACHE[key] = value
+    while len(_CACHE) > _CACHE_MAX:
+        _CACHE.pop(next(iter(_CACHE)))
 
 
 def _engine():
@@ -99,7 +111,7 @@ def baseline(prompt: str, io_id: int, subj_id: int) -> Dict[str, Any]:
             "top1": top1,
             "logit_diff": _logit_diff(engine, logits, io_id, subj_id),
         }
-    _CACHE[key] = dict(result)
+    _cache_put(key, dict(result))
     return result
 
 
@@ -133,7 +145,7 @@ def ablate(prompt: str, io_id: int, subj_id: int,
         finally:
             for handle in hooks:
                 handle.remove()
-    _CACHE[key] = value
+    _cache_put(key, value)
     return value
 
 
@@ -164,24 +176,15 @@ def capture(prompt: str) -> Tuple[Any, Dict[int, Any]]:
         finally:
             for handle in hooks:
                 handle.remove()
-    _CACHE[key] = (logits.clone(),
-                   {layer: t.clone() for layer, t in caps.items()})
+    _cache_put(key, (logits.clone(), {layer: t.clone() for layer, t in caps.items()}))
     return logits, caps
 
 
-def inject(prompt: str, io_id: int, subj_id: int,
-           clean_caps: Dict[int, Any],
-           active_heads: Set[Tuple[int, int]]) -> Dict[str, Any]:
-    """Run `prompt` with clean attention slices injected for active heads.
-
-    Used for clean-to-corrupted circuit isolation: `prompt` is normally the
-    corrupted variant while `clean_caps` come from the clean variant.
-    """
-    key = (f"inject|{prompt}|{io_id}|{subj_id}|"
-           f"{','.join(f'{l}H{h}' for l, h in sorted(active_heads))}")
-    if key in _CACHE:
-        return dict(_CACHE[key])
-    engine = _engine()
+def _injected_logits(engine: Any, prompt: str,
+                     clean_caps: Dict[int, Any],
+                     active_heads: Set[Tuple[int, int]]) -> Any:
+    """One corrupted forward pass with clean slices injected. Hook install,
+    forward, and removal are a single locked unit (see MODEL_LOCK)."""
     import torch
     _, _, hd = dims()
     hooks = []
@@ -203,16 +206,53 @@ def inject(prompt: str, io_id: int, subj_id: int,
         try:
             with torch.no_grad():
                 out = engine._model(**_inputs(engine, prompt))
-            logits = out.logits[0, -1].detach().cpu()
-            result = {
-                "top1": engine._decode(int(torch.argmax(logits))),
-                "logit_diff": _logit_diff(engine, logits, io_id, subj_id),
-            }
+            return out.logits[0, -1].detach().cpu()
         finally:
             for handle in hooks:
                 handle.remove()
-    _CACHE[key] = dict(result)
+
+
+def inject(prompt: str, io_id: int, subj_id: int,
+           clean_caps: Dict[int, Any],
+           active_heads: Set[Tuple[int, int]]) -> Dict[str, Any]:
+    """Run `prompt` with clean attention slices injected for active heads.
+
+    Used for clean-to-corrupted circuit isolation: `prompt` is normally the
+    corrupted variant while `clean_caps` come from the clean variant.
+    """
+    key = (f"inject|{prompt}|{io_id}|{subj_id}|"
+           f"{','.join(f'{l}H{h}' for l, h in sorted(active_heads))}")
+    if key in _CACHE:
+        return dict(_CACHE[key])
+    engine = _engine()
+    import torch
+    logits = _injected_logits(engine, prompt, clean_caps, active_heads)
+    result = {
+        "top1": engine._decode(int(torch.argmax(logits))),
+        "logit_diff": _logit_diff(engine, logits, io_id, subj_id),
+    }
+    _cache_put(key, dict(result))
     return result
+
+
+def target_logit(prompt: str, token_id: int,
+                 clean_caps: Dict[int, Any],
+                 active_heads: Set[Tuple[int, int]]) -> float:
+    """One head's target-token logit under circuit injection.
+
+    Same intervention as `inject`, but scores a single token instead of a
+    logit difference — for datasets that name a target token without naming
+    the IO/subject pair the difference needs.
+    """
+    key = (f"tlogit|{prompt}|{token_id}|"
+           f"{','.join(f'{l}H{h}' for l, h in sorted(active_heads))}")
+    if key in _CACHE:
+        return float(_CACHE[key])
+    engine = _engine()
+    logits = _injected_logits(engine, prompt, clean_caps, active_heads)
+    value = float(logits[token_id].item())
+    _cache_put(key, value)
+    return value
 
 
 def head_label(layer: int, head: int) -> str:
@@ -388,6 +428,59 @@ def circuit_fidelity(clean: str, corrupted: str, io_id: int, subj_id: int,
         "corrupted_logit_diff": corr_base,
         "recovered_logit_diff": recovered,
         "denominator": denom,
+        "retained_heads": sorted(head_label(*h) for h in retained),
+    }
+
+
+def _target_logit_of(engine: Any, prompt: str, token_id: int) -> float:
+    import torch
+    with _MEASURE_LOCK:
+        with torch.no_grad():
+            out = engine._model(**_inputs(engine, prompt))
+        return float(out.logits[0, -1, token_id].item())
+
+
+def circuit_fidelity_target(clean: str, corrupted: str, target_id: int,
+                            retained: Set[Tuple[int, int]]) -> Dict[str, Any]:
+    """Whole-circuit recovery measured on one target token's logit.
+
+    Same clean-to-corrupted injection as `circuit_fidelity`, but the score
+    is a single token's logit rather than an IO-minus-subject difference --
+    for datasets that name a target token without naming the pair the
+    difference needs. The two numbers are different metrics and must never
+    be compared or substituted; the record says which one it is.
+    """
+    if not retained:
+        return {
+            "fidelity": None,
+            "measured": False,
+            "metric": "target-logit recovery",
+            "reason": ("fidelity is undefined without a retained circuit: "
+                       "there is nothing to inject"),
+        }
+    engine = _engine()
+    clean_base = _target_logit_of(engine, clean, target_id)
+    corr_base = _target_logit_of(engine, corrupted, target_id)
+    denom = clean_base - corr_base
+    if not denom:
+        return {
+            "fidelity": None,
+            "measured": False,
+            "metric": "target-logit recovery",
+            "denominator": denom,
+            "reason": ("the clean and corrupted prompts give the target token "
+                       "identical logits, so there is no gap to explain"),
+        }
+    _, caps = capture(clean)
+    recovered = target_logit(corrupted, target_id, caps, retained)
+    return {
+        "fidelity": round((recovered - corr_base) / denom, 4),
+        "measured": True,
+        "metric": "target-logit recovery",
+        "clean_target_logit": round(clean_base, 4),
+        "corrupted_target_logit": round(corr_base, 4),
+        "recovered_target_logit": round(recovered, 4),
+        "denominator": round(denom, 4),
         "retained_heads": sorted(head_label(*h) for h in retained),
     }
 

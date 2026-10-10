@@ -33,10 +33,11 @@ if __name__ == "__main__":
         level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
     )
 
-    # Loopback only. This API has no authentication and exposes plugin
-    # install/enable, so binding 0.0.0.0 put it on the LAN for anyone who could
-    # reach the port. MECH_BIND_HOST makes the wider bind a deliberate choice
-    # (containers, shared dev machines) rather than an accident.
+    # Loopback only. The control plane requires bearer auth (backend/core/auth.py)
+    # and exposes plugin install/enable, so binding 0.0.0.0 still puts a
+    # privileged API on the LAN for anyone with the token. MECH_BIND_HOST makes
+    # the wider bind a deliberate choice (containers, shared dev machines)
+    # rather than an accident.
     #
     # Adopted from security/plugin-and-path-hardening, which added the env
     # override; the loopback default and the shim above are from this branch.

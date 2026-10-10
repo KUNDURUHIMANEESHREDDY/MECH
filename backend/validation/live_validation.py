@@ -156,6 +156,9 @@ class LiveValidationExecutor:
             "discovery_id": discovery.get("discovery_id", ""),
             "status": "completed",
             "provenance": "live",
+            # Attested here: every check above re-measured on held-out prompts
+            # through live forward passes. Wrappers propagate, never invent.
+            "attested": True,
             "field_provenance": field_map(
                 ("discovery_id", "status", "validated", "confidence",
                  "peer_review", "checks", "head_checks"),

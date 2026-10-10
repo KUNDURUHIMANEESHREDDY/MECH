@@ -1,0 +1,3427 @@
+==============================================================================
+MECH BACKEND - SECURITY & SCIENTIFIC-INTEGRITY REMEDIATION
+Actual source of every change made for the audit findings.
+Base commit b19f393.  Companion docs:
+  security_remediation_changes.patch  (git-apply-able diff)
+  security_remediation_changelog.md   (what/why narrative)
+==============================================================================
+
+
+##############################################################################
+# P0-1  MANDATORY BEARER AUTHENTICATION
+##############################################################################
+Problem: no inbound auth on /api, /api/v1 or /mcp. CORS was the
+de facto boundary, and MCP exposed arbitrary process execution.
+
+==========================================================================
+FILE: backend/core/auth.py  (NEW FILE - entire module)   (backend/core/auth.py)
+==========================================================================
+
+--- get_bearer_token  [lines 88-108] ---
+def get_bearer_token() -> str:
+    """Return the bearer token this process accepts.
+
+    Env override wins so operators and tests have a deterministic seam.
+    Otherwise load-or-create the persisted file token.
+    """
+    global _cached_file_token
+    env_token = os.environ.get(_TOKEN_ENV, "").strip()
+    if env_token:
+        return env_token
+    if _cached_file_token:
+        return _cached_file_token
+    path = _token_file()
+    existing = _read_file_token(path)
+    if existing:
+        _cached_file_token = existing
+        return existing
+    fresh = secrets.token_urlsafe(32)
+    _write_file_token(path, fresh)
+    _cached_file_token = fresh
+    return fresh
+
+--- verify_bearer  [lines 111-127] ---
+def verify_bearer(provided: Optional[str]) -> bool:
+    """True only when ``provided`` equals the active bearer token.
+
+    Never raises on bad input: ``None``, empty, and non-string values are
+    simply not authorized. Comparison is constant-time via
+    :func:`hmac.compare_digest`.
+    """
+    if not isinstance(provided, str):
+        return False
+    candidate = provided.strip()
+    if not candidate:
+        return False
+    expected = get_bearer_token()
+    if not isinstance(expected, str) or not expected:
+        return False
+    return hmac.compare_digest(candidate.encode("utf-8"),
+                               expected.encode("utf-8"))
+
+--- extract_bearer  [lines 130-140] ---
+def extract_bearer(authorization_header: Optional[str]) -> Optional[str]:
+    """Pull the credential out of an ``Authorization`` header value."""
+    if not isinstance(authorization_header, str):
+        return None
+    scheme, sep, credential = authorization_header.partition(" ")
+    if not sep:
+        return None
+    if scheme.strip().lower() != "bearer":
+        return None
+    credential = credential.strip()
+    return credential or None
+
+--- is_public_path  [lines 143-174] ---
+def is_public_path(path: str, method: str = "GET") -> bool:
+    """True when a request bypasses bearer auth.
+
+    Public: ``/``, ``/health``, CORS preflight (``OPTIONS``), and the built
+    frontend's static files (any ``GET``/``HEAD`` path that is not part of the
+    control plane). Everything under ``/api``, ``/mcp``, ``/health/``,
+    ``/openapi.json``, ``/docs`` and ``/redoc`` requires auth.
+    """
+    m = (method or "GET").upper()
+    # CORS preflight carries no Authorization header by design. Let the CORS
+    # middleware answer it; the follow-up real request still requires auth.
+    # Anonymous OPTIONS never implies trust.
+    if m == "OPTIONS":
+        return True
+    p = path or "/"
+    if not p.startswith("/"):
+        p = "/" + p
+    if p == "/" or p == "/health":
+        return True
+    if p == "/openapi.json" or p == "/openapi.yaml":
+        return False
+    if p == "/docs" or p.startswith("/docs/"):
+        return False
+    if p == "/redoc" or p.startswith("/redoc/"):
+        return False
+    if p == "/health/subsystems" or p.startswith("/health/"):
+        return False
+    if p == "/api" or p.startswith("/api/"):
+        return False
+    if p == "/mcp" or p.startswith("/mcp/"):
+        return False
+    return True
+
+--- auth_headers  [lines 177-179] ---
+def auth_headers(token: Optional[str] = None) -> Dict[str, str]:
+    """Authorization header dict for tests and same-process callers."""
+    return {"Authorization": f"Bearer {token if token else get_bearer_token()}"}
+
+--- reset_cache  [lines 182-185] ---
+def reset_cache() -> None:
+    """Clear the in-memory file-token cache (tests only)."""
+    global _cached_file_token
+    _cached_file_token = None
+
+==========================================================================
+FILE: backend/main.py   (backend/main.py)
+==========================================================================
+
+--- _auth_middleware  [lines 168-193] ---
+async def _auth_middleware(request: Request, call_next):
+    """Mandatory bearer gate for the control plane.
+
+    Loopback reachability and Origin are never authorization. ``/`` and
+    ``/health`` stay public, CORS preflight (OPTIONS) passes through to the
+    CORS middleware, and the built frontend's static files stay public so the
+    app can load. Everything else under ``/api``, ``/mcp``, ``/health/``,
+    ``/openapi.json``, ``/docs`` and ``/redoc`` requires
+    ``Authorization: Bearer <MECH_API_TOKEN>``.
+    """
+    from backend.core import auth as auth_mod
+
+    if auth_mod.is_public_path(request.url.path, request.method):
+        return await call_next(request)
+    token = auth_mod.extract_bearer(request.headers.get("authorization"))
+    if token is None:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "missing credentials"},
+        )
+    if not auth_mod.verify_bearer(token):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "invalid credentials"},
+        )
+    return await call_next(request)
+
+--- _body_cap  [lines 196-209] ---
+def _body_cap() -> int:
+    """Global request-body ceiling in bytes (MECH_MAX_BODY_BYTES override).
+
+    Prompts have their own 2048-char bound and SAE corpora 200k chars, but
+    the rest of the control plane accepts untyped `Dict[str, Any]` bodies.
+    Without a ceiling an authenticated caller can push arbitrary megabytes at
+    the dispatcher, so bound at the edge and let endpoint schemas be tighter.
+    """
+    raw = os.environ.get("MECH_MAX_BODY_BYTES", "").strip()
+    try:
+        value = int(raw) if raw else 2 * 1024 * 1024
+    except ValueError:
+        value = 2 * 1024 * 1024
+    return max(1024, min(value, 64 * 1024 * 1024))
+
+--- _body_size_middleware  [lines 213-243] ---
+async def _body_size_middleware(request: Request, call_next):
+    """Reject oversized bodies before they are read into memory.
+
+    Checks the declared Content-Length first (cheap, catches the honest
+    client) and counts actual streamed bytes otherwise, so a lying or
+    chunked header cannot slip a large payload past. 413 is a client error;
+    nothing downstream ever sees the oversized body.
+    """
+    cap = _body_cap()
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > cap:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"request body exceeds {cap} bytes"},
+                )
+        except ValueError:
+            return JSONResponse(
+                status_code=400, content={"detail": "malformed content-length"},
+            )
+    if "content-length" not in request.headers:
+        total = 0
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > cap:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"request body exceeds {cap} bytes"},
+                )
+    return await call_next(request)
+
+--- lifespan  [lines 32-82] ---
+async def lifespan(application: FastAPI):
+    """Application startup/shutdown.
+
+    Replaces the deprecated `@app.on_event` hooks. Teardown checkpoints the
+    SQLite WAL so a clean shutdown does not leave a large -wal file behind.
+    A checkpoint failure is logged and swallowed: it is not a reason to fail
+    shutdown, and the WAL remains durable either way.
+    """
+    logger.info("MECH starting up (lifespan).")
+    try:
+        from backend.core import auth as auth_mod
+        auth_mod.get_bearer_token()
+        logger.info("Control-plane bearer auth active (token file: %s).",
+                    auth_mod._token_file())
+    except Exception as exc:
+        logger.warning("Bearer token init failed: %s", exc)
+    try:
+        from backend.core import evidence_graph as eg_mod
+        report = eg_mod.quarantine_legacy_records()
+        if report.get("moved"):
+            logger.info("Quarantined %s legacy evidence record(s) to %s.",
+                        report["moved"], report["destination"])
+    except Exception as exc:
+        logger.warning("Evidence quarantine skipped: %s", exc)
+    try:
+        from backend.plugins.service import get_service
+        restored = get_service().restore_enabled()
+        if restored:
+            logger.info("Restored enabled plugins: %s", ", ".join(restored))
+    except Exception as exc:
+        logger.warning("Plugin restore skipped: %s", exc)
+
+    await _preload_gpt2_engine()
+
+    try:
+        yield
+    finally:
+        logger.info("MECH shutting down (lifespan).")
+        try:
+            from backend.storage.database import checkpoint_wal
+            busy, log_pages, checkpointed = checkpoint_wal()
+            if busy:
+                logger.warning(
+                    "WAL checkpoint busy at shutdown (busy=%s log=%s "
+                    "checkpointed=%s); the WAL stays durable but is not "
+                    "truncated.", busy, log_pages, checkpointed)
+            else:
+                logger.info("SQLite WAL checkpoint complete at shutdown "
+                            "(%s pages).", log_pages)
+        except Exception as exc:
+            logger.warning("WAL checkpoint failed at shutdown: %s", exc)
+
+==========================================================================
+FILE: frontend/src/services/api.ts   (TypeScript)
+==========================================================================
+
+--- apiToken  [lines 30-49] ---
+export function apiToken(): string | null {
+  const fromGlobal = runtime.__MECH_API_TOKEN__?.trim();
+  if (fromGlobal) return fromGlobal;
+  try {
+    const fromStorage = typeof localStorage !== 'undefined'
+      ? localStorage.getItem('mech_api_token')?.trim()
+      : null;
+    if (fromStorage) return fromStorage;
+  } catch {
+    /* storage unavailable (SSR/tests) — fall through */
+  }
+  try {
+    const fromEnv = (import.meta as unknown as { env?: Record<string, string> })
+      ?.env?.VITE_MECH_API_TOKEN?.trim();
+    if (fromEnv) return fromEnv;
+  } catch {
+    /* no Vite env — fall through */
+  }
+  return null;
+}
+
+--- authHeaders  [lines 51-54] ---
+export function authHeaders(): Record<string, string> {
+  const token = apiToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+--- request  [lines 70-87] ---
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const headers = { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) };
+    const response = await fetch(`${BASE}${path}`, { ...init, headers, signal: controller.signal });
+    if (response.status === 401) throw new Error(`${init.method ?? 'GET'} ${path} failed: 401 (missing or invalid bearer token)`);
+    if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${path} failed: ${response.status}`);
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`${init.method ?? 'GET'} ${path} timed out after ${REQUEST_TIMEOUT_MS} ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+
+##############################################################################
+# P0-2  MCP WORKSPACE CONTAINMENT CANNOT SELF-EXPAND
+##############################################################################
+Problem: mech_project_open() could authorize ANY directory -
+register_open_root() fed resolve_contained(), so asking to open
+/ enlarged the trust boundary itself.
+
+==========================================================================
+FILE: backend/mcp_server/workspace.py   (backend/mcp_server/workspace.py)
+==========================================================================
+
+--- configured_roots  [lines 23-40] ---
+def configured_roots() -> list[Path]:
+    """Immutable trust boundary: env roots plus the repo root.
+
+    Opened projects are deliberately excluded — they are grants *within*
+    the boundary, never extensions of it.
+    """
+    raw = os.environ.get("MECH_WORKSPACE_ROOTS", "")
+    roots: list[Path] = [Path(p) for p in raw.split(os.pathsep) if p.strip()]
+    roots.append(REPO_ROOT)
+    uniq: list[Path] = []
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved not in uniq:
+            uniq.append(resolved)
+    return uniq
+
+--- workspace_roots  [lines 43-54] ---
+def workspace_roots() -> list[Path]:
+    roots: list[Path] = list(configured_roots())
+    roots.extend(Path(p) for p in _opened_roots)
+    uniq: list[Path] = []
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved not in uniq:
+            uniq.append(resolved)
+    return uniq
+
+--- clear_open_roots  [lines 57-59] ---
+def clear_open_roots() -> None:
+    """Forget explicitly opened projects (test isolation)."""
+    _opened_roots.clear()
+
+--- register_open_root  [lines 62-95] ---
+def register_open_root(path: str) -> Path:
+    """Record an explicitly opened project directory as an allowed root.
+
+    The directory must already lie inside the configured trust boundary
+    (`configured_roots()`). Anything else — `/`, home, a sibling, a `..`
+    escape, a symlink/junction resolving outside — is rejected so the MCP
+    caller can never enlarge its own authority. Set `MECH_WORKSPACE_ROOTS`
+    to include the directory first.
+    """
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("project path must be a non-empty string")
+    candidate = Path(path.strip()).expanduser()
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    try:
+        resolved = candidate.resolve()
+    except OSError as exc:
+        raise ValueError(f"project path cannot be resolved: {exc}") from exc
+    if not resolved.is_dir():
+        raise ValueError(f"project path is not a directory: {path}")
+    for root in configured_roots():
+        try:
+            resolved.relative_to(root)
+            break
+        except ValueError:
+            continue
+    else:
+        allowed = ", ".join(str(r) for r in configured_roots())
+        raise ValueError(
+            f"project path is outside the allowed workspace roots: {resolved}. "
+            f"Allowed: {allowed}. Set MECH_WORKSPACE_ROOTS to include it."
+        )
+    _opened_roots.add(str(resolved))
+    return resolved
+
+--- resolve_contained  [lines 98-119] ---
+def resolve_contained(path_str: str) -> Path:
+    """Resolve a user-supplied path, refusing anything outside allowed roots."""
+    if not isinstance(path_str, str) or not path_str.strip():
+        raise ValueError("path must be a non-empty string")
+    candidate = Path(path_str.strip()).expanduser()
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    try:
+        resolved = candidate.resolve()
+    except OSError as exc:
+        raise ValueError(f"path cannot be resolved: {exc}") from exc
+    for root in workspace_roots():
+        try:
+            resolved.relative_to(root)
+            return resolved
+        except ValueError:
+            continue
+    allowed = ", ".join(str(r) for r in workspace_roots())
+    raise ValueError(
+        f"path is outside the allowed workspace roots: {resolved}. "
+        f"Allowed: {allowed}"
+    )
+
+
+##############################################################################
+# P0-3  ARBITRARY SHELL EXECUTION REMOVED FROM MCP
+##############################################################################
+Problem: mech_shell_exec ran any argv (shell=False stops shell
+injection, not arbitrary commands).
+
+==========================================================================
+FILE: backend/mcp_server/allowed_commands.py  (NEW FILE)   (backend/mcp_server/allowed_commands.py)
+==========================================================================
+
+--- TEST_RUNNERS  [lines 35-35] ---
+TEST_RUNNERS = ("pytest", "vitest")
+
+--- BUILD_TARGETS  [lines 36-36] ---
+BUILD_TARGETS = ("renderer",)
+
+--- build_test_argv  [lines 92-141] ---
+def build_test_argv(runner: str, args: List[str], base: Path) -> List[str]:
+    """Construct the executable argv for a test run (pure, no spawning).
+
+    Raises :class:`ValueError` for anything off the menu.
+    """
+    name = (runner or "").strip().lower()
+    if name not in TEST_RUNNERS:
+        raise ValueError(
+            f"unknown test runner {runner!r}; allowed: {', '.join(TEST_RUNNERS)}")
+    if not isinstance(args, list):
+        raise ValueError("args must be a list of strings")
+    if len(args) > MAX_ARGS:
+        raise ValueError(f"too many args (max {MAX_ARGS})")
+    for item in args:
+        if not isinstance(item, str) or len(item) > MAX_ARG_CHARS:
+            raise ValueError(f"invalid arg: {item!r}")
+
+    positional: List[str] = []
+    flags: List[str] = []
+    i = 0
+    while i < len(args):
+        item = args[i]
+        if item == "-k":
+            if i + 1 >= len(args) or not _K_VALUE_RE.match(args[i + 1]):
+                raise ValueError("-k requires a safe filter expression")
+            flags.extend([item, args[i + 1]])
+            i += 2
+        elif item in _PYTEST_FLAGS or (name == "vitest" and item in ("-q", "-x", "--version")):
+            flags.append(item)
+            i += 1
+        elif item.startswith("-"):
+            raise ValueError(f"flag not allowed: {item}")
+        else:
+            positional.append(_check_test_path(item, base))
+            i += 1
+
+    if name == "pytest":
+        return [sys.executable, "-m", "pytest", *flags, *positional]
+    npm = shutil.which("npm")
+    if npm is None:
+        raise ValueError("npm binary not found on PATH")
+    try:
+        base.relative_to(_frontend_dir().resolve())
+    except ValueError:
+        raise ValueError("vitest runs inside the frontend directory")
+    if flags and "--version" in flags and len(flags) > 1:
+        raise ValueError("--version takes no other flags")
+    if "--version" in flags:
+        return [npm, "run", "test:js", "--", "--version"]
+    return [npm, "run", "test:js", "--", *flags, *positional]
+
+--- build_build_argv  [lines 144-159] ---
+def build_build_argv(target: str) -> tuple[list, Path]:
+    """Construct the executable argv + fixed cwd for a build (pure).
+
+    Raises :class:`ValueError` for anything off the menu.
+    """
+    name = (target or "").strip().lower()
+    if name not in BUILD_TARGETS:
+        raise ValueError(
+            f"unknown build target {target!r}; allowed: {', '.join(BUILD_TARGETS)}")
+    npm = shutil.which("npm")
+    if npm is None:
+        raise ValueError("npm binary not found on PATH")
+    frontend = _frontend_dir()
+    if not frontend.is_dir():
+        raise ValueError("frontend directory not found")
+    return [npm, "run", "build:renderer"], frontend
+
+--- run_test  [lines 179-192] ---
+def run_test(runner: str, args: Optional[List[str]],
+             base: Path, timeout_s: Any = 300) -> Dict[str, Any]:
+    """Validate, construct, and run a test command in ``base``."""
+    try:
+        timeout = _coerce_timeout(timeout_s, MAX_TIMEOUT_TEST_S)
+    except ValueError as exc:
+        return _err(str(exc))
+    if not base.is_dir():
+        return _err(f"cwd is not a directory: {base}")
+    try:
+        argv = build_test_argv(runner, list(args or []), base)
+    except ValueError as exc:
+        return _err(str(exc))
+    return _run(argv, base, timeout)
+
+--- run_build  [lines 195-205] ---
+def run_build(target: str, timeout_s: Any = 900) -> Dict[str, Any]:
+    """Validate, construct, and run a build for ``target``."""
+    try:
+        timeout = _coerce_timeout(timeout_s, MAX_TIMEOUT_BUILD_S)
+    except ValueError as exc:
+        return _err(str(exc))
+    try:
+        argv, cwd = build_build_argv(target)
+    except ValueError as exc:
+        return _err(str(exc))
+    return _run(argv, cwd, timeout)
+
+--- _check_test_path  [lines 71-89] ---
+def _check_test_path(raw: str, base: Path) -> str:
+    """Validate one positional test-path arg; return it unchanged on success."""
+    if not isinstance(raw, str) or not raw.strip() or len(raw) > MAX_ARG_CHARS:
+        raise ValueError(f"invalid test path: {raw!r}")
+    if "\x00" in raw:
+        raise ValueError(f"invalid test path: {raw!r}")
+    candidate = Path(raw.strip())
+    target = candidate if candidate.is_absolute() else base / candidate
+    try:
+        resolved = target.resolve()
+    except OSError as exc:
+        raise ValueError(f"test path cannot be resolved: {exc}") from exc
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        raise ValueError(f"test path escapes the working directory: {raw}")
+    if not resolved.exists():
+        raise ValueError(f"test path does not exist: {raw}")
+    return raw
+
+--- _run  [lines 162-176] ---
+def _run(argv: List[str], cwd: Path, timeout: int) -> Dict[str, Any]:
+    try:
+        proc = subprocess.run(
+            argv, cwd=str(cwd), capture_output=True, text=True,
+            timeout=timeout, shell=False)
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout if isinstance(exc.stdout, str) else ""
+        err = exc.stderr if isinstance(exc.stderr, str) else ""
+        return {"status": "timeout", "provenance": "live", "cmd": argv,
+                "cwd": str(cwd), "stdout": out[-5_000:], "stderr": err[-MAX_STDERR_CHARS:]}
+    except OSError as exc:
+        return _err(f"exec failed: {exc}")
+    return _ok(cmd=argv, cwd=str(cwd), returncode=proc.returncode,
+               stdout=proc.stdout[-MAX_STDOUT_CHARS:],
+               stderr=proc.stderr[-MAX_STDERR_CHARS:])
+
+==========================================================================
+FILE: backend/mcp_server/server.py   (backend/mcp_server/server.py)
+==========================================================================
+
+--- _contained_pathspec  [lines 301-317] ---
+def _contained_pathspec(base: Path, path: str) -> str:
+    """Resolve a git pathspec against `base`, refusing escapes."""
+    if not isinstance(path, str) or not path.strip() or len(path) > 1024:
+        raise ValueError("path must be a non-empty string")
+    if path.strip() == ".":
+        return "."
+    candidate = Path(path.strip())
+    target = candidate if candidate.is_absolute() else base / candidate
+    try:
+        resolved = target.resolve()
+    except OSError as exc:
+        raise ValueError(f"path cannot be resolved: {exc}") from exc
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        raise ValueError(f"path is outside the working directory: {path}")
+    return str(resolved)
+
+--- mech_git_diff  [lines 321-337] ---
+def mech_git_diff(cwd: str = ".", path: str = ".") -> dict:
+    """git diff (read-only) inside a contained working directory."""
+    if _git() is None:
+        return _err("git binary not found on PATH")
+    try:
+        base = ws.resolve_contained(cwd)
+        spec = _contained_pathspec(base, path)
+    except ValueError as exc:
+        return _err(str(exc))
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "--", spec], cwd=str(base),
+            capture_output=True, text=True, timeout=60, shell=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _err(f"git diff failed: {exc}")
+    return _ok(cwd=str(base), returncode=proc.returncode,
+               diff=proc.stdout[-50_000:], stderr=proc.stderr[-MAX_LOG_LINES:])
+
+--- mech_git_commit  [lines 341-369] ---
+def mech_git_commit(cwd: str, message: str) -> dict:
+    """git add -A + commit inside a contained working directory.
+
+    Blast radius: stages *all* changes under cwd, not a single file. Call
+    mech_git_diff first and commit only from a cwd whose full diff you intend.
+    """
+    if _git() is None:
+        return _err("git binary not found on PATH")
+    if not isinstance(message, str) or not message.strip():
+        return _err("message must be a non-empty string")
+    if len(message.strip()) > 1000:
+        return _err("message exceeds 1000 characters")
+    try:
+        base = ws.resolve_contained(cwd)
+    except ValueError as exc:
+        return _err(str(exc))
+    try:
+        add = subprocess.run(
+            ["git", "add", "-A"], cwd=str(base),
+            capture_output=True, text=True, timeout=60, shell=False)
+        if add.returncode != 0:
+            return _err(f"git add failed: {add.stderr[-500:]}")
+        proc = subprocess.run(
+            ["git", "commit", "-m", message.strip()], cwd=str(base),
+            capture_output=True, text=True, timeout=120, shell=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _err(f"git commit failed: {exc}")
+    return _ok(cwd=str(base), returncode=proc.returncode,
+               stdout=proc.stdout[-5_000:], stderr=proc.stderr[-MAX_LOG_LINES:])
+
+--- mech_test_run  [lines 373-388] ---
+def mech_test_run(runner: str = "pytest", args: Optional[list] = None,
+                  cwd: str = ".", timeout_s: int = 300) -> dict:
+    """Run an allowlisted test suite in a contained dir (pytest | vitest).
+
+    Example: {"runner": "pytest", "args": ["tests/pytest/test_protocol.py", "-q"]}.
+    The executable argv is built by backend.mcp_server.allowed_commands; test
+    paths must already exist inside cwd. Flags: pytest -q, -x, --version,
+    --collect-only, -k <expr>; vitest -q, -x, --version, -k <expr>.
+    """
+    from backend.mcp_server import allowed_commands as ac
+
+    try:
+        base = ws.resolve_contained(cwd)
+    except ValueError as exc:
+        return _err(str(exc))
+    return ac.run_test(runner, list(args or []), base, timeout_s)
+
+--- mech_build_run  [lines 392-400] ---
+def mech_build_run(target: str = "renderer", timeout_s: int = 900) -> dict:
+    """Run an allowlisted build (renderer: npm run build:renderer).
+
+    The working directory is fixed to the frontend directory, not
+    caller-supplied.
+    """
+    from backend.mcp_server import allowed_commands as ac
+
+    return ac.run_build(target, timeout_s)
+
+
+##############################################################################
+# P1-4  RUN IDs CANNOT TRAVERSE THE EVIDENCE DIRECTORY
+##############################################################################
+Problem: os.path.join(evidence_dir, f"{run_id}.json") with no
+validation, reachable via GET /society/runs/{run_id} fallback.
+
+==========================================================================
+FILE: backend/core/evidence_graph.py   (backend/core/evidence_graph.py)
+==========================================================================
+
+--- RUN_ID_RE  [lines 278-278] ---
+RUN_ID_RE = re.compile(r"^r[0-9a-f]{12}$")
+
+--- validate_run_id  [lines 281-289] ---
+def validate_run_id(run_id: Any) -> str:
+    """Return `run_id` iff it is a structurally valid Society run ID.
+
+    Raises :class:`ValueError` for everything else, so a path-like `run_id`
+    can never become a filename.
+    """
+    if not isinstance(run_id, str) or not RUN_ID_RE.match(run_id):
+        raise ValueError(f"invalid run_id: {run_id!r}")
+    return run_id
+
+--- _record_path  [lines 292-306] ---
+def _record_path(run_id: str, directory: Optional[str] = None) -> str:
+    """Resolve the evidence file for a validated run ID, contained in-root.
+
+    Defense in depth: the regex above already makes traversal structurally
+    impossible, and this still verifies the resolved path stays inside the
+    evidence root before any open().
+    """
+    validate_run_id(run_id)
+    root = Path(_evidence_dir(directory)).resolve()
+    target = (root / f"{run_id}.json").resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise ValueError(f"run_id escapes the evidence directory: {run_id!r}")
+    return str(target)
+
+
+##############################################################################
+# P1-5  TAMPER-EVIDENT EVIDENCE ENVELOPE
+##############################################################################
+Problem: raw JSON written and parsed with no signature or schema
+check at the persistence boundary.
+
+==========================================================================
+FILE: backend/core/evidence_graph.py   (backend/core/evidence_graph.py)
+==========================================================================
+
+--- ENVELOPE_SCHEMA_VERSION  [lines 319-319] ---
+ENVELOPE_SCHEMA_VERSION = 1
+
+--- _canonical_record_json  [lines 325-327] ---
+def _canonical_record_json(record: Dict[str, Any]) -> str:
+    return json.dumps(record, sort_keys=True, separators=(",", ":"),
+                      default=str)
+
+--- _signing_payload  [lines 330-334] ---
+def _signing_payload(run_id: str, record: Dict[str, Any], *,
+                    created_at: str, public_key: str) -> str:
+    return ("\n".join((_ENVELOPE_PAYLOAD_PREFIX,
+                       str(ENVELOPE_SCHEMA_VERSION), run_id, created_at,
+                       public_key, _canonical_record_json(record))))
+
+--- _attest_envelope  [lines 337-372] ---
+def _attest_envelope(run_id: str, record: Dict[str, Any],
+                     created_at: str) -> Dict[str, Any]:
+    """Build the attestation block for a run record envelope.
+
+    Uses the real Ed25519 module (`backend.science.integrity.signing`), which
+    never defaults a key. With no key configured the envelope is written
+    unsigned (`attested: False`) with the reason stated — readable, but never
+    mistaken for tamper-evident. A signature here proves only that *this
+    backend wrote these bytes*; it says nothing about whether the numbers
+    inside are real measurements. That is the eligibility layer's job.
+    """
+    try:
+        from backend.science.integrity import signing as _signing
+        public_key = _signing.public_key_hex()
+        signature = _signing.sign(
+            _signing_payload(run_id, record, created_at=created_at,
+                             public_key=public_key))
+        return {
+            "attested": True,
+            "algorithm": "Ed25519",
+            "public_key": public_key,
+            "key_id": _signing.key_id_for(public_key),
+            "signature": signature,
+            "reason": None,
+        }
+    except Exception as exc:
+        reason = ("no signature was recorded: "
+                  f"{type(exc).__name__}: {exc}")[:300]
+        return {
+            "attested": False,
+            "algorithm": "Ed25519",
+            "public_key": None,
+            "key_id": None,
+            "signature": None,
+            "reason": reason,
+        }
+
+--- _is_envelope  [lines 375-378] ---
+def _is_envelope(data: Any) -> bool:
+    return (isinstance(data, dict)
+            and data.get("schema_version") == ENVELOPE_SCHEMA_VERSION
+            and isinstance(data.get("record"), dict))
+
+--- _is_historical  [lines 381-383] ---
+def _is_historical(data: Any) -> bool:
+    """True when a record carries the quarantine stamp (copied back or not)."""
+    return isinstance(data, dict) and data.get("origin") == HISTORICAL_ORIGIN
+
+--- envelope_status  [lines 386-454] ---
+def envelope_status(run_id: str,
+                    directory: Optional[str] = None) -> Dict[str, Any]:
+    """Verify the persistence envelope for a run without serving its record.
+
+    Returns a status dict; never raises. `"legacy"` means the file predates
+    envelopes and is served unverified (quarantine decides its fate, not this
+    function). `"valid"` means the bytes verify under the embedded key;
+    callers that pin a key must additionally compare `key_id`.
+    """
+    try:
+        path = _record_path(run_id, directory)
+    except ValueError as exc:
+        return {"envelope": "invalid", "attested": False,
+                "signature": "missing", "reason": str(exc)[:200]}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {"envelope": "missing", "attested": False,
+                "signature": "missing", "reason": "no record on disk"}
+    except Exception as exc:
+        return {"envelope": "corrupt", "attested": False,
+                "signature": "missing",
+                "reason": f"unreadable record: {type(exc).__name__}"[:200]}
+    if not _is_envelope(data):
+        return {"envelope": "legacy", "attested": False,
+                "signature": "missing",
+                "reason": "record predates signed envelopes; unverified"}
+    if _is_historical(data) or _is_historical(data.get("record")):
+        return {"envelope": "v1", "attested": False,
+                "signature": "invalid",
+                "reason": "record carries the quarantine stamp"}
+    if data.get("run_id") != run_id:
+        return {"envelope": "v1", "attested": False,
+                "signature": "invalid",
+                "reason": "envelope run_id does not match the filename"}
+    attestation = data.get("attestation")
+    if not isinstance(attestation, dict) or not attestation.get("attested"):
+        return {"envelope": "v1", "attested": False,
+                "signature": "missing",
+                "reason": str((attestation or {}).get("reason")
+                              or "record was saved without a signature")}
+    signature = attestation.get("signature")
+    public_key = attestation.get("public_key")
+    if not signature or not public_key:
+        return {"envelope": "v1", "attested": False,
+                "signature": "missing",
+                "reason": "attestation claims attested but carries no signature/key"}
+    if attestation.get("algorithm") != "Ed25519":
+        return {"envelope": "v1", "attested": False,
+                "signature": "invalid",
+                "reason": "unsupported attestation algorithm"}
+    try:
+        from backend.science.integrity import signing as _signing
+        result = _signing.verify(
+            _signing_payload(run_id, data["record"],
+                             created_at=str(data.get("created_at", "")),
+                             public_key=str(public_key)),
+            signature, public_key)
+    except Exception as exc:
+        return {"envelope": "v1", "attested": False,
+                "signature": "unverifiable",
+                "reason": f"verifier failed: {type(exc).__name__}"[:200]}
+    if not result.valid:
+        return {"envelope": "v1", "attested": False,
+                "signature": "invalid",
+                "reason": str(result.reason or "signature does not verify")[:200]}
+    return {"envelope": "v1", "attested": True, "signature": "valid",
+            "key_id": attestation.get("key_id"), "reason": None}
+
+--- save_run_record  [lines 457-514] ---
+def save_run_record(run_id: str, record: Dict[str, Any],
+                    directory: Optional[str] = None) -> str:
+    """Persist a full Society run record (trace + graph + publication).
+
+    The record is wrapped in a versioned, Ed25519-signed envelope (or an
+    explicitly unsigned one when no signing key is configured — see
+    `_attest_envelope`). Use `envelope_status` to check a file; `load`
+    unwraps but never upgrades.
+    """
+    from datetime import datetime, timezone
+
+    validate_run_id(run_id)
+    if not isinstance(record, dict):
+        raise ValueError("record must be a dict")
+    if record.get("origin") == HISTORICAL_ORIGIN:
+        raise ValueError("refusing to re-mint a quarantined record as current evidence")
+    target = _evidence_dir(directory)
+    os.makedirs(target, exist_ok=True)
+    path = _record_path(run_id, directory)
+    created_at = datetime.now(timezone.utc).isoformat()
+    envelope = {
+        "schema_version": ENVELOPE_SCHEMA_VERSION,
+        "run_id": run_id,
+        "created_at": created_at,
+        "record": record,
+        "attestation": _attest_envelope(run_id, record, created_at),
+    }
+    # Atomic commit: readers never see a partially written record. The payload
+    # goes to a uniquely named sidecar temp in the same directory (same
+    # filesystem, so the rename swaps the directory entry atomically — a
+    # concurrent reader sees the old file or the new one, never torn bytes),
+    # is flushed and fsynced, then moved over the target with os.replace.
+    # Crash/power-loss durability of the rename itself is best-effort
+    # (_fsync_dir is a no-op on Windows, where opening a directory fails).
+    # The commit holds _save_lock because same-target replaces race on
+    # Windows file locking (measured WinError 5 under a 10-thread hammer);
+    # last-wins stays deterministic. A crash can only orphan a sidecar, which
+    # readers ignore (list only reads *.json).
+    import tempfile
+    with _save_lock:
+        fd, tmp_path = tempfile.mkstemp(dir=target, prefix=f"{run_id}.json.tmp.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(envelope, f, indent=2, default=str)
+                f.flush()
+                os.fsync(f.fileno())
+            try:
+                _fsync_dir(target)
+            except OSError:
+                pass
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    return path
+
+--- load_run_record  [lines 526-546] ---
+def load_run_record(run_id: str,
+                    directory: Optional[str] = None) -> Dict[str, Any]:
+    """Load a run record, unwrapping the persistence envelope if present.
+
+    Pre-envelope (legacy) files are returned as-is; check `envelope_status`
+    to tell the two apart. Unwrapping never upgrades: a legacy record stays
+    legacy until something re-saves it through `save_run_record`. Anything
+    carrying the quarantine stamp is refused: a stamped file copied back
+    into the authoritative dir must not pass as current evidence.
+    """
+    path = _record_path(run_id, directory)
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if _is_historical(data):
+        raise ValueError(f"quarantined record is not servable: {run_id!r}")
+    if _is_envelope(data):
+        record = data["record"]
+        if _is_historical(record):
+            raise ValueError(f"quarantined record is not servable: {run_id!r}")
+        return record
+    return data
+
+--- list_run_records  [lines 549-583] ---
+def list_run_records(directory: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Summaries of persisted runs, newest first. Never raises."""
+    target = _evidence_dir(directory)
+    try:
+        files = sorted(
+            (f for f in os.listdir(target) if f.endswith(".json")),
+            reverse=True)
+    except Exception:
+        return []
+    summaries = []
+    for name in files[:200]:
+        try:
+            with open(os.path.join(target, name), "r",
+                      encoding="utf-8") as f:
+                record = json.load(f)
+            if _is_envelope(record):
+                outer_id = record.get("run_id", name[:-5])
+                record = record["record"]
+            else:
+                outer_id = None
+            if not isinstance(record, dict):
+                continue
+            if _is_historical(record):
+                continue  # quarantine stamp: never listed as a current run
+            pub = record.get("publication", {})
+            summaries.append({
+                "run_id": outer_id or record.get("run_id", name[:-5]),
+                "goal": record.get("goal", ""),
+                "status": record.get("status", ""),
+                "steps_completed": pub.get("steps_completed", ""),
+                "created": pub.get("published_at", ""),
+            })
+        except Exception:
+            continue
+    return summaries
+
+
+##############################################################################
+# P1-6  ATOMIC EVIDENCE WRITES
+##############################################################################
+Problem: direct write left a partial record after a crash.
+Two Windows bugs found by the tests: fixed .tmp name collided
+across threads, and same-target os.replace races file locking.
+
+==========================================================================
+FILE: backend/core/evidence_graph.py   (backend/core/evidence_graph.py)
+==========================================================================
+
+--- _save_lock  [lines 314-314] ---
+_save_lock = threading.Lock()
+
+--- _fsync_dir  [lines 517-523] ---
+def _fsync_dir(directory: str) -> None:
+    """Persist the directory entry itself (rename durability). Best effort."""
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+##############################################################################
+# P1-7  HISTORICAL EVIDENCE QUARANTINED
+##############################################################################
+Problem: 26 pre-envelope records shipped in the evidence dir,
+9 of them live+eligible, presented as current Society runs.
+
+==========================================================================
+FILE: backend/core/evidence_graph.py   (backend/core/evidence_graph.py)
+==========================================================================
+
+--- HISTORICAL_ORIGIN  [lines 590-590] ---
+HISTORICAL_ORIGIN = "historical_fixture"
+
+--- _QUARANTINE_FLAGS  [lines 594-595] ---
+_QUARANTINE_FLAGS = ("scientific_eligible", "validation_eligible",
+                     "publication_eligible")
+
+--- _historical_dir  [lines 598-603] ---
+def _historical_dir(directory: Optional[str] = None) -> str:
+    override = os.environ.get("MECH_EVIDENCE_HISTORICAL_DIR", "").strip()
+    if override:
+        return override
+    return os.path.join(os.path.dirname(_evidence_dir(directory) or ".") or ".",
+                        "evidence_historical")
+
+--- _stamp_historical  [lines 606-617] ---
+def _stamp_historical(record: Any) -> Any:
+    """Mark a record as a historical fixture, closing every eligibility gate."""
+    if not isinstance(record, dict):
+        return record
+    record["origin"] = HISTORICAL_ORIGIN
+    for flag in _QUARANTINE_FLAGS:
+        record[flag] = False
+    result = record.get("result")
+    if isinstance(result, dict):
+        for flag in _QUARANTINE_FLAGS:
+            result[flag] = False
+    return record
+
+--- quarantine_legacy_records  [lines 620-677] ---
+def quarantine_legacy_records(directory: Optional[str] = None,
+                              historical_directory: Optional[str] = None) -> Dict[str, Any]:
+    """Move pre-envelope records out of the authoritative evidence directory.
+
+    Idempotent one-time migration (also run at backend startup): every
+    ``*.json`` file that is not a v1 envelope is stamped
+    ``origin: historical_fixture`` with all eligibility flags forced False
+    and moved to the historical directory. Envelope records, ``*.tmp.*``
+    sidecars, and anything else are untouched. Never raises; reports counts.
+    """
+    target = _evidence_dir(directory)
+    dest = historical_directory or _historical_dir(directory)
+    report: Dict[str, Any] = {"moved": 0, "stamped": 0, "skipped": 0,
+                               "destination": dest}
+    try:
+        if Path(target).resolve() == Path(dest).resolve():
+            report["reason"] = "historical directory is the evidence directory; refusing"
+            return report
+    except OSError:
+        pass
+    try:
+        names = os.listdir(target)
+    except Exception:
+        return report
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        src = os.path.join(target, name)
+        try:
+            with open(src, "rb") as f:
+                raw_bytes = f.read()
+        except Exception:
+            continue
+        try:
+            data = json.loads(raw_bytes.decode("utf-8"))
+        except Exception:
+            data = None
+        if _is_envelope(data):
+            report["skipped"] += 1
+            continue
+        try:
+            os.makedirs(dest, exist_ok=True)
+            if isinstance(data, dict):
+                _stamp_historical(data)
+                report["stamped"] += 1
+                payload: bytes = json.dumps(data, indent=2, default=str).encode("utf-8")
+            else:
+                # Unparseable bytes move verbatim: forensics over formatting.
+                payload = raw_bytes
+            tmp = os.path.join(dest, name + f".tmp.{os.getpid()}")
+            with open(tmp, "wb") as f:
+                f.write(payload)
+            os.replace(tmp, os.path.join(dest, name))
+            os.unlink(src)
+            report["moved"] += 1
+        except Exception:
+            continue
+    return report
+
+--- _quarantined_path  [lines 680-689] ---
+def _quarantined_path(run_id: str, directory: Optional[str] = None,
+                      historical_directory: Optional[str] = None) -> str:
+    validate_run_id(run_id)
+    root = Path(historical_directory or _historical_dir(directory)).resolve()
+    target = (root / f"{run_id}.json").resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise ValueError(f"run_id escapes the quarantine directory: {run_id!r}")
+    return str(target)
+
+--- load_quarantined_record  [lines 692-699] ---
+def load_quarantined_record(run_id: str,
+                            directory: Optional[str] = None,
+                            historical_directory: Optional[str] = None
+                            ) -> Dict[str, Any]:
+    """Read a quarantined record for audit. Never served as a live run."""
+    path = _quarantined_path(run_id, directory, historical_directory)
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+--- load_quarantined_file  [lines 705-723] ---
+def load_quarantined_file(filename: str,
+                          directory: Optional[str] = None,
+                          historical_directory: Optional[str] = None) -> Any:
+    """Read a quarantined file by exact filename (covers odd legacy names).
+
+    The name must be a bare ``*.json`` filename — no separators, no
+    traversal — and the file must resolve inside the quarantine directory.
+    """
+    if (not isinstance(filename, str) or not _QUARANTINED_FILENAME_RE.match(filename)
+            or "/" in filename or "\\" in filename):
+        raise ValueError(f"invalid quarantined filename: {filename!r}")
+    root = Path(historical_directory or _historical_dir(directory)).resolve()
+    target = (root / filename).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise ValueError(f"filename escapes the quarantine directory: {filename!r}")
+    with open(str(target), "r", encoding="utf-8") as f:
+        return json.load(f)
+
+--- list_quarantined_records  [lines 726-762] ---
+def list_quarantined_records(directory: Optional[str] = None,
+                             historical_directory: Optional[str] = None
+                             ) -> List[Dict[str, Any]]:
+    """Summaries of quarantined records, flagged by origin. Never raises."""
+    target = historical_directory or _historical_dir(directory)
+    try:
+        files = sorted(
+            (f for f in os.listdir(target) if f.endswith(".json")),
+            reverse=True)
+    except Exception:
+        return []
+    summaries = []
+    for name in files[:200]:
+        try:
+            with open(os.path.join(target, name), "r",
+                      encoding="utf-8") as f:
+                record = json.load(f)
+        except Exception:
+            summaries.append({
+                "run_id": name[:-5] if name.endswith(".json") else name,
+                "goal": "",
+                "status": "",
+                "origin": "unparseable",
+            })
+            continue
+        try:
+            if not isinstance(record, dict):
+                continue
+            summaries.append({
+                "run_id": record.get("run_id", name[:-5]),
+                "goal": record.get("goal", ""),
+                "status": record.get("status", ""),
+                "origin": record.get("origin", HISTORICAL_ORIGIN),
+            })
+        except Exception:
+            continue
+    return summaries
+
+
+##############################################################################
+# P1  PROVENANCE SEMANTICS - ATTESTED EVIDENCE
+##############################################################################
+Three holes: _mark() could invent 'live' from is_available();
+evidence_policy never checked `attested`; and the graph let any
+non-discover/validate step mint Evidence nodes from numbers.
+
+==========================================================================
+FILE: backend/core/provenance.py   (backend/core/provenance.py)
+==========================================================================
+
+--- _FRAME_KEYS  [lines 82-87] ---
+_FRAME_KEYS = frozenset({
+    "provenance", "field_provenance", "status", "reason", "error",
+    "provenance_note", "model_loaded", "model_requested", "model_mismatch",
+    "attested",
+    "measured", "elapsed_ms", "runtime_ms", "timestamp",
+})
+
+--- attest_measurement  [lines 97-153] ---
+def attest_measurement(
+    result: Dict[str, Any],
+    *,
+    model_loaded: Optional[str] = None,
+    model_requested: Optional[str] = None,
+    fields: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    """Stamp `live` on a result the caller has just measured.
+
+    Refuses when the result's own `status` reports a failure, and records which
+    weights actually produced it when `model_loaded` is given. A requested model
+    that differs from the loaded one is recorded as `model_mismatch`, because a
+    caller asking for gpt2-large and receiving gpt2-small numbers should be able
+    to see that in the record rather than having to notice the dimensions.
+
+    An existing, more specific provenance is respected: this never overwrites a
+    label the measurement layer chose deliberately. A live label — fresh or
+    pre-existing — always carries `attested: True`: this function is the only
+    legal source of scientific `live`, and attestation is what makes it so.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    existing = result.get("provenance")
+    if isinstance(existing, str) and existing.strip():
+        # The measurement layer already said what this is. Do not override —
+        # but a live label without attestation is a broken invariant, so
+        # repair it rather than passing it on.
+        if existing.strip().lower() == LIVE:
+            result["attested"] = True
+        return result
+
+    if is_failure_status(result.get("status")):
+        return withhold(
+            result,
+            reason=(f"status was {result.get('status')!r}, so nothing was "
+                    f"measured and the result cannot be attested live"),
+        )
+
+    result["provenance"] = LIVE
+    result["attested"] = True
+    keys = list(fields) if fields is not None else [
+        k for k in result if k not in _FRAME_KEYS
+    ]
+    result["field_provenance"] = {
+        str(key): LIVE for key in keys if str(key) not in _FRAME_KEYS
+    }
+
+    if model_loaded is not None:
+        result["model_loaded"] = model_loaded
+    if model_requested is not None:
+        result["model_requested"] = model_requested
+        result["model_mismatch"] = bool(
+            model_loaded and model_requested
+            and str(model_loaded) != str(model_requested)
+        )
+    return result
+
+--- withhold  [lines 156-186] ---
+def withhold(result: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    """Mark a result as not measured, with the reason.
+
+    Never overwrites an existing non-live provenance that is already more
+    specific than `unavailable`.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    # Withheld means not measured, so never attested — on every path,
+    # including the early return for an already-specific non-live label.
+    result["attested"] = False
+    existing = str(result.get("provenance") or "").strip().lower()
+    if existing and existing != LIVE:
+        result.setdefault("reason", reason)
+        return result
+
+    result["provenance"] = UNAVAILABLE
+    result.setdefault("status", "unavailable")
+    # Keep a reason the record already carries. An engine's own explanation of
+    # why it measured nothing -- "torch/transformers not installed" -- is more
+    # specific than the generic "nothing attested this", and overwriting it would
+    # discard the only actionable part of the record.
+    if not str(result.get("reason") or "").strip():
+        result["reason"] = reason
+    result["field_provenance"] = {
+        str(key): UNAVAILABLE
+        for key in result
+        if key not in {"provenance", "field_provenance"}
+    }
+    return result
+
+==========================================================================
+FILE: backend/api/dispatcher.py - _mark rewritten   (backend/api/dispatcher.py)
+==========================================================================
+
+--- _mark  [lines 748-760] ---
+def _mark(res: Any, provenance: str) -> Any:
+    """Ensure a response carries a provenance label, never inventing `live`.
+
+    The `provenance` argument is legacy: availability (`engine.is_available()`)
+    says the ML stack imports, not that a forward pass ran, so a wrapper's
+    claim can never be the source of scientific `live`. An engine label —
+    attested or not — is preserved exactly as the measurement layer set it;
+    an unlabeled record is withheld as unmeasured rather than upgraded.
+    """
+    if isinstance(res, dict):
+        from backend.core.provenance import pass_through
+        return pass_through(res)
+    return res
+
+==========================================================================
+FILE: backend/agents/evidence_policy.py   (backend/agents/evidence_policy.py)
+==========================================================================
+
+--- _is_attested  [lines 16-17] ---
+def _is_attested(payload: Any) -> bool:
+    return _record(payload).get("attested") is True
+
+--- discovery_is_live  [lines 60-65] ---
+def discovery_is_live(payload: Any) -> bool:
+    """Whether a discovery result may enter validation and publication."""
+    return (_is_completed(payload)
+            and provenance_of(payload) == _LIVE
+            and _is_attested(payload)
+            and _opted_in(payload))
+
+--- validation_is_live  [lines 68-72] ---
+def validation_is_live(payload: Any) -> bool:
+    """Whether a validation result may support a scientific publication."""
+    record = _record(payload)
+    return (discovery_is_live(record)
+            and record.get("validated") is True)
+
+--- reproduction_is_live  [lines 75-83] ---
+def reproduction_is_live(payload: Any) -> Dict[str, Any]:
+    """Return the record only when reproduction is explicitly live."""
+    record = _record(payload)
+    if (not _is_completed(record)
+            or provenance_of(record) != _LIVE
+            or not _is_attested(record)
+            or record.get("mock_mode") is True):
+        return {}
+    return record
+
+--- gate_is_live  [lines 86-92] ---
+def gate_is_live(payload: Any) -> bool:
+    """A passing gate must also carry live provenance."""
+    record = _record(payload)
+    return (_is_completed(record)
+            and provenance_of(record) == _LIVE
+            and _is_attested(record)
+            and record.get("passed") is True)
+
+--- blocked_reason  [lines 95-111] ---
+def blocked_reason(payload: Any, stage: str) -> str:
+    """Explain why a stage cannot contribute scientific evidence."""
+    record = _record(payload)
+    provenance = provenance_of(record)
+    if provenance != _LIVE:
+        return f"{stage} blocked: provenance '{provenance}' is not live."
+    if not _is_completed(record):
+        return f"{stage} blocked: status '{status_of(record)}' is not complete."
+    if not _is_attested(record):
+        return f"{stage} blocked: the measurement is not attested."
+    if record.get("validation_eligible") is not True:
+        return f"{stage} blocked: validation eligibility was not asserted."
+    if record.get("publication_eligible") is not True:
+        return f"{stage} blocked: publication eligibility was not asserted."
+    if stage.lower().startswith("validation") and record.get("validated") is not True:
+        return "Validation blocked: the live validation verdict is not passing."
+    return f"{stage} blocked: required evidence fields are incomplete."
+
+==========================================================================
+FILE: backend/core/evidence_graph.py - gate inverted   (backend/core/evidence_graph.py)
+==========================================================================
+
+--- _step_allows_evidence  [lines 74-99] ---
+def _step_allows_evidence(step: Dict[str, Any]) -> bool:
+    """Whether a trace step may contribute Evidence nodes to the graph.
+
+    Inverted from permissive to authorizing: a step yields evidence only when
+    it explicitly carries attestation from the measurement layer, declares
+    live provenance, sits on a gated node, and its result clears the
+    scientific eligibility policy. In particular, executor-shaped steps with
+    numeric-looking fields but no attestation — the laundering mechanism —
+    never produce Evidence nodes.
+    """
+    if not isinstance(step, dict):
+        return False
+    if step.get("attested") is not True:
+        return False
+    if _step_provenance(step) != "live":
+        return False
+    node = str(step.get("node", ""))
+    if node not in {"discover", "validate"}:
+        return False
+    policy = _scientific_policy()
+    if policy is None:
+        return False
+    discovery_is_live, _, validation_is_live = policy
+    result = step.get("result")
+    return (discovery_is_live(result) if node == "discover"
+            else validation_is_live(result))
+
+
+##############################################################################
+# P1  MEASUREMENT LAYERS - attest where they measured
+##############################################################################
+Wrappers never assert attestation; these modules ran the
+measurements themselves, so they originate it.
+
+==========================================================================
+FILE: backend/interpretability/discovery/live_discovery.py   (backend/interpretability/discovery/live_discovery.py)
+==========================================================================
+
+--- _adequacy  [lines 89-151] ---
+def _adequacy(n_prompts: int, n_interaction_prompts: int,
+              faithfulness: Optional[float]) -> Dict[str, Any]:
+    """Derive the eligibility ladder from what was actually measured.
+
+    Previously this module returned ``validation_eligible: True`` and
+    ``publication_eligible: True`` unconditionally, with defaults of four prompts
+    and two prompts for the interaction stage. So a four-prompt run whose edges
+    were averaged from two observations declared itself fit for publication. The
+    flags were not a judgement about the result; they were constants next to real
+    measurements, which is the most confusing place for a constant to sit.
+
+    The ladder, and what each rung means here:
+
+        live                 -- weights were loaded and forward passes ran
+        measured             -- a faithfulness figure was computed at all
+        statistically_adequate -- enough prompts for the screening stage
+        interaction_adequate  -- enough prompts behind the pairwise edges
+        validation_eligible  -- statistically_adequate
+        publication_eligible -- both of the above
+
+    ``replicated`` is deliberately absent: nothing in this module runs a second
+    model or a second seed, so it could only ever be asserted, never measured.
+    """
+    measured = faithfulness is not None
+    statistically_adequate = n_prompts >= MIN_PROMPTS_FOR_VALIDATION
+    interaction_adequate = n_interaction_prompts >= MIN_PROMPTS_FOR_INTERACTION
+
+    reasons = []
+    if not measured:
+        reasons.append("no faithfulness was computed")
+    if not statistically_adequate:
+        reasons.append(
+            f"{n_prompts} prompts, below the {MIN_PROMPTS_FOR_VALIDATION} needed "
+            f"for a validation decision"
+        )
+    if not interaction_adequate:
+        reasons.append(
+            f"pairwise edges were averaged from {n_interaction_prompts} prompts, "
+            f"below the {MIN_PROMPTS_FOR_INTERACTION} needed to support a claim "
+            f"about them"
+        )
+
+    validation_eligible = measured and statistically_adequate
+    publication_eligible = validation_eligible and interaction_adequate
+
+    return {
+        "live": True,
+        "measured": measured,
+        "statistically_adequate": statistically_adequate,
+        "interaction_adequate": interaction_adequate,
+        "replicated": False,
+        "replicated_reason": (
+            "not measured: this module runs one model at one seed and performs "
+            "no replication"
+        ),
+        "validation_eligible": validation_eligible,
+        "publication_eligible": publication_eligible,
+        "min_prompts_for_validation": MIN_PROMPTS_FOR_VALIDATION,
+        "min_prompts_for_interaction": MIN_PROMPTS_FOR_INTERACTION,
+        "n_prompts": n_prompts,
+        "n_interaction_prompts": n_interaction_prompts,
+        "ineligible_because": reasons or None,
+    }
+
+==========================================================================
+FILE: backend/validation/live_validation.py   (backend/validation/live_validation.py)
+==========================================================================
+
+--- LiveValidationExecutor  [lines 37-198] ---
+class LiveValidationExecutor:
+    """Held-out re-measurement of a live discovery result."""
+
+    method = ("held-out re-measurement: replication of head effects, "
+              "injection recovery of the discovered circuit, and "
+              "leave-one-out necessity, all on unseen name pairs")
+
+    def validate(self, discovery: Dict[str, Any]) -> Dict[str, Any]:
+        heads = discovery.get("heads") or []
+        effects = {item.get("head"): item for item in
+                   (discovery.get("head_effects") or [])
+                   if isinstance(item, dict)}
+        if not heads or not effects:
+            return self._unavailable(
+                "The discovery carries no measured heads to re-measure.")
+        try:
+            token_ids = lm.single_token_names(NAMES)
+        except lm.LiveUnavailable as exc:
+            return self._unavailable(str(exc))
+        missing = [n for n, tid in token_ids.items() if tid is None]
+        if missing:
+            return self._unavailable(
+                "IOI comparison tokens are not single vocabulary items: "
+                + ", ".join(sorted(missing)))
+
+        pairs = prompt_panel(HELD_OUT_PROMPTS, offset=HELD_OUT_OFFSET)
+        prompts = []
+        for subj, io_name in pairs:
+            clean = lm.clean_prompt(subj, io_name)
+            corr = lm.corrupted_prompt(subj, io_name)
+            io_id = token_ids[io_name]
+            subj_id = token_ids[subj]
+            assert io_id is not None and subj_id is not None
+            clean_base = lm.baseline(clean, io_id, subj_id)
+            corr_base = lm.baseline(corr, io_id, subj_id)
+            prompts.append({
+                "subject": subj, "io": io_name, "clean": clean,
+                "corrupted": corr, "io_id": io_id, "subj_id": subj_id,
+                "clean_diff": clean_base["logit_diff"],
+                "corrupted_diff": corr_base["logit_diff"],
+            })
+
+        circuit = set()
+        for label in heads:
+            parsed = lm.parse_head(label)
+            if parsed is not None:
+                circuit.add(parsed)
+
+        # Replication of each head effect.
+        replicated = 0
+        head_checks = []
+        for label in heads:
+            parsed = lm.parse_head(label)
+            expected = effects.get(label, {}).get("mean_delta", 0.0)
+            if parsed is None:
+                head_checks.append({"head": label, "replicated": False,
+                                    "reason": "unparseable head label"})
+                continue
+            expected_sign = 1 if expected > 0 else -1
+            floor = max(0.10, 0.5 * abs(expected))
+            passes = 0
+            deltas = []
+            for prompt in prompts:
+                patched = lm.ablate(prompt["clean"], prompt["io_id"],
+                                    prompt["subj_id"], {parsed})
+                delta = patched - prompt["clean_diff"]
+                deltas.append(round(delta, 4))
+                sign = 1 if delta > 0 else -1
+                if sign == expected_sign and abs(delta) >= floor:
+                    passes += 1
+            ok = passes >= 2
+            replicated += 1 if ok else 0
+            head_checks.append({"head": label, "replicated": ok,
+                                "prompts_passed": passes,
+                                "per_prompt_delta": deltas})
+        replication_rate = replicated / len(heads)
+
+        # Circuit recovery on held-out prompts.
+        recoveries = []
+        for prompt in prompts:
+            _, caps = lm.capture(prompt["clean"])
+            patched = lm.inject(prompt["corrupted"], prompt["io_id"],
+                                prompt["subj_id"], caps, circuit)
+            denom = prompt["clean_diff"] - prompt["corrupted_diff"]
+            faith = ((patched["logit_diff"] - prompt["corrupted_diff"]) / denom
+                     if denom > 0.2 else 0.0)
+            recoveries.append(max(0.0, min(1.0, faith)))
+        recovery = mean(recoveries) if recoveries else 0.0
+
+        # Necessity (minimality) on held-out prompts.
+        necessary = 0
+        for label in heads:
+            parsed = lm.parse_head(label)
+            if parsed is None:
+                continue
+            hits = 0
+            for prompt in prompts:
+                if abs(prompt["clean_diff"]) <= 0.2:
+                    continue
+                patched = lm.ablate(prompt["clean"], prompt["io_id"],
+                                    prompt["subj_id"], {parsed})
+                if abs(patched - prompt["clean_diff"]) >= 0.10 * abs(prompt["clean_diff"]):
+                    hits += 1
+            if hits >= 2:
+                necessary += 1
+        minimality = necessary / len(heads)
+
+        checks = [
+            {"check": "replication_rate>=0.75", "value": round(replication_rate, 4),
+             "passed": replication_rate >= REPLICATION_FLOOR},
+            {"check": "held_out_recovery>=0.50", "value": round(recovery, 4),
+             "passed": recovery >= RECOVERY_FLOOR},
+            {"check": "minimality>=0.50", "value": round(minimality, 4),
+             "passed": minimality >= MINIMALITY_FLOOR},
+        ]
+        confidence = round(0.5 + 0.5 * mean(
+            [replication_rate, min(1.0, recovery), minimality]), 4)
+        validated = all(check["passed"] for check in checks) and confidence >= 0.85
+        return {
+            "discovery_id": discovery.get("discovery_id", ""),
+            "status": "completed",
+            "provenance": "live",
+            # Attested here: every check above re-measured on held-out prompts
+            # through live forward passes. Wrappers propagate, never invent.
+            "attested": True,
+            "field_provenance": field_map(
+                ("discovery_id", "status", "validated", "confidence",
+                 "peer_review", "checks", "head_checks"),
+                "live",
+            ),
+            "validation_eligible": True,
+            "publication_eligible": True,
+            "validated": validated,
+            "confidence": {
+                "confidence_score": confidence,
+                "method": ("0.5 + 0.5 * mean(replication_rate, recovery, "
+                           "minimality) over held-out prompts"),
+            },
+            "peer_review": {
+                "reviewer": "automated-live-checks (rule-based, not human peer review)",
+                "decision": "Accept" if validated else "Revise",
+                "checks": checks,
+            },
+            "replication_rate": round(replication_rate, 4),
+            "held_out_recovery": round(recovery, 4),
+            "minimality": round(minimality, 4),
+            "head_checks": head_checks,
+            "method": self.method,
+        }
+
+    @staticmethod
+    def _unavailable(reason: str) -> Dict[str, Any]:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": field_map(
+                ("status", "validated", "reason"), "unavailable"),
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "validated": False,
+            "reason": reason,
+        }
+
+==========================================================================
+FILE: backend/validation/benchmark_runner.py   (backend/validation/benchmark_runner.py)
+==========================================================================
+
+--- MechanisticBenchmarkRunner  [lines 17-123] ---
+class MechanisticBenchmarkRunner:
+    """Run live benchmarks when the model is connected, else fail closed."""
+
+    def run_benchmark(self, benchmark_id: str = "bench_default") -> Dict[str, Any]:
+        name = str(benchmark_id or "")
+        short = name[6:] if name.startswith("bench_") else name
+        if short.lower() != "ioi":
+            return {
+                "benchmark_id": benchmark_id,
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("benchmark_id", "status", "reason"), "unavailable"
+                ),
+                "reason": (f"No live benchmark executor is connected for "
+                           f"'{short}'."),
+            }
+        try:
+            from backend.interpretability.discovery import live_measure as lm
+            from backend.interpretability.discovery.live_discovery import (
+                NAMES,
+                prompt_panel,
+            )
+        except Exception as exc:
+            return {
+                "benchmark_id": benchmark_id,
+                "status": "error",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("benchmark_id", "status", "error"), "unavailable"
+                ),
+                "reason": f"Live benchmark imports failed: {exc}",
+            }
+        try:
+            token_ids = lm.single_token_names(NAMES)
+            missing = [n for n, tid in token_ids.items() if tid is None]
+            if missing:
+                raise lm.LiveUnavailable(
+                    "IOI comparison tokens are not single vocabulary items: "
+                    + ", ".join(sorted(missing)))
+            pairs = prompt_panel(6)
+            clean_hits = 0
+            corr_hits = 0
+            per_prompt = []
+            for subj, io_name in pairs:
+                clean = lm.clean_prompt(subj, io_name)
+                corr = lm.corrupted_prompt(subj, io_name)
+                io_id = token_ids[io_name]
+                subj_id = token_ids[subj]
+                assert io_id is not None and subj_id is not None
+                clean_base = lm.baseline(clean, io_id, subj_id)
+                corr_base = lm.baseline(corr, io_id, subj_id)
+                clean_ok = clean_base["top1"].strip() == io_name
+                # Corrupted variant swaps the giver: the subject becomes the
+                # correct continuation.
+                corr_ok = corr_base["top1"].strip() == subj
+                clean_hits += 1 if clean_ok else 0
+                corr_hits += 1 if corr_ok else 0
+                per_prompt.append({
+                    "subject": subj, "io": io_name,
+                    "clean_top1": clean_base["top1"],
+                    "clean_correct": clean_ok,
+                    "corrupted_top1": corr_base["top1"],
+                    "corrupted_correct": corr_ok,
+                })
+            accuracy = clean_hits / len(pairs)
+            robustness = corr_hits / len(pairs)
+            return {
+                "benchmark_id": benchmark_id,
+                "status": "completed",
+                "provenance": "live",
+                # Attested here: accuracy/robustness were computed from the
+                # per-prompt runs this function just executed above.
+                "attested": True,
+                "field_provenance": field_map(
+                    ("benchmark_id", "status", "accuracy",
+                     "robustness_score", "eval_samples", "per_prompt"),
+                    "live",
+                ),
+                "method": ("clean top-1 agreement plus corrupted-variant "
+                           "top-1 agreement over a fixed IOI prompt panel"),
+                "model_id": "gpt2-small",
+                "accuracy": round(accuracy, 4),
+                "robustness_score": round(robustness, 4),
+                "eval_samples": len(pairs),
+                "per_prompt": per_prompt,
+            }
+        except lm.LiveUnavailable as exc:
+            return {
+                "benchmark_id": benchmark_id,
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("benchmark_id", "status", "reason"), "unavailable"
+                ),
+                "reason": str(exc),
+            }
+        except Exception as exc:
+            return {
+                "benchmark_id": benchmark_id,
+                "status": "error",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("benchmark_id", "status", "error"), "unavailable"
+                ),
+                "error": str(exc)[:500],
+            }
+
+==========================================================================
+FILE: backend/science/reproducibility/ioi_pipeline.py
+==========================================================================
+
+--- attestation site [line 594] ---
+           return {
+               "pipeline": "IOIReproductionPipeline-HighFidelity",
+               "status": "completed",
+               "provenance": "live",
+               # Attested here: faithfulness/minimality/recovery were measured
+               # above through live capture/inject on loaded weights.
+>>             "attested": True,
+               "field_provenance": _field_map(
+                   ("status", "observed_metrics", "raw_traces",
+
+--- attestation site [line 863] ---
+           return {
+               "pipeline": "IOIReproductionPipeline-HighFidelity",
+               "status": "completed",
+               "provenance": "synthetic" if self.adapter.spec.mock_mode else "live",
+               # Attested only for the measured branch: mock mode computes from
+               # reference fixtures, which attests to nothing.
+>>             "attested": not self.adapter.spec.mock_mode,
+               "field_provenance": _field_map(
+                   ("status", "observed_metrics", "raw_traces", "reproducibility_report",
+
+--- attestation site [line 965] ---
+           return {
+               "status": "completed" if live else "unavailable",
+               "provenance": "live" if live else "unavailable",
+               # Attested only when at least one seed actually measured: the pool
+               # aggregates per-seed runs, and an all-unavailable pool attests to
+               # nothing.
+>>             "attested": bool(live),
+               "field_provenance": _field_map(
+                   ("status", "n_seeds_requested", "n_seeds_used", "pooled",
+
+==========================================================================
+FILE: backend/science/reproducibility/logit_lens_pipeline.py
+==========================================================================
+
+--- attestation site [line 185] ---
+           return {
+               "pipeline": "LogitLensPipeline",
+               "paper_id": self.PAPER_ID,
+               "provenance": "live",
+               # Attested here: every quantity above was read from a real forward
+               # pass (unreachable in mock mode, which returns unavailable early).
+>>             "attested": True,
+               "layer_results": layer_results,
+               "observed_metrics": observed_metrics,
+
+==========================================================================
+FILE: backend/science/reproducibility/greater_than_pipeline.py
+==========================================================================
+
+--- attestation site [line 264] ---
+               "pipeline": "GreaterThanCircuitPipeline",
+               "paper_id": self.PAPER_ID,
+               "provenance": "live",
+               # Attested here: layer effects were measured by ablating layers
+               # and re-measuring (unreachable in mock mode, which returns
+               # unavailable early).
+>>             "attested": True,
+               "measurement": measurement,
+               "layer_patch_effects": {str(L): round(means[L], 4) for L in sorted(means)},
+
+==========================================================================
+FILE: backend/science/reproducibility/induction_heads_pipeline.py
+==========================================================================
+
+--- attestation site [line 477] ---
+                       "part in which heads were found or scored."
+                   ),
+               },
+               "provenance": "live" if measured else "unavailable",
+               # Attested only when measured: this pipeline ran the sequences
+               # through live attention reads above.
+>>             "attested": bool(measured),
+               "validation_eligible": measured,
+               "publication_eligible": False,
+
+==========================================================================
+FILE: backend/services/gpt2_engine.py   (backend/services/gpt2_engine.py)
+==========================================================================
+
+--- _attest_info  [lines 159-168] ---
+def _attest_info(description: Dict[str, Any]) -> Dict[str, Any]:
+    """Attest an info() description: the identity of the weights in memory.
+
+    `info()` reads every value off the loaded config, so it describes a
+    measurement of what is in memory rather than a claim. Attesting here (at
+    the source) is what lets the API layer pass it through instead of
+    withholding it as unlabeled.
+    """
+    return attest_measurement(description,
+                              model_loaded=_loaded_model_id())
+
+
+##############################################################################
+# P1  WRAPPERS - propagate attestation, never assert it
+##############################################################################
+
+==========================================================================
+FILE: backend/agents/discoverer.py   (backend/agents/discoverer.py)
+==========================================================================
+
+--- Discoverer  [lines 93-204] ---
+class Discoverer:
+    """Discovers circuits, cross-model alignments, and feature genealogies."""
+
+    capability = "discover"
+
+    def discover(self, hypothesis: str) -> Dict[str, Any]:
+        try:
+            from .evidence_policy import (
+                blocked_reason,
+                discovery_is_live,
+                field_map,
+                provenance_of,
+            )
+            from backend.interpretability.discovery.discovery_engine import (
+                DiscoveryEngine,
+            )
+            engine = DiscoveryEngine()
+            res = engine.discover_and_orchestrate(hypothesis_statement=hypothesis)
+            if not discovery_is_live(res):
+                # Do not place the synthetic result under ``result``: that
+                # key is consumed by validation, evidence graphs, and the
+                # scribe as scientific evidence.
+                return {
+                    "status": "unavailable",
+                    "provenance": provenance_of(res),
+                    "field_provenance": field_map(
+                        ("status", "discovery_id", "reason", "result"),
+                        provenance_of(res),
+                    ),
+                    "validation_eligible": False,
+                    "publication_eligible": False,
+                    "discovery_id": res.get("discovery_id", ""),
+                    "reason": blocked_reason(res, "Discovery"),
+                }
+            # `**res` first, the guarded verdict last.
+            #
+            # The spread used to come last, so it overwrote the keys this
+            # function had just decided. `res` carries `status`, `provenance` and
+            # `field_provenance` of its own, so the guard's answer was discarded
+            # and replaced by whatever the engine happened to say -- the same
+            # shape as the P0 defect, where a wrapper's provenance verdict was not
+            # authoritative.
+            #
+            # It was not an active misreport: `discovery_is_live` is
+            # `provenance_of(payload) == "live"` among other conditions, so the
+            # value being spread in agreed with the value being guarded. But the
+            # guard decided nothing, and it would start mattering the moment that
+            # predicate diverged from a bare provenance comparison.
+            return {
+                **res,
+                "status": "completed",
+                "provenance": "live",
+                # Propagated, never asserted: the guard above already required
+                # an attested live result, and the spread carries it through.
+                # A result that measured nothing arrives unattested and stays
+                # ineligible downstream.
+                "attested": res.get("attested", False),
+                "field_provenance": field_map(
+                    ("status", "result", "discovery_id"), "live"
+                ),
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "error", "result"), "unavailable"
+                ),
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "error": str(exc)[:500],
+            }
+
+    def cross_model(self, source_model: str = "gpt2",
+                    target_model: str = "gpt2-medium",
+                    circuit_type: str = "ioi") -> Dict[str, Any]:
+        try:
+            from backend.interpretability.discovery.cross_model_circuits import (
+                CrossModelCircuitsEngine,
+            )
+            res = CrossModelCircuitsEngine().compare_circuits(
+                source_model=source_model, target_model=target_model,
+                circuit_type=circuit_type)
+            return _wrap_engine_result(res, "cross_model_circuits")
+        except Exception as exc:
+            return _engine_error("cross_model_circuits", exc)
+
+    def genealogy(self, feature_id: str = "f_1402") -> Dict[str, Any]:
+        try:
+            from backend.interpretability.discovery.feature_genealogy import (
+                FeatureGenealogyEngine,
+            )
+            res = FeatureGenealogyEngine().get_genealogy(feature_id=feature_id)
+            return _wrap_engine_result(res, "feature_genealogy")
+        except Exception as exc:
+            return _engine_error("feature_genealogy", exc)
+
+    def circuits(self) -> Dict[str, Any]:
+        try:
+            from backend.science.explorer.circuit_explorer import CircuitExplorer
+            res = CircuitExplorer().list_circuits()
+            return _wrap_engine_result(res, "circuit_explorer")
+        except Exception as exc:
+            return _engine_error("circuit_explorer", exc)
+
+    def circuit(self, circuit_id: str = "c_ioi") -> Dict[str, Any]:
+        try:
+            from backend.science.explorer.circuit_explorer import CircuitExplorer
+            res = CircuitExplorer().get_circuit(circuit_id=circuit_id)
+            return _wrap_engine_result(res, "circuit_explorer")
+        except Exception as exc:
+            return _engine_error("circuit_explorer", exc)
+
+==========================================================================
+FILE: backend/agents/critic.py   (backend/agents/critic.py)
+==========================================================================
+
+--- Critic  [lines 42-389] ---
+class Critic:
+    """Validates discoveries, scores confidence, reflects on campaigns."""
+
+    capability = "validate"
+
+    def validate(
+        self,
+        discovery_id: str,
+        hypothesis: str,
+        discovery_result: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not discovery_is_live(discovery_result):
+            return {
+                "status": "unavailable",
+                "provenance": provenance_of(discovery_result),
+                "field_provenance": field_map(
+                    ("status", "validated", "reason"), provenance_of(discovery_result)
+                ),
+                "validated": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": blocked_reason(discovery_result, "Validation input"),
+            }
+        try:
+            from backend.validation.validation_engine import (
+                ScientificValidationEngine,
+            )
+            res = ScientificValidationEngine().validate_discovery(
+                discovery_id=discovery_id, hypothesis_statement=hypothesis,
+                discovery_result=discovery_result)
+            if not validation_is_live(res):
+                return {
+                    "status": "unavailable",
+                    "provenance": provenance_of(res),
+                    "field_provenance": field_map(
+                        ("status", "validated", "reason"), provenance_of(res)
+                    ),
+                    "validated": False,
+                    "validation_eligible": False,
+                    "publication_eligible": False,
+                    "reason": blocked_reason(res, "Validation"),
+                }
+            return {
+                "status": "completed",
+                "provenance": "live",
+                # Propagated from the validation engine's re-measurement, never
+                # asserted: the Critic judges, it does not run forward passes.
+                "attested": res.get("attested", False),
+                "field_provenance": field_map(
+                    ("status", "validated", "result", "confidence", "peer_review"),
+                    "live",
+                ),
+                "result": res,
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "validated", "error"), "unavailable"
+                ),
+                "validated": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "error": str(exc)[:500],
+            }
+
+    def is_confident(self, validation_result: Dict[str, Any]) -> bool:
+        """Whether a validation result is confident *and* peer-accepted.
+
+        The peer-review decision must be exactly "Accept". This used to be
+
+            return score >= CONFIDENCE_THRESHOLD and decision in ("", "Accept")
+
+        and `decision` defaults to "" at two levels -- an absent `peer_review`
+        dict, and an absent `decision` key inside it. So a validation carrying a
+        0.90 confidence score and *no peer review at all* passed this gate. The
+        surrounding documentation says peer review must be Accept; the code
+        permitted its absence, which is the one state that can never mean
+        Accept.
+
+        Only an explicit Accept passes. Missing, empty, pending, revise and
+        reject all fail, and failing closed is the point: a review that has not
+        happened is not a review that succeeded.
+        """
+        if not validation_is_live(validation_result):
+            return False
+        try:
+            conf = validation_result.get("confidence", {})
+            score = float(conf.get("confidence_score", 0.0))
+            review = validation_result.get("peer_review", {})
+            decision = str(review.get("decision", "") or "").strip()
+            return score >= CONFIDENCE_THRESHOLD and decision == "Accept"
+        except Exception:
+            return False
+
+    def reproduce(self, paper_id: str = "ioi",
+                    n_prompts: int = 16) -> Dict[str, Any]:
+        """Closed validation loop: live pipeline -> observed metrics ->
+        ReproducibilityReport vs published (TransformerLens-paper) baselines
+        -> 0.85 gate verdict.
+
+        Live weights only: returns status unavailable without torch. Small
+        default n keeps routes/tests tractable; n_samples is reported.
+        """
+        if paper_id != "ioi":
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "observed_metrics", "report", "gate", "reason"),
+                    "unavailable",
+                ),
+                "publication_eligible": False,
+                "reason": f"live reproduction for '{paper_id}' "
+                          "not implemented (ioi only)",
+            }
+        try:
+            from backend.services import gpt2_engine
+            if not gpt2_engine.is_available():
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "field_provenance": field_map(
+                        ("status", "observed_metrics", "report", "gate", "reason"),
+                        "unavailable",
+                    ),
+                    "publication_eligible": False,
+                    "reason": "torch/transformers not installed",
+                }
+            from backend.science.reproducibility.ioi_pipeline import (
+                IOIReproductionPipeline,
+            )
+            from backend.science.reproducibility.reproducibility_report import (
+                ReproducibilityReportEngine,
+            )
+            run = IOIReproductionPipeline(mock_mode=False).run(
+                n_prompts=n_prompts)
+            if run.get("mock_mode") is not False or not reproduction_is_live(run):
+                return {
+                    "status": "unavailable",
+                    "provenance": provenance_of(run),
+                    "field_provenance": field_map(
+                        ("status", "observed_metrics", "report", "gate", "reason"),
+                        provenance_of(run),
+                    ),
+                    "publication_eligible": False,
+                    "reason": "The reproduction pipeline did not return explicit live evidence.",
+                }
+            observed = dict(run.get("observed_metrics", {}))
+            # The pipeline reports whether each metric was actually measured
+            # (e.g. circuit_minimality needs >= 10 usable prompts for its
+            # majority vote). That flag has to survive into the report: mapping
+            # an unmeasured 0.0 into observed_metrics made "not attempted" look
+            # like "attempted and scored zero", and earned it a fidelity_pct.
+            unmeasured = {
+                required: observed.get(f"{observed_key}_measured", True) is False
+                for required, observed_key in METRIC_MAP.items()
+            }
+            try:
+                mapped = {}
+                for required, observed_key in METRIC_MAP.items():
+                    if unmeasured[required]:
+                        mapped[required] = None
+                        continue
+                    value = float(observed[observed_key])
+                    if not 0.0 <= value <= 1.0:
+                        raise ValueError(f"{observed_key} outside [0, 1]")
+                    mapped[required] = value
+            except (KeyError, TypeError, ValueError) as exc:
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "field_provenance": field_map(
+                        ("status", "observed_metrics", "report", "gate", "reason"),
+                        "unavailable",
+                    ),
+                    "publication_eligible": False,
+                    "reason": f"Live reproduction metrics are incomplete: {exc}",
+                }
+            report_engine = ReproducibilityReportEngine()
+            report = report_engine.generate_report(
+                paper_id=paper_id,
+                pipeline_name="IOIReproductionPipeline-HighFidelity",
+                model_id=run.get("model_id", "gpt2-small"),
+                dataset_manifest_id=run.get("manifest_id", ""),
+                observed_metrics=mapped,
+                explanation_of_diffs=[
+                    "circuit_completeness proxied by functional_recovery "
+                    "(injection-recovered logit-diff ratio).",
+                    "circuit_minimality measured as the fraction of circuit "
+                    "heads individually necessary on usable prompts.",
+                    f"live run over {observed.get('n_samples', n_prompts)} "
+                    "prompts; mock_mode=False.",
+                ],
+            )
+            if isinstance(report, dict):
+                # Never infer `live` here.
+                #
+                # Was `report.setdefault("provenance", "live")` on a record built
+                # by `ReproducibilityReportEngine.generate_report`. The Critic is a
+                # *gate*, not the measurement layer: it did not run a forward
+                # pass, so it cannot know whether the run it is judging measured
+                # anything. Defaulting the label meant a report whose metrics were
+                # all `NOT_RUN` still arrived labelled as a live measurement, and
+                # the evidence policy -- which reads exactly this field -- would
+                # accept it.
+                report = pass_through(dict(report))
+            # Gate value is the mean fidelity_pct over *measured* metrics, on
+            # the same 0-100 scale the threshold is expressed in
+            # (CONFIDENCE_THRESHOLD * 100).
+            #
+            # This used to do `m.get("fidelity_pct", 0.0)` inside a bare
+            # `except Exception: pass`. Once unmeasured metrics correctly
+            # carry fidelity_pct=None, the sum raised TypeError, the bare
+            # except swallowed it, and the gate reported value=0.0 -- a
+            # permanent fail that silently contradicted the report's own
+            # overall_fidelity_pct and hid the error that caused it.
+            metrics = report.get("metric_results", []) if isinstance(report, dict) else []
+            scored = [
+                m["fidelity_pct"] for m in metrics
+                if isinstance(m, dict)
+                and isinstance(m.get("fidelity_pct"), (int, float))
+            ]
+            unmeasured_names = [
+                m.get("name") for m in metrics
+                if isinstance(m, dict) and m.get("measured") is False
+            ]
+            if scored:
+                fidelity: Optional[float] = round(sum(scored) / len(scored), 2)
+            else:
+                fidelity = None
+
+            # Like-for-like calibration, when the pipeline supplied one.
+            #
+            # `fidelity` above compares each metric against the registry's
+            # published constant. For IOI that constant is not the same
+            # measurement this harness makes -- running the *published* circuit
+            # through this harness gives a materially lower number than the
+            # published 0.86. So the pipeline also measures the published
+            # circuit through identical code and reports the ratio. That ratio
+            # is the answerable question: is the discovered circuit as good as
+            # the published one, measured the same way?
+            same_harness_ref = observed.get(
+                "reference_circuit_faithfulness_same_harness")
+            discovered_faith = mapped.get("circuit_faithfulness")
+            calibrated: Optional[Dict[str, Any]] = None
+            if (isinstance(same_harness_ref, (int, float))
+                    and same_harness_ref > 0
+                    and isinstance(discovered_faith, (int, float))):
+                ratio = discovered_faith / same_harness_ref
+                calibrated = {
+                    "metric": "circuit_faithfulness",
+                    "discovered": round(discovered_faith, 4),
+                    "published_circuit_same_harness": round(same_harness_ref, 4),
+                    "ratio": round(ratio, 4),
+                    # Matching or beating the published circuit through the
+                    # same code is the like-for-like success condition.
+                    "at_least_published": ratio >= 1.0,
+                    "basis": "both circuits measured by this pipeline, same prompts",
+                }
+
+            gate = {
+                "status": "completed" if fidelity is not None else "unavailable",
+                "provenance": "live" if fidelity is not None else "unavailable",
+                "threshold": CONFIDENCE_THRESHOLD,
+                "metric": "overall_fidelity_pct",
+                "value": fidelity,
+                "metrics_scored": len(scored),
+                "metrics_unmeasured": unmeasured_names,
+                # An unmeasurable gate cannot pass.
+                "passed": fidelity is not None and fidelity >= CONFIDENCE_THRESHOLD * 100,
+                "reason": (
+                    None if fidelity is not None else
+                    "No metric produced a fidelity score; the gate cannot be "
+                    "evaluated and does not pass."
+                ),
+                # Both fidelity_pct values above are measured against the
+                # registry's *published* reference numbers. For IOI those are
+                # not the same measurement as what this pipeline computes:
+                # running the published IOI circuit through this same harness
+                # yields a lower figure than the published 0.86. So
+                # `passed` here is a comparison against an external constant,
+                # not a like-for-like one. The calibrated comparison is below
+                # and is the one that answers "is this circuit as good as the
+                # published one".
+                "reference_basis": "published_external_constants",
+                "reference_basis_is_like_for_like": False,
+                "calibrated": calibrated,
+            }
+            return {
+                "status": "completed",
+                "provenance": "live",
+                # Propagated from the pipeline run above (measured or not);
+                # the Critic maps metrics, it does not re-measure them.
+                "attested": run.get("attested", False) if isinstance(run, dict) else False,
+                "field_provenance": field_map(
+                    ("status", "paper_id", "n_prompts", "observed_metrics", "report", "gate"),
+                    "live",
+                ),
+                "paper_id": paper_id,
+                # The like-for-like comparison, hoisted to the top level
+                # because it is the answerable question. `report` and `gate`
+                # compare against external published constants, which for IOI
+                # are not the same measurement as this harness makes.
+                "calibrated_vs_published_circuit": calibrated,
+                "n_prompts": n_prompts,
+                "mock_mode": False,
+                "observed_metrics": mapped,
+                # Which of the above carry a real measurement. `mapped` only
+                # holds the validated metric set, so without this a caller
+                # cannot tell a measured value from a None.
+                "unmeasured_metrics": sorted(
+                    name for name, is_unmeasured in unmeasured.items()
+                    if is_unmeasured
+                ),
+                "report": report if isinstance(report, dict) else
+                {"report": report},
+                "gate": gate,
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "observed_metrics", "report", "gate", "error"),
+                    "unavailable",
+                ),
+                "publication_eligible": False,
+                "error": str(exc)[:500],
+            }
+
+    def reflect(self, campaign_id: str,
+                successful: List[str], failed: List[str],
+                planner_decisions: List[str]) -> Dict[str, Any]:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": field_map(
+                ("status", "campaign_id", "successful", "failed", "result"),
+                "unavailable",
+            ),
+            "campaign_id": campaign_id,
+            "successful": successful,
+            "failed": failed,
+            "planner_decisions": planner_decisions,
+            "reason": "No live reflection executor is connected.",
+        }
+
+==========================================================================
+FILE: backend/agents/executor.py   (backend/agents/executor.py)
+==========================================================================
+
+--- Executor  [lines 73-247] ---
+class Executor:
+    """Executes model loads, prompts, patches, pipelines, orchestrated runs."""
+
+    capability = "exec"
+
+    # -- engine helpers -------------------------------------------------
+    def _engine(self):  # type: ignore[no-untyped-def]
+        from backend.services import gpt2_engine
+        return gpt2_engine
+
+    @staticmethod
+    def _live_available() -> bool:
+        try:
+            from backend.services import gpt2_engine
+            return bool(gpt2_engine.is_available())
+        except Exception:
+            return False
+
+    async def _call(self, name: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        try:
+            engine = self._engine()
+        except Exception as exc:
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": {"status": "unavailable", "reason": "unavailable"},
+                "reason": f"gpt2_engine import failed: {exc}",
+            }
+        if not engine.is_available():
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": {"status": "unavailable", "reason": "unavailable"},
+                "reason": "torch/transformers not installed — seeded fallback in use",
+            }
+        try:
+            fn = getattr(engine, name)
+            res = await asyncio.to_thread(fn, *args, **kwargs)
+            if isinstance(res, dict):
+                # Never infer `live` here.
+                #
+                # Was `res.setdefault("provenance", "live")` plus a
+                # `field_provenance` defaulting *every* key to live. So a
+                # returned `{"status": "unavailable"}` became a live
+                # measurement, and its `reason` field was relabelled live as
+                # well -- the explanation of why nothing was measured was itself
+                # marked as measured.
+                #
+                # `is_available()` is not the missing piece of evidence either: it
+                # says torch and transformers imported. It does not say a forward
+                # pass ran.
+                #
+                # The measurement layer now originates provenance (see
+                # backend/core/provenance.py). This only preserves what it said,
+                # and withholds when it said nothing.
+                return pass_through(res)
+            # A bare value carries no provenance of its own, so it cannot be
+            # presented as a measurement. Previously this wrapped it as
+            # `status: ok, provenance: live`, which meant a function returning
+            # None produced a live record asserting a successful result.
+            return withhold(
+                {
+                    "status": "unmeasured",
+                    "op": name,
+                    "result": res,
+                },
+                reason=(
+                    f"{name}() returned {type(res).__name__}, not a record. A bare "
+                    f"return value carries no provenance, so it cannot be "
+                    f"reported as a measurement."
+                ),
+            )
+        except Exception as exc:
+            return withhold(
+                {"status": "error", "op": name, "error": str(exc)[:500]},
+                reason=f"{name} raised {type(exc).__name__}: {exc}"[:300],
+            )
+
+    # -- model ops ------------------------------------------------------
+    async def ensure_model(self, model_name: str = "gpt2") -> Dict[str, Any]:
+        res = await self._call("load")
+        if res.get("status") == "loaded":
+            res["model_name"] = model_name
+        return res
+
+    async def run_prompt(self, prompt: str) -> Dict[str, Any]:
+        return await self._call("run_prompt", prompt)
+
+    async def infer(self, prompt: str) -> Dict[str, Any]:
+        return await self._call("infer", prompt)
+
+    async def activations(self, layer: int = 5) -> Dict[str, Any]:
+        return await self._call("activations", layer)
+
+    async def patch_head(self, layer: int, head: int,
+                           pos_token: str = " Paris",
+                           neg_token: str = " London",
+                           prompt: str = "The capital of France is") -> Dict[str, Any]:
+        # patch_head reads _cache["prompt"] — populate it first.
+        await self._call("run_prompt", prompt)
+        return await self._call("patch_head", layer, head,
+                                pos_token, neg_token)
+
+    async def patch_neuron(self, layer: int, neuron_index: int,
+                           patch_value: float = 3.5) -> Dict[str, Any]:
+        return await self._call("patch_neuron", layer, neuron_index, patch_value)
+
+    async def ioi(self, **kwargs: Any) -> Dict[str, Any]:
+        return await self._call("ioi", **kwargs)
+
+    # -- pipelines & orchestration (sync, CPU-cheap dispatch) ------------
+    def reproduce(self, paper_id: str = "ioi",
+                  n_prompts: int = 4) -> Dict[str, Any]:
+        mod_name, cls_name = PIPELINE_MODULES.get(
+            paper_id, PIPELINE_MODULES["ioi"])
+        try:
+            import importlib
+            import inspect as _inspect
+            mod = importlib.import_module(mod_name)
+            cls = getattr(mod, cls_name)
+            try:
+                params = _inspect.signature(cls.__init__).parameters
+                live = "mock_mode" in params and self._live_available()
+                pipeline = (cls(mock_mode=not live)
+                            if "mock_mode" in params else cls())
+            except Exception:
+                pipeline = cls()
+                live = False
+            try:
+                run_params = _inspect.signature(pipeline.run).parameters
+                res = (pipeline.run(n_prompts=n_prompts)
+                       if "n_prompts" in run_params else pipeline.run())
+            except Exception:
+                res = pipeline.run()
+            if not isinstance(res, dict):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "paper_id": paper_id,
+                    "reason": "Reproduction pipeline returned no structured result.",
+                }
+            if res.get("mock_mode") is True or res.get("provenance") != "live":
+                return {
+                    "status": "unavailable",
+                    "provenance": res.get("provenance", "synthetic"),
+                    "paper_id": paper_id,
+                    "reason": (
+                        "The Society reproduction stage is reference/mock data; "
+                        "it cannot enter validation or publication."
+                    ),
+                }
+            return {
+                "status": "completed",
+                "provenance": "live",
+                # Propagated from the pipeline result: the executor dispatches,
+                # it does not measure.
+                "attested": res.get("attested", False),
+                "paper_id": paper_id,
+                "result": _jsonable(res),
+            }
+        except Exception as exc:
+            return {"status": "error", "paper_id": paper_id,
+                    "error": str(exc)[:500]}
+
+    def orchestrate(self, experiment_id: str, goal: str,
+                    strategy: str = "Balanced") -> Dict[str, Any]:
+        try:
+            from backend.runtime.orchestration.execution_orchestrator import (
+                ExecutionOrchestrator,
+            )
+            orch = ExecutionOrchestrator()
+            return orch.submit_and_orchestrate(
+                experiment_id=experiment_id, goal=goal, strategy=strategy)
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)[:500]}
+
+==========================================================================
+FILE: backend/agents/scribe.py   (backend/agents/scribe.py)
+==========================================================================
+
+--- Scribe  [lines 58-381] ---
+class Scribe:
+    """Publishes mechanistic reports from run traces."""
+
+    capability = "publish"
+
+    def evidence(self, run_id: str = "", goal: str = "",
+                  trace: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """Build an evidence graph only from an eligible live trace."""
+        if trace is None:
+            return {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "result", "reason"), "unavailable"
+                ),
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": "A run trace is required; reference/demo graphs cannot be published.",
+            }
+        reason = publication_block_reason(trace)
+        if reason:
+            return {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "result", "reason"), "unavailable"
+                ),
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": reason,
+            }
+        try:
+            from backend.core.evidence_graph import TraceableEvidenceGraph
+            graph = TraceableEvidenceGraph.from_run(
+                run_id or "run_unknown", goal, trace)
+            return {
+                "status": "completed",
+                "provenance": "live",
+                "field_provenance": field_map(("status", "result"), "live"),
+                "result": graph.to_dict(),
+            }
+        except Exception as exc:
+            return {"status": "error", "provenance": "unavailable",
+                    "error": str(exc)[:500]}
+
+    def report(self, experiment_id: str, title: str,
+               trace: Optional[List[Dict[str, Any]]] = None,
+               reproducibility: Optional[Dict[str, Any]] = None,
+               gate: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Generate a report whose provenance is *derived*, never asserted.
+
+        Provenance used to be a caller-supplied string that was passed straight
+        into ReportService and echoed back, so `report(experiment_id="fake",
+        title="Fake", provenance="live")` produced a live-labelled artifact with
+        no evidence chain behind it. The caller can no longer choose the label:
+        it is computed from the trace, and a trace that does not clear the
+        publication gate blocks the report outright.
+        """
+        if trace is None:
+            return _blocked_report(
+                "A run trace is required; a report cannot claim live provenance "
+                "without one.")
+        reason = publication_block_reason(trace, reproducibility, gate)
+        if reason:
+            return _blocked_report(reason)
+
+        try:
+            from backend.services.report_service import ReportService
+            res = ReportService().generate_report(
+                experiment_id=experiment_id, title=title,
+                provenance="live")
+            return {
+                "status": "completed",
+                "provenance": "live",
+                # Propagated from the gate this report just cleared: the
+                # Scribe assembles, it does not measure.
+                "attested": gate.get("attested", False) if isinstance(gate, dict) else False,
+                "field_provenance": field_map(("status", "result"), "live"),
+                "validation_eligible": True,
+                "publication_eligible": True,
+                "result": res,
+            }
+        except Exception as exc:
+            return {"status": "error", "provenance": "unavailable",
+                    "error": str(exc)[:500]}
+
+    def publish(self, goal: str, trace: List[Dict[str, Any]],
+                reflection: Dict[str, Any],
+                run_id: str = "",
+                reproducibility: Optional[Dict[str, Any]] = None,
+                gate: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Publish only a complete, explicitly live evidence chain."""
+        reason = publication_block_reason(trace, reproducibility, gate)
+        if reason:
+            return {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "result", "reason"), "unavailable"
+                ),
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "goal": goal,
+                "reason": reason,
+                "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
+            }
+
+        exp_id = entity_id("exp_")
+        # Provenance is derived from the trace inside report(), not asserted here.
+        rep = self.report(experiment_id=exp_id,
+                          title=f"Mechanistic Report: {goal[:60]}",
+                          trace=trace,
+                          reproducibility=reproducibility,
+                          gate=gate)
+        ev = self.evidence(run_id=run_id or exp_id, goal=goal, trace=trace)
+        if rep.get("status") != "completed" or ev.get("status") != "completed":
+            return {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "result", "reason"), "unavailable"
+                ),
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "goal": goal,
+                "reason": "Report or evidence generation did not return a live artifact.",
+                "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
+            }
+        ok_steps = sum(1 for t in trace
+                       if t.get("status") in ("completed", "ok", "loaded"))
+        publication = {
+            "status": "completed",
+            "provenance": "live",
+            # Propagated from the gate: publish is reached only after
+            # publication_block_reason passes, which now requires attestation
+            # end to end.
+            "attested": gate.get("attested", False) if isinstance(gate, dict) else False,
+            "field_provenance": field_map(
+                ("status", "report", "evidence_graph", "reflection",
+                 "reproducibility", "gate", "knowledge_writeback"),
+                "live",
+            ),
+            "validation_eligible": True,
+            "publication_eligible": True,
+            "goal": goal,
+            "experiment_id": exp_id,
+            "steps_completed": f"{ok_steps}/{len(trace)}",
+            "report": rep.get("result", rep),
+            "evidence_graph": ev.get("result", ev),
+            "reflection": reflection,
+            "reproducibility": reproducibility or {},
+            "gate": gate or {},
+            "published_at": _dt.datetime.utcnow().isoformat() + "Z",
+        }
+        publication["knowledge_writeback"] = self.write_back(
+            run_id or exp_id, goal, trace, reflection, publication)
+        writeback = publication["knowledge_writeback"]
+        publication["field_provenance"]["knowledge_writeback"] = (
+            writeback.get("provenance", "unavailable")
+            if isinstance(writeback, dict) else "unavailable"
+        )
+        return publication
+
+    def write_back(self, run_id: str, goal: str,
+                   trace: List[Dict[str, Any]],
+                   reflection: Dict[str, Any],
+                   publication: Dict[str, Any],
+                   store: Any = None) -> Dict[str, Any]:
+        """Persist run discoveries to the knowledge graph (GraphStore JSON).
+
+        Never raises: KG write-back must not fail a run. Returns a summary
+        of stored node ids (empty when nothing measurable was found).
+        """
+        if not isinstance(publication, dict) or publication.get("status") != "completed":
+            return {
+                "stored": [],
+                "status": "blocked",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "stored", "reason"), "unavailable"
+                ),
+                "reason": "Knowledge write-back requires a completed live publication.",
+            }
+        publication_repro = (publication.get("reproducibility")
+                             if isinstance(publication, dict) else None)
+        publication_gate = (publication.get("gate")
+                            if isinstance(publication, dict) else None)
+        if publication_repro == {}:
+            publication_repro = None
+        if publication_gate == {}:
+            publication_gate = None
+        reason = publication_block_reason(trace, publication_repro,
+                                          publication_gate)
+        if reason:
+            return {
+                "stored": [],
+                "status": "blocked",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "stored", "reason"), "unavailable"
+                ),
+                "reason": reason,
+            }
+
+        stored: List[str] = []
+        try:
+            if store is None:
+                import os as _os
+                from backend.knowledge_graph.graph_store import GraphStore
+                override = _os.environ.get("MECH_KG_PATH", "")
+                store = GraphStore(override) if override else GraphStore()
+            from backend.knowledge_graph.graph_store import KGEdge, KGNode
+            from backend.knowledge_graph.ontology import EdgeType, NodeType
+
+            def add_node(node_id: str, node_type: Any, label: str,
+                         properties: Optional[Dict[str, Any]] = None) -> str:
+                store.add_node(KGNode(node_id=node_id,
+                                      node_type=node_type.value
+                                      if hasattr(node_type, "value")
+                                      else str(node_type),
+                                      label=label,
+                                      properties=properties or {}))
+                stored.append(node_id)
+                return node_id
+
+            def add_edge(source: str, target: str, edge_type: Any,
+                         weight: float = 1.0) -> None:
+                store.add_edge(KGEdge(
+                    edge_id=f"{source}__{target}__{str(edge_type)}",
+                    source_id=source, target_id=target,
+                    edge_type=edge_type.value
+                    if hasattr(edge_type, "value") else str(edge_type),
+                    weight=weight))
+
+            ok = sum(1 for t in trace
+                     if t.get("status") in ("completed", "ok", "loaded"))
+            camp = add_node(f"camp_{run_id}", NodeType.CAMPAIGN,
+                            f"Campaign: {goal[:60]}",
+                            {"goal": goal, "steps_completed":
+                             f"{ok}/{len(trace)}",
+                             "status": publication.get("status", "")})
+            add_node(f"goal_{run_id}", NodeType.RESEARCH_GOAL, goal[:80], {})
+            add_edge(camp, f"goal_{run_id}", EdgeType.CONTAINS)
+            exp = add_node(publication.get("experiment_id", f"exp_{run_id}"),
+                           NodeType.EXPERIMENT,
+                           f"Society run {run_id}",
+                           {"steps_completed": f"{ok}/{len(trace)}"})
+            add_edge(camp, exp, EdgeType.CONTAINS)
+
+            by_node = {t.get("node", ""): t for t in trace}
+            disc = by_node.get("discover", {})
+            result = disc.get("result", {}) if isinstance(disc, dict) else {}
+            disc_id = result.get("discovery_id", "")
+            if disc.get("status") == "completed" and disc_id:
+                score = _first_score(result, ("circuit_score",
+                                              "confidence_score",
+                                              "calibrated_confidence"))
+                circ = add_node(f"circuit_{disc_id}", NodeType.CIRCUIT,
+                                f"Circuit {disc_id}",
+                                {"score": score,
+                                 "heads": result.get("top_attributed_nodes",
+                                                     result.get("nodes", []))})
+                add_edge(camp, circ, EdgeType.DISCOVERED_BY, weight=score)
+                add_edge(exp, circ, EdgeType.SUPPORTS, weight=score)
+
+            patch = by_node.get("patch", {})
+            if patch.get("status") == "ok" and isinstance(
+                    patch.get("delta"), (int, float)):
+                ev = add_node(f"ev_{run_id}_patch", NodeType.EVIDENCE,
+                              f"patch delta {patch['delta']}",
+                              {"delta": patch["delta"],
+                               "layer": patch.get("layer"),
+                               "head": patch.get("head")})
+                add_edge(exp, ev, EdgeType.SUPPORTS,
+                         weight=min(1.0, abs(float(patch["delta"]))))
+
+            valid = by_node.get("validate", {})
+            vres = valid.get("result", {}) if isinstance(valid, dict) else {}
+            conf = _first_score(vres, ("confidence_score",))
+            if valid.get("status") == "completed":
+                ev = add_node(f"ev_{run_id}_validation", NodeType.EVIDENCE,
+                              f"validation confidence {conf}",
+                              {"confidence": conf,
+                               "validated": vres.get("validated", False)})
+                add_edge(exp, ev, EdgeType.VALIDATED_BY,
+                         weight=min(1.0, float(conf or 0.0)))
+                if vres.get("validated"):
+                    claim = add_node(f"claim_{run_id}", NodeType.MECHANISM_CLAIM,
+                                     f"Validated: {goal[:60]}",
+                                     {"confidence": conf})
+                    add_edge(ev, claim, EdgeType.SUPPORTS,
+                             weight=min(1.0, float(conf or 0.0)))
+
+            pub = add_node(f"pub_{run_id}", NodeType.PUBLICATION,
+                           f"Mechanistic Report {run_id}",
+                           {"experiment_id": publication.get("experiment_id",
+                                                             "")})
+            add_edge(exp, pub, EdgeType.SUPPORTS)
+            gate = publication.get("gate", {})
+            if isinstance(gate, dict) and gate:
+                ev = add_node(
+                    f"ev_{run_id}_gate", NodeType.EVIDENCE,
+                    f"gate {'PASSED' if gate.get('passed') else 'FAILED'} "
+                    f"@ {gate.get('value', 0)}%",
+                    {"passed": bool(gate.get("passed", False)),
+                     "threshold_pct": gate.get("threshold", 0.85) * 100
+                     if isinstance(gate.get("threshold"), (int, float))
+                     else gate.get("threshold"),
+                     "fidelity_pct": gate.get("value")})
+                add_edge(exp, ev, EdgeType.VALIDATED_BY)
+        except Exception as exc:
+            return {
+                "stored": stored,
+                "status": "error",
+                "provenance": "unavailable",
+                "field_provenance": field_map(("status", "stored", "error"), "unavailable"),
+                "error": str(exc)[:300],
+            }
+        return {
+            "stored": stored,
+            "status": "completed",
+            "provenance": "live",
+            "field_provenance": field_map(("status", "stored"), "live"),
+        }
+
+==========================================================================
+FILE: backend/agents/society.py   (backend/agents/society.py)
+==========================================================================
+
+--- ResearchSocietyV2  [lines 77-401] ---
+class ResearchSocietyV2:
+    """Central orchestrator managing the six specialized Society agents."""
+
+    def __init__(self) -> None:
+        from .critic import Critic
+        from .discoverer import Discoverer
+        from .executor import Executor
+        from .inspector import Inspector
+        from .planner import Planner
+        from .scribe import Scribe
+        self.planner = Planner()
+        self.executor = Executor()
+        self.inspector = Inspector()
+        self.discoverer = Discoverer()
+        self.critic = Critic()
+        self.scribe = Scribe()
+        self.replans = 0
+
+    # -- dispatch ------------------------------------------------------
+    def dispatch(self, node: Dict[str, Any]) -> str:
+        explicit = str(node.get("agent", "")).strip().lower()
+        if explicit in ("planner", "executor", "inspector",
+                        "discoverer", "critic", "scribe"):
+            return explicit
+        blob = f"{node.get('id', '')} {node.get('op', '')}".lower()
+        for kw, agent in CAPABILITY_MAP.items():
+            if kw in blob:
+                return agent
+        return "executor"  # safe default: executor degrades gracefully
+
+    # -- stage execution ------------------------------------------------
+    async def _run_node(self, node: Dict[str, Any],
+                        ctx: Dict[str, Any]) -> Dict[str, Any]:
+        agent_name = self.dispatch(node)
+        agent = getattr(self, agent_name)
+        op = str(node.get("op", ""))
+        args = dict(node.get("args", {}))
+        # Provide cross-stage context the planner cannot know upfront.
+        if agent_name == "critic" and op == "validate":
+            args.setdefault("discovery_id",
+                            ctx.get("discovery_id", "disc_unknown"))
+            args.setdefault("discovery_result", ctx.get("discovery_result", {}))
+        if agent_name == "scribe" and op == "publish":
+            return self.scribe.publish(
+                goal=ctx.get("goal", ""), trace=ctx.get("trace", []),
+                reflection=ctx.get("reflection", {}))
+        fn = getattr(agent, op, None)
+        if fn is None:
+            return {"status": "error",
+                    "error": f"unknown op '{op}' for agent '{agent_name}'"}
+
+        # Check the call before making it. `fn(**args)` on a signature that
+        # cannot accept them raises TypeError, which used to propagate out of the
+        # whole workflow and surface as "Society run failed" naming only the
+        # offending keyword. Reporting it as a failed step -- with the node, the
+        # op and the accepted parameters -- keeps one bad step from destroying
+        # the run's trace, and names what to fix.
+        #
+        # This was the second half of the contract mismatch: the planner's
+        # anchor node named `reproduce` but supplied `ensure_model`'s argument.
+        # See docs/audit/society-contract-mismatch.md.
+        import inspect as _inspect
+        try:
+            _inspect.signature(fn).bind(**args)
+        except (TypeError, ValueError) as exc:
+            return {
+                "status": "error",
+                "error": (
+                    f"step '{node.get('id')}' cannot call "
+                    f"{agent_name}.{op} with {sorted(args)}: {exc}"),
+                "accepted": sorted(self._accepted_params(fn)),
+            }
+
+        if asyncio.iscoroutinefunction(fn):
+            return await fn(**args)
+        return await asyncio.to_thread(fn, **args)
+
+    @staticmethod
+    def _accepted_params(fn) -> List[str]:
+        """Parameter names `fn` accepts, excluding `self`.
+
+        Included in an error payload so a reader can see what the call wanted
+        without opening the agent's source.
+        """
+        import inspect as _inspect
+        try:
+            params = _inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return []
+        return [n for n in params if n not in ("self", "cls")]
+
+    @staticmethod
+    def _failed(res: Dict[str, Any]) -> bool:
+        return res.get("status") in ("error", "unavailable", "failed", "blocked")
+
+    @staticmethod
+    def _confidence_of(vres: Any) -> float:
+        try:
+            return float((vres.get("confidence") or {})
+                         .get("confidence_score", 0.0))
+        except Exception:
+            return 0.0
+
+    # -- main loop ------------------------------------------------------
+    def _emit(self, events: List[Dict[str, Any]], on_event: Any,
+              event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Append a ResearchEvent and forward it to the live hook (SSE)."""
+        ev = _event(event_type, payload)
+        events.append(ev)
+        if on_event is not None:
+            try:
+                on_event(ev)
+            except Exception:
+                pass
+        return ev
+
+    @staticmethod
+    def _emit_plugin_hook(hook_name: str, payload: Dict[str, Any]) -> None:
+        """Fan a platform event out to enabled plugins. Never fails a run."""
+        try:
+            from backend.plugins.service import get_service
+            get_service().bus().emit(hook_name, payload)
+        except Exception:
+            pass
+
+    async def run(self, goal: str,
+                  model_name: str = "gpt2",
+                  on_event: Any = None,
+                  run_id: str = "") -> Dict[str, Any]:
+        events: List[Dict[str, Any]] = []
+        self._emit(events, on_event, "ResearchStarted", {"goal": goal})
+        self._emit_plugin_hook("on_campaign_started",
+                               {"campaign_id": run_id or "run_unknown",
+                                "goal": goal, "model_name": model_name})
+        workflow = self.planner.plan(goal)
+        workflow["provenance"] = "reference"
+        workflow["field_provenance"] = field_map(
+            ("goal", "pipeline", "states", "nodes"), "reference"
+        )
+        nodes = list(workflow.get("nodes", []))[:MAX_STEPS]
+        self._emit(events, on_event, "ExperimentQueued",
+                   {"plan": [n["id"] for n in nodes]})
+
+        trace: List[Dict[str, Any]] = []
+        ctx: Dict[str, Any] = {"goal": goal, "model_name": model_name,
+                               "trace": trace}
+        for node in nodes:
+            res = await self._run_node(node, ctx)
+            step = {"node": node["id"], "agent": self.dispatch(node), **res}
+            step["field_provenance"] = _response_field_provenance(res)
+            trace.append(step)
+            ctx["trace"] = trace
+            if node["id"] == "discover":
+                disc = res.get("result")
+                if not isinstance(disc, dict):
+                    disc = {}
+                if not disc:
+                    # Discoverer now spreads live fields at top level; use res directly
+                    disc = res
+                ctx["discovery_result"] = disc
+                if res.get("discovery_id"):
+                    ctx["discovery_id"] = res["discovery_id"]
+                if (res.get("status") == "completed"
+                        and discovery_is_live(disc)
+                        and disc.get("discovery_id")):
+                    ctx["discovery_id"] = disc["discovery_id"]
+                    self._emit(events, on_event, "DiscoveryCreated",
+                               {"discovery_id": disc["discovery_id"]})
+            if self._failed(res):
+                self._emit(events, on_event, "HypothesisRejected",
+                           {"node": node["id"],
+                            "reason": str(res.get("error") or res.get("reason", ""))[:200]})
+                break  # fail-fast: GPU/executor failure poisons later stages
+
+        # Reflection (Critic) — one replan allowed when confidence is low.
+        successful = [t["node"] for t in trace if not self._failed(t)]
+        failed = [t["node"] for t in trace if self._failed(t)]
+        reflection = self.critic.reflect(
+            campaign_id=entity_id("camp_"),
+            successful=successful, failed=failed,
+            planner_decisions=[n["id"] for n in nodes])
+
+        paper_id = workflow.get("pipeline", "ioi")
+        discovery_step = next(
+            (t for t in trace if t.get("node") == "discover"), {})
+        # Trace steps store discoverer response fields directly (spread), not in "result"
+        discovery_result = discovery_step if isinstance(discovery_step, dict) else {}
+        discovery_eligible = discovery_is_live(discovery_result)
+
+        # Do not run or publish reproduction evidence when discovery is not
+        # explicitly live.  This keeps synthetic DiscoveryEngine fields out
+        # of the validation/publication chain rather than merely hiding them.
+        if discovery_eligible:
+            # Bounded panel: the trace already ran a live reproduction smoke
+            # test; this independent run feeds the publication gate.
+            repro = await asyncio.to_thread(
+                self.critic.reproduce, paper_id, 8)
+        else:
+            repro = {
+                "status": "blocked",
+                "provenance": provenance_of(discovery_result),
+                "field_provenance": field_map(
+                    ("status", "reason", "observed_metrics", "report", "gate"),
+                    provenance_of(discovery_result),
+                ),
+                "publication_eligible": False,
+                "reason": blocked_reason(discovery_result, "Discovery"),
+            }
+        ctx["reproducibility"] = repro
+
+        valid_step = next((t for t in trace if t.get("node") == "validate"),
+                          {})
+        vres = valid_step.get("result", {}) if isinstance(valid_step, dict) \
+            else {}
+        if not isinstance(vres, dict):
+            vres = {}
+        validation_eligible = validation_is_live(vres)
+        confident = self.critic.is_confident(vres)
+        if discovery_eligible:
+            gate = dict(repro.get("gate", {})) if isinstance(repro, dict) else {}
+            gate.update({
+                "status": "completed" if repro.get("status") == "completed"
+                          else "unavailable",
+                "provenance": "live" if repro.get("provenance") == "live"
+                              else "unavailable",
+                # Propagated from the reproduction record: the Society
+                # assembles the gate, it does not measure. An unattested
+                # reproduction keeps the gate closed.
+                "attested": bool(repro.get("attested", False))
+                            if isinstance(repro, dict) else False,
+                "field_provenance": field_map(
+                    ("status", "threshold", "value", "passed", "confidence", "validated"),
+                    "live" if repro.get("provenance") == "live" else "unavailable",
+                ),
+                "confidence": self._confidence_of(vres),
+                "validated": bool(vres.get("validated", False)),
+                "passed": bool(gate.get("passed", False))
+                          and confident and validation_eligible,
+            })
+        else:
+            gate = {
+                "status": "blocked",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "validated", "passed", "reason"), "unavailable"
+                ),
+                "validated": False,
+                "passed": False,
+                "reason": blocked_reason(discovery_result, "Discovery"),
+            }
+        ctx["gate"] = gate
+        self._emit(events, on_event, "CircuitValidated",
+                   {"successful": successful, "failed": failed,
+                    "status": "completed" if validation_eligible else "blocked",
+                    "gate_passed": gate["passed"],
+                    "fidelity_pct": gate.get("value"),
+                    "reason": gate.get("reason", "")})
+
+        needs_replan = bool(failed) and self.replans < MAX_REPLANS
+        if needs_replan and not any(t["node"] == "validate" and not self._failed(t)
+                                    for t in trace):
+            self.replans += 1
+            # Narrow retry: re-run only the failed scope would go here;
+            # v1 records the replan and does not publish partial evidence.
+            self._emit(events, on_event, "ExperimentQueued",
+                       {"replan": self.replans, "failed": failed})
+
+        publication = self.scribe.publish(goal=goal, trace=trace,
+                                          reflection=reflection,
+                                          run_id=run_id,
+                                          reproducibility=repro,
+                                          gate=gate)
+        if publication.get("status") == "completed":
+            self._emit(events, on_event, "PublicationGenerated",
+                       {"experiment_id": publication.get("experiment_id")})
+        else:
+            self._emit(events, on_event, "HypothesisRejected",
+                       {"node": "publish",
+                        "reason": str(publication.get("reason")
+                                      or "Publication evidence is unavailable")
+                        [:200]})
+        self._emit(events, on_event, "ResearchFinished",
+                   {"steps_completed": publication.get("steps_completed")
+                    or f"{len(successful)}/{len(trace)}"})
+        self._emit_plugin_hook("on_campaign_completed",
+                               {"campaign_id": run_id or "run_unknown",
+                                "goal": goal,
+                                "status": publication.get("status", "")})
+
+        if publication.get("status") == "blocked":
+            status = "blocked"
+        elif failed:
+            status = "failed"
+        elif successful:
+            status = "completed"
+        else:
+            status = "failed"
+        return {
+            "status": status,
+            "provenance": publication.get("provenance", "unavailable"),
+            "field_provenance": {
+                "workflow": workflow.get("provenance", "reference"),
+                "trace": "live" if status == "completed" else "unavailable",
+                "reflection": reflection.get("provenance", "unavailable"),
+                "reproducibility": repro.get("provenance", "unavailable"),
+                "gate": gate.get("provenance", "unavailable"),
+                "publication": publication.get("provenance", "unavailable"),
+            },
+            "validation_eligible": bool(publication.get("validation_eligible", False)),
+            "publication_eligible": bool(publication.get("publication_eligible", False)),
+            "goal": goal,
+            "workflow": workflow,
+            "trace": trace,
+            "reflection": reflection,
+            "publication": publication,
+            "events": events,
+        }
+
+    def run_blocking(self, goal: str,
+                     model_name: str = "gpt2",
+                     on_event: Any = None,
+                     run_id: str = "") -> Dict[str, Any]:
+        """Sync entry point for FastAPI handlers (dispatcher POST /society/run)."""
+        return asyncio.run(self.run(goal, model_name=model_name,
+                                    on_event=on_event, run_id=run_id))
+
+
+##############################################################################
+# P1  RUNTIME CONTROLS - admission, body cap, model identity
+##############################################################################
+Society runs are a thread + queue per request; model info
+returned gpt2-small's shape for every requested name.
+
+==========================================================================
+FILE: backend/api/dispatcher.py   (backend/api/dispatcher.py)
+==========================================================================
+
+--- _SOCIETY_MAX_ACTIVE_RUNS  [lines 1713-1713] ---
+_SOCIETY_MAX_ACTIVE_RUNS = 2
+
+--- _society_admission_reason  [lines 1719-1734] ---
+def _society_admission_reason() -> str:
+    with _society_lock:
+        active = sum(1 for r in _society_runs.values()
+                     if r.get("status") == "running")
+        queued = sum(1 for r in _society_runs.values()
+                     if r.get("status") == "queued")
+    if active >= _SOCIETY_MAX_ACTIVE_RUNS:
+        return (f"active run limit reached ({active}/"
+                f"{_SOCIETY_MAX_ACTIVE_RUNS})")
+    # Queue capacity is a cap on queued work in its own right: admitting
+    # another run when MAX_QUEUED are already waiting would exceed it
+    # regardless of how much room the active slot has.
+    if queued >= _SOCIETY_MAX_QUEUED_RUNS:
+        return (f"queue capacity reached ({queued}/"
+                f"{_SOCIETY_MAX_QUEUED_RUNS} queued)")
+    return ""
+
+--- society_run  [lines 1798-1841] ---
+def society_run(payload: Dict[str, Any]) -> Dict[str, Any]:
+    goal = str((payload or {}).get("goal", "")).strip()
+    if not goal:
+        return {"status": "error", "error": "goal required"}
+    if len(goal) > _SOCIETY_MAX_GOAL_CHARS:
+        return {"status": "error",
+                "error": f"goal exceeds {_SOCIETY_MAX_GOAL_CHARS} characters"}
+    model_name = str((payload or {}).get("model_name", "gpt2"))
+    if len(model_name) > _SOCIETY_MAX_MODEL_NAME_CHARS:
+        return {"status": "error", "error": "model_name is too long"}
+    # Admission control before any state is allocated.
+    reason = _society_admission_reason()
+    if reason:
+        return {"status": "busy", "error": reason,
+                "queue": {"active": _SOCIETY_MAX_ACTIVE_RUNS,
+                          "max_queued": _SOCIETY_MAX_QUEUED_RUNS}}
+    run_id = "r" + uuid.uuid4().hex[:12]
+    run: Dict[str, Any] = {
+        "run_id": run_id,
+        "goal": goal,
+        "model_name": model_name,
+        "status": "running",
+        "cancel_requested": False,
+        "events": [],
+        "result": None,
+        "queue": queue.Queue(maxsize=1000),
+        "created": time.time(),
+    }
+    with _society_lock:
+        _society_runs[run_id] = run
+        # Prune oldest finished runs so long-lived desktop sessions stay lean.
+        if len(_society_runs) > _SOCIETY_MAX_RUNS:
+            finished = sorted(
+                ((rid, r) for rid, r in _society_runs.items()
+                 if r.get("status") != "running"),
+                key=lambda kv: kv[1].get("created", 0),
+            )
+            for rid, _ in finished[: len(_society_runs) - _SOCIETY_MAX_RUNS]:
+                _society_runs.pop(rid, None)
+    worker = threading.Thread(
+        target=_society_worker, args=(run_id, goal, model_name), daemon=True)
+    worker.start()
+    return {"runId": run_id, "status": "started",
+            "stream": f"/api/society/stream?runId={run_id}"}
+
+--- get_model_info  [lines 103-142] ---
+def get_model_info(name: str) -> Dict[str, Any]:
+    """Architecture of the model actually in memory, or one honest refusal.
+
+    Fixed 12/12/768/50257 used to be returned for any name — including
+    ``gemma-2b`` and ``llama-3-8b``, which have different shapes entirely and
+    no loader in this engine. Now: a name matching the loaded weights gets
+    real config-derived dimensions; anything else is reported as a mismatch
+    with the loaded identity attached, so a response can never describe a
+    model that did not produce it.
+    """
+    engine = get_engine()
+    if engine and engine.is_available():
+        res = engine.info()
+        if isinstance(res, dict) and res.get("status") == "loaded":
+            loaded = str(res.get("model_name", ""))
+            if name == loaded:
+                return _mark(res, "live")
+            # Pass through the real description, then record the mismatch —
+            # never plain dimensions under the requested name.
+            out = dict(res)
+            out["model_name"] = name
+            out["model_requested"] = name
+            out["model_loaded"] = loaded
+            out["model_mismatch"] = True
+            out["reason"] = (f"model mismatch: requested {name!r} but the engine "
+                             f"has {loaded!r} weights in memory; the dimensions "
+                             "below describe the loaded weights, not the "
+                             "requested model")
+            out["provenance"] = "live"
+            out["attested"] = res.get("attested", False)
+            out["field_provenance"] = {"model_name": "live", **{
+                k: "live" for k in res if k not in
+                {"status", "reason", "model_name"}
+            }}
+            return out
+    return _mark({
+        "status": "unavailable",
+        "model_name": name,
+        "error": "torch/transformers not available — no weights in memory",
+    }, "unavailable")
+
+--- load_model  [lines 85-99] ---
+def load_model(payload: Dict[str, Any]) -> Dict[str, Any]:
+    name = payload.get("model_name", "gpt2-small")
+    engine = get_engine()
+    if engine and engine.is_available():
+        return _mark(engine.load(), "live")
+    return {
+        "status": "unavailable",
+        "model_name": name,
+        "provenance": "unavailable",
+        "field_provenance": {
+            "status": "unavailable",
+            "model_name": "unavailable",
+        },
+        "reason": "The model registry is reference-only; no live model was loaded.",
+    }
+
+--- run_benchmark  [lines 199-262] ---
+def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from backend.agents.evidence_policy import field_map
+
+    name = str(payload.get("benchmark_name", "IOI"))
+    try:
+        from backend.validation.benchmark_runner import (
+            MechanisticBenchmarkRunner,
+        )
+        res = MechanisticBenchmarkRunner().run_benchmark(f"bench_{name}")
+        status = str(res.get("status", "unavailable")).lower()
+        provenance = str(res.get("provenance", "unavailable")).lower()
+        if status not in {"completed", "passed"} or provenance != "live":
+            return {
+                "status": status if status in {"unavailable", "error"} else "unavailable",
+                "benchmark_name": name,
+                "provenance": provenance if provenance in {"unavailable", "seeded", "reference"} else "unavailable",
+                "field_provenance": field_map(
+                    ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
+                    provenance if provenance in {"unavailable", "seeded", "reference"} else "unavailable",
+                ),
+                "reason": str(res.get("reason") or "Live benchmark execution is unavailable."),
+            }
+
+        try:
+            score = float(res["accuracy"])
+            pass_rate = float(res.get("robustness_score", score))
+        except (KeyError, TypeError, ValueError):
+            return {
+                "status": "unavailable",
+                "benchmark_name": name,
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
+                    "unavailable",
+                ),
+                "reason": "The live executor did not return numeric score fields.",
+            }
+
+        return {
+            "status": "completed",
+            "benchmark_name": name,
+            "provenance": "live",
+            # Propagated from the runner's own measurement, never asserted:
+            # this route narrows the record to scores, it does not measure.
+            "attested": res.get("attested", False),
+            "field_provenance": field_map(
+                ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
+                "live",
+            ),
+            "score": round(score, 4),
+            "pass_rate": round(pass_rate, 4),
+            "eval_samples": res.get("eval_samples"),
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "benchmark_name": name,
+            "provenance": "unavailable",
+            "field_provenance": field_map(
+                ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
+                "unavailable",
+            ),
+            "error": str(exc)[:300],
+        }
+
+
+##############################################################################
+# TESTS - new suites written for the fixes
+##############################################################################
+
+==========================================================================
+FILE: tests/pytest/test_auth_control_plane.py  (136 lines, NEW - see patch for contents)
+==========================================================================
+Full contents are in security_remediation_changes.patch.
+
+==========================================================================
+FILE: tests/pytest/test_runtime_controls.py  (194 lines, NEW - see patch for contents)
+==========================================================================
+Full contents are in security_remediation_changes.patch.
+
+==========================================================================
+FILE: tests/pytest/test_run_id_validation.py  (87 lines, NEW - see patch for contents)
+==========================================================================
+Full contents are in security_remediation_changes.patch.
+
+==========================================================================
+FILE: tests/pytest/test_evidence_envelope.py  (188 lines, NEW - see patch for contents)
+==========================================================================
+Full contents are in security_remediation_changes.patch.
+
+==========================================================================
+FILE: tests/pytest/test_evidence_atomicity.py  (84 lines, NEW - see patch for contents)
+==========================================================================
+Full contents are in security_remediation_changes.patch.
+
+==========================================================================
+FILE: tests/pytest/test_evidence_quarantine.py  (204 lines, NEW - see patch for contents)
+==========================================================================
+Full contents are in security_remediation_changes.patch.
+
+==========================================================================
+FILE: tests/pytest/test_attested_evidence.py  (143 lines, NEW - see patch for contents)
+==========================================================================
+Full contents are in security_remediation_changes.patch.

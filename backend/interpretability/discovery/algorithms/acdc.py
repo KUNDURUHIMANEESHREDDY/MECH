@@ -319,15 +319,18 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
         # fall below 0.90 -- so it reported success no matter how little of the
         # circuit survived.
         #
-        # This requires the live engine, because the generic adapter's
-        # `patch_activation` takes a single site and cannot restore a whole
-        # circuit at once. When the live engine is absent, fidelity is
-        # honestly unmeasured rather than approximated.
+        # Two metrics, never confused. The bundled datasets name a target
+        # token but not the IO/subject pair a logit *difference* needs, so
+        # the gap-based `circuit_fidelity` cannot run on them -- and for a
+        # long time that meant fidelity was always unmeasured on the standard
+        # path. When only the target token is known, fidelity is the
+        # target-logit recovery from `circuit_fidelity_target`, recorded
+        # under its own metric name.
         logit_recovery_fidelity: Optional[float] = None
+        fidelity_metric = "unmeasured"
         fidelity_detail: Dict[str, Any] = {
             "measured": False,
-            "reason": "live engine unavailable; circuit-level injection is not "
-                      "expressible with a single-site adapter",
+            "reason": "no token ids available to score recovery against",
         }
         if dataset.get("io_id") is not None and dataset.get("subject_id") is not None:
             try:
@@ -340,6 +343,23 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                     set(retained_components))
                 fidelity_detail = detail
                 logit_recovery_fidelity = detail.get("fidelity")
+                fidelity_metric = "logit-difference recovery"
+            except Exception as exc:
+                fidelity_detail = {
+                    "measured": False,
+                    "reason": f"fidelity measurement failed: {exc}",
+                }
+        elif target_id is not None and retained_components:
+            try:
+                from backend.interpretability.discovery.live_measure import (
+                    circuit_fidelity_target,
+                )
+                detail = circuit_fidelity_target(
+                    clean_prompt, corrupted_prompt, target_id,
+                    set(retained_components))
+                fidelity_detail = detail
+                logit_recovery_fidelity = detail.get("fidelity")
+                fidelity_metric = "target-logit recovery"
             except Exception as exc:
                 fidelity_detail = {
                     "measured": False,
@@ -365,6 +385,7 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                 "logit_recovery_fidelity": logit_recovery_fidelity,
                 "logit_recovery_fidelity_measured":
                     bool(fidelity_detail.get("measured")),
+                "logit_recovery_fidelity_metric": fidelity_metric,
                 "logit_recovery_fidelity_detail": fidelity_detail,
                 "pruning_ratio": round(len(retained_components) / max(1, len(candidate_edges)), 3),
                 "component_list": component_list # Added for Phase 39.2

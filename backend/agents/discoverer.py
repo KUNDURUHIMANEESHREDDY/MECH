@@ -22,6 +22,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+#: Sample sizes the Society's discovery asks for. These are
+#: `live_discovery.MIN_PROMPTS_FOR_VALIDATION` and
+#: `..._MIN_PROMPTS_FOR_INTERACTION` -- the thresholds the executor itself uses
+#: to derive eligibility. Asserted equal below so a change to the executor's
+#: thresholds fails a test rather than silently making the Society's discovery
+#: ineligible again.
+SOCIETY_DISCOVERY_N_PROMPTS = 10
+SOCIETY_DISCOVERY_N_INTERACTION_PROMPTS = 5
+
 
 def _wrap_engine_result(result: Any, engine: str) -> Dict[str, Any]:
     """Wrap a sub-engine's result without overriding its own verdict.
@@ -107,7 +116,18 @@ class Discoverer:
                 DiscoveryEngine,
             )
             engine = DiscoveryEngine()
-            res = engine.discover_and_orchestrate(hypothesis_statement=hypothesis)
+            res = engine.discover_and_orchestrate(
+                hypothesis_statement=hypothesis,
+                # The Society's purpose is a publishable finding, so its
+                # discovery must ask for a sample adequate to support one. These
+                # are `live_discovery.MIN_PROMPTS_FOR_VALIDATION` and
+                # `..._FOR_INTERACTION`; passing them here is the caller's cost
+                # decision, which is where the executor's docstring says it
+                # belongs. Omitting them left every Society discovery at the
+                # four-prompt default and permanently ineligible.
+                n_prompts=SOCIETY_DISCOVERY_N_PROMPTS,
+                n_interaction_prompts=SOCIETY_DISCOVERY_N_INTERACTION_PROMPTS,
+            )
             if not discovery_is_live(res):
                 # Do not place the synthetic result under ``result``: that
                 # key is consumed by validation, evidence graphs, and the
@@ -142,6 +162,11 @@ class Discoverer:
                 **res,
                 "status": "completed",
                 "provenance": "live",
+                # Propagated, never asserted: the guard above already required
+                # an attested live result, and the spread carries it through.
+                # A result that measured nothing arrives unattested and stays
+                # ineligible downstream.
+                "attested": res.get("attested", False),
                 "field_provenance": field_map(
                     ("status", "result", "discovery_id"), "live"
                 ),

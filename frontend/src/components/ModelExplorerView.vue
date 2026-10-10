@@ -123,15 +123,16 @@
             <button
               class="button button--primary"
               type="button"
+              data-testid="model-load"
               :disabled="!canLoadModel"
               @click="loadSelectedModel"
             >
               <span v-if="modelLoadState === 'loading'" class="spinner spinner--small" aria-hidden="true" />
               {{ modelLoadState === 'loading' ? 'Loading…' : sameModel(loadedModel, selectedModel) ? 'Reload model' : 'Load model' }}
             </button>
-            <div v-if="loadedModel" class="loaded-model" role="status" aria-live="polite">
+            <div v-if="loadedModel" class="loaded-model" role="status" aria-live="polite" data-testid="model-loaded">
               <span>Loaded</span>
-              <strong>{{ loadedModel }}</strong>
+              <strong data-testid="model-loaded-name">{{ loadedModel }}</strong>
               <span
                 class="provenance-badge provenance-badge--compact"
                 :class="`provenance-badge--${modelProvenance}`"
@@ -144,7 +145,7 @@
             <div v-else class="loaded-model loaded-model--empty">No model is loaded in this view.</div>
             <p v-if="formatFieldProvenance(modelFieldProvenance) !== 'Unavailable'" class="field-help">Field provenance: {{ formatFieldProvenance(modelFieldProvenance) }}</p>
           </div>
-          <p v-if="modelLoadError" class="inline-error" role="alert">{{ modelLoadError }}</p>
+          <p v-if="modelLoadError" class="inline-error" role="alert" data-testid="model-load-error">{{ modelLoadError }}</p>
           <p v-else-if="modelLoadNote" class="field-help">{{ modelLoadNote }}</p>
         </div>
         <div v-else class="empty-state empty-state--compact">
@@ -191,7 +192,7 @@
                 <option value="infer">Generic infer</option>
               </select>
             </div>
-            <button class="button button--primary prompt-run" type="submit" :disabled="!canRunPrompt">
+            <button class="button button--primary prompt-run" type="submit" data-testid="model-run-prompt" :disabled="!canRunPrompt">
               <span v-if="promptState === 'loading'" class="spinner spinner--small" aria-hidden="true" />
               {{ promptState === 'loading' ? 'Running…' : 'Run prompt' }}
             </button>
@@ -223,7 +224,7 @@
           </div>
           <p id="model-explorer-prompt-help" class="field-help">
             Results are shown only when the backend returns them. A seeded response is labeled and is not presented as a live measurement.
-            After each run, the predicted next token is appended to the prompt, so repeated runs generate text token by token.
+            The prompt box is never modified by a run — copy the next token yourself if you want to extend the prompt.
           </p>
           <label class="auto-prompt-toggle">
             <input v-model="autoPrompt" type="checkbox" />
@@ -242,14 +243,20 @@
             <span class="spinner" aria-hidden="true" />
             <span>Running the selected endpoint…</span>
           </div>
-          <div v-else-if="promptResult" class="result-content">
+          <div v-else-if="promptResult" class="result-content" data-testid="model-prompt-result">
             <div class="result-meta">
               <span>
                 {{ promptSource === 'infer' ? 'Generic inference' : 'GPT-2 prompt run' }}
                 <template v-if="resultModelName"> · {{ resultModelName }}</template>
               </span>
-              <span v-if="resultTokenCount">{{ resultTokenCount }} returned tokens</span>
+              <span v-if="resultTokenCount" data-testid="model-prompt-token-count">{{ resultTokenCount }} returned tokens</span>
             </div>
+            <p v-if="executedPrompt" class="provenance-note">
+              Results for: “{{ executedPrompt }}”
+            </p>
+            <p v-if="promptStale" class="inline-error" role="alert">
+              Stale — the prompt box changed since this run. Re-run to measure the current text.
+            </p>
 
             <div v-if="resultTokens.length" class="token-output">
               <div class="subheading">Returned token sequence</div>
@@ -797,6 +804,13 @@ const promptError = ref('');
 const promptResult = ref<JsonRecord | null>(null);
 const promptSource = ref<PromptMode | null>(null);
 const promptProvenance = ref<Provenance>('unavailable');
+/** The exact prompt text that produced the rendered results. The input box
+ *  (`prompt`) is never mutated after a run, so any difference between the
+ *  two means the rendered panels describe an older prompt — shown as STALE.
+ *  This closes the contamination where the next token used to be appended
+ *  to the input and follow-up panels (layer tensors, logit lens) measured
+ *  a prompt that was never executed. */
+const executedPrompt = ref('');
 
 const selectedLayer = ref<number | null>(null);
 const selectedHead = ref<number | null>(null);
@@ -1078,6 +1092,12 @@ const nextToken = computed(() => nextTokenResult.value?.token ?? '');
 const nextTokenSource = computed(() => nextTokenResult.value?.source ?? '');
 const promptProvenanceNote = computed(() => provenanceTitle(promptProvenance.value));
 const promptFieldProvenance = computed(() => fieldProvenanceOf(promptResult.value?.field_provenance));
+/** True when the input differs from what produced the rendered results. */
+const promptStale = computed(() => (
+  promptResult.value !== null
+  && executedPrompt.value !== ''
+  && prompt.value.trim() !== executedPrompt.value
+));
 const displayActivationProvenance = computed<Provenance>(() => (
   activationDetail.value ? activationProvenance.value : layerActivationProvenance.value
 ));
@@ -1550,6 +1570,7 @@ async function runPrompt(mode?: PromptMode): Promise<void> {
   promptResult.value = null;
   promptSource.value = null;
   promptProvenance.value = 'unavailable';
+  executedPrompt.value = '';
   resetInspectionResults();
   try {
     const response = requireResponse(
@@ -1561,8 +1582,13 @@ async function runPrompt(mode?: PromptMode): Promise<void> {
     promptResult.value = response;
     promptSource.value = selectedMode;
     promptProvenance.value = provenanceFrom(response, 'unavailable');
+    // Record the executed text BEFORE the inspection cascade: every
+    // follow-up panel measures this prompt, never the input box (which the
+    // user may already be editing). The input is deliberately NOT extended
+    // with the next token — that used to make layer/logit panels measure a
+    // prompt that was never executed.
+    executedPrompt.value = text;
     promptState.value = 'ready';
-    if (nextToken.value) prompt.value = `${text}${nextToken.value}`;
     if (isGpt2Model.value) await loadActivations(false);
     if (isGpt2Model.value) await runInspectionCascade();
   } catch (error) {
@@ -1755,18 +1781,20 @@ async function loadActivations(silent = false): Promise<void> {
   }
 }
 
-async function loadLayerActivations(): Promise<void> {
+async function loadLayerActivations(promptText?: string): Promise<void> {
   if (!isGpt2Model.value || selectedLayer.value === null) {
     layerActivationError.value = 'Load GPT-2 and select a layer before requesting layer tensors.';
     return;
   }
+  // Measure the executed prompt, not whatever the input box holds now.
+  const text = (promptText ?? executedPrompt.value ?? prompt.value).trim() || prompt.value.trim();
   layerActivationsLoading.value = true;
   layerActivationError.value = '';
   try {
     const response = requireResponse(
       await api.pythonCall('gpt2/layer_activations', {
         layer: selectedLayer.value,
-        prompt: prompt.value.trim(),
+        prompt: text,
       }),
       `Layer activations (layer ${selectedLayer.value})`,
     );
@@ -1782,16 +1810,18 @@ async function loadLayerActivations(): Promise<void> {
   }
 }
 
-async function loadLogitLens(): Promise<void> {
+async function loadLogitLens(promptText?: string): Promise<void> {
   if (!isGpt2Model.value) {
     lensError.value = 'The logit lens is only available for GPT-2-family models.';
     return;
   }
+  // Measure the executed prompt, not whatever the input box holds now.
+  const text = (promptText ?? executedPrompt.value ?? prompt.value).trim() || prompt.value.trim();
   lensLoading.value = true;
   lensError.value = '';
   try {
     const response = requireResponse(
-      await api.pythonCall('gpt2/logit_lens_all', { prompt: prompt.value.trim() }),
+      await api.pythonCall('gpt2/logit_lens_all', { prompt: text }),
       'Logit lens',
     );
     lensDetail.value = response;

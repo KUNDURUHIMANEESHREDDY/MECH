@@ -68,6 +68,8 @@ Reproduce with `python scripts/capture_results.py` → `docs/results/capture.jso
 | IOI corrupted flip rate (3 templates) | **1.0** (3/3) |
 | Baseline clean logit difference | `2.1681` |
 | Heads screened by zero-ablation | 144 / 144 |
+| Heads whose ablation supports IOI / opposes it | 68 / 76 |
+| Strongest supporting head (signed effect) | `L2H0`, `+0.9391` (43 % of baseline) |
 | Steering flip (layer 10, α=40) | ` the` → ` Paris` |
 | GPT-2 perplexity on held-out prose | 44.9 |
 

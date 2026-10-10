@@ -129,6 +129,9 @@ class Scribe:
             return {
                 "status": "completed",
                 "provenance": "live",
+                # Propagated from the gate this report just cleared: the
+                # Scribe assembles, it does not measure.
+                "attested": gate.get("attested", False) if isinstance(gate, dict) else False,
                 "field_provenance": field_map(("status", "result"), "live"),
                 "validation_eligible": True,
                 "publication_eligible": True,
@@ -185,6 +188,10 @@ class Scribe:
         publication = {
             "status": "completed",
             "provenance": "live",
+            # Propagated from the gate: publish is reached only after
+            # publication_block_reason passes, which now requires attestation
+            # end to end.
+            "attested": gate.get("attested", False) if isinstance(gate, dict) else False,
             "field_provenance": field_map(
                 ("status", "report", "evidence_graph", "reflection",
                  "reproducibility", "gate", "knowledge_writeback"),

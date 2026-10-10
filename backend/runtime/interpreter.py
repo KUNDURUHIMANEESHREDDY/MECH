@@ -150,7 +150,16 @@ def run_inference(
             token_acts = torch.tanh(act_squeezed[:, neuron_idx] * 3.0)
             token_activations = [float(a) for a in token_acts.tolist()]
             # Averaged activation (backward-compatible scalar)
-            avg_activation = float(torch.tanh(act_tensor.abs().mean(dim=0).squeeze(0)[neuron_idx] * 3.0)) \
+            #
+            # Mean over the *token* axis, so it reduces to one number per
+            # neuron. The previous expression was `act_tensor.abs().mean(dim=0)
+            # .squeeze(0)[neuron_idx]`: mean(dim=0) already averages over batch
+            # and leaves [seq, inter_dim], and squeeze(0) is a no-op because
+            # dim 0 is seq rather than 1. Indexing that with neuron_idx
+            # therefore returned a vector, and float() on a multi-element
+            # tensor raised -- so this branch only ever worked while
+            # `inter_dim` happened to be small enough to hide it.
+            avg_activation = float(torch.tanh(act_tensor.abs().mean(dim=1)[0, neuron_idx] * 3.0)) \
                 if act_tensor.size(0) == 1 else float(token_acts.mean())
             neuron_dtos.append(NeuronActivation(
                 layer=li, index=ni, activation=avg_activation,

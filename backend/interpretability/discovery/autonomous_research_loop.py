@@ -9,6 +9,8 @@ Emits standardized ReasoningTrace objects to feed ReasoningTraceView and Evidenc
 
 from __future__ import annotations
 
+from backend.core.identifiers import entity_id
+
 import datetime as _dt
 import time
 from dataclasses import dataclass, field
@@ -105,7 +107,7 @@ class AutonomousResearchLoop:
     def run_campaign(self, goal: ResearchGoal) -> AutonomousCampaignReport:
         """Executes the closed-loop autonomous research cycle until confidence threshold is met."""
         t0 = time.time()
-        campaign_id = f"campaign_{hash(goal.goal_id + str(time.time())) & 0xffffffff:08x}"
+        campaign_id = entity_id("campaign_")
 
         plan = self.planner.plan(goal)
         prompts = self.dataset_manager.load(goal.dataset_name)
@@ -148,7 +150,22 @@ class AutonomousResearchLoop:
 
                 score = report.confidence
                 evidence_data = report.statistics
-                iteration_measured = score is not None
+                # The report's own verdict on whether it measured takes
+                # precedence over the confidence value. ACDC always reports
+                # confidence 0.0 -- calibrated to "no confidence", never a
+                # measurement -- and declares provenance.measured False when
+                # its sweep evaluated nothing (e.g. mock adapter). Reading
+                # `score is not None` alone counted that 0.0 as evidence and
+                # marked the iteration measured. Algorithms whose reports
+                # carry no measured key keep the legacy rule.
+                prov = (report.provenance
+                        if isinstance(report.provenance, dict) else {})
+                if "measured" in prov:
+                    iteration_measured = prov.get("measured") is True
+                    if not iteration_measured:
+                        score = None
+                else:
+                    iteration_measured = score is not None
 
                 if algorithm_name == "causal_scrubbing":
                     # `get("validated", True)` made a scrubbing report with no

@@ -23,16 +23,11 @@ from benchmarking.benchmark_tasks import (
 )
 
 
-def _has_gpt2() -> bool:
-    try:
-        from backend.science.models.gpt2_adapter import GPT2Adapter
-        return GPT2Adapter(variant="small", mock_mode=False)._model is not None
-    except Exception:
-        return False
+from _weight_guard import skip_reason, weights_available
 
 
 needs_weights = pytest.mark.skipif(
-    not _has_gpt2(), reason="GPT-2 weights are not loaded"
+    not weights_available(), reason=skip_reason()
 )
 
 

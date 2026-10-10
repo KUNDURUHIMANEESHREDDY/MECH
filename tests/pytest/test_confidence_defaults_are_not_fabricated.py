@@ -289,10 +289,11 @@ def test_missing_confidence_defaults_to_zero_and_stays_conservative():
     The fabricated defaults this file is about went the other way.
 
     A payload only reaches the confidence check once `validation_is_live` passes,
-    which requires status completed, provenance "live", both eligibility flags
-    set, and `validated: True`. Asserting against a payload that fails that gate
-    would prove nothing -- every such case returns False regardless of the
-    confidence value -- so the positive case is built to actually reach it.
+    which requires status completed, provenance "live", `attested is True`,
+    both eligibility flags set, and `validated: True`. Asserting against a
+    payload that fails that gate would prove nothing -- every such case returns
+    False regardless of the confidence value -- so the positive case is built
+    to actually reach it.
     """
     from backend.agents.critic import CONFIDENCE_THRESHOLD, Critic
 
@@ -303,6 +304,7 @@ def test_missing_confidence_defaults_to_zero_and_stays_conservative():
         return {
             "status": "completed",
             "provenance": "live",
+            "attested": True,
             "validation_eligible": True,
             "publication_eligible": True,
             "validated": True,
@@ -351,6 +353,7 @@ def test_missing_peer_review_is_not_an_accept():
         record = {
             "status": "completed",
             "provenance": "live",
+            "attested": True,
             "validation_eligible": True,
             "publication_eligible": True,
             "validated": True,

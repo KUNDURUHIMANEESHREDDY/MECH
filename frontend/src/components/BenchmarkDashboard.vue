@@ -97,19 +97,19 @@
         <form class="run-form" @submit.prevent="runSelectedBenchmark">
           <div class="field">
             <label for="benchmark-select">Benchmark</label>
-            <select id="benchmark-select" v-model="selectedBenchmark" :disabled="!catalog.length || running">
+            <select id="benchmark-select" v-model="selectedBenchmark" data-testid="benchmark-select" :disabled="!catalog.length || running">
               <option value="" disabled>{{ catalog.length ? 'Select a benchmark' : 'Catalog unavailable' }}</option>
               <option v-for="name in catalog" :key="name" :value="name">{{ name }}</option>
             </select>
           </div>
-          <button class="tool-button tool-button--primary" type="submit" :disabled="!selectedBenchmark || running || offline">
+          <button class="tool-button tool-button--primary" type="submit" data-testid="benchmark-run" :disabled="!selectedBenchmark || running || offline">
             <span v-if="running" class="spinner" aria-hidden="true" />
             <span v-else aria-hidden="true">▶</span>
             {{ running ? 'Running…' : 'Run selected benchmark' }}
           </button>
         </form>
         <p class="run-note">The endpoint accepts a benchmark name. It does not accept a model or sample configuration in the current contract.</p>
-        <div v-if="lastResult" class="result-card" :class="`result-card--${resultTone}`" role="status" aria-live="polite">
+        <div v-if="lastResult" class="result-card" :class="`result-card--${resultTone}`" role="status" aria-live="polite" data-testid="benchmark-result">
           <div class="result-card__heading"><strong>Last backend response</strong><span>{{ lastResult.status || 'status unavailable' }}</span></div>
           <dl class="result-grid">
             <div><dt>Benchmark</dt><dd>{{ lastResult.benchmarkName || selectedBenchmark || 'Unavailable' }}</dd></div>

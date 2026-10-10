@@ -12,8 +12,10 @@ export class WorkspaceBundle {
       layout: layoutManager.getLayout(),
       notebook: notebookStore.exportNotebook(),
       metadata: {
-        active_model: 'GPT-2 Small',
-        dataset: 'IOI Benchmark',
+        // Never asserted: no live model/dataset identity is available in
+        // this module. Previously hardcoded to GPT-2 Small / IOI Benchmark.
+        active_model: 'unconfirmed',
+        dataset: 'unconfirmed',
       },
     };
   }

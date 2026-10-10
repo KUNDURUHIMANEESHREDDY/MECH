@@ -39,22 +39,7 @@ BACKEND = ROOT / "backend"
 #: Sorted, and matched by exact path, so a fix anywhere surfaces as a failure
 #: that has to be acknowledged. Do not add an entry to silence a failure:
 #: convert the call site and delete the key.
-KNOWN_REMAINING = frozenset({
-    "backend/distributed/distributed_campaign.py",
-    "backend/interpretability/discovery/autonomous_paper_replicator.py",
-    "backend/interpretability/discovery/autonomous_research_loop.py",
-    "backend/interpretability/discovery/cross_model_circuits.py",
-    "backend/interpretability/discovery/dag_discovery_planner.py",
-    "backend/interpretability/discovery/information_gain_scheduler.py",
-    "backend/interpretability/discovery/research_campaign_manager.py",
-    "backend/knowledge_graph/graph_builder.py",
-    "backend/research_platform/autonomous/autonomous_planner.py",
-    "backend/research_platform/autonomous/research_governance.py",
-    "backend/research_platform/autonomous/research_program_manager.py",
-    "backend/research_platform/meta/literature_learning_pipeline.py",
-    "backend/runtime/execution/distributed.py",
-    "backend/runtime/orchestration/ray_integration.py",
-})
+KNOWN_REMAINING = frozenset()
 
 
 def _calls_builtin_hash(node: ast.AST) -> bool:
@@ -148,10 +133,9 @@ def test_each_remaining_site_is_still_present(rel):
 
 def test_the_inventory_only_shrinks():
     """Ratchet. Written to match today's count on purpose."""
-    assert len(KNOWN_REMAINING) <= 14, (
-        f"{len(KNOWN_REMAINING)} hash()-derived identifiers remain, up from "
-        f"14. This guard makes the remainder visible; it is not a licence to "
-        f"add. Convert them to backend.core.identifiers.")
+    assert len(KNOWN_REMAINING) == 0, (
+        f"{len(KNOWN_REMAINING)} hash()-derived identifier site(s) remain. "
+        f"Convert them to backend.core.identifiers.")
 
 
 def test_entity_and_content_ids_are_distinguishable():

@@ -120,6 +120,7 @@
           <button
             class="run-button"
             type="submit"
+            data-testid="transformer-run"
             :disabled="!canRunPrompt"
           >
             <RefreshCw v-if="promptState === 'loading'" class="spinning" :size="15" aria-hidden="true" />
@@ -127,7 +128,7 @@
             {{ promptState === 'loading' ? 'Running…' : 'Run prompt' }}
           </button>
         </div>
-        <p v-if="promptError" id="transformer-prompt-error" class="inline-error" role="alert">{{ promptError }}</p>
+        <p v-if="promptError" id="transformer-prompt-error" class="inline-error" role="alert" data-testid="transformer-prompt-error">{{ promptError }}</p>
       </form>
 
       <section class="overview-panel" aria-labelledby="architecture-overview-title">
@@ -201,7 +202,7 @@
           <span v-if="architectureValue('activation')">Block activation {{ textValue(architectureValue('activation')) }}</span>
         </div>
 
-        <dl v-if="architectureStats.length" class="architecture-stats">
+        <dl v-if="architectureStats.length" class="architecture-stats" data-testid="transformer-architecture">
           <div v-for="stat in architectureStats" :key="stat.label" class="architecture-stat">
             <dt>{{ stat.label }}</dt>
             <dd>{{ stat.value }}</dd>
@@ -222,7 +223,7 @@
             <span class="count-badge">{{ layerOptions.length }}</span>
           </header>
 
-          <div v-if="layerOptions.length" class="layer-list" aria-label="Transformer layers">
+          <div v-if="layerOptions.length" class="layer-list" data-testid="transformer-layers" aria-label="Transformer layers">
             <button
               v-for="layer in layerOptions"
               :key="layer"
@@ -424,22 +425,22 @@
               <RefreshCw class="spinning" :size="17" aria-hidden="true" />
               Running the prompt endpoint…
             </div>
-            <div v-else-if="promptError" class="inline-message inline-message--error" role="alert">
+            <div v-else-if="promptError" class="inline-message inline-message--error" role="alert" data-testid="transformer-run-error">
               <AlertTriangle :size="17" aria-hidden="true" />
               <div><strong>Prompt run failed.</strong><span>{{ promptError }}</span></div>
             </div>
             <template v-else-if="promptResult">
-              <div v-if="promptNextToken" class="next-token">
+              <div v-if="promptNextToken" class="next-token" data-testid="transformer-next-token">
                 <span>Next token</span>
                 <code>{{ formatToken(promptNextToken) }}</code>
               </div>
 
-              <div class="result-summary">
+              <div class="result-summary" data-testid="transformer-prompt-summary">
                 <span>{{ promptTokens.length }} returned tokens</span>
                 <span>{{ promptPredictions.length }} returned predictions</span>
               </div>
 
-              <div v-if="promptTokens.length" class="token-strip" aria-label="Returned prompt tokens">
+              <div v-if="promptTokens.length" class="token-strip" data-testid="transformer-tokens" aria-label="Returned prompt tokens">
                 <span v-for="(token, index) in promptTokens" :key="`prompt-token-${index}-${token}`">
                   {{ formatToken(token) }}
                 </span>

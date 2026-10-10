@@ -506,6 +506,7 @@ class IOIReproductionPipeline:
                 round(mean(recovery_scores), 4) if recovery_scores else 0.0),
             "circuit_minimality": round(minimality, 4),
             "circuit_minimality_measured": minimality_measured,
+            "n_usable_prompts": usable,
             "n_templates": len(per_template_report),
             "templates_with_usable_prompts": len(templates_with_usable),
             # How many of those are frame-level estimates rather than single
@@ -588,6 +589,9 @@ class IOIReproductionPipeline:
             "pipeline": "IOIReproductionPipeline-HighFidelity",
             "status": "completed",
             "provenance": "live",
+            # Attested here: faithfulness/minimality/recovery were measured
+            # above through live capture/inject on loaded weights.
+            "attested": True,
             "field_provenance": _field_map(
                 ("status", "observed_metrics", "raw_traces",
                  "reproducibility_report", "manifest_id",
@@ -595,8 +599,16 @@ class IOIReproductionPipeline:
                 "live",
             ),
             "provenance_note": "Observed from the connected model run.",
-            "validation_eligible": True,
-            "publication_eligible": True,
+            "validation_eligible": bool(circuit) and usable >= MIN_PROMPTS_FOR_MINIMALITY,
+            "publication_eligible": bool(circuit) and usable >= MIN_PROMPTS_FOR_MINIMALITY,
+            "n_usable_prompts": usable,
+            "ineligible_because": (
+                [r for r in [
+                    None if circuit else "no minimal circuit was identified",
+                    None if usable >= MIN_PROMPTS_FOR_MINIMALITY else (
+                        f"only {usable} usable prompts, below the "
+                        f"{MIN_PROMPTS_FOR_MINIMALITY} needed for eligibility"),
+                ] if r] or None),
             "mock_mode": False,
             "discovery_provenance": "live",
             "synthetic_fields": [],
@@ -609,6 +621,10 @@ class IOIReproductionPipeline:
         }
 
     def run(self, n_prompts: int = 100, seed: int = 42, model_variant: str = "small") -> Dict[str, Any]:
+        # Validate input bounds explicitly - fail closed with a clear error.
+        if n_prompts <= 0:
+            raise ValueError(f"n_prompts must be > 0, got {n_prompts}")
+
         # Switch model metadata if needed (simulated for mock). Live mode
         # always measures through backend.services.gpt2_engine (gpt2-small);
         # never construct a second weights copy here.
@@ -842,6 +858,9 @@ class IOIReproductionPipeline:
             "pipeline": "IOIReproductionPipeline-HighFidelity",
             "status": "completed",
             "provenance": "synthetic" if self.adapter.spec.mock_mode else "live",
+            # Attested only for the measured branch: mock mode computes from
+            # reference fixtures, which attests to nothing.
+            "attested": not self.adapter.spec.mock_mode,
             "field_provenance": _field_map(
                 ("status", "observed_metrics", "raw_traces", "reproducibility_report",
                  "manifest_id", "discovery_provenance"),
@@ -940,6 +959,10 @@ class IOIReproductionPipeline:
         return {
             "status": "completed" if live else "unavailable",
             "provenance": "live" if live else "unavailable",
+            # Attested only when at least one seed actually measured: the pool
+            # aggregates per-seed runs, and an all-unavailable pool attests to
+            # nothing.
+            "attested": bool(live),
             "field_provenance": _field_map(
                 ("status", "n_seeds_requested", "n_seeds_used", "pooled",
                  "per_seed", "reason"),

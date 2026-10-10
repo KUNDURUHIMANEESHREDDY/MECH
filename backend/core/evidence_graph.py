@@ -18,6 +18,71 @@ PROVENANCE_VALUES = {"live", "seeded", "reference", "unavailable"}
 
 EVIDENCE_DIR = os.environ.get("MECH_EVIDENCE_DIR", "backend/storage/evidence")
 
+#: Comma-separated paths to trusted signing key files. Each path is loaded
+#: and its public key fingerprint (key_id) is computed. Only envelopes whose
+#: attestation key_id matches one of these trusted key_ids are considered
+#: attested. If unset, no envelope is considered attested (fail-closed).
+_TRUSTED_KEY_PATHS_ENV = "MECH_TRUSTED_SIGNING_KEY_PATH"
+
+#: Parsed and cached trusted key IDs. None = not yet loaded.
+_TRUSTED_KEY_IDS: Optional[set[str]] = None
+
+
+def _load_trusted_key_ids() -> set[str]:
+    """Load trusted signing key IDs from MECH_TRUSTED_SIGNING_KEY_PATH.
+
+    Returns a set of key_id strings (format: "ed25519:<16-char-hex>").
+    Returns empty set if env var is not set, meaning no key is trusted
+    (fail-closed: no envelope will be attested).
+    """
+    global _TRUSTED_KEY_IDS
+    if _TRUSTED_KEY_IDS is not None:
+        return _TRUSTED_KEY_IDS
+
+    paths_env = os.environ.get(_TRUSTED_KEY_PATHS_ENV, "").strip()
+    if not paths_env:
+        _TRUSTED_KEY_IDS = set()
+        return _TRUSTED_KEY_IDS
+
+    try:
+        from backend.science.integrity import signing as _signing
+    except Exception:
+        # If signing module unavailable, trust nothing
+        _TRUSTED_KEY_IDS = set()
+        return _TRUSTED_KEY_IDS
+
+    trusted = set()
+    for path_str in paths_env.split(","):
+        path_str = path_str.strip()
+        if not path_str:
+            continue
+        try:
+            pub_hex = _signing.public_key_hex(path_str)
+            key_id = _signing.key_id_for(pub_hex)
+            trusted.add(key_id)
+        except Exception:
+            # Individual bad key is ignored; continue with others
+            continue
+
+    _TRUSTED_KEY_IDS = trusted
+    return _TRUSTED_KEY_IDS
+
+
+def _reset_trusted_key_ids_cache() -> None:
+    """Clear the trusted key IDs cache. Used by tests when env vars change."""
+    global _TRUSTED_KEY_IDS
+    _TRUSTED_KEY_IDS = None
+
+
+def _is_key_trusted(key_id: Optional[str]) -> bool:
+    """Return True iff key_id is in the trusted set."""
+    if key_id is None:
+        return False
+    trusted = _load_trusted_key_ids()
+    if not trusted:
+        return False
+    return key_id in trusted
+
 # Numeric step-result keys promoted to Evidence nodes by from_run().
 EVIDENCE_KEYS = ("delta", "clean_ld", "patched_ld", "circuit_score",
                  "confidence_score", "attribution_score", "causal_effect",
@@ -389,8 +454,11 @@ def envelope_status(run_id: str,
 
     Returns a status dict; never raises. `"legacy"` means the file predates
     envelopes and is served unverified (quarantine decides its fate, not this
-    function). `"valid"` means the bytes verify under the embedded key;
-    callers that pin a key must additionally compare `key_id`.
+    function). `"valid"` means the bytes verify under the embedded key AND the
+    signing key is in the configured trusted set (MECH_TRUSTED_SIGNING_KEY_PATH).
+    Envelopes with valid signatures but untrusted keys get
+    `attested: False, signature: "untrusted"`. Callers that pin a key must
+    additionally compare `key_id`.
     """
     try:
         path = _record_path(run_id, directory)
@@ -450,8 +518,16 @@ def envelope_status(run_id: str,
         return {"envelope": "v1", "attested": False,
                 "signature": "invalid",
                 "reason": str(result.reason or "signature does not verify")[:200]}
+    # Signature is valid; now check if the signing key is TRUSTED.
+    key_id = attestation.get("key_id")
+    if not _is_key_trusted(key_id):
+        return {"envelope": "v1", "attested": False,
+                "signature": "untrusted",
+                "reason": ("signature verifies but the signing key is not in the "
+                           "configured trusted key set")[:200],
+                "key_id": key_id}
     return {"envelope": "v1", "attested": True, "signature": "valid",
-            "key_id": attestation.get("key_id"), "reason": None}
+            "key_id": key_id, "reason": None}
 
 
 def save_run_record(run_id: str, record: Dict[str, Any],

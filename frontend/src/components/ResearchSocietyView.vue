@@ -29,6 +29,7 @@
             v-model="goal"
             type="text"
             class="society__goal"
+            data-testid="society-goal"
             placeholder="e.g. Reproduce IOI on gpt2-small and find causally important heads"
             :disabled="isActive"
             :aria-invalid="Boolean(validationMessage)"
@@ -39,6 +40,7 @@
           <button
             type="submit"
             class="society__button society__button--primary"
+            data-testid="society-run"
             :disabled="!canRun"
           >
             <span
@@ -75,10 +77,10 @@
       </div>
     </form>
 
-    <div class="society__status" role="status" aria-live="polite">
+    <div class="society__status" role="status" aria-live="polite" data-testid="society-status" :data-phase="phase">
       <span class="society__status-dot" :class="`society__status-dot--${statusTone}`" aria-hidden="true" />
       <div>
-        <strong>{{ statusHeading }}</strong>
+        <strong data-testid="society-status-heading">{{ statusHeading }}</strong>
         <span>{{ statusDetail }}</span>
       </div>
       <span class="society__backend-state">{{ backendStateLabel }}</span>
@@ -89,7 +91,7 @@
       <span>{{ offlineNotice }}</span>
     </div>
 
-    <div v-if="errorMessage" class="society__notice society__notice--error" role="alert">
+    <div v-if="errorMessage" class="society__notice society__notice--error" role="alert" data-testid="society-error">
       <strong>Society request failed</strong>
       <span>{{ errorMessage }}</span>
     </div>
@@ -113,8 +115,8 @@
           <span class="society__spinner" aria-hidden="true" />
           <span>Waiting for backend trace steps…</span>
         </div>
-        <ol v-else-if="steps.length" class="society__steps">
-          <li v-for="step in steps" :key="`${step.node}-${step.agent ?? 'agent-unavailable'}`" class="society__step">
+        <ol v-else-if="steps.length" class="society__steps" data-testid="society-steps">
+          <li v-for="step in steps" :key="`${step.node}-${step.agent ?? 'agent-unavailable'}`" class="society__step" data-testid="society-step">
             <span
               class="society__step-dot"
               :class="`society__step-dot--${stepTone(step.status)}`"

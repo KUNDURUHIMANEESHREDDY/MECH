@@ -9,17 +9,28 @@ export class ReportGenerator {
     const notebook = notebookStore.exportNotebook();
     let md = `# ${title}\n\n`;
     md += `**Generated:** ${new Date().toISOString()}\n`;
-    md += `**Active Model:** GPT-2 Small\n\n`;
+    md += `**Provenance:** unconfirmed — this report renders notebook cells only; model identity is not asserted here.\n\n`;
     md += `## Experiment Summary & Key Observations\n`;
 
+    let measuredCells = 0;
     notebook.cells.forEach((c) => {
       if (c.type === 'markdown') md += `${c.content}\n\n`;
-      if (c.type === 'json') md += `\`\`\`json\n${JSON.stringify(c.data, null, 2)}\n\`\`\`\n\n`;
+      if (c.type === 'json') {
+        measuredCells += 1;
+        md += `\`\`\`json\n${JSON.stringify(c.data, null, 2)}\n\`\`\`\n\n`;
+      }
     });
 
+    // No hardcoded findings. The previous version asserted a Layer 8 patch
+    // at L8_N402 and a Paris/France prediction delta on every report,
+    // regardless of what ran. Findings are emitted only from measured cells;
+    // an empty notebook yields an explicit no-measurements statement.
     md += `## Intervention & Prediction Verification\n`;
-    md += `- **Layer 8 Activation Patch**: Replacement patch applied at L8_N402.\n`;
-    md += `- **Prediction Delta**: Top prediction updated from " France" (0.12) to " Paris" (0.82).\n`;
+    if (measuredCells === 0) {
+      md += `No measurements recorded in this notebook. No interventions were verified.\n`;
+    } else {
+      md += `${measuredCells} measured cell(s) recorded above; interpretation beyond the recorded values was not performed.\n`;
+    }
     return md;
   }
 

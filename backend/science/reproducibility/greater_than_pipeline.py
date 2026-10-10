@@ -258,6 +258,10 @@ class GreaterThanCircuitPipeline:
             "pipeline": "GreaterThanCircuitPipeline",
             "paper_id": self.PAPER_ID,
             "provenance": "live",
+            # Attested here: layer effects were measured by ablating layers
+            # and re-measuring (unreachable in mock mode, which returns
+            # unavailable early).
+            "attested": True,
             "measurement": measurement,
             "layer_patch_effects": {str(L): round(means[L], 4) for L in sorted(means)},
             "observed_metrics": observed_metrics,

@@ -11,6 +11,8 @@ Manages end-to-end scientific research campaigns, tracking:
 
 from __future__ import annotations
 
+from backend.core.identifiers import entity_id
+
 import datetime as _dt
 import json
 import os
@@ -136,48 +138,21 @@ class ResearchCampaignManager:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
     def _seed_defaults(self) -> None:
-        """Seeds benchmark research campaigns into workspace."""
-        c1 = ResearchCampaign(
-            campaign_id="campaign_ioi_01",
-            title="IOI Circuit Discovery & Cross-Model Validation",
-            goal_description="Discover, prune, and validate indirect object identification circuit across GPT-2, Gemma, and Llama.",
-            status="Completed",
-            target_model="GPT2-S",
-            planned_experiments=["attribution_patching", "acdc", "path_patching", "causal_scrubbing", "feature_universality"],
-            completed_experiments=[
-                ExperimentRecord(
-                    experiment_id="exp_01_attr", algorithm_name="attribution_patching", target_model="GPT2-S",
-                    status="Completed", compute_consumed_flops=1.2e12, runtime_ms=1200.0,
-                    evidence={"isolated_heads": ["L9H9", "L10H0"]}, uncertainty_before=0.50, uncertainty_after=0.35
-                ),
-                ExperimentRecord(
-                    experiment_id="exp_02_acdc", algorithm_name="acdc", target_model="GPT2-S",
-                    status="Completed", compute_consumed_flops=8.5e12, runtime_ms=7800.0,
-                    evidence={"retained_nodes": 4, "pruned_ratio": 0.94}, uncertainty_before=0.35, uncertainty_after=0.18
-                ),
-                ExperimentRecord(
-                    experiment_id="exp_03_scrub", algorithm_name="causal_scrubbing", target_model="GPT2-S",
-                    status="Completed", compute_consumed_flops=1.1e13, runtime_ms=9500.0,
-                    evidence={"falsification_verdict": "PASS", "behavior_preserved": 0.96}, uncertainty_before=0.18, uncertainty_after=0.038
-                )
-            ],
-            failed_experiments=[],
-            evidence_accumulated=[
-                {"evidence_id": "ev_01", "type": "ACDC Pruning", "value": "94% pruned; 3-head minimal subgraph"},
-                {"evidence_id": "ev_02", "type": "Causal Scrubbing", "value": "Preserved 96% accuracy under name-type equivalence class"}
-            ],
-            remaining_uncertainty=0.038,
-            budget_remaining_usd=8.45,
-            compute_consumed_flops=2.07e13,
-            papers_reproduced=["paper_wang_2022", "paper_conmy_2023"],
-            final_mechanism_claims=["claim_ioi_name_mover"]
-        )
-        self._campaigns[c1.campaign_id] = c1
-        self.save()
+        """No archive is seeded.
+
+        Previously this seeded campaigns_index.json with a completed campaign
+        whose FLOPs, runtimes, uncertainties and mechanism claims were invented.
+        CampaignAnalyticsEngine then reported success rates and leaderboards
+        over that fiction. An empty archive is the honest default: nothing
+        is measured, so nothing is reported. Callers start from no campaigns
+        and every campaign that appears is one a real run created.
+        """
+        self._campaigns = {}
+
 
     def create_campaign(self, title: str, goal: ResearchGoal, initial_budget_usd: float = 10.0) -> ResearchCampaign:
         """Creates and registers a new research campaign."""
-        cid = f"campaign_{hash(title + str(time.time())) & 0xffffffff:08x}"
+        cid = entity_id("campaign_")
         campaign = ResearchCampaign(
             campaign_id=cid,
             title=title,

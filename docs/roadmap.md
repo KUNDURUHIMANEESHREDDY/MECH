@@ -127,9 +127,13 @@ the directory at runtime (`GraphStore`, `CircuitDiscoveryEngine`, `MechanismClai
       torch turns a slow dependency into a restart loop) and a new `GET /health/subsystems`
       probes process, dependency, model, executor, storage, and evidence. The status
       vocabulary has no `healthy` member: nothing there proves health, only that a
-      subsystem was exercised and what it reported. `POST /api/runtime/status` now probes
-      each engine for real reachability (including `sbatch` on PATH for Slurm) and only
-      says `connected` when one verified.
+      subsystem was exercised and what it reported. `POST /api/runtime/status` measures
+      each engine on a four-rung ladder — `installed` / `configured` / `reachable` /
+      `execution_ready` — and only says `connected` when one answered. The rungs exist
+      because a single boolean could not tell them apart: the old probe answered
+      `reachable` with `importlib.find_spec("ray") is not None`, so a laptop with `ray`
+      pip-installed and no cluster reported `connected`. `engines` lists what was
+      reached; `execution_ready_engines` lists what could take a job right now.
 - [x] ~~Make the live-weight test a required CI job.~~ **done** — `.github/workflows/ci.yml`
       has a separate `live-evidence` job that loads GPT-2, runs a real forward pass (so a
       stub cannot satisfy it), then runs `test_validation_loop.py`, the attestation hash

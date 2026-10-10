@@ -1,4 +1,4 @@
-"""Research Society v2 â€” Supervisor (ReAct: plan -> dispatch -> execute -> reflect).
+"""Research Society v2 — Supervisor (ReAct: plan -> dispatch -> execute -> reflect).
 
 Replaces backend/agents/research_society.py::ResearchSociety.
 run_society_collaboration (stub: hardcoded "Step 1/Step 2", fake 0.95 scores)
@@ -15,7 +15,7 @@ never requires torch/transformers. Agent-to-op dispatch falls back to
 CAPABILITY_MAP keyword matching when no LLM dispatcher is configured.
 
 Emits backend.core.event_schema.ResearchEvent (valid types only) into the
-returned trace â€” the per-run evidence trail.
+returned trace — the per-run evidence trail.
 """
 
 from __future__ import annotations
@@ -248,7 +248,7 @@ class ResearchSocietyV2:
                             "reason": str(res.get("error") or res.get("reason", ""))[:200]})
                 break  # fail-fast: GPU/executor failure poisons later stages
 
-        # Reflection (Critic) â€” one replan allowed when confidence is low.
+        # Reflection (Critic) — one replan allowed when confidence is low.
         successful = [t["node"] for t in trace if not self._failed(t)]
         failed = [t["node"] for t in trace if self._failed(t)]
         reflection = self.critic.reflect(
@@ -299,6 +299,11 @@ class ResearchSocietyV2:
                           else "unavailable",
                 "provenance": "live" if repro.get("provenance") == "live"
                               else "unavailable",
+                # Propagated from the reproduction record: the Society
+                # assembles the gate, it does not measure. An unattested
+                # reproduction keeps the gate closed.
+                "attested": bool(repro.get("attested", False))
+                            if isinstance(repro, dict) else False,
                 "field_provenance": field_map(
                     ("status", "threshold", "value", "passed", "confidence", "validated"),
                     "live" if repro.get("provenance") == "live" else "unavailable",

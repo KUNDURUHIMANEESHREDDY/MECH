@@ -116,8 +116,9 @@ class SessionInfo:
 class SessionManager:
     """Manages inspection sessions."""
 
-    def __init__(self):
+    def __init__(self, max_sessions: int = 64):
         self._sessions: Dict[str, SessionInfo] = {}
+        self._max_sessions = max_sessions
 
     def create_session(
         self,
@@ -138,6 +139,8 @@ class SessionManager:
         )
         session = SessionInfo(session_id, runtime)
         self._sessions[session_id] = session
+        while len(self._sessions) > self._max_sessions:
+            self._sessions.pop(next(iter(self._sessions)))
         return session
 
     def get_session(self, session_id: str) -> SessionInfo:

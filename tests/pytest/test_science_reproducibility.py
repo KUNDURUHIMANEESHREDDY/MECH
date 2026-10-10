@@ -431,22 +431,11 @@ def test_arithmetic_pipeline_refuses_rather_than_fabricating():
     assert "not implemented" in str(excinfo.value).lower()
 
 
-def _has_gpt2() -> bool:
-    """Whether real GPT-2 weights are loadable here.
-
-    Same helper as test_benchmark_executor_measurement.py: `needs_weights` is a
-    skipif alias rather than a registered marker, so a test that needs a forward
-    pass has to gate on this or it fails wherever the weights are absent.
-    """
-    try:
-        from science.models.gpt2_adapter import GPT2Adapter
-        return GPT2Adapter(variant="small", mock_mode=False)._model is not None
-    except Exception:
-        return False
+from _weight_guard import skip_reason, weights_available
 
 
 needs_weights = pytest.mark.skipif(
-    not _has_gpt2(), reason="GPT-2 weights are not loaded"
+    not weights_available(), reason=skip_reason()
 )
 
 

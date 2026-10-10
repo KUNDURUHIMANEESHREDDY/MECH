@@ -10,6 +10,7 @@ import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.core.provenance import attest_measurement
+from backend.services.model_lock import MODEL_LOCK
 
 try:
     import numpy as np
@@ -70,10 +71,10 @@ def load() -> Dict[str, Any]:
     if not ML_AVAILABLE:
         return {"status": "error", "error": "torch/transformers not installed"}
     if _model is not None:
-        return info()
+        return _attest_info(info())
     with _lock:
         if _model is not None:
-            return info()
+            return _attest_info(info())
         try:
             try:
                 _tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True)
@@ -91,7 +92,7 @@ def load() -> Dict[str, Any]:
             _model.eval()
         except Exception as e:
             return {"status": "error", "error": str(e)}
-        return info()
+        return _attest_info(info())
 
 
 def _cfg() -> Any:
@@ -122,24 +123,117 @@ def _head_dim() -> int:
 
 
 def info() -> Dict[str, Any]:
+    """Cheap description of the loaded model. Every value read from the config.
+
+    Nothing here is a literal. A response that says `activation: "gelu_new"`
+    because that string was typed into this function describes no weights; one
+    that reads it off `config.activation_function` describes the model in
+    memory. The distinction matters as soon as the checkpoint changes.
+    """
+    if _model is None:
+        return {"status": "error", "error": "no model loaded"}
+    cfg = _cfg()
     n_params = sum(p.numel() for p in _model.parameters())
+    architectures = getattr(cfg, "architectures", None) or [type(_model).__name__]
     return {
         "status": "loaded",
-        "model_name": "gpt2",
-        "model_type": getattr(_cfg(), "model_type", "gpt2"),
+        "model_name": _loaded_model_id() or SUPPORTED_MODEL,
+        "model_type": getattr(cfg, "model_type", None),
+        "architectures": list(architectures),
         "n_layers": _n_layers(),
         "n_heads": _n_heads(),
         "d_model": _d_model(),
         "d_mlp": _d_mlp(),
         "d_head": _head_dim(),
-        "vocab_size": int(_cfg().vocab_size),
-        "n_positions": int(getattr(_cfg(), "n_positions", 1024)),
+        "vocab_size": int(cfg.vocab_size),
+        "n_positions": int(getattr(cfg, "n_positions", 1024)),
         "n_params": int(n_params),
         "n_params_human": _human_params(n_params),
         "device": str(next(_model.parameters()).device),
         "dtype": str(next(_model.parameters()).dtype),
-        "activation": "gelu_new",
-        "architecture": "decoder-only transformer (GPT-2)",
+        "activation": getattr(cfg, "activation_function", None),
+        "architecture": architectures[0],
+    }
+
+
+def _attest_info(description: Dict[str, Any]) -> Dict[str, Any]:
+    """Attest an info() description: the identity of the weights in memory.
+
+    `info()` reads every value off the loaded config, so it describes a
+    measurement of what is in memory rather than a claim. Attesting here (at
+    the source) is what lets the API layer pass it through instead of
+    withholding it as unlabeled.
+    """
+    return attest_measurement(description,
+                              model_loaded=_loaded_model_id())
+
+
+def model_identity() -> Dict[str, Any]:
+    """Immutable identity of the weights in memory, for research artifacts.
+
+    Every field is read from the loaded model or tokenizer. A result artifact
+    that carries this block can be tied to specific weights after the fact:
+    `revision` is the checkpoint's commit, and the three hashes cover the weight
+    tensors, the config, and the vocabulary -- so a change to any of them is
+    detectable rather than inferred.
+
+    Distinct from `info()` on purpose. `info()` is a display description that
+    changes if you re-load; this is a fingerprint, and a result should cite it
+    rather than re-describe itself. Costs ~1.6s on GPT-2 small (hashing ~500MB
+    of tensors), which is noise against a capture run measured in tens of
+    seconds and is not something to guess at.
+    """
+    if _model is None:
+        return {"status": "error", "error": "no model loaded", "attested": False}
+
+    from backend.science.reproducibility.model_fingerprint import (
+        ModelFingerprintEngine as _Fingerprint,
+    )
+
+    cfg = _cfg()
+    try:
+        weights_sha = _Fingerprint._sha256_state_dict(_model)
+        config_sha = _Fingerprint._sha256_config(_model)
+        tokenizer_sha = _Fingerprint._sha256_tokenizer(_tokenizer)
+    except Exception as exc:  # noqa: BLE001
+        # Reported rather than raised. The caller decides whether an
+        # unattested identity blocks the run -- see
+        # `scripts/capture_results.py`, which treats it as fatal, because an
+        # artifact whose weights cannot be named must not claim to be measured.
+        return {
+            "status": "error",
+            "error": f"identity hashing failed: {exc}",
+            "attested": False,
+            "attestation_reason": str(exc),
+        }
+
+    return {
+        "status": "ok",
+        "attested": True,
+        "model_id": _loaded_model_id() or SUPPORTED_MODEL,
+        "model_type": getattr(cfg, "model_type", None),
+        "architectures": list(getattr(cfg, "architectures", None) or []),
+        # The checkpoint commit is the only part of a HF id that cannot be
+        # re-pointed. "gpt2" alone does not identify a set of weights; this does.
+        "revision": getattr(cfg, "_commit_hash", None),
+        "weights_sha256": weights_sha,
+        "config_sha256": config_sha,
+        "tokenizer_sha256": tokenizer_sha,
+        "tokenizer_class": type(_tokenizer).__name__ if _tokenizer else None,
+        "tokenizer_vocab_size": (
+            len(_tokenizer.get_vocab()) if _tokenizer is not None else None
+        ),
+        "parameter_count": sum(p.numel() for p in _model.parameters()),
+        "dtype": str(next(_model.parameters()).dtype),
+        "device": str(next(_model.parameters()).device),
+        "n_layers": _n_layers(),
+        "n_heads": _n_heads(),
+        "d_model": _d_model(),
+        "d_head": _head_dim(),
+        "d_mlp": _d_mlp(),
+        "vocab_size": int(cfg.vocab_size),
+        "n_positions": int(getattr(cfg, "n_positions", 1024)),
+        "activation": getattr(cfg, "activation_function", None),
     }
 
 
@@ -242,7 +336,7 @@ def architecture() -> Dict[str, Any]:
                         "d_model": _d_model(),
                         "d_mlp": d_mlp,
                         "num_neurons": d_mlp,
-                        "activation": "gelu_new",
+                        "activation": getattr(_cfg(), "activation_function", None),
                     },
                 ],
                 "n_params": sum(p.numel() for p in block.parameters()),
@@ -310,6 +404,16 @@ def architecture() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _forward(prompt: str) -> Dict[str, Any]:
+    global _cache
+    # Serialized on MODEL_LOCK (shared with live_measure): hook install,
+    # forward, hook removal, and cache replacement are one atomic unit.
+    # Without this, two concurrent prompts interleave hooks and the cache
+    # ends up describing a prompt it never ran.
+    with MODEL_LOCK:
+        return _forward_locked(prompt)
+
+
+def _forward_locked(prompt: str) -> Dict[str, Any]:
     global _cache
     inputs = _tokenizer(prompt, return_tensors="pt")
     device = next(_model.parameters()).device
@@ -762,7 +866,7 @@ def neuron_detail(
 
         return {
             "status": "ok",
-            "model_name": "gpt2",
+            "model_name": _loaded_model_id() or SUPPORTED_MODEL,
             "layer": layer,
             "neuron_index": neuron_index,
             "component": "mlp",
@@ -822,7 +926,7 @@ def neuron_detail(
 
     return {
         "status": "ok",
-        "model_name": "gpt2",
+        "model_name": _loaded_model_id() or SUPPORTED_MODEL,
         "layer": layer,
         "neuron_index": neuron_index,
         "component": "resid",
@@ -944,97 +1048,119 @@ def head_detail(layer: int, head: int) -> Dict[str, Any]:
     }
 
 
-def attention_head(layer: int, head: int) -> Dict[str, Any]:
+def attention_head(layer: int, head: int, prompt: Optional[str] = None) -> Dict[str, Any]:
+    """Attention pattern for one head, optionally for a specific prompt.
+
+    When `prompt` is given, ensure-then-read happens atomically under
+    MODEL_LOCK, so the matrix always describes the requested prompt —
+    never whatever another thread ran last. Without `prompt`, the
+    current cache is read (and the response names its prompt).
+    """
     err = _ensure_loaded()
     if err:
         return err
-    if not _cache:
-        return {"status": "error", "error": "Run a prompt first to populate the cache."}
-    detail = head_detail(layer, head)
-    if detail.get("status") != "ok":
-        return detail
-    return {
-        "status": "ok",
-        "layer": detail["layer"],
-        "head": detail["head"],
-        "matrix": detail["attention_matrix"] or [],
-        "str_tokens": detail["str_tokens"] or [],
-    }
+    with MODEL_LOCK:
+        if prompt:
+            if not _cache or _cache.get("prompt") != prompt:
+                _forward_locked(prompt)
+        if not _cache:
+            return {"status": "error", "error": "Run a prompt first to populate the cache."}
+        detail = head_detail(layer, head)
+        if detail.get("status") != "ok":
+            return detail
+        return {
+            "status": "ok",
+            "layer": detail["layer"],
+            "head": detail["head"],
+            "matrix": detail["attention_matrix"] or [],
+            "str_tokens": detail["str_tokens"] or [],
+            "prompt": _cache.get("prompt"),
+        }
 
 
-def activations(layer: int) -> Dict[str, Any]:
+def activations(layer: int, prompt: Optional[str] = None) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
         return err
-    layer = max(0, min(_n_layers() - 1, int(layer)))
-    seq = len(_cache.get("str_tokens", [])) if _cache else 0
-    result: Dict[str, Any] = {
-        "status": "ok",
-        "layer": layer,
-        "resid_shape": [seq, _d_model()],
-        "attn_shape": [_n_heads(), seq, seq],
-        "mlp_shape": [seq, _d_mlp()],
-        "has_cache": bool(_cache),
-    }
-    if _cache and "mlp_post" in _cache and layer in _cache["mlp_post"]:
-        acts = _cache["mlp_post"][layer]
-        result["mlp_last_token"] = [round(float(x), 5) for x in acts[-1].tolist()]
-        result["mlp_stats"] = _tensor_stats(acts)
-    if _cache and "hidden" in _cache:
-        h = torch.tensor(_cache["hidden"][layer + 1])
-        result["resid_stats"] = _tensor_stats(h)
-        result["resid_last_token"] = [round(float(x), 5) for x in h[-1].tolist()[:64]]
-    return result
+    with MODEL_LOCK:
+        if prompt:
+            if not _cache or _cache.get("prompt") != prompt:
+                _forward_locked(prompt)
+        layer = max(0, min(_n_layers() - 1, int(layer)))
+        seq = len(_cache.get("str_tokens", [])) if _cache else 0
+        result: Dict[str, Any] = {
+            "status": "ok",
+            "layer": layer,
+            "resid_shape": [seq, _d_model()],
+            "attn_shape": [_n_heads(), seq, seq],
+            "mlp_shape": [seq, _d_mlp()],
+            "has_cache": bool(_cache),
+            "prompt": _cache.get("prompt") if _cache else None,
+        }
+        if _cache and "mlp_post" in _cache and layer in _cache["mlp_post"]:
+            acts = _cache["mlp_post"][layer]
+            result["mlp_last_token"] = [round(float(x), 5) for x in acts[-1].tolist()]
+            result["mlp_stats"] = _tensor_stats(acts)
+        if _cache and "hidden" in _cache:
+            h = torch.tensor(_cache["hidden"][layer + 1])
+            result["resid_stats"] = _tensor_stats(h)
+            result["resid_last_token"] = [round(float(x), 5) for x in h[-1].tolist()[:64]]
+        return result
 
 
 def patch_head(layer: int, head: int, pos_token: str, neg_token: str) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
         return err
-    if not _cache:
-        return {"status": "error", "error": "Run a prompt first to populate the cache."}
-    layer = max(0, min(_n_layers() - 1, int(layer)))
-    head = max(0, min(_n_heads() - 1, int(head)))
-    prompt = _cache["prompt"]
-    head_dim = _head_dim()
+    # Whole intervention runs under MODEL_LOCK: prompt snapshot, clean
+    # forward, hook install, patched forward, hook removal. Otherwise a
+    # concurrent forward's hooks leak into this measurement.
+    with MODEL_LOCK:
+        if not _cache:
+            return {"status": "error", "error": "Run a prompt first to populate the cache."}
+        layer = max(0, min(_n_layers() - 1, int(layer)))
+        head = max(0, min(_n_heads() - 1, int(head)))
+        prompt = _cache["prompt"]
+        head_dim = _head_dim()
 
-    def logit_diff() -> float:
-        inputs = _tokenizer(prompt, return_tensors="pt")
-        with torch.no_grad():
-            out = _model(**inputs)
-        logits = out.logits[0, -1]
-        return _token_logit(pos_token, logits) - _token_logit(neg_token, logits)
+        def logit_diff() -> float:
+            inputs = _tokenizer(prompt, return_tensors="pt")
+            with torch.no_grad():
+                out = _model(**inputs)
+            logits = out.logits[0, -1]
+            return _token_logit(pos_token, logits) - _token_logit(neg_token, logits)
 
-    def zero_head_hook(module, inp):
-        # Pre-hook (NOT post-hook): replacing c_proj's input re-routes the
-        # computation through the patched tensor. The old post-hook mutated
-        # the already-computed output's input in place and returned `out`
-        # unchanged, so every patch measured delta == 0.0 (no-op).
-        x = inp[0]
-        sl = slice(head * head_dim, (head + 1) * head_dim)
-        if x.shape[-1] >= sl.stop:
-            x = x.clone()
-            x[..., sl] = 0.0
-            return (x,) + tuple(inp[1:])
-        return inp
+        def zero_head_hook(module, inp):
+            # Pre-hook (NOT post-hook): replacing c_proj's input re-routes the
+            # computation through the patched tensor. The old post-hook mutated
+            # the already-computed output's input in place and returned `out`
+            # unchanged, so every patch measured delta == 0.0 (no-op).
+            x = inp[0]
+            sl = slice(head * head_dim, (head + 1) * head_dim)
+            if x.shape[-1] >= sl.stop:
+                x = x.clone()
+                x[..., sl] = 0.0
+                return (x,) + tuple(inp[1:])
+            return inp
 
-    clean_ld = round(logit_diff(), 4)
-    hook = _model.transformer.h[layer].attn.c_proj.register_forward_pre_hook(
-        zero_head_hook)
-    try:
-        patched_ld = round(logit_diff(), 4)
-    finally:
-        hook.remove()
-    delta = round(patched_ld - clean_ld, 4)
-    return {
-        "status": "ok",
-        "layer": layer,
-        "head": head,
-        "clean_ld": clean_ld,
-        "patched_ld": patched_ld,
-        "delta": delta,
-        "direction": "hurts" if delta < 0 else "helps",
-    }
+        clean_ld = round(logit_diff(), 4)
+        hook = _model.transformer.h[layer].attn.c_proj.register_forward_pre_hook(
+            zero_head_hook)
+        try:
+            patched_ld = round(logit_diff(), 4)
+        finally:
+            hook.remove()
+        delta = round(patched_ld - clean_ld, 4)
+        return {
+            "status": "ok",
+            "layer": layer,
+            "head": head,
+            "clean_ld": clean_ld,
+            "patched_ld": patched_ld,
+            "delta": delta,
+            "direction": "hurts" if delta < 0 else "helps",
+            "prompt": prompt,
+        }
 
 
 def patch_neuron(
@@ -1216,13 +1342,25 @@ def infer(prompt: str, model_name: str) -> Dict[str, Any]:
 
 
 def _ensure_prompt(prompt: str) -> Optional[Dict[str, Any]]:
-    """Load the model and populate _cache for prompt (no-op if cached)."""
+    """Load the model and populate _cache for prompt (no-op if cached).
+
+    Check and forward happen under MODEL_LOCK so two threads racing with
+    different prompts cannot both see a stale cache and both forward —
+    the loser reuses the winner's cache only when the prompts match.
+    """
     err = _ensure_loaded()
     if err:
         return err
-    if not _cache or _cache.get("prompt") != prompt:
-        _forward(prompt)
+    with MODEL_LOCK:
+        if not _cache or _cache.get("prompt") != prompt:
+            _forward_locked(prompt)
     return None
+
+
+def _snapshot() -> Dict[str, Any]:
+    """Return the current cache under lock (shallow copy)."""
+    with MODEL_LOCK:
+        return dict(_cache) if _cache else {}
 
 
 def layer_activations(layer: int, prompt: str) -> Dict[str, Any]:

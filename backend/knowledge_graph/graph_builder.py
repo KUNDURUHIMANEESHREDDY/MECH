@@ -6,6 +6,8 @@ and Paper Replicator to update graph nodes and edges with zero manual synchroniz
 
 from __future__ import annotations
 
+from backend.core.identifiers import content_id
+
 import datetime as _dt
 import time
 from typing import Any, Dict, List, Optional
@@ -61,7 +63,7 @@ class GraphBuilder:
 
         # Link to referenced papers
         for paper_ref in claim.literature_citations:
-            p_id = f"paper_{hash(paper_ref) & 0xffffffff:08x}"
+            p_id = content_id(paper_ref, prefix="paper_")
             p_node = KGNode(node_id=p_id, node_type=NodeType.PAPER, label=paper_ref)
             self.store.add_node(p_node)
 

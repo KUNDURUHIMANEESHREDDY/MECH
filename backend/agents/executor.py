@@ -224,6 +224,9 @@ class Executor:
             return {
                 "status": "completed",
                 "provenance": "live",
+                # Propagated from the pipeline result: the executor dispatches,
+                # it does not measure.
+                "attested": res.get("attested", False),
                 "paper_id": paper_id,
                 "result": _jsonable(res),
             }

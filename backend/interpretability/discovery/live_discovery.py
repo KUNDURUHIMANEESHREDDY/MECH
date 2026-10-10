@@ -26,6 +26,7 @@ from statistics import mean
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from backend.agents.evidence_policy import field_map
+from backend.core.provenance import set_evidence_level
 
 from . import live_measure as lm
 
@@ -151,12 +152,15 @@ def _adequacy(n_prompts: int, n_interaction_prompts: int,
 
 
 _registry: Dict[str, Dict[str, Any]] = {}
+_REGISTRY_MAX = 128
 
 
 def remember(result: Dict[str, Any]) -> None:
     disc_id = result.get("discovery_id")
     if isinstance(disc_id, str) and disc_id:
         _registry[disc_id] = result
+        while len(_registry) > _REGISTRY_MAX:
+            _registry.pop(next(iter(_registry)))
 
 
 def recall(discovery_id: str) -> Optional[Dict[str, Any]]:
@@ -356,10 +360,21 @@ class LiveIOIDiscovery:
         mean_faithfulness = round(mean(faithfulness), 4) if faithfulness else 0.0
         adequacy = _adequacy(len(prompts), len(pair_prompts), mean_faithfulness)
 
+        # Evidence level: INTERVENTIONAL (causal intervention via ablation/injection)
+        # Upgraded to CAUSALLY_VALIDATED if validation-eligible
+        evidence_level = "INTERVENTIONAL"
+        if adequacy.get("validation_eligible"):
+            evidence_level = "CAUSALLY_VALIDATED"
+
         result = {
             "discovery_id": disc_id,
             "status": "completed",
             "provenance": "live",
+            # Attested here because this module ran the measurements above:
+            # per-prompt capture/inject on live weights, not a relabel of
+            # someone else's numbers. Wrappers must propagate this, never
+            # invent it.
+            "attested": True,
             "field_provenance": field_map(
                 ("status", "discovery_id", "method", "model_id",
                  "n_prompts", "heads", "head_effects", "edges",
@@ -385,6 +400,7 @@ class LiveIOIDiscovery:
             "baselines": prompts,
             "discovery_provenance": "live",
             "synthetic_fields": [],
+            "evidence_level": evidence_level,
         }
         remember(result)
         return result

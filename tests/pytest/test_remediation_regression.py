@@ -21,7 +21,8 @@ from backend.research_platform.autonomous.ai_scientist_engine import AIScientist
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    from backend.core import auth as auth_mod
+    return TestClient(app, headers=auth_mod.auth_headers())
 
 
 def test_health_endpoint_contract(client):

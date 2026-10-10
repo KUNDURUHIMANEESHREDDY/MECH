@@ -140,13 +140,34 @@ def extract_bearer(authorization_header: Optional[str]) -> Optional[str]:
     return credential or None
 
 
+#: File extensions that identify static frontend assets.
+#: Vite outputs these; they must be public so the browser can load the
+#: frontend before it knows the bearer token.
+_STATIC_ASSET_EXTENSIONS = frozenset({
+    # JavaScript / CSS / Source maps
+    ".js", ".css", ".map",
+    # Fonts
+    ".woff", ".woff2", ".ttf", ".eot",
+    # Images
+    ".ico", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif",
+    # Manifest / manifest-like
+    ".json", ".webmanifest",
+    # Other common static types
+    ".txt", ".xml", ".ico",
+    # Images (additional)
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif",
+})
+
+
 def is_public_path(path: str, method: str = "GET") -> bool:
     """True when a request bypasses bearer auth.
 
-    Public: ``/``, ``/health``, CORS preflight (``OPTIONS``), and the built
-    frontend's static files (any ``GET``/``HEAD`` path that is not part of the
-    control plane). Everything under ``/api``, ``/mcp``, ``/health/``,
-    ``/openapi.json``, ``/docs`` and ``/redoc`` requires auth.
+    Defaults to PROTECTED (False). Explicitly allows:
+      - OPTIONS (CORS preflight)
+      - / and /health (liveness)
+      - Static asset paths (by file extension, matching Vite output)
+
+    Everything else requires bearer authentication.
     """
     m = (method or "GET").upper()
     # CORS preflight carries no Authorization header by design. Let the CORS
@@ -154,11 +175,20 @@ def is_public_path(path: str, method: str = "GET") -> bool:
     # Anonymous OPTIONS never implies trust.
     if m == "OPTIONS":
         return True
-    p = path or "/"
+
+    p = (path or "/").strip()
+    if not p:
+        p = "/"
     if not p.startswith("/"):
         p = "/" + p
+
+    # Exact public paths (liveness)
     if p == "/" or p == "/health":
         return True
+
+    # Explicitly protected paths (control plane) - checked BEFORE static assets
+    # so that control plane endpoints like /openapi.json are not caught by
+    # static asset extension matching.
     if p == "/openapi.json" or p == "/openapi.yaml":
         return False
     if p == "/docs" or p.startswith("/docs/"):
@@ -171,7 +201,16 @@ def is_public_path(path: str, method: str = "GET") -> bool:
         return False
     if p == "/mcp" or p.startswith("/mcp/"):
         return False
-    return True
+
+    # Static asset paths: check file extension (with or without query string)
+    # Paths like "/assets/main.js?v=123" should have extension recognized.
+    path_no_query = p.split("?", 1)[0]
+    _, ext = os.path.splitext(path_no_query)
+    if ext.lower() in _STATIC_ASSET_EXTENSIONS:
+        return True
+
+    # Default: PROTECTED (require auth)
+    return False
 
 
 def auth_headers(token: Optional[str] = None) -> Dict[str, str]:

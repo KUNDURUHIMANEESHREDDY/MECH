@@ -37,6 +37,9 @@ function registerRuntimeHandlers({ ipcMain, logger }) {
   });
 
   ipcMain.handle('python:call', async (_event, { method, payload }) => {
+    if (typeof method !== 'string' || !/^[a-z0-9_/]+$/.test(method)) {
+      throw new Error('invalid backend method');
+    }
     return callBackend(method, payload || {});
   });
 

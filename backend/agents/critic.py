@@ -84,6 +84,9 @@ class Critic:
             return {
                 "status": "completed",
                 "provenance": "live",
+                # Propagated from the validation engine's re-measurement, never
+                # asserted: the Critic judges, it does not run forward passes.
+                "attested": res.get("attested", False),
                 "field_provenance": field_map(
                     ("status", "validated", "result", "confidence", "peer_review"),
                     "live",
@@ -208,7 +211,7 @@ class Critic:
             except (KeyError, TypeError, ValueError) as exc:
                 return {
                     "status": "unavailable",
-                    "provenance": "live",
+                    "provenance": "unavailable",
                     "field_provenance": field_map(
                         ("status", "observed_metrics", "report", "gate", "reason"),
                         "unavailable",
@@ -329,6 +332,9 @@ class Critic:
             return {
                 "status": "completed",
                 "provenance": "live",
+                # Propagated from the pipeline run above (measured or not);
+                # the Critic maps metrics, it does not re-measure them.
+                "attested": run.get("attested", False) if isinstance(run, dict) else False,
                 "field_provenance": field_map(
                     ("status", "paper_id", "n_prompts", "observed_metrics", "report", "gate"),
                     "live",

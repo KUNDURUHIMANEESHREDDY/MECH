@@ -9,7 +9,7 @@ explicit unavailable envelope.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from backend.agents.evidence_policy import field_map
 from backend.core.identifiers import content_id
@@ -73,7 +73,12 @@ class DiscoveryEngine:
         self.algorithm_registry.register_algorithm("Superposition", lambda p: self.superposition_analyzer.analyze_superposition())
         self.algorithm_registry.register_algorithm("PaperReplication", lambda p: self.paper_replicator.replicate_paper())
 
-    def discover_and_orchestrate(self, hypothesis_statement: str) -> Dict[str, Any]:
+    def discover_and_orchestrate(
+        self,
+        hypothesis_statement: str,
+        n_prompts: Optional[int] = None,
+        n_interaction_prompts: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Run live causal discovery when a model is connected.
 
         The registered discovery algorithms return reference or synthetic
@@ -81,6 +86,16 @@ class DiscoveryEngine:
         validated or publication-ready, so when no live executor is available
         the orchestrator stops at evidence collection and exposes no synthetic
         result fields.
+
+        `n_prompts` is forwarded to the live executor, which derives
+        validation eligibility from it, and `n_interaction_prompts` likewise for
+        publication eligibility. They are parameters here because
+        `LiveIOIDiscovery.run` has taken both since it was written, while this
+        method forwarded neither -- so a caller that wanted an adequate sample
+        had no way to ask for it, and every discovery stopped at evidence
+        collection with `ineligible_because: 4 prompts, below the 10 needed`.
+        Leaving both at their defaults keeps the existing cost; a caller that
+        needs eligibility says so.
         """
         # Validate before anything else. An empty or non-string hypothesis
         # previously flowed into the run and produced an ordinary-looking
@@ -102,7 +117,13 @@ class DiscoveryEngine:
             LiveIOIDiscovery = None  # type: ignore[assignment]
         if LiveIOIDiscovery is not None and LiveIOIDiscovery.available():
             try:
-                result = LiveIOIDiscovery().run(hypothesis_statement)
+                forwarded = {}
+                if n_prompts is not None:
+                    forwarded["n_prompts"] = n_prompts
+                if n_interaction_prompts is not None:
+                    forwarded["n_interaction_prompts"] = n_interaction_prompts
+                result = LiveIOIDiscovery().run(
+                    hypothesis_statement, **forwarded)
             except Exception as exc:
                 # Record the failure before propagating. A raising executor
                 # must not strand the discovery mid-run with no record of why

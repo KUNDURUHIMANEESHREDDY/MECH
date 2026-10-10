@@ -6,6 +6,8 @@ EXPERIMENTAL → UNDER_REVIEW → REVISION_REQUIRED → VALIDATED → SUPERSEDED
 
 from __future__ import annotations
 
+from backend.core.identifiers import content_id
+
 import datetime as _dt
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -74,7 +76,7 @@ class ResearchGovernanceEngine:
             "requester": requester,
             "approved": True,
             "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
-            "provenance_hash": f"sha256_{hash(experiment_id) & 0xffffffff:08x}",
+            "provenance_hash": content_id(experiment_id, requester, prefix="sha256_"),
         }
         self.audit_log.append(entry)
         return entry

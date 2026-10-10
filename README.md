@@ -187,25 +187,46 @@ Indirect Object Identification, using the template from
 
 ### Head ablation — which heads the IOI behaviour depends on
 
-All 144 heads zero-ablated on the IOI prompt, ranked by how far the logit difference moves.
-Baseline `clean_ld = 2.1681` on every row.
+All 144 heads zero-ablated on the IOI prompt. Baseline `clean_ld = 2.1681` on every row.
 
-| Head | Ablated logit diff | Δ | Relative drop |
-|------|--------------------|---|---------------|
-| `L0H7` | `3.6692` | `+1.5011` | 69 % |
-| `L0H0` | `3.4965` | `+1.3284` | 61 % |
-| `L2H3` | `3.3778` | `+1.2097` | 56 % |
-| `L2H0` | `1.2290` | `−0.9391` | 43 % |
-| `L8H10` | `1.2671` | `−0.9010` | 42 % |
-| `L5H9` | `2.9457` | `+0.7776` | 36 % |
-| `L8H6` | `1.4272` | `−0.7409` | 34 % |
-| `L10H7` | `2.8598` | `+0.6917` | 32 % |
+**Effect** below is `clean_ld − ablated_ld`, signed: **positive means removing the head
+destroyed the IOI signal**, so the head supports the behaviour. Negative means removing it
+*improved* IOI, so the head works against it.
+
+| Head | Ablated logit diff | Effect on IOI | Fraction of baseline | Role |
+|------|--------------------|---------------|----------------------|------|
+| `L2H0` | `1.2290` | `+0.9391` | 43 % | supports |
+| `L8H10` | `1.2671` | `+0.9010` | 42 % | supports |
+| `L8H6` | `1.4272` | `+0.7409` | 34 % | supports |
+| `L10H0` | `1.6983` | `+0.4698` | 22 % | supports |
+| `L2H5` | `1.7350` | `+0.4331` | 20 % | supports |
+| `L7H3` | `1.7511` | `+0.4170` | 19 % | supports |
+| `L7H9` | `1.7596` | `+0.4085` | 19 % | supports |
+| `L11H0` | `1.7819` | `+0.3862` | 18 % | supports |
+
+**68 of 144 heads support IOI; 76 oppose it.** The strongest opponents:
+
+| Head | Ablated logit diff | Effect on IOI | Fraction of baseline | Role |
+|------|--------------------|---------------|----------------------|------|
+| `L0H7` | `3.6692` | `−1.5011` | −69 % | opposes |
+| `L0H0` | `3.4965` | `−1.3284` | −61 % | opposes |
+| `L2H3` | `3.3778` | `−1.2097` | −56 % | opposes |
+| `L5H9` | `2.9457` | `−0.7776` | −36 % | opposes |
+| `L10H7` | `2.8598` | `−0.6917` | −32 % | opposes |
 
 ![IOI head sweep](docs/images/ioi-head-sweep.png)
 
-A positive Δ means the logit difference *grew* when the head was removed — the head was
-suppressing the IOI answer. Early-layer heads (L0, L2) dominate because they carry the name
-tokens themselves.
+The supporting heads sit in the mid and late blocks (L2, L7, L8, L10, L11), which is where
+the published IOI circuit is found. The strong opponents are concentrated in L0 — removing
+an early attention head *helps* IOI on this prompt, so those heads are carrying interference
+rather than the name-mover signal.
+
+> **This table was wrong before and is corrected here.** It previously ranked heads by the
+> *magnitude* of the change, which put `L0H7`, `L0H0` and `L2H3` at the top of a table
+> titled "which heads the IOI behaviour depends on" — all three of which had their IOI
+> score *improve* when ablated. On the signed metric those three rank 144th, 143rd and
+> 142nd. `scripts/capture_results.py` now ranks on the signed effect and reports both roles
+> separately; `tests/pytest/test_head_ablation_ranking.py` pins the sign behaviour.
 
 > **Honest caveat.** This is a single-prompt, single-direction zero-ablation screen, not a
 > validated circuit. It does **not** reproduce the published IOI circuit, which needs

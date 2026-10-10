@@ -66,6 +66,11 @@ huggingface-hub>=0.23.2,<1.0
 psutil>=5.9.0
 httpx>=0.24.0
 
+# MCP control plane (external agents drive MECH through tools, not the UI).
+# Verified with 1.30.0; the FastMCP surface used here (tool/streamable_http_app
+# /run_stdio_async) is stable across 1.x.
+mcp>=1.30.0
+
 # Testing
 pytest>=7.4.0
 pytest-asyncio>=0.21.0

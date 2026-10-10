@@ -9,6 +9,8 @@ Automates end-to-end scientific replication of published mechanistic interpretab
 
 from __future__ import annotations
 
+from backend.core.identifiers import entity_id
+
 import datetime as _dt
 import time
 from dataclasses import dataclass, field
@@ -144,7 +146,7 @@ class AutonomousPaperReplicator:
     def replicate_paper(self, paper_query: str) -> AutonomousReplicationReport:
         """Executes full autonomous paper replication workflow."""
         t0 = time.time()
-        repl_id = f"repl_{hash(paper_query + str(time.time())) & 0xffffffff:08x}"
+        repl_id = entity_id("repl_")
 
         # 1. Methodology Extraction
         paper_spec = self.parse_paper_spec(paper_query)

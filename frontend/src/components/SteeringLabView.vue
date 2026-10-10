@@ -16,46 +16,46 @@
       </span>
     </header>
 
-    <form class="steer-form" @submit.prevent="runSteer">
+    <form class="steer-form" data-testid="steer-form" @submit.prevent="runSteer">
       <label class="steer-field">
         <span>Prompt under test</span>
-        <input v-model="prompt" type="text" class="control" placeholder="The capital of France is" />
+        <input v-model="prompt" type="text" class="control" data-testid="steer-prompt" placeholder="The capital of France is" />
       </label>
       <label class="steer-field">
         <span>Positive contrast prompt</span>
-        <input v-model="posPrompt" type="text" class="control" placeholder="Paris is beautiful." />
+        <input v-model="posPrompt" type="text" class="control" data-testid="steer-positive" placeholder="Paris is beautiful." />
       </label>
       <label class="steer-field">
         <span>Negative contrast prompt</span>
-        <input v-model="negPrompt" type="text" class="control" placeholder="London is rainy." />
+        <input v-model="negPrompt" type="text" class="control" data-testid="steer-negative" placeholder="London is rainy." />
       </label>
       <div class="steer-row">
         <label>Layer
-          <select v-model.number="layer" class="control control--inline">
+          <select v-model.number="layer" class="control control--inline" data-testid="steer-layer">
             <option v-for="n in 12" :key="n" :value="n - 1">L{{ n - 1 }}</option>
           </select>
         </label>
         <label>Strength α
-          <input v-model.number="alpha" type="number" min="0" max="100" step="1" class="control control--inline control--number" />
+          <input v-model.number="alpha" type="number" min="0" max="100" step="1" class="control control--inline control--number" data-testid="steer-alpha" />
         </label>
-        <button class="tool-button tool-button--primary" type="submit" :disabled="loading">
+        <button class="tool-button tool-button--primary" type="submit" data-testid="steer-submit" :disabled="loading">
           {{ loading ? 'Steering…' : 'Steer' }}
         </button>
       </div>
     </form>
 
-    <div v-if="errorMessage" class="tool-notice tool-notice--error" role="alert">
+    <div v-if="errorMessage" class="tool-notice tool-notice--error" role="alert" data-testid="steer-error">
       <strong>Steering failed</strong>
       <span>{{ errorMessage }}</span>
     </div>
 
-    <section v-if="result" class="steer-result" aria-label="Steering result">
-      <div class="verdict" :class="result.flipped ? 'verdict--flipped' : 'verdict--same'" role="status">
+    <section v-if="result" class="steer-result" aria-label="Steering result" data-testid="steer-result">
+      <div class="verdict" :class="result.flipped ? 'verdict--flipped' : 'verdict--same'" role="status" data-testid="steer-verdict">
         {{ result.flipped ? 'FLIPPED' : 'UNCHANGED' }}
       </div>
       <dl class="readout">
-        <div><dt>Clean next token</dt><dd>{{ result.clean_top }}</dd></div>
-        <div><dt>Steered next token</dt><dd>{{ result.steered_top }}</dd></div>
+        <div><dt>Clean next token</dt><dd data-testid="steer-clean-token">{{ result.clean_top }}</dd></div>
+        <div><dt>Steered next token</dt><dd data-testid="steer-steered-token">{{ result.steered_top }}</dd></div>
         <div><dt>Layer</dt><dd>L{{ result.layer }}</dd></div>
         <div><dt>α</dt><dd>{{ result.alpha }}</dd></div>
         <div><dt>Vector norm</dt><dd>{{ result.vector_norm }}</dd></div>

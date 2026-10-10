@@ -1,0 +1,190 @@
+{
+  "base": "http://localhost:5173",
+  "startedAt": "2026-10-09T10:13:48.684Z",
+  "totals": {
+    "screenshots": 10,
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "failedRequests": 0,
+    "failedResponses": 0,
+    "failedRoutes": 1
+  },
+  "routes": [
+    {
+      "route": "explorer",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "explorer",
+          "name": "01-model-explorer",
+          "file": "docs\\images\\ui\\01-model-explorer.png"
+        },
+        {
+          "route": "explorer",
+          "name": "01b-model-explorer-inspectors",
+          "file": "docs\\images\\ui\\01b-model-explorer-inspectors.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "6.7"
+    },
+    {
+      "route": "transformer",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "transformer",
+          "name": "02-transformer-visualizer",
+          "file": "docs\\images\\ui\\02-transformer-visualizer.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "4.6"
+    },
+    {
+      "route": "network",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "network",
+          "name": "03-network",
+          "file": "docs\\images\\ui\\03-network.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "5.0"
+    },
+    {
+      "route": "steering",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "steering",
+          "name": "04-steering-lab",
+          "file": "docs\\images\\ui\\04-steering-lab.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "4.2"
+    },
+    {
+      "route": "benchmark",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "benchmark",
+          "name": "05-benchmark-dashboard",
+          "file": "docs\\images\\ui\\05-benchmark-dashboard.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "2.4"
+    },
+    {
+      "route": "society",
+      "status": "failed",
+      "screenshots": [],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": {
+        "message": "society: the Society run ended in phase \"failed\", not \"done\": Society request failed\nDiscovery blocked: stage status 'unavailable' is not complete.",
+        "detail": {
+          "phase": "failed",
+          "detail": "Society request failed\nDiscovery blocked: stage status 'unavailable' is not complete.",
+          "pageUrl": "http://localhost:5173/#society"
+        }
+      },
+      "durationS": "34.5"
+    },
+    {
+      "route": "workspace",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "workspace",
+          "name": "07-campaign-workspace",
+          "file": "docs\\images\\ui\\07-campaign-workspace.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "1.0"
+    },
+    {
+      "route": "models",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "models",
+          "name": "08-models",
+          "file": "docs\\images\\ui\\08-models.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "0.9"
+    },
+    {
+      "route": "settings",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "settings",
+          "name": "09-settings",
+          "file": "docs\\images\\ui\\09-settings.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "0.9"
+    },
+    {
+      "route": "plugins",
+      "status": "ok",
+      "screenshots": [
+        {
+          "route": "plugins",
+          "name": "10-plugin-sdk",
+          "file": "docs\\images\\ui\\10-plugin-sdk.png"
+        }
+      ],
+      "consoleErrors": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "failedResponses": [],
+      "failedAssertion": null,
+      "durationS": "0.9"
+    }
+  ]
+}

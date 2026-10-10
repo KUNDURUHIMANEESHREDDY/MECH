@@ -15,6 +15,8 @@ highly-novel scientific experiments.
 
 from __future__ import annotations
 
+from backend.core.identifiers import entity_id
+
 import datetime as _dt
 import math
 import time
@@ -181,7 +183,7 @@ class InformationGainScheduler:
     def run_scheduled_campaign(self, goal: ResearchGoal) -> EUCampaignReport:
         """Executes active learning campaign maximizing Expected Utility (EU)."""
         t0 = time.time()
-        campaign_id = f"eu_campaign_{hash(goal.goal_id + str(time.time())) & 0xffffffff:08x}"
+        campaign_id = entity_id("eu_campaign_")
 
         prompts = self.dataset_manager.load(goal.dataset_name)
         dataset_item = prompts[0] if prompts else {"clean": "John gave a drink to Mary", "target": " Mary"}

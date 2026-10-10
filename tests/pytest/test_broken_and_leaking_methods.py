@@ -29,6 +29,7 @@ cannot return silently, and pin that adding the column is still outstanding.
 from __future__ import annotations
 
 import json
+import sqlite3
 import zipfile
 from pathlib import Path
 
@@ -153,31 +154,16 @@ def test_config_agreement_without_weights_says_so():
 # ── Project export scoping ───────────────────────────────────────────────────
 
 def test_reports_cannot_leak_across_projects(tmp_path, monkeypatch):
-    """A project's archive must not contain another project's reports."""
-    import backend.core.database as database
+    """A project's archive must not contain another project's sessions or reports."""
     from backend.api.project_export import ProjectExporter
+    from backend.storage import DesktopStorage
 
-    class _Row:
-        def __init__(self, session_data):
-            self.session_data = session_data
-
-    class _Query:
-        def filter(self, *a, **k):
-            return self
-
-        def all(self):
-            return [_Row({"session_id": "s1", "project": "alpha"})]
-
-    class _Db:
-        def query(self, *a, **k):
-            return _Query()
-
-        def close(self):
-            pass
-
-    # `export_project` imports SessionLocal inside the call, so this is the
-    # binding it actually resolves.
-    monkeypatch.setattr(database, "SessionLocal", lambda: _Db())
+    store = DesktopStorage(tmp_path / "authority.db")
+    store.initialize()
+    store.add_session({"id": "s1", "project_id": "alpha"})
+    store.add_session({"id": "s2", "project_id": "beta"})
+    store.add_session({"id": "s3"})          # names no project at all
+    monkeypatch.setenv("MECH_STORAGE_DB", str(store.db_path))
     monkeypatch.setenv("MECH_EXPORT_ROOT", str(tmp_path))
 
     result = ProjectExporter().export_project("alpha", dest_dir=str(tmp_path))
@@ -185,6 +171,7 @@ def test_reports_cannot_leak_across_projects(tmp_path, monkeypatch):
     with zipfile.ZipFile(result["archive_path"]) as archive:
         names = set(archive.namelist())
         metadata = json.loads(archive.read("metadata.json"))
+        sessions = json.loads(archive.read("sessions.json"))
 
     assert "reports.json" not in names, (
         "the archive still carries a reports file; reports are not "
@@ -197,18 +184,31 @@ def test_reports_cannot_leak_across_projects(tmp_path, monkeypatch):
     assert metadata["sessions_included"] == 1
     assert "sessions.json" in names
 
+    assert [s["id"] for s in sessions] == ["s1"], (
+        "the archive carried a session that is not provably this project's")
+    # 'beta' and the unattributed one are both counted, so dropping them is
+    # visible in the archive rather than silent.
+    assert metadata["sessions_omitted_unattributed"] == 2
 
-def test_the_schema_gap_the_real_fix_needs_is_still_open():
+
+def test_the_schema_gap_the_real_fix_needs_is_still_open(tmp_path):
     """Documents the outstanding work, and will fail loudly once it is done.
 
-    `ReportRecord.project_id` is the actual fix for project scoping. While the
-    column is absent the export omits reports; once someone adds it, this test
-    fails and asks them to restore report export with a real filter rather than
-    deleting the test.
+    Reports are not project-scoped: the single storage authority has no
+    `reports` table at all, so the export omits them rather than risk
+    including another project's work. Once someone adds one, this test fails
+    and asks them to scope reports to a project before exporting them.
     """
-    from backend.core.database import ReportRecord
+    from backend.storage import DesktopStorage
 
-    assert not hasattr(ReportRecord, "project_id"), (
-        "ReportRecord now has a project_id column, so reports can be filtered "
-        "to one project. Restore report export with "
-        ".filter(ReportRecord.project_id == project_id) and delete this test.")
+    store = DesktopStorage(tmp_path / "gap.db")
+    store.initialize()
+    with sqlite3.connect(store.db_path) as connection:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+
+    assert "reports" not in tables, (
+        "A reports table now exists in the storage authority. Reports were "
+        "never project-scoped, so `export_project` must gain a project link "
+        "and a real filter before including them -- then restore report "
+        "export and delete this test.")

@@ -5,11 +5,13 @@ import { eventBus } from '../../utils/eventBus';
  */
 class NotebookStore {
   constructor() {
+    // A fresh notebook starts EMPTY. Seed cells used to carry hardcoded
+    // "findings" (residual norms, L8_N402 scores, feature 1402 @ 4.12) that
+    // flowed verbatim into exported reports — invented measurements with a
+    // fresh timestamp. Cells below are an explicitly-labeled template with
+    // no numeric claims; real cells are appended only from backend runs.
     this.cells = [
-      { id: 'c1', type: 'markdown', content: '# GPT-2 Indirect Object Identification Experiment\nInvestigating layer 8 feature activations on IOI sequences.' },
-      { id: 'c2', type: 'plot', title: 'Layer 8 Residual Norms', data: [12.4, 14.1, 16.5, 18.2] },
-      { id: 'c3', type: 'table', headers: ['Layer', 'Head', 'Score'], rows: [[8, 9, 0.95], [9, 9, 0.88]] },
-      { id: 'c4', type: 'json', data: { feature_id: 1402, activation: 4.12, label: 'Indirect Object' } },
+      { id: 'c1', type: 'markdown', content: '# Experiment Notebook\nEmpty template — cells added here come only from executed backend runs. Nothing below is a measurement.' },
     ];
   }
 

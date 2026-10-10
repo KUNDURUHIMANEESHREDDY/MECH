@@ -23,8 +23,10 @@ sys.path.insert(0, str(BACKEND_DIR))
 sys.path.insert(0, str(BACKEND_DIR.parent))
 
 from backend.main import app  # noqa: E402
+from backend.core import auth as auth_mod  # noqa: E402
 
-client = TestClient(app, raise_server_exceptions=False)
+client = TestClient(app, raise_server_exceptions=False,
+                    headers=auth_mod.auth_headers())
 
 
 # ── 1. Health & Root ────────────────────────────────────────────────────
@@ -55,14 +57,36 @@ class TestModels:
         assert "gpt2-small" in models
 
     def test_get_model_info(self):
+        """Model info describes loaded weights or refuses; never a shape table.
+
+        This used to assert `layers == 12`, `hidden_size == 768`,
+        `vocab_size == 50257`, `num_heads == 12` for *any* requested name --
+        including gemma-2b and llama-3-8b, which have different shapes and no
+        loader here. Those literals described gpt2-small while claiming to
+        answer for another model. Now the response either reports the loaded
+        identity or is explicitly unavailable/mismatched.
+        """
         r = client.get("/api/v1/models/gpt2-small")
         assert r.status_code == 200
         info = r.json()
-        assert info["model_name"] == "gpt2-small"
-        assert info["layers"] == 12
-        assert info["hidden_size"] == 768
-        assert info["vocab_size"] == 50257
-        assert info["num_heads"] == 12
+
+        if info.get("status") == "unavailable":
+            # No weights in memory: no dimensions may be invented.
+            assert info.get("layers") is None
+            assert info.get("hidden_size") is None
+            assert info["provenance"] == "unavailable"
+            return
+
+        # Weights loaded: every dimension comes from the config, and the
+        # requested name must either match or be reported as a mismatch.
+        assert info["model_requested"] == info["model_name"] or \
+            info.get("model_mismatch") is True, info
+        assert info["n_layers"] > 0 and info["d_model"] > 0
+        assert info["n_heads"] > 0 and info["vocab_size"] > 0
+        # The old response keys are gone, so nothing downstream can read a
+        # stale literal off a mismatch response.
+        assert "hidden_size" not in info
+        assert "num_heads" not in info
 
     def test_load_model(self):
         r = client.post("/api/v1/models/load", json={"model_name": "gpt2-small"})

@@ -66,13 +66,15 @@ def _fake_engine(monkeypatch, payload: Dict[str, Any]) -> None:
 def _live_payload(**overrides: Any) -> Dict[str, Any]:
     """A payload that clears `discovery_is_live`.
 
-    `discovery_is_live` needs a completed status, `provenance == "live"` and
-    `_opted_in` -- both eligibility flags true. Anything else short-circuits to
-    the blocked branch and never reaches the spread.
+    `discovery_is_live` needs a completed status, `provenance == "live"`,
+    `attested is True` and `_opted_in` -- both eligibility flags true.
+    Anything else short-circuits to the blocked branch and never reaches
+    the spread.
     """
     payload: Dict[str, Any] = {
         "status": "completed",
         "provenance": "live",
+        "attested": True,
         "validation_eligible": True,
         "publication_eligible": True,
         "discovery_id": "disc_test",
@@ -132,6 +134,8 @@ def test_the_payload_is_still_spread_so_nothing_is_lost(monkeypatch):
     ({"provenance": "unavailable"}, "the engine withheld the label"),
     ({"provenance": "mock"}, "the engine returned mock data"),
     ({"provenance": "synthetic"}, "the engine returned synthetic data"),
+    ({"attested": False}, "the engine measured but did not attest"),
+    ({"attested": None}, "the engine said nothing about attestation"),
     ({"validation_eligible": False}, "the engine declined validation"),
     ({"publication_eligible": False}, "the engine declined publication"),
     ({"status": "unavailable"}, "the engine did not complete"),
