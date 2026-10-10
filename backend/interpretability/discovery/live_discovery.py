@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
+import uuid
 from statistics import mean
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from backend.agents.evidence_policy import field_map
-from backend.core.provenance import set_evidence_level
+from backend.core.provenance import set_evidence_level, _MEASUREMENT_BOUNDARY_ID
 
 from . import live_measure as lm
 
@@ -375,6 +377,25 @@ class LiveIOIDiscovery:
             # someone else's numbers. Wrappers must propagate this, never
             # invent it.
             "attested": True,
+            # Cryptographically bound measurement record:
+            "measurement_record": {
+                "model_identity": {"name": self.model_id, "content_hash": hashlib.sha256(self.model_id.encode()).hexdigest()[:32]},
+                "input_commitment": "ioi_discovery_circuit",
+                "output_commitment": hashlib.sha256(json.dumps({
+                    "discovery_id": disc_id,
+                    "heads": [lm.head_label(layer, head) for layer, head in circuit],
+                    "head_effects": head_effects,
+                    "edges": edges,
+                    "unresolved_interactions": unresolved,
+                    "faithfulness": mean_faithfulness,
+                    "completeness": round(mean(completeness), 4) if completeness else 0.0,
+                    "edges": edges,
+                }, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()[:32],
+                "execution_context": {
+                    "timestamp": time.time(),
+                    "measurement_boundary_id": _MEASUREMENT_BOUNDARY_ID,
+                },
+            },
             "field_provenance": field_map(
                 ("status", "discovery_id", "method", "model_id",
                  "n_prompts", "heads", "head_effects", "edges",

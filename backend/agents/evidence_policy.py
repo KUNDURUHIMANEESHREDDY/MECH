@@ -14,7 +14,22 @@ from typing import Any, Dict, Iterable, Optional
 
 
 def _is_attested(payload: Any) -> bool:
-    return _record(payload).get("attested") is True
+    """True iff the payload carries a valid measurement record.
+
+    This is the single source of truth for scientific attestation. A bare
+    `attested: True` boolean is NOT sufficient — the record must have been
+    produced by the measurement boundary via `attest_measurement`, which
+    embeds a cryptographically bound `measurement_record`.
+    """
+    record = _record(payload)
+    if record.get("attested") is not True:
+        return False
+    mr = record.get("measurement_record")
+    if not isinstance(mr, dict):
+        return False
+    # Must have the four binding fields
+    required = ("model_identity", "input_commitment", "output_commitment", "execution_context")
+    return all(k in mr for k in required)
 
 
 _COMPLETED_STATUSES = {"completed", "complete", "ok", "passed", "success"}

@@ -24,7 +24,13 @@ from backend.core.provenance import (  # noqa: E402
 def _eligible(**overrides):
     payload = {"status": "completed", "provenance": "live",
                "attested": True, "validation_eligible": True,
-               "publication_eligible": True}
+               "publication_eligible": True,
+               "measurement_record": {
+                   "model_identity": {"name": "gpt2", "content_hash": "abcd1234"},
+                   "input_commitment": "input123",
+                   "output_commitment": "output123",
+                   "execution_context": {"timestamp": 1234567890.0, "measurement_boundary_id": "boundary123"},
+               }}
     payload.update(overrides)
     return payload
 
@@ -130,6 +136,13 @@ def _discover_step(attested=True):
               "discovery_id": "d1", "result": {"delta": 0.0146}}
     if attested:
         result["attested"] = True
+        # Add minimal valid measurement_record to satisfy _is_attested
+        result["measurement_record"] = {
+            "model_identity": {"name": "gpt2", "content_hash": "abcd1234"},
+            "input_commitment": "input123",
+            "output_commitment": "output123",
+            "execution_context": {"timestamp": 1234567890.0, "measurement_boundary_id": "boundary123"},
+        }
         step_attested = True
     else:
         step_attested = False

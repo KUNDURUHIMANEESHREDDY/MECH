@@ -28,7 +28,6 @@ comparison -- which was failing.
 These tests pin the property directly, so removing the check fails them rather
 than silently reopening the hole.
 """
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,6 +41,16 @@ from backend.agents.evidence_policy import (  # noqa: E402
     gate_is_live,
     publication_block_reason,
 )
+
+
+def _base_measurement_record():
+    """Standard measurement record for test fixtures."""
+    return {
+        "model_identity": {"name": "gpt2", "content_hash": "abcd1234"},
+        "input_commitment": "input123",
+        "output_commitment": "output123",
+        "execution_context": {"timestamp": 1234567890.0, "measurement_boundary_id": "boundary123"},
+    }
 
 
 def _failing_gate(**overrides):
@@ -62,6 +71,7 @@ def _failing_gate(**overrides):
         "metric": "overall_fidelity_pct",
         "value": 64.72,
         "threshold": 0.85,
+        "measurement_record": _base_measurement_record(),
     }
     gate.update(overrides)
     return gate
@@ -69,10 +79,12 @@ def _failing_gate(**overrides):
 
 def _trace_with_discovery():
     """A trace whose discovery and validation steps are both live and complete."""
+    base_mr = _base_measurement_record()
     discovery = {
         "node": "discover", "status": "completed", "provenance": "live",
         "attested": True, "validation_eligible": True,
         "publication_eligible": True, "measured": True,
+        "measurement_record": _base_measurement_record(),
     }
     validation = {
         "node": "validate", "status": "completed", "provenance": "live",
@@ -82,6 +94,7 @@ def _trace_with_discovery():
             "status": "completed", "provenance": "live", "attested": True,
             "validation_eligible": True, "publication_eligible": True,
             "validated": True,
+            "measurement_record": _base_measurement_record(),
         },
     }
     return [discovery, validation]
@@ -117,7 +130,7 @@ def test_publication_is_blocked_when_only_the_fidelity_check_fails():
     trace = _trace_with_discovery()
 
     reason = publication_block_reason(trace, reproducibility=None,
-                                     gate=_failing_gate())
+                                      gate=_failing_gate())
 
     assert reason, (
         "publication was allowed when the fidelity gate failed; this is the "
