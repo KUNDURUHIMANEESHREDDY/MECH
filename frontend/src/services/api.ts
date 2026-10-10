@@ -38,13 +38,10 @@ export function apiToken(): string | null {
   } catch {
     /* storage unavailable (SSR/tests) — fall through */
   }
-  try {
-    const fromEnv = (import.meta as unknown as { env?: Record<string, string> })
-      ?.env?.VITE_MECH_API_TOKEN?.trim();
-    if (fromEnv) return fromEnv;
-  } catch {
-    /* no Vite env — fall through */
-  }
+  // No Vite env fallback — VITE_MECH_API_TOKEN would bundle a secret into the build.
+  // The token must come from secure runtime sources only:
+  // - runtime.__MECH_API_TOKEN__ (set by Electron at startup)
+  // - localStorage.getItem('mech_api_token') (set at runtime after login)
   return null;
 }
 
