@@ -49,76 +49,81 @@ from backend.agents.evidence_policy import discovery_is_live  # noqa: E402
 GOAL = "Reproduce IOI on gpt2-small and find causally important heads"
 
 
+# ── patching ─────────────────────────────────────────────────────────────
+# Both `discovery_engine.discover_and_orchestrate` and `discoverer.discover`
+# import their collaborator *inside* the method, so replacing a module
+# attribute has no effect. The method on the class is looked up at call time,
+# which is the seam that actually works -- and it is also the seam the earlier
+# version of this file tried and failed to use.
+
+def _record_executor(monkeypatch, sink):
+    """Intercept `LiveIOIDiscovery.run`, recording its kwargs into `sink`."""
+    def fake_run(self, hypothesis_statement, **kwargs):
+        sink.update(kwargs)
+        return {"status": "completed", "provenance": "live",
+                "validation_eligible": True, "publication_eligible": True}
+
+    monkeypatch.setattr(LiveIOIDiscovery, "run", fake_run)
+    monkeypatch.setattr(LiveIOIDiscovery, "available", staticmethod(lambda: True))
+
+
+def _record_orchestrator(monkeypatch, sink):
+    """Intercept `DiscoveryEngine.discover_and_orchestrate` for the agent test."""
+    from backend.interpretability.discovery.discovery_engine import DiscoveryEngine
+
+    def fake_orchestrate(self, hypothesis_statement, **kwargs):
+        sink.update(kwargs)
+        return {"status": "completed", "provenance": "live",
+                "validation_eligible": True, "publication_eligible": True}
+
+    monkeypatch.setattr(DiscoveryEngine, "discover_and_orchestrate",
+                        fake_orchestrate)
+
+
 @pytest.fixture
 def engine_available():
-    """Skip-free: the discovery needs live weights, and the tests below are
-    about the *call*, not about the measurement."""
+    """The discovery needs live weights; some tests are about the measurement,
+    others only about the call."""
     return LiveIOIDiscovery.available()
 
 
-# ── the interface ────────────────────────────────────────────────────────
-
-def test_the_orchestrator_accepts_and_forwards_a_prompt_count():
+def test_the_orchestrator_accepts_and_forwards_a_prompt_count(monkeypatch):
     """The parameter exists and reaches the executor."""
-    import backend.interpretability.discovery.discovery_engine as de_mod
+    saw = {}
+    _record_executor(monkeypatch, saw)
 
-    with RecorderPatch() as recorder:
-        de_mod.DiscoveryEngine().discover_and_orchestrate(
-            hypothesis_statement=GOAL, n_prompts=7)
+    from backend.interpretability.discovery.discovery_engine import DiscoveryEngine
+    DiscoveryEngine().discover_and_orchestrate(
+        hypothesis_statement=GOAL, n_prompts=7)
 
-    assert recorder.last_kwargs == {"n_prompts": 7}, (
-        f"the orchestrator did not forward n_prompts; the executor saw "
-        f"{recorder.last_kwargs!r}")
-
-
-class RecorderPatch:
-    """Patch `LiveIOIDiscovery` into the discovery_engine module's namespace."""
-
-    def __enter__(self):
-        import backend.interpretability.discovery.discovery_engine as de_mod
-        self._mod = de_mod
-        self._original = getattr(de_mod, "LiveIOIDiscovery", None)
-
-        class Recorder:
-            available = staticmethod(lambda: True)
-
-            def run(self, hypothesis_statement, **kwargs):
-                Recorder.last_kwargs = kwargs  # type: ignore[attr-defined]
-                return {"status": "completed", "provenance": "live",
-                        "validation_eligible": True}
-
-        de_mod.LiveIOIDiscovery = lambda: Recorder()  # type: ignore[assignment]
-        return Recorder
-
-    def __exit__(self, *exc):
-        if self._original is not None:
-            self._mod.LiveIOIDiscovery = self._original  # type: ignore[assignment]
-        return False
+    assert saw == {"n_prompts": 7}, (
+        f"the orchestrator did not forward n_prompts; the executor saw {saw!r}")
 
 
-def test_the_orchestrator_forwards_both_sample_sizes():
-    import backend.interpretability.discovery.discovery_engine as de_mod
+def test_the_orchestrator_forwards_both_sample_sizes(monkeypatch):
+    saw = {}
+    _record_executor(monkeypatch, saw)
 
-    with RecorderPatch() as recorder:
-        de_mod.DiscoveryEngine().discover_and_orchestrate(
-            hypothesis_statement=GOAL, n_prompts=10, n_interaction_prompts=5)
+    from backend.interpretability.discovery.discovery_engine import DiscoveryEngine
+    DiscoveryEngine().discover_and_orchestrate(
+        hypothesis_statement=GOAL, n_prompts=10, n_interaction_prompts=5)
 
-    assert recorder.last_kwargs == {"n_prompts": 10, "n_interaction_prompts": 5}, (
+    assert saw == {"n_prompts": 10, "n_interaction_prompts": 5}, (
         "the interaction count was not forwarded, so publication eligibility "
-        "stays unreachable even after validation eligibility is fixed")
+        f"stays unreachable even after validation eligibility is fixed; saw {saw!r}")
 
 
-def test_the_defaults_do_not_silently_change():
+def test_the_defaults_do_not_silently_change(monkeypatch):
     """A fix that works by raising every caller's cost is not a fix."""
-    import backend.interpretability.discovery.discovery_engine as de_mod
+    saw = {}
+    _record_executor(monkeypatch, saw)
 
-    with RecorderPatch() as recorder:
-        de_mod.DiscoveryEngine().discover_and_orchestrate(
-            hypothesis_statement=GOAL)
+    from backend.interpretability.discovery.discovery_engine import DiscoveryEngine
+    DiscoveryEngine().discover_and_orchestrate(hypothesis_statement=GOAL)
 
-    assert recorder.last_kwargs == {}, (
+    assert saw == {}, (
         "the orchestrator now forwards counts a caller did not ask for, which "
-        "raises the cost of every existing caller silently")
+        f"raises the cost of every existing caller silently; saw {saw!r}")
 
 
 def test_a_caller_can_now_reach_eligibility(engine_available):
@@ -148,35 +153,20 @@ def test_a_caller_can_now_reach_eligibility(engine_available):
 
 # ── the Society agent asks for it ────────────────────────────────────────
 
-def test_the_society_agent_requests_an_adequate_sample():
+def test_the_society_agent_requests_an_adequate_sample(monkeypatch):
     """The workflow's caller must actually ask."""
     sent = {}
+    _record_orchestrator(monkeypatch, sent)
 
-    class FakeEngine:
-        def discover_and_orchestrate(self, hypothesis_statement, **kwargs):
-            sent.update(kwargs)
-            return {"status": "completed", "provenance": "live",
-                    "validation_eligible": True, "publication_eligible": True}
-
-    agent = disc_mod.Discoverer.__new__(disc_mod.Discoverer)
-    # `discover` needs only the engine; bind the fake in place of the real one.
-    import backend.agents.discoverer as d
-
-    real_engine = getattr(d, "DiscoveryEngine", None)
-    d.DiscoveryEngine = lambda: FakeEngine()  # type: ignore[assignment]
-    try:
-        agent.discover("Reproduce IOI on gpt2-small")
-    finally:
-        if real_engine is not None:
-            d.DiscoveryEngine = real_engine  # type: ignore[assignment]
+    disc_mod.Discoverer().discover("Reproduce IOI on gpt2-small")
 
     assert sent.get("n_prompts") == disc_mod.SOCIETY_DISCOVERY_N_PROMPTS, (
         "the Society did not ask for a validation-adequate sample, so its "
-        "discovery stays ineligible")
+        f"discovery stays ineligible; the executor saw {sent!r}")
     assert sent.get("n_interaction_prompts") == (
         disc_mod.SOCIETY_DISCOVERY_N_INTERACTION_PROMPTS), (
         "the Society did not ask for an interaction-adequate sample, so "
-        "publication eligibility stays unreachable")
+        f"publication eligibility stays unreachable; saw {sent!r}")
 
 
 def test_the_society_counts_match_the_executors_thresholds():
@@ -186,28 +176,24 @@ def test_the_society_counts_match_the_executors_thresholds():
             == MIN_PROMPTS_FOR_INTERACTION)
 
 
-def test_the_default_gate_still_refuses_an_inadequate_sample():
+def test_the_default_gate_still_refuses_an_inadequate_sample(monkeypatch):
     """The negative control: raising the caller's count must not weaken the gate.
 
     If the orchestrator began returning eligibility for a short sample, this
-    fails and the other assertions here would be passing for the wrong reason.
+    fails and the assertions above would be passing for the wrong reason.
     """
     import backend.interpretability.discovery.live_discovery as ld
 
-    def _adequacy_stub(n_prompts, n_interaction_prompts):
+    real = ld._adequacy
+
+    def fake_adequacy(*args, **kwargs):
         return {"statistically_adequate": False, "interaction_adequate": False,
                 "validation_eligible": False, "publication_eligible": False,
                 "ineligible_because": ["stub: too few prompts"]}
 
-    real = getattr(ld, "_adequacy", None)
-    if real is not None:
-        ld._adequacy = _adequacy_stub  # type: ignore[assignment]
-    try:
-        res = ld.LiveIOIDiscovery().run(GOAL, n_prompts=2,
-                                        n_interaction_prompts=1)
-    finally:
-        if real is not None:
-            ld._adequacy = real  # type: ignore[assignment]
+    monkeypatch.setattr(ld, "_adequacy", fake_adequacy)
+    res = ld.LiveIOIDiscovery().run(GOAL, n_prompts=2, n_interaction_prompts=1)
+    assert real is not ld._adequacy
 
     assert res.get("validation_eligible") is False, (
         "an inadequate sample was reported validation-eligible; the gate has "

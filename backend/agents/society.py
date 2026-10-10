@@ -310,8 +310,18 @@ class ResearchSocietyV2:
                 ),
                 "confidence": self._confidence_of(vres),
                 "validated": bool(vres.get("validated", False)),
-                "passed": bool(gate.get("passed", False))
-                          and confident and validation_eligible,
+                # Propagated, never asserted. The gate's own `passed` comes from
+                # the critic's fidelity comparison and is the binding
+                # constraint; these two say the validation chain was eligible,
+                # which is a separate question. They were absent, so
+                # `blocked_reason` reported "validation eligibility was not
+                # asserted" -- blaming a missing field for a gate that closed
+                # for a real reason (fidelity below threshold).
+                "validation_eligible": bool(validation_eligible),
+                "publication_eligible": bool(
+                    vres.get("publication_eligible", False)),
+                "passed": bool(gate.get("passed", False)) and confident
+                          and validation_eligible,
             })
         else:
             gate = {

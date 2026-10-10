@@ -108,7 +108,37 @@ def blocked_reason(payload: Any, stage: str) -> str:
         return f"{stage} blocked: publication eligibility was not asserted."
     if stage.lower().startswith("validation") and record.get("validated") is not True:
         return "Validation blocked: the live validation verdict is not passing."
+    if (stage.lower().startswith("validation")
+            and record.get("passed") is not True):
+        # The binding constraint, and deliberately last: every earlier check
+        # asks whether the chain was *eligible*, while this asks whether the
+        # measurement actually cleared its bar. Without it, a gate that carried
+        # eligibility fields but did not pass was reported as having no reason
+        # at all -- and `publication_block_reason` treats an empty reason as
+        # "no block", so the fidelity gate could be bypassed silently.
+        detail = _fidelity_shortfall(record)
+        return "Validation gate blocked: %s" % (
+            detail or "the fidelity gate did not pass.")
     return f"{stage} blocked: required evidence fields are incomplete."
+
+
+def _fidelity_shortfall(record: Dict[str, Any]) -> str:
+    """Name the metric, the value and the threshold, or return "".
+
+    A blocked gate must say *what* it measured and *what* it was measured
+    against. These keys are written by the critic's reproduction gate, so a
+    reader is told which number fell short rather than being told a field is
+    missing.
+    """
+    metric = record.get("metric")
+    value = record.get("value")
+    threshold = record.get("threshold")
+    if not isinstance(metric, str) or not metric:
+        return ""
+    if isinstance(value, (int, float)) and isinstance(threshold, (int, float)):
+        return (f"the fidelity gate did not pass: {metric} = {value} "
+                f"against a threshold of {threshold}")
+    return f"the fidelity gate did not pass on {metric}"
 
 
 def _steps(trace: Optional[Iterable[Dict[str, Any]]], node: str):

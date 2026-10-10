@@ -88,7 +88,7 @@ Mapped against `docs/AUDIT_REMEDIATION.md` § *Not done, and why*.
 | Plugin read confinement / Windows containment | **CLOSED** | `6cd22d5`, `dde24ae` |
 | Attestation laundering / shape-only signature | **CLOSED** | `462a9a5`, `cb14eb7` |
 | Manifest signing incomplete; Required-gates; reproducibility snapshot; plugin artifact integrity; legacy `importlib` loader; architecture consolidation; backlog #13 | **UNVERIFIED** | not examined in this bounded pass — do not read silence as closed |
-| **EvidenceBoundary has no production callers** | **STILL OPEN** | `admit()` call sites outside tests: **0** |
+| **EvidenceBoundary has no production callers** | **CLOSED, by removal not wiring** | `backend/core/evidence_boundary.py` was deleted in `624bd3f` — this gate report got this wrong, recording the module as still present with 0 call sites. It duplicated `load_run_record` *without* the quarantine checks, so a caller walking through it bypassed the stamp enforcement. All load paths now route through `evidence_graph.py`, which enforces `HISTORICAL_ORIGIN`. The audit's proposed remedy, wiring the live-writers through `admit()`, is moot: the duplicate is gone rather than bridged. |
 
 The last one is the finding I'd flag hardest. A correct, unforgeable gate that no
 production code walks through is still not a gate. The earlier record said wiring
