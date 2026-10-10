@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from unittest import mock
 import subprocess
 import sys
 import tempfile
@@ -544,19 +545,23 @@ def _run_guardless(tmp_path: Path, extra: str = "") -> subprocess.CompletedProce
 def test_a_missing_guard_does_not_take_the_suite_down(tmp_path):
     """A safety net must not be the thing that breaks the suite.
 
-    A top-level `import source_stability` in conftest raises
-    `ModuleNotFoundError` out of conftest itself: pytest reports "ImportError
-    while loading conftest", collects nothing, and the run exits 4 with **zero
-    tests executed**. The guard is a new file in a directory that is only on
-    sys.path by conftest's own arrangement, so this is reachable by a rename or
-    an uncommitted new file -- and it would turn the suite red for a *missing*
-    safety net, the opposite of the intent.
+    A top-level `import source_stability` raises ModuleNotFoundError out of
+    conftest itself: pytest reports "ImportError while loading conftest",
+    collects nothing, and the run exits 4 with **zero tests executed**. The guard
+    is a new file in a directory that is only on sys.path by conftest's own
+    arrangement, so this is reachable by a rename or an uncommitted new file --
+    and it would turn the suite red for a *missing* safety net, the opposite of
+    the intent. So the tests must still RUN.
+
+    This is the fail-soft half, and it is deliberately paired with
+    `test_a_missing_guard_fails_the_run_it_cannot_attest`, which is the
+    fail-closed half. Together they say: the suite still runs and reports its
+    real results, but the run is not green.
     """
     done = _run_guardless(tmp_path)
     output = done.stdout + done.stderr
 
     assert "1 passed" in output, output
-    assert done.returncode == 0, output
     assert "GUARD UNAVAILABLE" in output, (
         "an unattested run must say so, or it reads as an attested one")
     assert "unattested" in output
@@ -571,10 +576,74 @@ def test_a_missing_guard_reports_no_attestation_claim(tmp_path):
         "an unattested run must not claim an attestation it did not perform")
     assert "RUN NOT TRUSTWORTHY" not in output
 
-def test_a_missing_guard_still_lets_a_real_failure_show(tmp_path):
-    """Degrading must not mask genuine test failures."""
+    assert "GUARD UNAVAILABLE" in output
+    assert "exiting non-zero" in output, (
+        "an unattested run must say that it is failing because it cannot attest, "
+        "not merely that the guard is missing")
+    assert done.returncode != 0, (
+        "a run whose guard could not be loaded reported success; the guard fails "
+        "OPEN and can be removed to make an unattested run look green")
+
+
+def test_a_missing_guard_degrades_but_still_reports_test_failures(tmp_path):
+    """Degrading must not mask genuine test failures -- and must not hide them.
+
+    Both properties at once, because the combination is what a fail-closed guard
+    needs: absent guard means the run goes red, but a *real* test failure is
+    still reported as a failure rather than being replaced by the guard's own
+    complaint.
+    """
     done = _run_guardless(tmp_path, extra="def test_fails():\n    assert False\n")
     output = done.stdout + done.stderr
 
     assert "1 failed" in output, output
+    assert "GUARD UNAVAILABLE" in output
     assert done.returncode != 0
+
+
+def test_a_missing_guard_fails_the_run_it_cannot_attest(tmp_path):
+    """A safety net must fail CLOSED, not open.
+
+    An independent review found this was not true. `pytest_sessionfinish` printed
+    a notice and returned without touching `session.exitstatus`, so deleting,
+    renaming or breaking `scripts/source_stability.py` disabled the guard and the
+    run reported green -- while the module docstring said "fail-closed by
+    default". A guard that can be removed to make the thing it covers look fine
+    is not a guard.
+
+    Before the fix the exit status was 0. The test file itself still passes, so
+    this pins the exit code rather than any assertion.
+    """
+    done = _run_guardless(tmp_path)
+    output = done.stdout + done.stderr
+
+    assert "GUARD UNAVAILABLE" in output
+    assert "exiting non-zero" in output, (
+        "an unattested run must say that it is failing because it cannot attest, "
+        "not merely that the guard is missing")
+    assert done.returncode != 0, (
+        "a run whose guard could not be loaded reported success; the guard fails "
+        "OPEN and can be removed to make an unattested run look green")
+
+
+def test_the_bypass_variable_ignores_values_that_are_not_enablers():
+    """`=0` and `=false` must not disable the guard.
+
+    `os.environ.get(...)` truthiness made every non-empty string an opt-out, so
+    an operator setting `MECH_SKIP_SOURCE_STABILITY_CHECK=0` believing they were
+    re-enabling it had disabled it. Found by the same independent review.
+
+    Checked on the property alone: constructing a `SessionGuard` would resolve a
+    real repository root, which is not what this test is about.
+    """
+    guard = ss.SessionGuard.__new__(ss.SessionGuard)
+
+    for disabled in ("0", "false", "no", "off", "n", "F", "OFF", " ",
+                     "disabled", "none"):
+        with mock.patch.dict(os.environ, {ss.BYPASS_ENV: disabled}):
+            assert guard.bypassed is False, (
+                f"{ss.BYPASS_ENV}={disabled!r} was treated as an opt-out")
+
+    for enabled in ("1", "true", "TRUE", "yes", "Y", " true "):
+        with mock.patch.dict(os.environ, {ss.BYPASS_ENV: enabled}):
+            assert guard.bypassed is True

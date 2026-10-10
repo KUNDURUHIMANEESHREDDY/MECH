@@ -69,7 +69,7 @@ import sys
 import sysconfig
 import tempfile
 from pathlib import Path
-from typing import Iterable, Set
+from typing import Iterable, Optional, Set
 
 # Audit events that mean "this is about to touch the network".
 _NETWORK_EVENTS = (
@@ -309,16 +309,46 @@ def _model_cache_roots() -> Set[Path]:
     return found
 
 
+def _repo_root() -> Optional[Path]:
+    """This repository's checkout root, or None if it cannot be located.
+
+    Located by walking up from this file rather than from the process cwd,
+    because the worker's cwd is the plugin's own directory and the runner's is
+    the repo root -- so a cwd-based answer would differ per process, which is
+    exactly the ambiguity a readability grant must not have.
+    """
+    here = Path(__file__).resolve()
+    for candidate in here.parents:
+        if (candidate / "backend" / "plugins").is_dir():
+            return candidate
+    return None
+
+
 def default_readable_roots() -> Set[Path]:
     """The readable allow-list a plugin gets without being told otherwise.
 
     Derived from the interpreter's own import roots so that bundled plugins can
     still import the package they are written against -- the import roots are
     filtered, but not by the same rule as the deliberate grants above.
+
+    The repository root is deliberately *not* in that set. It used to be, by
+    accident of the worker putting `_REPO_ROOT` and `_BACKEND` on `sys.path`
+    (and the runner additionally exporting `PYTHONPATH=<repo root>`), which
+    made every import root include the whole checkout. Since `backend/storage`
+    lives inside it, the control-plane bearer token and the experiment database
+    were readable by any installed plugin -- while the docstring above the
+    grants said the host's data is "outside the granted roots and is not
+    exposed". Measured on this host before the fix: the token file and the
+    SQLite database both read as readable.
+
+    An import root is *because it is an import root*, so a plugin that needs the
+    SDK directory gets it; it does not get the tree that happens to contain it.
     """
     roots: Set[Path] = {_normalize(tempfile.gettempdir())}
     roots |= _python_roots()
     roots |= _model_cache_roots()
+
+    grant = _normalize(_repo_root()) if _repo_root() is not None else None
     for entry in list(sys.path):
         # An empty entry means "the current directory", which is not a path and
         # would otherwise resolve to wherever the worker happens to be.
@@ -328,8 +358,16 @@ def default_readable_roots() -> Set[Path]:
             resolved = _normalize(entry)
         except Exception:  # noqa: BLE001
             continue
-        if not _is_credential_location(resolved):
-            roots.add(resolved)
+        if _is_credential_location(resolved):
+            continue
+        # The checkout root is not a readable root merely because it is on the
+        # import path; its storage subtree holds the bearer token and the
+        # database, and those are the host's data.
+        if grant is not None and resolved == grant:
+            continue
+        roots.add(resolved)
+    if grant is not None:
+        roots.add(_normalize(grant / "backend" / "plugins"))
     return roots
 
 

@@ -1,3 +1,5 @@
+import os
+import tempfile
 """Capability-restriction tests.
 
 The AST lint in ``plugin_sandbox`` is static and readable. This tests the
@@ -36,6 +38,9 @@ plugin_dir = Path({plugin_dir!r})
 plugin_dir.mkdir(parents=True, exist_ok=True)
 allowed = plugin_dir / "allowed.txt"
 outside = Path({outside!r})
+# A file in the real system temp: a location that grants access for the
+# reason the read allowance exists (model caches and downloads live there).
+readoutside = Path({readoutside!r})
 
 install_capability_hook(writable_roots=[plugin_dir])
 
@@ -90,7 +95,7 @@ def _write_inside():
     allowed.write_text("ok")
 
 def _read_outside():
-    return outside.read_text()
+    return readoutside.read_text()
 
 def _remove_outside():
     outside.unlink()
@@ -173,12 +178,32 @@ attempt("symlink_outside_target", _symlink_outside_target)
 
 def run_probe(tmp_path):
     plugin_dir = tmp_path / "plugindir"
+
+    # `outside` stays INSIDE the repository -- `pytest.ini` sets
+    # `--basetemp=.pytest-tmp`, so `tmp_path` is under the checkout. That is what
+    # the write and mutation tests need: a target that must be refused because it
+    # is outside the *writable* roots.
     outside = tmp_path / "outside.txt"
     outside.write_text("secret", encoding="utf-8")
+
+    # `readoutside` is a genuinely readable path: the real system temp, where
+    # model caches and downloads live, which is the reason the read allowance
+    # exists. It is a separate file because `outside` must stay unwritable --
+    # pointing the read test at `outside` would have asserted that a repo path
+    # is readable, which is precisely the grant that exposed `backend/storage`.
+    try:
+        readoutside = Path(tempfile.gettempdir()) / (
+            "mech-cap-probe-%d.txt" % os.getpid())
+        readoutside.parent.mkdir(parents=True, exist_ok=True)
+        readoutside.write_text("secret", encoding="utf-8")
+    except OSError:
+        pytest.skip("cannot create a file in the system temp directory")
+
     script = PROBE.format(
         repo=str(REPO_ROOT),
         plugin_dir=str(plugin_dir),
         outside=str(outside),
+        readoutside=str(readoutside),
     )
     proc = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True,
@@ -366,3 +391,35 @@ def _shutdown(proxy):
         proxy._roundtrip({"op": "shutdown"})  # noqa: SLF001
     except Exception:  # noqa: BLE001
         pass
+
+
+def test_the_repository_root_is_not_a_granted_read_root():
+    """The checkout root grants access to the bearer token and the database.
+
+    `default_readable_roots()` derived its set from every `sys.path` entry, and
+    the worker puts `_REPO_ROOT` and `_BACKEND` on that path while the runner
+    additionally exports `PYTHONPATH=<repo root>`. The checkout therefore became
+    a readable root, and `backend/storage` lives inside it -- so an installed
+    plugin could read `.mech_api_token` and the experiment database while the
+    module docstring said the host's data "is outside the granted roots and is
+    not exposed".
+
+    Measured on this host before the fix; pinned here so it cannot return.
+    """
+    import backend.plugins.capabilities as caps
+
+    repo = caps._repo_root()
+    assert repo is not None, "could not locate the repository root"
+    roots = caps.default_readable_roots()
+
+    assert not any(r == repo for r in roots), (
+        "the repository root is a granted read root, which exposes "
+        "backend/storage/.mech_api_token and the experiment database to any "
+        "installed plugin")
+    storage = repo / "backend" / "storage"
+    assert not any(r == storage for r in roots)
+    # The SDK directory still grants, so a plugin can import what it is written
+    # against. Without this the containment would break every plugin.
+    assert any(r == (repo / "backend" / "plugins") for r in roots), (
+        "the plugin SDK directory is not readable; plugins can no longer import "
+        "the package they are written against")

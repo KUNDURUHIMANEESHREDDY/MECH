@@ -347,7 +347,15 @@ class SessionGuard:
 
     @property
     def bypassed(self) -> bool:
-        return bool(os.environ.get(BYPASS_ENV, "").strip())
+        """Whether the opt-out is set *as an enabling value*.
+
+        Not merely truthy: `0`, `false`, `no` and friends are what an operator
+        types when trying to RE-ENABLE the check, so treating them as an opt-out
+        disables the guard at the moment of its most likely restoration. Any
+        value that is not an explicit enable is a refusal.
+        """
+        value = os.environ.get(BYPASS_ENV, "").strip().lower()
+        return value in ("1", "true", "yes", "y")
 
     def start(self) -> Snapshot:
         self._started = snapshot(self._root)

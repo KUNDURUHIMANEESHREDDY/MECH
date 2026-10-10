@@ -117,9 +117,26 @@ class ResearchSocietyV2:
                             ctx.get("discovery_id", "disc_unknown"))
             args.setdefault("discovery_result", ctx.get("discovery_result", {}))
         if agent_name == "scribe" and op == "publish":
+            # The gate travels with the publication.
+            #
+            # This shortcut used to call `publish(goal, trace, reflection)`
+            # with no `reproducibility` and no `gate`, so a plan node reaching
+            # `publish` checked only the discovery and validation chain and
+            # skipped the fidelity gate entirely -- the same shape as the
+            # planner/executor mismatch: an interface that runs with less than
+            # it was built to enforce. The authoritative call in `run()` does
+            # pass both, so the final publication was still gated, but a node
+            # arriving here could produce a publication-shaped result that had
+            # never been measured.
+            #
+            # Passed from `ctx`, which `run()` populates before this node
+            # dispatches, and which is the only source of either value.
             return self.scribe.publish(
                 goal=ctx.get("goal", ""), trace=ctx.get("trace", []),
-                reflection=ctx.get("reflection", {}))
+                reflection=ctx.get("reflection", {}),
+                run_id=ctx.get("run_id", "") or ctx.get("goal", "")[:0],
+                reproducibility=ctx.get("reproducibility"),
+                gate=ctx.get("gate"))
         fn = getattr(agent, op, None)
         if fn is None:
             return {"status": "error",

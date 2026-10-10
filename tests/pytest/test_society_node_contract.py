@@ -400,3 +400,44 @@ def test_the_finding_is_documented_separately_from_the_scripts_work():
     assert "model_variant" in text, (
         "the write-up must record that model_variant was considered and ruled "
         "out, so the next reader does not re-derive it")
+
+
+def test_a_publish_node_cannot_skip_the_fidelity_gate():
+    """A plan node reaching `publish` must carry the gate.
+
+    Found by an independent review. `_run_node`'s scribe branch called
+    `publish(goal, trace, reflection)` with no `reproducibility` and no `gate`,
+    so `publication_block_reason(trace, None, None)` checked only the discovery
+    and validation chain -- the fidelity gate was never consulted. The
+    authoritative call in `run()` does pass both, so the final publication was
+    still gated, but a node arriving here could return a publication-shaped
+    result that had never been measured.
+
+    The mutation test for this matters: removing the forwarding from the node
+    path passes the rest of this file unchanged.
+    """
+    supervisor = ResearchSocietyV2()
+    node = {"id": "publish", "agent": "scribe", "op": "publish", "args": {}}
+    ctx = {"goal": "any", "trace": [], "reflection": {}, "run_id": "run_x",
+           "reproducibility": {"marker": "repro"}, "gate": {"marker": "gate"}}
+
+    seen = {}
+    original = supervisor.scribe.publish
+
+    def spy(goal, trace, reflection, run_id="", reproducibility=None,
+            gate=None):
+        seen["reproducibility"] = reproducibility
+        seen["gate"] = gate
+        return original(goal, trace, reflection, run_id, reproducibility, gate)
+
+    supervisor.scribe.publish = spy
+    try:
+        asyncio.run(supervisor._run_node(node, ctx))
+    finally:
+        supervisor.scribe.publish = original
+
+    assert seen.get("gate") == {"marker": "gate"}, (
+        "the node path did not forward the gate, so a publish node can be "
+        "reached without the fidelity gate ever being consulted")
+    assert seen.get("reproducibility") == {"marker": "repro"}, (
+        "the node path did not forward reproducibility")

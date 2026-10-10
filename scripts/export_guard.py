@@ -182,7 +182,13 @@ SECRET_CONTENT_RULES: Sequence[tuple] = (
      r"(?i)\"private_?key\"\s*:\s*\"-----BEGIN"),
     ("aws-access-key-id", r"\bAKIA[0-9A-Z]{16}\b"),
     ("aws-secret-access-key",
-     r"(?i)aws_?secret_?access_?key\s*[=:]\s*[\"'][A-Za-z0-9/+=]{40}[\"']"),
+     # Quotes are optional, not required. `~/.aws/credentials` is an INI whose
+     # values are unquoted, so a rule demanding quotes on both sides published
+     # exactly the file the rule was written for. It was easy to miss because
+     # the access-key-id rule above does catch the same file when both keys are
+     # present, which they usually are -- so the gap only shows on a file
+     # carrying the secret alone.
+     r"(?i)aws_?secret_?access_?key\s*[=:]\s*[\"']?[A-Za-z0-9/+=]{40}[\"']?"),
     ("github-token", r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),
     ("github-fine-grained-pat", r"\bgithub_pat_[A-Za-z0-9_]{40,}\b"),
     ("slack-token", r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b"),
@@ -370,7 +376,54 @@ def screen_file(path: Path, rel: str, report: ScreenReport,
             report.reject(rel, "secret-content:" + ",".join(sorted(hits)))
             return False
 
+        # Encoding is not a hiding place. The scan above decodes as UTF-8; a
+        # secret saved in another encoding -- UTF-16LE is Notepad's historical
+        # default for files with unusual characters -- is mangled into NUL
+        # bytes and clears every regex above, and is then published with the
+        # key trivially recoverable by stripping the NULs.
+        #
+        # Verified before being fixed: a UTF-16LE PEM in `notes.txt` sailed
+        # through the name rules and the type allow-list and was exported.
+        obfuscated = content_exclusion_reasons(_deobfuscate(text))
+        if obfuscated:
+            report.reject(rel, "secret-content-encoding:"
+                          + ",".join(sorted(obfuscated)))
+            return False
+
     return True
+
+
+def _deobfuscate(text: str) -> str:
+    """`text` with NUL bytes removed and with any UTF-16 shapes undone.
+
+    Only used as a *second* scan after the strict one has passed, so it can
+    never turn an accept into a reject on a file the rules already understood;
+    it exists to catch a secret that survived by being encoded rather than by
+    being absent. Returns "" when there is nothing to undo, so the caller treats
+    an all-NUL file as empty rather than scanning it twice.
+    """
+    if not text or "\x00" not in text:
+        return ""
+    stripped = text.replace("\x00", "")
+    if not stripped:
+        return ""
+    # A UTF-16 decode of the original bytes would be the principled recovery,
+    # but the caller has already decoded the file as text with errors="replace",
+    # so the original bytes are gone. NUL-stripping recovers the same plaintext
+    # for both UTF-16LE and UTF-16BE with an even/odd split, which is the case
+    # that matters; anything genuinely binary is rejected elsewhere.
+    try:
+        raw = text.encode("utf-8", errors="replace")
+        for codec in ("utf-16-le", "utf-16-be"):
+            try:
+                decoded = raw.decode(codec, errors="ignore")
+            except (UnicodeDecodeError, LookupError):
+                continue
+            if decoded and len(decoded) < len(stripped):
+                continue
+    except Exception:  # pragma: no cover - defensive only
+        pass
+    return stripped
 
 
 def walk_repository(root: Path, exclude_dirs: Sequence[str],

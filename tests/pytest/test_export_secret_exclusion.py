@@ -465,3 +465,79 @@ def test_export_by_type_still_classifies_the_usual_suspects(tree, monkeypatch):
     assert "README.md" in grouped["markdown"]
     assert "Makefile" in grouped["config"]
     assert "package.json" in grouped["json"]
+
+
+def test_a_secret_in_an_encoded_shape_is_still_excluded(tmp_path):
+    """A UTF-16 private key must not be published as an ordinary text file.
+
+    The content scan decodes as UTF-8 with `errors="replace"`, so a secret saved
+    in UTF-16 -- Notepad's historical default for files with unusual characters
+    -- is mangled into NUL bytes and clears every regex, then is published with
+    the key recoverable by stripping NULs. Found by an independent review, which
+    executed the guard over 1,446 real files rather than reasoning about it.
+
+    Verified before fixing: a UTF-16LE PEM in `notes.txt` was `accepted = True`.
+
+    `FAKE_PEM` is built by concatenation -- see the module docstring: a literal
+    here would make this file itself a secret-bearing source file.
+    """
+    import scripts.export_guard as guard
+
+    utf16 = tmp_path / "notes.txt"
+    utf16.write_bytes(FAKE_PEM.encode("utf-16-le"))
+    report = guard.ScreenReport()
+
+    assert guard.screen_file(utf16, tmp_path, report) is False, (
+        "a private key stored as UTF-16 was accepted for publication")
+    reasons = report.reason_counts()
+    assert any("secret-content-encoding" in k for k in reasons), reasons
+    # The same bytes as UTF-8 must still be reported by the plain rule, so the
+    # encoding reason is a *second* net rather than a replacement for the first.
+    plain = tmp_path / "plain.txt"
+    plain.write_text(FAKE_PEM, encoding="utf-8")
+    plain_report = guard.ScreenReport()
+    assert guard.screen_file(plain, tmp_path, plain_report) is False
+    assert not any("secret-content-encoding" in k
+                   for k in plain_report.reason_counts()), (
+        "the encoding reason must apply only to the encoded case")
+
+
+def test_an_unquoted_aws_secret_access_key_is_excluded(tmp_path):
+    """`~/.aws/credentials` is an INI whose values are unquoted.
+
+    The pattern required quotes on both sides, so it published exactly the file
+    it was written to catch. Easy to miss because the access-key-id rule does
+    fire when both keys are in the same file, which they usually are.
+
+    Note this test builds the *secret value* only, not an `AKIA...` access-key
+    id: the id rule is a different net, and including both would make this pass
+    for the wrong reason.
+    """
+    import scripts.export_guard as guard
+
+    ini = tmp_path / "cfg.ini"
+    ini.write_text(
+        "[default]\naws_secret_access_key = "
+        + "wJalrXUtnFEMI" + "/K7MDENG" + "/bPxRfiCY" + "EXAMPLEKEY" + "\n",
+        encoding="utf-8")
+    report = guard.ScreenReport()
+
+    assert guard.screen_file(ini, tmp_path, report) is False
+    reasons = report.reason_counts()
+    assert any("aws-secret-access-key" in k for k in reasons), reasons
+
+
+def test_the_quoted_form_is_still_excluded(tmp_path):
+    """The control: the original rule still holds after making quotes optional."""
+    import scripts.export_guard as guard
+
+    ini = tmp_path / "cfg.ini"
+    ini.write_text(
+        '[default]\naws_secret_access_key = "'
+        + "wJalrXUtnFEMI" + "/K7MDENG" + "/bPxRfiCY" + "EXAMPLEKEY" + '"\n',
+        encoding="utf-8")
+    report = guard.ScreenReport()
+
+    assert guard.screen_file(ini, tmp_path, report) is False
+    reasons = report.reason_counts()
+    assert any("aws-secret-access-key" in k for k in reasons), reasons

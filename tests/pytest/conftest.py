@@ -121,6 +121,26 @@ def pytest_sessionfinish(session, exitstatus):
               "so a source change during it cannot be detected and its result "
               "may describe a half-written file.")
         print("  (%s)" % _UNAVAILABLE_REASON)
+        # Fail closed, not open.
+        #
+        # This used to `return` here without touching the exit status, which
+        # made the guard fail OPEN: deleting, renaming or breaking
+        # `scripts/source_stability.py` -- or making it raise -- turned the guard
+        # off and left the run reporting green. The module docstring says the
+        # check is fail-closed by default, and an independent review found the
+        # gap between that claim and the behaviour. A safety net that can be
+        # removed to make the thing it covers look fine is not a safety net.
+        #
+        # The printed notice is kept, because a reader needs to know *why* the
+        # run is red; and it is a distinct message so an unattested run is not
+        # confused with a failed test.
+        print("\n[source-stability] exiting non-zero because this run makes no "
+              "attestation. Set %s=1 to run without the guard deliberately; %s "
+              "must not disable it by being absent."
+              % (source_stability and source_stability.BYPASS_ENV
+                 or "MECH_SKIP_SOURCE_STABILITY_CHECK",
+                 _UNAVAILABLE_REASON))
+        session.exitstatus = 1
         return
 
     guard = _SOURCE_GUARD
