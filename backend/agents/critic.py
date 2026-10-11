@@ -335,6 +335,16 @@ class Critic:
                 # Propagated from the pipeline run above (measured or not);
                 # the Critic maps metrics, it does not re-measure them.
                 "attested": run.get("attested", False) if isinstance(run, dict) else False,
+                # The binding record travels with the attestation.
+                #
+                # `measurement_record` is cryptographically bound to the pipeline
+                # run (model_identity, input_commitment, output_commitment,
+                # execution_context). Forwarded, never invented: the Critic maps
+                # metrics and does not re-measure them; the pipeline run is the
+                # only honest source. An absent record stays absent rather than
+                # being defaulted, which preserves the fail-closed direction.
+                "measurement_record": run.get("measurement_record")
+                if isinstance(run, dict) else None,
                 "field_provenance": field_map(
                     ("status", "paper_id", "n_prompts", "observed_metrics", "report", "gate"),
                     "live",
