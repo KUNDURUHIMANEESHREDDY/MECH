@@ -755,7 +755,7 @@ def quarantine_legacy_records(directory: Optional[str] = None,
     target = _evidence_dir(directory)
     dest = historical_directory or _historical_dir(directory)
     report: Dict[str, Any] = {"moved": 0, "stamped": 0, "skipped": 0,
-                               "destination": dest}
+                               "destination": dest, "failures": []}
     try:
         if Path(target).resolve() == Path(dest).resolve():
             report["reason"] = "historical directory is the evidence directory; refusing"
@@ -764,7 +764,8 @@ def quarantine_legacy_records(directory: Optional[str] = None,
         pass
     try:
         names = os.listdir(target)
-    except Exception:
+    except Exception as e:
+        report["failures"].append({"stage": "listdir", "error": str(e)})
         return report
     for name in names:
         if not name.endswith(".json"):
@@ -773,11 +774,13 @@ def quarantine_legacy_records(directory: Optional[str] = None,
         try:
             with open(src, "rb") as f:
                 raw_bytes = f.read()
-        except Exception:
+        except Exception as e:
+            report["failures"].append({"filename": name, "stage": "read", "error": str(e)})
             continue
         try:
             data = json.loads(raw_bytes.decode("utf-8"))
-        except Exception:
+        except Exception as e:
+            report["failures"].append({"filename": name, "stage": "json_decode", "error": str(e)})
             data = None
         if _is_envelope(data):
             report["skipped"] += 1
@@ -797,7 +800,8 @@ def quarantine_legacy_records(directory: Optional[str] = None,
             os.replace(tmp, os.path.join(dest, name))
             os.unlink(src)
             report["moved"] += 1
-        except Exception:
+        except Exception as e:
+            report["failures"].append({"filename": name, "stage": "write_move", "error": str(e)})
             continue
     return report
 
