@@ -335,6 +335,25 @@ class Critic:
                 # Propagated from the pipeline run above (measured or not);
                 # the Critic maps metrics, it does not re-measure them.
                 "attested": run.get("attested", False) if isinstance(run, dict) else False,
+                # The binding record travels with the attestation.
+                #
+                # `attested: True` alone no longer satisfies the evidence policy:
+                # `_is_attested` also requires a `measurement_record` dict with
+                # four binding fields. The Critic rebuilds its own result dict,
+                # and this key was not among the fields it forwarded -- so
+                # `reproduction_is_live(critic_output)` was False for a run whose
+                # pipeline record was complete. The Society applies exactly that
+                # predicate to this object (`publication_block_reason` ->
+                # `reproduction_is_live(reproducibility)`), so every Society
+                # publication was blocked at Reproduction while looking like it
+                # had passed the fidelity gate.
+                #
+                # Forwarded, never invented: the Critic did not run the forward
+                # pass, so the only honest source is the run it is judging. An
+                # absent record stays absent rather than being defaulted, which
+                # keeps the fail-closed direction.
+                "measurement_record": run.get("measurement_record")
+                if isinstance(run, dict) else None,
                 "field_provenance": field_map(
                     ("status", "paper_id", "n_prompts", "observed_metrics", "report", "gate"),
                     "live",

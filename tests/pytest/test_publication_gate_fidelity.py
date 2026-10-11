@@ -33,6 +33,8 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
@@ -40,6 +42,7 @@ from backend.agents.evidence_policy import (  # noqa: E402
     blocked_reason,
     gate_is_live,
     publication_block_reason,
+    reproduction_is_live,
 )
 
 
@@ -156,3 +159,43 @@ def test_a_gate_with_no_metric_still_blocks():
     reason = blocked_reason(gate, "Validation gate")
     assert reason, "a gate with no metric detail was allowed to pass silently"
     assert "did not pass" in reason
+
+
+def test_the_critic_forwards_the_measurement_record():
+    """`attested: True` without the record is not attestation any more.
+
+    The Critic rebuilds its own result dict and forwarded `attested` but not
+    `measurement_record`, so `_is_attested(critic_output)` was False for a run
+    whose pipeline record was complete. The Society applies exactly that
+    predicate to this object -- `publication_block_reason` calls
+    `reproduction_is_live(reproducibility)` on the critic's return -- so every
+    Society publication was blocked at "Reproduction" while looking like it had
+    passed the fidelity gate.
+
+    The gate needs live GPT-2 weights, so this is skipped when they are absent;
+    the plumbing is still pinned by the interface tests above.
+    """
+    from backend.interpretability.discovery.live_discovery import (
+        LiveIOIDiscovery,
+    )
+
+    if not LiveIOIDiscovery.available():
+        pytest.skip("live GPT-2 weights unavailable")
+
+    from backend.agents.critic import Critic
+
+    repro = Critic().reproduce("ioi", n_prompts=8)
+
+    assert repro.get("status") == "completed", repro.get("reason")
+    record = repro.get("measurement_record")
+    assert isinstance(record, dict), (
+        "the Critic did not forward the pipeline's measurement_record, so a "
+        "complete record reads as unattested to every caller of this result")
+    assert set(record) >= {"model_identity", "input_commitment",
+                          "output_commitment", "execution_context"}, (
+        "the forwarded record is missing a binding field")
+    assert reproduction_is_live(repro), (
+        "the Critic's own output still fails reproduction_is_live; the Society "
+        "publication path applies that predicate to this object")
+
+
