@@ -576,11 +576,14 @@ def save_run_record(run_id: str, record: Dict[str, Any],
                 json.dump(envelope, f, indent=2, default=str)
                 f.flush()
                 os.fsync(f.fileno())
+            # Rename first, then fsync directory to persist the directory entry.
+            # This order ensures the file data is durable (fsynced before rename),
+            # and the directory entry update is persisted after the rename.
+            os.replace(tmp_path, path)
             try:
                 _fsync_dir(target)
             except OSError:
                 pass
-            os.replace(tmp_path, path)
         except BaseException:
             try:
                 os.unlink(tmp_path)
