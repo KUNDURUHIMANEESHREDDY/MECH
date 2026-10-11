@@ -342,6 +342,19 @@ class AttributionPatchingAlgorithm(DiscoveryAlgorithm):
                 # makes it a head-level attribution; the previous code collapsed
                 # the head to a single scalar before multiplying.
                 delta_x = [c - r for c, r in zip(clean_vec, corrupted_vec)]
+                # `attr_score` is the magnitude only. The absolute value makes
+                # it direction-blind: a head that pushes the metric toward the
+                # corrupted answer scores the same as one that pushes it toward
+                # the clean answer. Measured on the canonical IOI pair, three
+                # of the top eight attributions patch with a delta running the
+                # opposite way to what "top attribution" implies.
+                #
+                # The ranking is unchanged -- a first-order |d*g| screening
+                # score is legitimate and is what the paper's method calls
+                # for. What was missing is the signed term the score is built
+                # from, so a reader could do the directional check without
+                # re-running 144 patches.
+                signed_attr = sum(d * g for d, g in zip(delta_x, grad))
                 attr_score = sum(abs(d * g) for d, g in zip(delta_x, grad))
                 grad_norm = max(abs(g) for g in grad)
                 delta_norm = max(abs(d) for d in delta_x)
@@ -360,7 +373,13 @@ class AttributionPatchingAlgorithm(DiscoveryAlgorithm):
                         "grad_m": [round(v, 8) for v in grad],
                         "max_abs_delta_x": round(delta_norm, 6),
                         "max_abs_grad_m": round(grad_norm, 8),
-                        "attribution_score": round(attr_score, 6)
+                        "attribution_score": round(attr_score, 6),
+                        # The signed term behind the magnitude. A positive
+                        # value means the component's activation difference and
+                        # gradient point the same way; negative means they
+                        # oppose. The ranking uses abs(); this is published so
+                        # the sign is not lost.
+                        "signed_attribution": round(signed_attr, 6),
                     })
 
         # Sort by attribution score descending
@@ -449,7 +468,23 @@ class AttributionPatchingAlgorithm(DiscoveryAlgorithm):
                     else config.token_position),
                 "metric_definition": (
                     f"logit(target) - logit(baseline) at the final position. "
-                    f"{metric_note}"),
+                    f"{metric_note} Components are ranked by "
+                    f"sum(abs(d*g)), a magnitude with no sign: a high "
+                    f"attribution does not mean the component drives the "
+                    f"metric toward the clean answer. Read "
+                    f"signed_attribution for the direction."),
+                # Stated because it is not inferable from the numbers: the
+                # ranking is by magnitude, not direction. See
+                # `signed_attribution` on each component for the sign.
+                "attribution_is_direction_blind": True,
+                "attribution_direction_note": (
+                    "attribution_score is sum(abs(d*g)) and carries no sign. "
+                    "A high score does not mean the component drives the "
+                    "metric toward the clean answer; some top-ranked "
+                    "components patch with an effect in the opposite "
+                    "direction. Read signed_attribution for the sign, or "
+                    "patch the head to establish causality."
+                ),
                 "metric_target_token_id": target_id,
                 "metric_baseline_token_id": baseline_id,
                 "measured": measured,

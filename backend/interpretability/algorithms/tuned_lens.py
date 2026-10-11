@@ -308,6 +308,22 @@ class TunedLens(ProjectionModel):
     # ── projection ───────────────────────────────────────────────────────
 
     def project(self, prompt: str, layer: int, top_k: int = 5) -> Dict[str, Any]:
+        """Project through the trained translator, then unembed.
+
+        This used to delegate straight to `self.logit_lens.project` and return
+        that payload with `affine_translation_applied: True` written into it.
+        The flag described a transformation that never happened: the numbers
+        were the plain logit lens, byte-identical to an untrained lens, while
+        the payload also claimed `tuned_lens_available`, `trained` and
+        `layer_trained`. A researcher comparing a tuned lens against a raw one
+        would have measured no difference and been told the tuning was applied.
+
+        The translator is now applied to the cached residual stream before the
+        unembedding, which is the tuned-lens definition. When the hidden state is
+        unavailable -- weights unloaded, no cached prompt, an untrained layer --
+        that is reported rather than substituted with the untransformed value,
+        because a fallback here would reinstate exactly the defect.
+        """
         base = self.logit_lens.project(prompt, layer, top_k=top_k)
 
         if not self.is_trained:
@@ -330,26 +346,122 @@ class TunedLens(ProjectionModel):
             return base
 
         trained = self.training_report or {}
+        layer_trained = layer in self.translators
+
+        translated = self._project_translated(prompt, layer, top_k)
+        if translated is None:
+            # Report honestly instead of returning the untransformed
+            # projection under a flag saying it was transformed.
+            base.update({
+                "method": "TunedLens",
+                "affine_translation_applied": False,
+                "tuned_lens_available": True,
+                "trained": True,
+                "layer_trained": layer_trained,
+                "translator_kind": trained.get("translator_kind",
+                                                TRANSLATOR_KIND),
+                "provenance": UNAVAILABLE,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "top_token": None,
+                "top_probability": None,
+                "top_k_tokens": None,
+                "reason": (
+                    "The residual stream for this prompt and layer was not "
+                    "available, so the trained translator could not be applied. "
+                    "The projection reported here is therefore the plain logit "
+                    "lens and no translation was applied. Nothing was measured "
+                    "with the tuned translator."
+                ),
+            })
+            return base
+
+        base.update(translated)
         base.update({
             "method": "TunedLens",
             "affine_translation_applied": True,
             "tuned_lens_available": True,
             "trained": True,
+            "layer_trained": layer_trained,
             "translator_kind": trained.get("translator_kind", TRANSLATOR_KIND),
             "provenance": LIVE,
-            "layer_trained": layer in self.translators,
             "training": trained,
             "validation_eligible": False,
             "publication_eligible": False,
             "reason": (
-                "Translators were trained against this model's own predictions. "
-                "Note the projection here is still the logit lens applied to "
-                "one prompt; the learned translator is applied inside "
-                "`apply_translator`, and a per-prompt projection is not by "
-                "itself evidence of a mechanism."
+                "The layer's trained diagonal-affine translator was applied to "
+                "the residual stream before the unembedding. Note this is one "
+                "prompt's projection; it is not by itself evidence of a "
+                "mechanism."
             ),
         })
         return base
+
+    def _project_translated(self, prompt: str, layer: int,
+                            top_k: int) -> Optional[Dict[str, Any]]:
+        """Apply the translator and re-project, or ``None`` if not possible.
+
+        Reads the residual stream the engine already cached for `prompt`, so
+        this costs no extra forward pass. The final layer's cached entry is
+        post-`ln_f` (see `docs/notes/tl_block11_anomaly.md`), so it is used as-is
+        while earlier layers are normalised first -- the same convention
+        `gpt2_engine.logit_lens` follows.
+        """
+        torch = self._torch()
+        if torch is None:
+            return None
+        if layer not in self.translators:
+            return None
+
+        engine = self.engine
+        snapshot = getattr(engine, "_snapshot", None)
+        if snapshot is None:
+            return None
+        state = snapshot()
+        if state.get("prompt") != prompt:
+            # The cache describes a different prompt; reading it would report
+            # another prompt's activations under this one.
+            return None
+
+        hidden = (state.get("hidden") or [])
+        n_layers = int(getattr(engine, "_n_layers", lambda: 0)())
+        index = layer + 1
+        if index >= len(hidden):
+            return None
+
+        try:
+            model = engine._model
+            row = torch.tensor(hidden[index][-1], dtype=torch.float32)
+            entry = self.translators[layer]
+            scale = entry["scale"].float().to(row.device)
+            shift = entry["shift"].float().to(row.device)
+            translated = row * scale + shift
+
+            # Earlier entries are pre-ln_f; the last is already normalised.
+            if layer != n_layers - 1:
+                translated = model.transformer.ln_f(translated)
+
+            logits = translated @ model.transformer.wte.weight.T.float()
+            probs = torch.softmax(logits, dim=-1)
+            k = max(1, min(int(top_k), probs.numel()))
+            top = torch.topk(probs, k)
+            tokens = [
+                {
+                    "token": engine._decode(int(i)),
+                    "prob": round(float(probs[i]), 6),
+                }
+                for i in top.indices
+            ]
+        except Exception:
+            # Any failure means no tuned projection; the caller reports that
+            # rather than falling back to an untransformed number.
+            return None
+
+        return {
+            "top_token": tokens[0]["token"] if tokens else None,
+            "top_probability": tokens[0]["prob"] if tokens else None,
+            "top_k_tokens": tokens,
+        }
 
     def apply_translator(self, hidden: Any, layer: int) -> Any:
         """Apply a layer's learned affine map to a hidden-state tensor.

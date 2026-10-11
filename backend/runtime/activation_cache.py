@@ -27,6 +27,19 @@ import torch
 from .errors import CacheError
 
 
+#: Sentinel for `search(head=...)` meaning "entries whose head *is* None".
+#:
+#: `head` is `Optional[int]` on the entry, and `None` already meant "do not
+#: filter" in `search`. So the population that actually has no head -- the MLP
+#: and residual captures that `run_inference` writes -- was unreachable by
+#: head, and `search(head=None)` returned attention and MLP rows mixed
+#: together. A caller could not ask for "the headless ones" at all.
+#:
+#: A distinct sentinel keeps `search(head=None)` meaning no-filter, so no
+#: existing caller changes behaviour.
+HEADLESS = object()
+
+
 @dataclass
 class CachedActivation:
     activation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -51,6 +64,21 @@ class ActivationCache:
     # ── CRUD ─────────────────────────────────────────────────────
 
     def put(self, activation: CachedActivation) -> str:
+        # Snapshot the tensor on the way in.
+        #
+        # The entry was stored by reference, so any later in-place write by
+        # the caller silently rewrote the cached measurement -- the cache
+        # would go on reporting a value that was never measured, under an
+        # activation_id and timestamp claiming it was. Callers reuse their
+        # buffers; `run_inference` hands the same store to a hook and then
+        # keeps using it.
+        #
+        # Cloned once, here, where the tensor enters the cache, so every
+        # other method stays a plain accessor. `detach` first: a cached
+        # activation should not keep the caller's autograd graph alive.
+        if activation.tensor is not None:
+            activation.tensor = activation.tensor.detach().clone()
+
         if len(self._entries) >= self._max_entries:
             # FIFO eviction
             oldest_key = next(iter(self._entries))
@@ -83,7 +111,7 @@ class ActivationCache:
         session_id: str | None = None,
         layer: int | None = None,
         component: str | None = None,
-        head: int | None = None,
+        head: int | None | object = None,
         prompt_id: str | None = None,
     ) -> list[CachedActivation]:
         results = list(self._entries.values())
@@ -93,7 +121,10 @@ class ActivationCache:
             results = [a for a in results if a.layer == layer]
         if component is not None:
             results = [a for a in results if a.component == component]
-        if head is not None:
+        if head is HEADLESS:
+            # Explicitly "no head", which is distinct from "do not filter".
+            results = [a for a in results if a.head is None]
+        elif head is not None:
             results = [a for a in results if a.head == head]
         if prompt_id is not None:
             results = [a for a in results if a.prompt_id == prompt_id]

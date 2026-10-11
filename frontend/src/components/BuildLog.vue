@@ -162,6 +162,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { api } from '../services/api';
+import { applyBuildSnapshot } from './buildLogState';
 
 type UnknownRecord = Record<string, unknown>;
 type Bridge = Record<string, unknown>;
@@ -189,6 +190,21 @@ const liveConnected = ref(false);
 const errorMessage = ref('');
 const actionMessage = ref('');
 let stopBuildEvents: (() => void) | null = null;
+
+/**
+ * Run identity of the build currently on screen.
+ *
+ * Polling responses are applied only when they are not older than this
+ * (T14). `started_at` is the run's serial number -- `build_runner.py`
+ * rewrites it on every `_run_build` -- so it is what distinguishes a slow
+ * response for the previous build from a current one. Without it, a request
+ * issued before the user started a new build would resolve afterwards and
+ * repaint the view with the old build's output and status; when that old
+ * build had finished, it would also stop the poller and abandon the build
+ * still running.
+ */
+const currentRunKey = ref<string | null>(null);
+const staleResponsesIgnored = ref(0);
 
 const bridgeAvailable = computed(() => Boolean(bridge.value));
 const canRead = computed(() => hasMethod(bridge.value, 'getBuildLogs'));
@@ -318,24 +334,34 @@ async function loadBridgeLogs(reader: BridgeMethod) {
 
 function applyApiBuildState(build: unknown) {
   if (!isRecord(build)) return;
-  const status = stringValue(build.status);
-  if (status === 'running') buildStatus.value = 'running';
-  else if (status === 'completed') buildStatus.value = 'success';
-  else if (status === 'failed') buildStatus.value = 'error';
-  else if (status === 'idle' && buildStatus.value !== 'running') buildStatus.value = 'idle';
-  const tail = stringValue(build.output_tail);
-  if (tail) {
-    buildEntries.value = tail.split(/\r?\n/).filter((line) => line.trim() !== '').slice(-200).map(
-      (line, index) => ({
-        id: `backend-build-${index}-${line.slice(0, 20)}`,
-        timestamp: stringValue(build.finished_at) || stringValue(build.started_at),
-        level: buildStatus.value === 'error' ? 'error' : 'info',
-        message: line,
-        context: '',
-      }),
-    );
-  }
-  if (buildStatus.value === 'running') startPolling();
+
+  // T14: refuse a response older than the run on screen. Returning without
+  // touching buildStatus matters as much as returning without touching the
+  // entries: the caller starts or stops polling based on that status, so a
+  // stale 'completed' would call stopPolling() and stop watching a build that
+  // is still running.
+  const view = {
+    status: buildStatus.value,
+    entries: buildEntries.value,
+    runKey: currentRunKey.value,
+    staleIgnored: staleResponsesIgnored.value,
+  };
+  const applied = applyBuildSnapshot(view, build);
+
+  currentRunKey.value = view.runKey;
+  staleResponsesIgnored.value = view.staleIgnored;
+  if (!applied) return;
+
+  buildStatus.value = view.status;
+  buildEntries.value = view.entries.map((entry) => ({
+    id: entry.id,
+    timestamp: stringValue(build.finished_at) || stringValue(build.started_at),
+    level: view.status === 'error' ? 'error' : 'info',
+    message: entry.message,
+    context: '',
+  }));
+
+  if (view.status === 'running') startPolling();
   else stopPolling();
 }
 

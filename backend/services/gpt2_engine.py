@@ -90,6 +90,14 @@ def load() -> Dict[str, Any]:
             _model.config.output_attentions = True
             _model.config.output_hidden_states = True
             _model.eval()
+            # GPT-2 defines no pad token, and without one the tokenizer
+            # refuses to pad at all (`padding=True` raises), so a batch of
+            # differing lengths cannot be tokenized. `model_manager` sets
+            # pad_token from eos for the same weights, so leaving this unset
+            # made two loaders produce different tokenizer configuration for
+            # one model. eos is GPT-2's pad in practice.
+            if _tokenizer.pad_token is None:
+                _tokenizer.pad_token = _tokenizer.eos_token
         except Exception as e:
             return {"status": "error", "error": str(e)}
         return _attest_info(info())
@@ -97,6 +105,59 @@ def load() -> Dict[str, Any]:
 
 def _cfg() -> Any:
     return _model.config
+
+
+def _index_error(kind: str, index: Any, valid: str) -> Dict[str, Any]:
+    """Refuse an index that names nothing, rather than substituting another.
+
+    Sixteen call sites previously normalised every layer, head and neuron
+    index with `max(0, min(n - 1, int(index)))`. That made
+    `activations(999)` return layer 11's tensor with `status: "ok"` -- measured
+    bit-identical to `activations(11)`. The caller asked about a layer that
+    does not exist and received a complete, correctly-shaped, plausible
+    measurement of a *different* layer, with nothing in the response to say so.
+
+    Clamping is the one error shape a research tool cannot afford, because the
+    result is indistinguishable from a real one. `HFAdapterMixin._layer_error`
+    already refused with the wording below for the non-GPT-2 families; the two
+    paths now agree.
+
+    `valid` names the acceptable range so the caller can correct the request.
+    """
+    return {
+        "status": "unavailable",
+        "provenance": "unavailable",
+        "measured": False,
+        "validation_eligible": False,
+        "publication_eligible": False,
+        "reason": (
+            f"{kind} {index} is outside this model ({valid}), so nothing "
+            f"exists at that position. Nothing was measured."
+        ),
+    }
+
+
+def _check_layer(layer: Any) -> Optional[Dict[str, Any]]:
+    """Return an error dict for an out-of-range layer, else ``None``."""
+    n = _n_layers()
+    try:
+        value = int(layer)
+    except (TypeError, ValueError):
+        return _index_error("Layer", layer, f"{n} layers, indexed 0..{n - 1}")
+    if value < 0 or value >= n:
+        return _index_error("Layer", value, f"{n} layers, indexed 0..{n - 1}")
+    return None
+
+
+def _check_index(kind: str, index: Any, n: int) -> Optional[Dict[str, Any]]:
+    """Return an error dict for an out-of-range head/neuron, else ``None``."""
+    try:
+        value = int(index)
+    except (TypeError, ValueError):
+        return _index_error(kind, index, f"{n}, indexed 0..{n - 1}")
+    if value < 0 or value >= n:
+        return _index_error(kind, value, f"{n}, indexed 0..{n - 1}")
+    return None
 
 
 def _d_mlp() -> int:
@@ -503,7 +564,17 @@ def generate_text(primer: str, max_new_tokens: int = 12,
         return err
     primer = (primer or "").strip() or "The"
     max_new_tokens = max(1, min(48, int(max_new_tokens)))
-    temperature = max(0.1, min(2.0, float(temperature)))
+    # temperature=0 means greedy. The floor used to be 0.1, which made greedy
+    # unreachable: a caller asking for deterministic output got 0.1 and kept
+    # sampling, and two identical calls returned different text. Worse, the
+    # result reported the substituted temperature, so the difference was only
+    # visible by comparing the response against the request.
+    temperature = float(temperature)
+    if temperature < 0.0:
+        temperature = 0.0
+    if temperature > 2.0:
+        temperature = 2.0
+    greedy = temperature == 0.0
     top_k = max(1, min(200, int(top_k)))
     device = next(_model.parameters()).device
     with torch.no_grad():
@@ -512,11 +583,17 @@ def generate_text(primer: str, max_new_tokens: int = 12,
         generated = input_ids[0].tolist()
         for _ in range(max_new_tokens):
             out = _model(input_ids=input_ids[:, -_cfg().n_positions:])
-            logits = out.logits[0, -1].float() / temperature
-            topk = torch.topk(logits, k=min(top_k, logits.numel()))
-            probs = torch.softmax(topk.values, dim=-1)
-            choice = int(torch.multinomial(probs, num_samples=1).item())
-            next_id = int(topk.indices[choice].item())
+            raw_logits = out.logits[0, -1].float()
+            if greedy:
+                # Deterministic by construction: the model's own argmax, not a
+                # sample from a distribution the caller cannot reproduce.
+                next_id = int(raw_logits.argmax().item())
+            else:
+                logits = raw_logits / temperature
+                topk = torch.topk(logits, k=min(top_k, logits.numel()))
+                probs = torch.softmax(topk.values, dim=-1)
+                choice = int(torch.multinomial(probs, num_samples=1).item())
+                next_id = int(topk.indices[choice].item())
             generated.append(next_id)
             if next_id == _tokenizer.eos_token_id:
                 break
@@ -541,7 +618,10 @@ def layer_detail(layer: int) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
         return err
-    layer = max(0, min(_n_layers() - 1, int(layer)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
     block = _model.transformer.h[layer]
     d_mlp = int(block.mlp.c_fc.weight.shape[1])
 
@@ -675,7 +755,10 @@ def list_neurons(
     if err:
         return err
 
-    layer = max(0, min(_n_layers() - 1, int(layer)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
     page = max(0, int(page))
     page_size = max(1, min(512, int(page_size)))
     component = (component or "mlp").lower()
@@ -799,7 +882,10 @@ def neuron_detail(
     if err:
         return err
 
-    layer = max(0, min(_n_layers() - 1, int(layer)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
     component = (component or "mlp").lower()
     top_k_weights = max(1, min(64, int(top_k_weights)))
     block = _model.transformer.h[layer]
@@ -808,7 +894,10 @@ def neuron_detail(
         c_fc_w = block.mlp.c_fc.weight.data.float()  # [d_model, d_mlp]
         c_proj_w = block.mlp.c_proj.weight.data.float()  # [d_mlp, d_model]
         d_mlp = int(c_fc_w.shape[1])
-        neuron_index = max(0, min(d_mlp - 1, int(neuron_index)))
+        bad = _check_index('Neuron', neuron_index, d_mlp)
+        if bad is not None:
+            return bad
+        neuron_index = int(neuron_index)
 
         in_w = c_fc_w[:, neuron_index]  # [d_model]
         out_w = c_proj_w[neuron_index, :]  # [d_model]
@@ -899,7 +988,10 @@ def neuron_detail(
         }
 
     # Residual stream dimension
-    neuron_index = max(0, min(_d_model() - 1, int(neuron_index)))
+    bad = _check_index('Neuron', neuron_index, _d_model())
+    if bad is not None:
+        return bad
+    neuron_index = int(neuron_index)
     per_token = []
     act_stats = None
     hist = None
@@ -1002,8 +1094,14 @@ def head_detail(layer: int, head: int) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
         return err
-    layer = max(0, min(_n_layers() - 1, int(layer)))
-    head = max(0, min(_n_heads() - 1, int(head)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
+    bad = _check_index('Head', head, _n_heads())
+    if bad is not None:
+        return bad
+    head = int(head)
     hd = _head_dim()
     block = _model.transformer.h[layer]
     c_attn_w = block.attn.c_attn.weight.data.float()
@@ -1086,7 +1184,10 @@ def activations(layer: int, prompt: Optional[str] = None) -> Dict[str, Any]:
         if prompt:
             if not _cache or _cache.get("prompt") != prompt:
                 _forward_locked(prompt)
-        layer = max(0, min(_n_layers() - 1, int(layer)))
+        bad = _check_layer(layer)
+        if bad is not None:
+            return bad
+        layer = int(layer)
         seq = len(_cache.get("str_tokens", [])) if _cache else 0
         result: Dict[str, Any] = {
             "status": "ok",
@@ -1118,8 +1219,14 @@ def patch_head(layer: int, head: int, pos_token: str, neg_token: str) -> Dict[st
     with MODEL_LOCK:
         if not _cache:
             return {"status": "error", "error": "Run a prompt first to populate the cache."}
-        layer = max(0, min(_n_layers() - 1, int(layer)))
-        head = max(0, min(_n_heads() - 1, int(head)))
+        bad = _check_layer(layer)
+        if bad is not None:
+            return bad
+        layer = int(layer)
+        bad = _check_index('Head', head, _n_heads())
+        if bad is not None:
+            return bad
+        head = int(head)
         prompt = _cache["prompt"]
         head_dim = _head_dim()
 
@@ -1173,9 +1280,15 @@ def patch_neuron(
     err = _ensure_loaded()
     if err:
         return err
-    layer = max(0, min(_n_layers() - 1, int(layer)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
     d_mlp = _d_mlp()
-    neuron_index = max(0, min(d_mlp - 1, int(neuron_index)))
+    bad = _check_index('Neuron', neuron_index, d_mlp)
+    if bad is not None:
+        return bad
+    neuron_index = int(neuron_index)
     prompt = prompt or (_cache.get("prompt") if _cache else None)
     if not prompt:
         import random
@@ -1373,7 +1486,10 @@ def layer_activations(layer: int, prompt: str) -> Dict[str, Any]:
     err = _ensure_prompt(prompt)
     if err:
         return err
-    layer = max(0, min(_n_layers() - 1, int(layer)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
     try:
         import numpy as _np
 
@@ -1430,7 +1546,10 @@ def ablate_layer(layer: int, prompt: str,
     err = _ensure_prompt(prompt)
     if err:
         return err
-    layer = max(0, min(_n_layers() - 1, int(layer)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
     clean_ld = _token_logit(pos_token, _cache["logits"]) \
         - _token_logit(neg_token, _cache["logits"])
 
@@ -1472,7 +1591,10 @@ def steer(prompt: str, layer: int, pos_prompt: str, neg_prompt: str,
     err = _ensure_loaded()
     if err:
         return err
-    layer = max(0, min(_n_layers() - 1, int(layer)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
     alpha = max(0.0, min(100.0, float(alpha)))
     device = next(_model.parameters()).device
 
@@ -1540,11 +1662,28 @@ def logit_lens(layer: int, prompt: str, top_k: int = 5) -> Dict[str, Any]:
     err = _ensure_prompt(prompt)
     if err:
         return err
-    layer = max(0, min(_n_layers() - 1, int(layer)))
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
     device = next(_model.parameters()).device
     h = torch.from_numpy(_cache["hidden"][layer + 1][-1]).float().to(device)
     with torch.no_grad():
-        normed = _model.transformer.ln_f(h)
+        # The recorded stream is pre-ln_f for every layer except the last
+        # entry, which is *already* ln_f(block n-1) -- HuggingFace's
+        # `output_hidden_states` puts the normalised final residual in that
+        # slot in place of the block's raw output.
+        #
+        # So the final layer's hidden state arrives normalised, and applying
+        # ln_f again applied the learned scale and bias twice. The argmax still
+        # matched the model's, which is why the token-identity test passed and
+        # the defect went unnoticed; the probabilities were wrong (measured:
+        # p(' the') 0.038 against the model's 0.085, and a token the model puts
+        # at 0.004 was reported at 0.019 and promoted into the top five).
+        if layer == _n_layers() - 1:
+            normed = h
+        else:
+            normed = _model.transformer.ln_f(h)
         logits = normed @ _model.transformer.wte.weight.T
     logits = logits.detach().cpu()
     probs = torch.softmax(logits, dim=-1)

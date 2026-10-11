@@ -47,6 +47,11 @@ class NeuronActivation(BaseModel):
     layer: int
     index: int
     activation: float
+    #: Per-token activations for this neuron, aligned with the token list.
+    #: `run_inference` computes and passes this on every call, so before it
+    #: was declared here pydantic silently dropped it -- every caller saw an
+    #: empty per-token breakdown while the work had been done and thrown away.
+    token_activations: list[float] = []
 
 
 class TokenInfo(BaseModel):

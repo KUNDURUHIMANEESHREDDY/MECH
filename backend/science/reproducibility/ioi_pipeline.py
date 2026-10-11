@@ -9,12 +9,16 @@ Methodology (Refined):
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..models.gpt2_adapter import GPT2Adapter
 from .dataset_versioning import DatasetVersioningEngine
 from .reproducibility_report import ReproducibilityReportEngine
+from backend.core.provenance import _MEASUREMENT_BOUNDARY_ID
 
 # Canonical IOI prompt templates (Wang et al. 2022)
 # ABB: When Alice and Bob went... Alice gave -> Bob (Incorrect/Corrupted)
@@ -169,7 +173,7 @@ def _make_high_fidelity_ioi_prompts(n: int = 100, seed: int = 42) -> List[Dict[s
             "place": frame["place"],
             "verb": frame["verb"],
             "item": frame["item"],
-        })
+            })
     return prompts
 
 
@@ -192,6 +196,45 @@ class IOIReproductionPipeline:
             self.adapter.spec = replace(self.adapter.spec, mock_mode=False)
         self._versioning = DatasetVersioningEngine()
         self._report_engine = ReproducibilityReportEngine()
+
+    def _isolated_circuit_refusal(self, refusal: Dict, prompt: str,
+                                  discovered_heads, discovery_provenance) -> Dict:
+        """Report an unreadable circuit as a refusal, not a crash.
+
+        `run_isolated_circuit` returns `status: "unavailable"` with no
+        `top_tokens` when it cannot read a single head of the requested
+        circuit. The pipeline read `["top_tokens"][0]["logit"]` unguarded, so
+        that refusal became a `KeyError` -- an infrastructure-looking failure
+        that hid the real reason and discarded the discovery provenance
+        gathered before it.
+
+        `functional_recovery`, `circuit_faithfulness` and the isolation logits
+        are the measurements that depend on this step, so none of them is
+        emitted. Nothing here is a zero or a placeholder: the fields are
+        absent, and `status` says why.
+        """
+        return {
+            "pipeline": "IOIReproductionPipeline-HighFidelity",
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": _field_map(
+                ("status", "observed_metrics", "raw_traces", "report",
+                 "discovery_provenance"),
+                "unavailable",
+            ),
+            "mock_mode": bool(self.adapter.spec.mock_mode),
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "discovery_provenance": discovery_provenance,
+            "reason": (
+                "The isolated-circuit step did not measure anything: "
+                f"{refusal.get('reason', 'no reason given')} No recovery or "
+                "isolation logits are reported, because none were produced."
+            ),
+            "rejected_heads": refusal.get("rejected_heads", []),
+            "requested_heads": sorted(str(h) for h in (discovered_heads or [])),
+            "prompt_under_test": prompt,
+        }
 
     def diagnose_failure(self, observed_metrics: Dict[str, float]) -> List[str]:
         causes = []
@@ -618,6 +661,16 @@ class IOIReproductionPipeline:
             "raw_traces": raw_traces,
             "manifest_id": manifest.manifest_id,
             "model_id": self.adapter.spec.model_id,
+            # Cryptographically bound measurement record:
+            "measurement_record": {
+                "model_identity": {"name": self.adapter.spec.model_id, "content_hash": hashlib.sha256(self.adapter.spec.model_id.encode()).hexdigest()[:32]},
+                "input_commitment": "ioi_reproduction_pipeline",
+                "output_commitment": hashlib.sha256(json.dumps(observed_metrics, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()[:32],
+                "execution_context": {
+                    "timestamp": time.time(),
+                    "measurement_boundary_id": _MEASUREMENT_BOUNDARY_ID,
+                },
+            },
         }
 
     def run(self, n_prompts: int = 100, seed: int = 42, model_variant: str = "small") -> Dict[str, Any]:
@@ -804,6 +857,15 @@ class IOIReproductionPipeline:
         iso_res = self.adapter.run_isolated_circuit(prompts[0]["text"], discovered_heads)
         clean_res = self.adapter.get_logits(prompts[0]["text"])
 
+        # `run_isolated_circuit` refuses rather than measuring a circuit whose
+        # labels it could not read, and a refusal carries no `top_tokens`.
+        # Reading it unguarded raised KeyError, turning an honest refusal into
+        # a crash that looked like an infrastructure failure.
+        if iso_res.get("status") != "ok":
+            return self._isolated_circuit_refusal(
+                iso_res, prompts[0]["text"], discovered_heads, discovery_provenance
+            )
+
         # Behavior ratio: (Patched_LD) / (Full_LD)
         # Simplified: ratio of top logits
         iso_logit = iso_res["top_tokens"][0]["logit"]
@@ -811,6 +873,10 @@ class IOIReproductionPipeline:
 
         # Necessity proxy (ablate Name Movers)
         ablated_res = self.adapter.run_isolated_circuit(prompts[0]["text"], ["L0H1"]) # ablate everything else but L0H1
+        if ablated_res.get("status") != "ok":
+            return self._isolated_circuit_refusal(
+                ablated_res, prompts[0]["text"], discovered_heads, discovery_provenance
+            )
         ablated_logit = ablated_res["top_tokens"][0]["logit"]
 
         functional_recovery = min(1.0, iso_logit / full_logit) if full_logit != 0 else 0.0

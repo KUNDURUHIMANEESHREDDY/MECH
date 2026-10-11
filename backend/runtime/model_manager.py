@@ -14,6 +14,8 @@ Supported architectures:
 
 from __future__ import annotations
 
+import threading
+
 import torch
 import torch.nn as nn
 
@@ -49,23 +51,62 @@ _loaded_model: nn.Module | None = None
 _loaded_tokenizer = None
 _loaded_name: str | None = None
 
+#: Serialises loads, unloads and reads of the three globals above.
+#:
+#: They are assigned separately, so without a lock a reader can observe one
+#: load's `_loaded_model` alongside another's `_loaded_tokenizer` -- a tokenizer
+#: that does not match the weights, producing token ids the embedding table
+#: does not cover, with no error anywhere. The same window let a failed load
+#: leave a stale tokenizer behind.
+_LOAD_LOCK = threading.RLock()
+
 
 # ── API ──────────────────────────────────────────────────────────
 
 
-def list_models() -> list[str]:
-    return list(_MODEL_REGISTRY.keys()) + list(_FUTURE_MODELS.keys())
+def list_models() -> list[dict]:
+    """Every known model, each marked with whether it can actually be loaded.
+
+    Returns per-entry dicts rather than bare names. It used to return a flat
+    `list[str]` of eight names with nothing distinguishing the three that load
+    from the five that raise `ModelLoadError` -- so a UI rendering this list
+    offered the user five unusable models and the failure only surfaced when
+    they tried. `model_name` is kept so existing callers that only wanted a
+    name still have one field to read.
+    """
+    out: list[dict] = []
+    for name, entry in _MODEL_REGISTRY.items():
+        out.append({
+            "model_name": name,
+            "hf_id": entry["hf_id"],
+            "family": entry["family"],
+            "supported": True,
+        })
+    for name, entry in _FUTURE_MODELS.items():
+        out.append({
+            "model_name": name,
+            "hf_id": entry["hf_id"],
+            "family": entry["family"],
+            "supported": False,
+        })
+    return out
 
 
 def model_info(name: str) -> dict:
-    entry = _MODEL_REGISTRY.get(name) or _FUTURE_MODELS.get(name)
+    entry = _MODEL_REGISTRY.get(name)
+    supported = entry is not None
+    if entry is None:
+        entry = _FUTURE_MODELS.get(name)
     if entry is None:
         raise ModelNotFoundError(f"Model '{name}' not in registry")
+    with _LOAD_LOCK:
+        loaded = name == _loaded_name
     return {
         "model_name": name,
         "hf_id": entry["hf_id"],
         "family": entry["family"],
-        "loaded": name == _loaded_name,
+        "loaded": loaded,
+        "supported": supported,
         **{k: v for k, v in entry.items() if k not in ("hf_id", "family")},
     }
 
@@ -79,7 +120,8 @@ def load_model(name: str) -> dict:
         future = _FUTURE_MODELS.get(name)
         if future is None:
             raise ModelNotFoundError(
-                f"Unknown model '{name}'. Available: {list_models()}"
+                f"Unknown model '{name}'. Available: "
+                + ", ".join(e["model_name"] for e in list_models())
             )
         raise ModelLoadError(
             f"Model '{name}' is registered but not yet supported in this build. "
@@ -90,36 +132,63 @@ def load_model(name: str) -> dict:
 
     bus.emit(MODEL_LOADING, model_name=name, hf_id=hf_id)
 
-    try:
-        if _loaded_model is not None:
-            _unload_current()
+    # Build the tokenizer and weights into locals, and only then commit them to
+    # the globals -- replacing what was loaded as the last step, not the first.
+    #
+    # The previous order called `_unload_current()` *before* fetching, so any
+    # failure left the platform with no model at all: a dropped connection or a
+    # full disk destroyed a working 500 MB checkpoint that was serving fine,
+    # and the raised error did not mention it. Worse, the tokenizer was
+    # assigned to the global before the weights were, so a failure in between
+    # left a tokenizer for a model that never loaded -- held, with
+    # `_loaded_name` None so nothing reported it, ready for any caller that
+    # reached past `get_model_and_tokenizer`.
+    with _LOAD_LOCK:
+        try:
+            new_tokenizer = AutoTokenizer.from_pretrained(hf_id)
+            if new_tokenizer.pad_token is None:
+                new_tokenizer.pad_token = new_tokenizer.eos_token
 
-        _loaded_tokenizer = AutoTokenizer.from_pretrained(hf_id)
-        if _loaded_tokenizer.pad_token is None:
-            _loaded_tokenizer.pad_token = _loaded_tokenizer.eos_token
+            new_model = AutoModelForCausalLM.from_pretrained(
+                hf_id,
+                torch_dtype=torch.float32,
+                output_attentions=True,
+                output_hidden_states=True,
+            )
+            new_model.eval()
+        except Exception as e:
+            # Nothing has been touched, so the previously loaded model is
+            # still the one in use and still reported as loaded.
+            raise ModelLoadError(
+                f"Failed to load model '{name}': {e}. Any previously loaded "
+                f"model is untouched and still in use."
+            )
 
-        _loaded_model = AutoModelForCausalLM.from_pretrained(
-            hf_id,
-            torch_dtype=torch.float32,
-            output_attentions=True,
-            output_hidden_states=True,
-        )
-        _loaded_model.eval()
+        previous_name = _loaded_name
+        _loaded_model = new_model
+        _loaded_tokenizer = new_tokenizer
         _loaded_name = name
 
-        config = _loaded_model.config
+        if previous_name:
+            bus.emit(MODEL_UNLOADED, model_name=previous_name)
+
+        config = new_model.config
+        parameter = next(new_model.parameters())
         info = {
             "model_name": name,
             "status": "loaded",
             "num_layers": getattr(config, "n_layer", getattr(config, "num_hidden_layers", 0)),
             "num_heads": getattr(config, "n_head", getattr(config, "num_attention_heads", 0)),
             "hidden_dim": getattr(config, "n_embd", getattr(config, "hidden_size", 0)),
+            # Read back from the loaded weights rather than from what the
+            # loader was asked for, so a caller can verify the precision and
+            # placement it is measuring in.
+            "dtype": str(parameter.dtype),
+            "device": str(parameter.device),
+            "pad_token_set": new_tokenizer.pad_token is not None,
         }
         bus.emit(MODEL_LOADED, model_name=name, info=info)
         return info
-
-    except Exception as e:
-        raise ModelLoadError(f"Failed to load model '{name}': {e}")
 
 
 def _unload_current() -> None:
@@ -133,9 +202,10 @@ def _unload_current() -> None:
 
 
 def unload_model(name: str | None = None) -> dict:
-    if name is not None and name != _loaded_name:
-        raise ModelLoadError(f"Model '{name}' is not currently loaded")
-    _unload_current()
+    with _LOAD_LOCK:
+        if name is not None and name != _loaded_name:
+            raise ModelLoadError(f"Model '{name}' is not currently loaded")
+        _unload_current()
     return {"status": "unloaded"}
 
 
@@ -147,10 +217,15 @@ def switch_model(name: str) -> dict:
 
 
 def get_model_and_tokenizer():
-    if _loaded_model is None or _loaded_tokenizer is None:
-        raise ModelLoadError("No model loaded. Call load_model() first.")
-    return _loaded_model, _loaded_tokenizer
+    # Read both globals under the lock. Without it a concurrent load can
+    # commit one of the two between the two reads, handing back a tokenizer
+    # that does not match the weights.
+    with _LOAD_LOCK:
+        if _loaded_model is None or _loaded_tokenizer is None:
+            raise ModelLoadError("No model loaded. Call load_model() first.")
+        return _loaded_model, _loaded_tokenizer
 
 
 def is_loaded() -> bool:
-    return _loaded_model is not None
+    with _LOAD_LOCK:
+        return _loaded_model is not None

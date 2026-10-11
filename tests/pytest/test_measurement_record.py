@@ -134,7 +134,7 @@ def test_measurement_record_verifiable_independent_of_boolean():
     # (this test documents the requirement; the actual check is in evidence_policy)
 
 
-def test_envelope_embeds_measurement_record():
+def test_envelope_embeds_measurement_record(monkeypatch):
     """Evidence envelope must embed the full measurement record."""
     from backend.core import evidence_graph as eg
     import tempfile
@@ -147,9 +147,27 @@ def test_envelope_embeds_measurement_record():
         key_file = Path(tmp) / "signing.key"
         key_file.write_bytes(seed)
         
-        import os
-        os.environ["MECH_SIGNING_KEY_PATH"] = str(key_file)
-        os.environ["MECH_TRUSTED_SIGNING_KEY_PATH"] = str(key_file)
+        # `monkeypatch`, not `os.environ[...] = ...`. This block runs inside a
+        # `TemporaryDirectory`, so the key file is deleted when it exits --
+        # but a bare `os.environ` assignment is never undone. The variable was
+        # left pointing at a file that no longer existed, for the rest of the
+        # session. Anything downstream that reads it does not see "unset", it
+        # sees a path it cannot open.
+        #
+        # That is not hypothetical. `test_provenance_signing.py::
+        # test_promotion_refuses_without_a_key` asserts that promotion refuses
+        # when no key is configured, by checking for the message "no default
+        # signing key". With the dangling variable set, `_key_path()` returned
+        # the dead path instead of None, so promotion got as far as trying to
+        # load it and aborted with a different message -- "got 57 bytes". The
+        # promotion still correctly refused, so the test passed alone and in
+        # isolation while failing in the full suite, which made it look like
+        # flakiness rather than a leak.
+        #
+        # Every other site in this suite already used monkeypatch; these three
+        # were the outliers.
+        monkeypatch.setenv("MECH_SIGNING_KEY_PATH", str(key_file))
+        monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", str(key_file))
         
         result = {"status": "ok", "output": {"value": 42}}
         attested = attest_measurement(result, model_loaded="gpt2")
@@ -165,7 +183,7 @@ def test_envelope_embeds_measurement_record():
         assert env["record"]["measurement_record"]["output_commitment"] == expected_hash
 
 
-def test_verification_checks_cryptographic_binding():
+def test_verification_checks_cryptographic_binding(monkeypatch):
     """Verification must check the cryptographic binding, not just boolean."""
     from backend.core import evidence_graph as eg
     import tempfile
@@ -176,9 +194,27 @@ def test_verification_checks_cryptographic_binding():
         key_file = Path(tmp) / "signing.key"
         key_file.write_bytes(seed)
         
-        import os
-        os.environ["MECH_SIGNING_KEY_PATH"] = str(key_file)
-        os.environ["MECH_TRUSTED_SIGNING_KEY_PATH"] = str(key_file)
+        # `monkeypatch`, not `os.environ[...] = ...`. This block runs inside a
+        # `TemporaryDirectory`, so the key file is deleted when it exits --
+        # but a bare `os.environ` assignment is never undone. The variable was
+        # left pointing at a file that no longer existed, for the rest of the
+        # session. Anything downstream that reads it does not see "unset", it
+        # sees a path it cannot open.
+        #
+        # That is not hypothetical. `test_provenance_signing.py::
+        # test_promotion_refuses_without_a_key` asserts that promotion refuses
+        # when no key is configured, by checking for the message "no default
+        # signing key". With the dangling variable set, `_key_path()` returned
+        # the dead path instead of None, so promotion got as far as trying to
+        # load it and aborted with a different message -- "got 57 bytes". The
+        # promotion still correctly refused, so the test passed alone and in
+        # isolation while failing in the full suite, which made it look like
+        # flakiness rather than a leak.
+        #
+        # Every other site in this suite already used monkeypatch; these three
+        # were the outliers.
+        monkeypatch.setenv("MECH_SIGNING_KEY_PATH", str(key_file))
+        monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", str(key_file))
         
         # Valid record with measurement_record
         result = {"status": "ok", "output": {"value": 42}}
@@ -192,7 +228,7 @@ def test_verification_checks_cryptographic_binding():
         assert status["signature"] == "valid"
 
 
-def test_forged_boolean_without_record_rejected():
+def test_forged_boolean_without_record_rejected(monkeypatch):
     """A result with attested=True but no measurement_record must be rejected."""
     # This test documents the requirement — the verification layer
     # must check for measurement_record, not just the boolean
@@ -205,9 +241,27 @@ def test_forged_boolean_without_record_rejected():
         key_file = Path(tmp) / "signing.key"
         key_file.write_bytes(seed)
         
-        import os
-        os.environ["MECH_SIGNING_KEY_PATH"] = str(key_file)
-        os.environ["MECH_TRUSTED_SIGNING_KEY_PATH"] = str(key_file)
+        # `monkeypatch`, not `os.environ[...] = ...`. This block runs inside a
+        # `TemporaryDirectory`, so the key file is deleted when it exits --
+        # but a bare `os.environ` assignment is never undone. The variable was
+        # left pointing at a file that no longer existed, for the rest of the
+        # session. Anything downstream that reads it does not see "unset", it
+        # sees a path it cannot open.
+        #
+        # That is not hypothetical. `test_provenance_signing.py::
+        # test_promotion_refuses_without_a_key` asserts that promotion refuses
+        # when no key is configured, by checking for the message "no default
+        # signing key". With the dangling variable set, `_key_path()` returned
+        # the dead path instead of None, so promotion got as far as trying to
+        # load it and aborted with a different message -- "got 57 bytes". The
+        # promotion still correctly refused, so the test passed alone and in
+        # isolation while failing in the full suite, which made it look like
+        # flakiness rather than a leak.
+        #
+        # Every other site in this suite already used monkeypatch; these three
+        # were the outliers.
+        monkeypatch.setenv("MECH_SIGNING_KEY_PATH", str(key_file))
+        monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", str(key_file))
         
         # Forge a result with attested=True but no measurement_record
         forged = {"attested": True, "provenance": "live", "output": "fake"}

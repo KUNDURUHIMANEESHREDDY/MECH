@@ -530,6 +530,48 @@ def envelope_status(run_id: str,
             "key_id": key_id, "reason": None}
 
 
+#: How long `_replace_with_retry` keeps retrying a sharing-violation rename.
+_REPLACE_RETRY_SECONDS = 5.0
+
+#: Pause between attempts. Windows releases the target within milliseconds;
+#: the bound exists so a genuinely stuck writer fails the commit instead of
+#: hanging the suite forever.
+_REPLACE_RETRY_BACKOFF = 0.005
+
+
+def _replace_with_retry(src: str, dst: str) -> None:
+    """`os.replace`, retried while Windows reports the target as busy.
+
+    The WinError 5 this absorbs is a *sharing violation*, not a permissions
+    problem. `os.replace` deletes the destination and renames in one step; on
+    Windows a concurrent reader or writer holding the destination open makes
+    that delete fail with `PermissionError` (WinError 5). The window is short
+    -- another process's open handle, which closes as soon as it is done --
+    so retrying turns a spurious failure into the documented last-wins result.
+
+    Why this is needed here despite `_save_lock`: that lock is a
+    `threading.Lock`, so it serialises commits only within one process. Two
+    agent processes -- or the two-process durability tests -- never touch it.
+    Measured before this was added:
+    `test_concurrent_processes_same_run_id_no_corruption` failed 3 of 6 runs
+    with `Access is denied` on the rename.
+
+    The lock is kept. It is still correct and still cheap for the common
+    single-process case; it simply does not cover this.
+    """
+    import time
+
+    deadline = time.monotonic() + _REPLACE_RETRY_SECONDS
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_REPLACE_RETRY_BACKOFF)
+
+
 def save_run_record(run_id: str, record: Dict[str, Any],
                     directory: Optional[str] = None) -> str:
     """Persist a full Society run record (trace + graph + publication).
@@ -579,7 +621,7 @@ def save_run_record(run_id: str, record: Dict[str, Any],
             # Rename first, then fsync directory to persist the directory entry.
             # This order ensures the file data is durable (fsynced before rename),
             # and the directory entry update is persisted after the rename.
-            os.replace(tmp_path, path)
+            _replace_with_retry(tmp_path, path)
             try:
                 _fsync_dir(target)
             except OSError:

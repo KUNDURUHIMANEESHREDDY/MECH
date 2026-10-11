@@ -60,5 +60,21 @@ class CausalTracingEngine:
             "layer_effects_field_provenance": {
                 str(e["layer"]): "reference" for e in layer_effects
             },
+            # The two headline numbers are synthesised -- `max_causal_layer` is
+            # the literal 8, not the argmax of anything measured -- and were
+            # returned bare while `layer_effects` carried a provenance map.
+            # A consumer reading either number had nothing to tell it apart
+            # from a measurement, which is the specific failure an honest
+            # `status: unavailable` does not cover.
+            #
+            # A dict keyed by field name, matching `evidence_policy.field_map`
+            # and the other producers in this codebase. A bare
+            # `<field>_field_provenance: "reference"` string was tried first
+            # and is wrong: it records one value with nothing to associate it
+            # with.
+            "headline_field_provenance": {
+                "max_causal_layer": "reference",
+                "max_indirect_effect": "reference",
+            },
             "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
         }

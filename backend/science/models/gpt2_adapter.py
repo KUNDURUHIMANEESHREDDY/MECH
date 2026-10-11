@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+import re
 from typing import Any, Dict, List, Optional
 
 from .adapter_base import (
@@ -31,6 +32,24 @@ def _mock_activation(layer: int, neuron_index: int, prompt: str) -> float:
     """Deterministic mock activation for reproducible tests."""
     seed = int(hashlib.sha256(f"{layer}_{neuron_index}_{prompt[:20]}".encode("utf-8")).hexdigest()[:8], 16)
     return round((seed % 1000) / 200.0 - 2.5, 4)
+
+
+def _parse_head_label(label: str, n_layers: int, n_heads: int):
+    """``"L9H6"`` -> ``(9, 6)``, or ``None`` if it is not a real head.
+
+    Returns ``None`` for anything that is not exactly ``L<layer>H<head>`` and
+    for indices outside this model's shape. Out-of-range matters as much as
+    malformed: ``"L99H99"`` parses cleanly as a tuple, and the caller would
+    then request a layer that does not exist, whose mask slice is silently
+    never written -- shrinking the circuit without saying so.
+    """
+    match = re.fullmatch(r"L(\d+)H(\d+)", label)
+    if match is None:
+        return None
+    layer, head = int(match.group(1)), int(match.group(2))
+    if not (0 <= layer < n_layers and 0 <= head < n_heads):
+        return None
+    return (layer, head)
 
 
 class GPT2Adapter(ModelAdapter):
@@ -713,56 +732,83 @@ class GPT2Adapter(ModelAdapter):
             import torch
             inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
 
-            with torch.no_grad():
-                orig_logits = self._model(**inputs).logits[0, -1, :]
-            orig_top = orig_logits.topk(1)
-            scored_index = orig_top.indices[0] if score_token_id is None else score_token_id
-            original_logit = float(orig_logits[scored_index])
-            top_token_before = self._tokenizer.decode([orig_top.indices[0]])
-
-            # GPT-2 Attention head output patching via attn.c_proj pre-hook.
-            # (A post-hook on `attn` cannot work: its output is a tuple and
-            # mutating it neither applies nor returns correctly.)
-            def head_patch_hook(module, inp):
-                # Merged-head input shape: [batch, seq, d_model]
-                # Head dimension: d_model / num_heads
-                d_head = self.spec.d_model // self.spec.num_heads
-                start = head_index * d_head
-                end = (head_index + 1) * d_head
-                x = inp[0]
-                if x.shape[-1] < end:
-                    return inp
-                x = x.clone()
-                if patch_vector is not None:
-                    # Inject specific vector (e.g. mean ablation vector)
-                    v = torch.tensor(patch_vector, device=x.device, dtype=x.dtype)
-                    x[0, -1, start:end] = v
-                else:
-                    # Zero ablation
-                    x[..., start:end] = 0.0
-                return (x,) + tuple(inp[1:])
-
-            layer_module = self._model.transformer.h[layer].attn.c_proj
-            handle = layer_module.register_forward_pre_hook(head_patch_hook)
-
+            # Both forward passes below must run the same attention kernel as
+            # the capture that produced `patch_vector`.
+            #
+            # `_forward_with_hooks` forces eager so attention weights are
+            # materialised; this method used the model default (sdpa), so a
+            # captured vector and the tensor it was patched back into came from
+            # two different kernels over the same weights. Measured at layer 6,
+            # head 6: 87.5% of the 64 components differed, worst 3.7e-04 --
+            # well above the capture's own 6-decimal rounding. Feeding a
+            # captured vector back in therefore perturbed the tensor it came
+            # from, and the scored logit moved by 0.0625.
+            #
+            # That constant kernel-disagreement term sits inside every
+            # head-level causal result, because each one compares a capture
+            # against a patched pass. Small, universal, and indistinguishable
+            # from a weak causal effect.
+            config = self._model.config
+            previous_impl = getattr(config, "_attn_implementation", None)
+            if previous_impl != "eager":
+                config._attn_implementation = "eager"
             try:
                 with torch.no_grad():
-                    patched_logits = self._model(**inputs).logits[0, -1, :]
-                patched_logit_for_orig_token = float(patched_logits[scored_index])
-                top_token_after = self._tokenizer.decode([torch.argmax(patched_logits)])
+                    orig_logits = self._model(**inputs).logits[0, -1, :]
+                orig_top = orig_logits.topk(1)
+                scored_index = orig_top.indices[0] if score_token_id is None else score_token_id
+                original_logit = float(orig_logits[scored_index])
+                top_token_before = self._tokenizer.decode([orig_top.indices[0]])
 
-                return PatchResult(
-                    original_logit=original_logit,
-                    patched_logit=patched_logit_for_orig_token,
-                    delta=patched_logit_for_orig_token - original_logit,
-                    top_token_before=top_token_before,
-                    top_token_after=top_token_after,
-                    layer=layer,
-                    neuron_index=head_index, # overloaded as head index
-                    patch_value=0.0 # overloaded as zero ablation
-                )
+                # GPT-2 Attention head output patching via attn.c_proj pre-hook.
+                # (A post-hook on `attn` cannot work: its output is a tuple and
+                # mutating it neither applies nor returns correctly.)
+                def head_patch_hook(module, inp):
+                    # Merged-head input shape: [batch, seq, d_model]
+                    # Head dimension: d_model / num_heads
+                    d_head = self.spec.d_model // self.spec.num_heads
+                    start = head_index * d_head
+                    end = (head_index + 1) * d_head
+                    x = inp[0]
+                    if x.shape[-1] < end:
+                        return inp
+                    x = x.clone()
+                    if patch_vector is not None:
+                        # Inject specific vector (e.g. mean ablation vector)
+                        v = torch.tensor(patch_vector, device=x.device, dtype=x.dtype)
+                        x[0, -1, start:end] = v
+                    else:
+                        # Zero ablation
+                        x[..., start:end] = 0.0
+                    return (x,) + tuple(inp[1:])
+
+                layer_module = self._model.transformer.h[layer].attn.c_proj
+                handle = layer_module.register_forward_pre_hook(head_patch_hook)
+
+                try:
+                    with torch.no_grad():
+                        patched_logits = self._model(**inputs).logits[0, -1, :]
+                    patched_logit_for_orig_token = float(patched_logits[scored_index])
+                    top_token_after = self._tokenizer.decode([torch.argmax(patched_logits)])
+
+                    return PatchResult(
+                        original_logit=original_logit,
+                        patched_logit=patched_logit_for_orig_token,
+                        delta=patched_logit_for_orig_token - original_logit,
+                        top_token_before=top_token_before,
+                        top_token_after=top_token_after,
+                        layer=layer,
+                        neuron_index=head_index, # overloaded as head index
+                        patch_value=0.0 # overloaded as zero ablation
+                    )
+                finally:
+                    handle.remove()
             finally:
-                handle.remove()
+                # Restore the caller's attention implementation. Left as eager,
+                # this would silently change every later measurement that does
+                # not force its own -- the same class of bug in reverse.
+                if previous_impl is not None:
+                    config._attn_implementation = previous_impl
 
         # Mock Path
         return PatchResult(
@@ -776,13 +822,52 @@ class GPT2Adapter(ModelAdapter):
         if not self.spec.mock_mode and self._model is not None:
             import torch
 
-            # Parse head list: "L9H6" -> (9, 6)
+            # Parse head list: "L9H6" -> (9, 6).
+            #
+            # Unreadable or out-of-range labels were previously dropped by a
+            # bare `except: continue`. Measured consequence: ["garbage"] and
+            # ["L99H99"] both returned a top logit identical to an *empty*
+            # circuit, and ["L9H6", "garbage"] returned exactly ["L9H6"] alone.
+            # The caller got a complete, plausible result describing a circuit
+            # they had not asked for, with nothing to distinguish the two.
+            #
+            # Now every rejected label is named in `rejected_heads`, and a
+            # circuit with no readable heads at all is refused rather than
+            # measured.
+            n_layers = self.spec.num_layers
+            n_heads = self.spec.num_heads
             active_heads = set()
+            rejected_heads: List[str] = []
+
             for h_str in head_list:
-                try:
-                    parts = h_str.replace("L", "").split("H")
-                    active_heads.add((int(parts[0]), int(parts[1])))
-                except Exception: continue
+                label = str(h_str).strip().upper()
+                parsed = _parse_head_label(label, n_layers, n_heads)
+                if parsed is None:
+                    rejected_heads.append(str(h_str))
+                else:
+                    active_heads.add(parsed)
+
+            # A refusal is warranted only when the caller *supplied* heads and
+            # none could be read. An explicitly empty `head_list` is a
+            # different request -- isolate nothing, ablate every head -- and is
+            # a well-defined measurement, so it runs and is labelled as such.
+            # Conflating the two turned a legitimate control condition into an
+            # error.
+            if head_list and not active_heads:
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "measured": False,
+                    "validation_eligible": False,
+                    "publication_eligible": False,
+                    "rejected_heads": rejected_heads,
+                    "reason": (
+                        "No head in the requested circuit could be read against "
+                        f"this model ({n_layers} layers, {n_heads} heads per "
+                        f"layer), so there was no circuit to isolate and nothing "
+                        f"was measured. Rejected: {rejected_heads}."
+                    ),
+                }
 
             handles = []
             d_head = self.spec.d_model // self.spec.num_heads
@@ -804,10 +889,18 @@ class GPT2Adapter(ModelAdapter):
                 return mask_hook
 
             # Register hooks for all attention layers
-            for i in range(self.spec.num_layers):
+            for i in range(n_layers):
                 layer_module = self._model.transformer.h[i].attn.c_proj
                 handles.append(layer_module.register_forward_pre_hook(make_mask_hook(i)))
 
+            # Pin the attention kernel to the one `capture_head_outputs` uses.
+            # Without this the isolation ran under sdpa while the activation it
+            # is compared against was captured under eager -- the same
+            # constant kernel-disagreement term fixed for `patch_head_output`.
+            config = self._model.config
+            previous_impl = getattr(config, "_attn_implementation", None)
+            if previous_impl != "eager":
+                config._attn_implementation = "eager"
             try:
                 # Also optionally ablate MLPs if they aren't in the "circuit"
                 # For IOI, MLPs are often included or excluded depending on paper
@@ -817,15 +910,34 @@ class GPT2Adapter(ModelAdapter):
                     logits = self._model(**inputs).logits[0, -1, :]
 
                 top5 = logits.topk(5)
-                return {
+                result = {
+                    "status": "ok",
                     "top_token": self._tokenizer.decode([top5.indices[0]]),
                     "top_tokens": [
                         {"token": self._tokenizer.decode([idx]), "logit": round(float(l), 3)}
                         for l, idx in zip(top5.values, top5.indices)
-                    ]
+                    ],
+                    # The circuit that actually ran, so a partially-readable
+                    # request is attributable rather than silently different.
+                    "active_heads": sorted(
+                        "L%dH%d" % (l, h) for l, h in active_heads
+                    ),
+                    "circuit_isolated": True,
+                    "all_heads_ablated": not active_heads,
                 }
+                if rejected_heads:
+                    result["rejected_heads"] = rejected_heads
+                    result["reason"] = (
+                        "Some requested heads could not be read against this "
+                        f"model and were excluded from the circuit that ran: "
+                        f"{rejected_heads}. `active_heads` names what was "
+                        f"actually isolated."
+                    )
+                return result
             finally:
                 for h in handles: h.remove()
+                if previous_impl is not None:
+                    config._attn_implementation = previous_impl
 
         # Mock Path
         return {"top_token": " Mary", "top_tokens": [{"token": " Mary", "logit": 3.2}]}

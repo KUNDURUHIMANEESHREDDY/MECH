@@ -86,51 +86,74 @@ def run_inference(
     attn_dtos: list[AttentionMap] = []
     cache_ids: list[str] = []
 
-    for idx, attn_tensor in enumerate(attention_store):
-        # attn_tensor shape: [batch, heads, seq, seq]
-        li = idx // num_heads
-        hi = idx % num_heads
-        mat = attn_tensor[0].numpy().tolist()  # [heads, seq, seq] → [seq, seq]
+    # Each registered AttentionHook fires once per *layer* and appends one
+    # [batch, heads, seq, seq] tensor, so this store is indexed by LAYER.
+    #
+    # The previous code walked it as though it were indexed by head --
+    # `layer = idx // num_heads`, `head = idx % num_heads` -- which for a
+    # 3-layer 4-head model filed all three captures under layer 0, heads
+    # 0/1/2. Every map above layer 0 was confidently mislabelled, and
+    # `attn_tensor[0]` dropped only the batch axis, so a [heads, seq, seq]
+    # tensor was handed to a field declared list[list[float]] and pydantic
+    # rejected it outright.
+    #
+    # Now: layer is the store index, and each head is sliced to its own
+    # [seq, seq] matrix. Nothing is inferred from position.
+    for li, attn_tensor in enumerate(attention_store):
+        for hi in range(num_heads):
+            # [batch, heads, seq, seq] -> [seq, seq] for this one head.
+            mat = attn_tensor[0, hi].tolist()
 
-        attn_dtos.append(AttentionMap(
-            layer=li, head=hi, tokens=[t.text for t in all_tokens], matrix=mat,
-        ))
+            attn_dtos.append(AttentionMap(
+                layer=li, head=hi, tokens=[t.text for t in all_tokens], matrix=mat,
+            ))
 
-        # Cache & Repository
-        if session:
-            rec = ActivationRecord(
-                session_id=session.session_id,
-                prompt_id=session.session_id[:8],
-                layer=li,
-                head=hi,
-                component="attention",
-                shape=tuple(attn_tensor.shape),
-                tensor=attn_tensor,
-            )
-            activation_repo.save(rec)
+            # Cache & Repository
+            #
+            # Inside the head loop, and storing THIS head's slice. It used to
+            # sit outside the loop, where `hi` was whatever the last inner
+            # iteration left behind and the whole [batch, heads, seq, seq]
+            # tensor was filed under that single head -- a record whose
+            # `shape` claimed one head and whose payload contained all of
+            # them.
+            head_tensor = attn_tensor[0, hi]
 
-        if cache and session:
-            ca = CachedActivation(
-                session_id=session.session_id,
-                prompt_id=session.session_id[:8],
-                layer=li,
-                head=hi,
-                component="attention",
-                shape=list(attn_tensor.shape),
-                tensor=attn_tensor,
-                metadata={"model": config._name_or_path if hasattr(config, '_name_or_path') else ""},
-            )
-            cid = cache.put(ca)
-            cache_ids.append(cid)
-            bus.emit(ACTIVATION_CACHED, activation_id=cid, layer=li, head=hi)
+            if session:
+                rec = ActivationRecord(
+                    session_id=session.session_id,
+                    prompt_id=session.session_id[:8],
+                    layer=li,
+                    head=hi,
+                    component="attention",
+                    shape=tuple(head_tensor.shape),
+                    tensor=head_tensor,
+                )
+                activation_repo.save(rec)
+
+            if cache and session:
+                ca = CachedActivation(
+                    session_id=session.session_id,
+                    prompt_id=session.session_id[:8],
+                    layer=li,
+                    head=hi,
+                    component="attention",
+                    shape=list(head_tensor.shape),
+                    tensor=head_tensor,
+                    metadata={"model": config._name_or_path if hasattr(config, '_name_or_path') else ""},
+                )
+                cid = cache.put(ca)
+                cache_ids.append(cid)
+                bus.emit(ACTIVATION_CACHED, activation_id=cid, layer=li, head=hi)
 
     # ── Build neuron activations ─────────────────────────────
     n_neurons_per_layer = 8
     neuron_dtos: list[NeuronActivation] = []
 
     for li in range(num_layers):
-        # Each MLP hook stores one tensor per layer
-        layer_mlps = [t for idx, t in enumerate(mlp_store) if idx // 1 == li]
+        # One MLP capture per layer, in registration order, so the store is
+        # indexed by layer. The previous filter was `idx // 1 == li`, which is
+        # just `idx == li` wearing a disguise that reads as a division.
+        layer_mlps = [mlp_store[li]] if li < len(mlp_store) else []
         if not layer_mlps:
             continue
         # Take the first MLP capture for this layer
@@ -146,6 +169,17 @@ def run_inference(
 
         for ni in range(n_neurons_per_layer):
             neuron_idx = int((ni / n_neurons_per_layer) * actual_inter_dim)
+            #
+            # Report the neuron actually read, not the sample counter.
+            # `ni` strides across the width (with 8 samples over a 128-wide
+            # MLP, neuron_idx was 0, 16, 32, ... 112), but the DTO carried
+            # `index=ni`, so index=3 was really neuron 48. The value was
+            # computed correctly and labelled falsely, which is the worst
+            # combination: it looks like data.
+            #
+            # Neuron indices now stay within range and each one names itself.
+            if neuron_idx >= actual_inter_dim:
+                continue
             # Activation of this neuron at each token position
             token_acts = torch.tanh(act_squeezed[:, neuron_idx] * 3.0)
             token_activations = [float(a) for a in token_acts.tolist()]
@@ -162,7 +196,7 @@ def run_inference(
             avg_activation = float(torch.tanh(act_tensor.abs().mean(dim=1)[0, neuron_idx] * 3.0)) \
                 if act_tensor.size(0) == 1 else float(token_acts.mean())
             neuron_dtos.append(NeuronActivation(
-                layer=li, index=ni, activation=avg_activation,
+                layer=li, index=neuron_idx, activation=avg_activation,
                 token_activations=token_activations,
             ))
 

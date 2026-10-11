@@ -52,6 +52,14 @@ backend/storage/evidence_historical/
 # benchmark_datasets spelling no longer matches anything.
 backend/research_datasets/knowledge_graph_index.json
 
+# SAE fit checkpoints (backend/storage/sae_checkpoints/). Written by
+# `sae_pipeline._save_checkpoint` at the end of every `run()`, and never read
+# back: nothing loads a checkpoint as a required input, so a missing directory
+# is normal and the artifact is refitted on demand. The filename encodes the
+# seed and config, so each distinct fit adds a file and they accumulate for the
+# life of the checkout -- 156 files / 8.7 MB and climbing.
+backend/storage/sae_checkpoints/
+
 # Plugin runtime state: installed copies, registry, audit trails.
 # Plugin *sources* (library/, samples) stay tracked; installed state does not.
 backend/plugins/installed/

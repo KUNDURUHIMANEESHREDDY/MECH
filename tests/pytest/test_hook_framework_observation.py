@@ -338,3 +338,261 @@ def test_the_mlp_hook_captures_the_mlp_hidden_not_the_block_input(
     finally:
         probe.remove()
         manager.clear()
+
+
+# ── run_inference: captured data must be labelled by what captured it ──
+#
+# The tests above pin the hook layer. These pin the seam ABOVE it: the
+# interpreter that consumes those captures and turns them into DTOs. A hook
+# can capture a perfect tensor and a consumer can still mislabel it, and in a
+# research tool a mislabelled activation is worse than a missing one -- it
+# looks like data.
+
+
+@pytest.fixture
+def eager_model():
+    """A real GPT-2 whose attention weights are actually observable.
+
+    `eager` rather than the default `sdpa`, because sdpa does not expose
+    attention weights at all -- there is nothing to capture, and a test
+    asserting on the capture would be asserting on nothing.
+    """
+    config = GPT2Config(
+        n_layer=3,
+        n_head=4,
+        n_embd=32,
+        n_positions=64,
+        vocab_size=50257,
+        attn_implementation="eager",
+    )
+    model = GPT2LMHeadModel(config)
+    model.eval()
+    return model
+
+
+@pytest.fixture
+def gpt2_tokenizer():
+    transformers = pytest.importorskip("transformers")
+    try:
+        return transformers.AutoTokenizer.from_pretrained("gpt2")
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip("gpt2 tokenizer unavailable offline: %s" % exc)
+
+
+def test_every_attention_map_is_labelled_with_its_true_layer_and_head(
+    eager_model, gpt2_tokenizer
+):
+    """A captured attention map must carry the layer and head it came from.
+
+    `AttentionHook` fires once per *layer* -- it hooks the whole attention
+    module, so it yields one `[batch, heads, seq, seq]` tensor per layer. The
+    interpreter was then computing `layer = idx // num_heads` and
+    `head = idx % num_heads` as though the store held one entry per *head*.
+
+    For a 3-layer, 4-head model that labelled all three captures as
+    layer 0, heads 0/1/2. Layer 1's map was filed under head 1 of layer 0;
+    layer 2's under head 2 of layer 0. Nothing crashed, the shapes were all
+    valid, and every map was confidently wrong.
+
+    This is the fabrication failure mode in its purest form: plausible
+    numbers carrying a false identity. Each map's identity is now checked by
+    comparing it to the tensor captured from that exact layer, so a
+    mislabelling fails here rather than silently colouring a circuit diagram.
+    """
+    from backend.runtime.interpreter import run_inference
+    from backend.runtime.hook_framework import HookManager
+
+    tokens = gpt2_tokenizer(
+        "The capital of France is", return_tensors="pt"
+    )["input_ids"]
+    n_layers = eager_model.config.n_layer
+    n_heads = eager_model.config.n_head
+
+    # Ground truth: capture each layer separately so each tensor is
+    # unambiguously identified.
+    per_layer: dict[int, list[torch.Tensor]] = {}
+    for layer in range(n_layers):
+        manager = HookManager()
+        manager.bind(eager_model)
+        capture: list[torch.Tensor] = []
+        manager.register_hook(layer, "attention", store=capture)
+        with torch.no_grad():
+            eager_model(tokens, output_attentions=True, use_cache=False)
+        manager.clear()
+        per_layer[layer] = capture
+
+    result = run_inference(
+        "The capital of France is",
+        max_new_tokens=1,
+        model=eager_model,
+        tokenizer=gpt2_tokenizer,
+    )
+
+    maps = result["attention_maps"]
+    assert maps, (
+        "no attention maps were produced; a 3-layer eager model must yield "
+        "%d layers x %d heads = %d maps"
+        % (n_layers, n_heads, n_layers * n_heads)
+    )
+
+    # Index the returned maps by their claimed identity.
+    by_identity = {(m.layer, m.head): m for m in maps}
+
+    for layer in range(n_layers):
+        for head in range(n_heads):
+            key = (layer, head)
+            assert key in by_identity, (
+                "no attention map labelled layer %d head %d; got identities %s"
+                % (layer, head, sorted(by_identity))
+            )
+            matrix = by_identity[key].matrix
+            seq = per_layer[layer][0].shape[-1]
+
+            assert len(matrix) == seq and len(matrix[0]) == seq, (
+                "map labelled (layer %d, head %d) has shape %dx%d, expected "
+                "%dx%d" % (layer, head, len(matrix), len(matrix[0]), seq, seq)
+            )
+
+            reference = per_layer[layer][0][0, head].tolist()
+            assert matrix == reference, (
+                "map labelled (layer %d, head %d) does not match the tensor "
+                "captured from that layer/head -- the map is mislabelled"
+                % (layer, head)
+            )
+
+
+def test_a_neuron_report_names_the_neuron_it_actually_read(
+    eager_model, gpt2_tokenizer
+):
+    """`NeuronActivation.index` must be the neuron's real index.
+
+    The interpreter samples a handful of neurons per layer by striding
+    across the MLP width -- `neuron_idx = int((ni / n_neurons_per_layer) *
+    inter_dim)` -- but then reported the *loop counter* as the index. With
+    8 samples across a 128-wide MLP that meant index=1 was really neuron 16,
+    index=2 really neuron 32, and so on; only index=0 was honest.
+
+    So a caller asking "what is neuron 3 doing?" got neuron 48's activation,
+    correctly computed and confidently mislabelled. The value is real, which
+    is what makes this dangerous: nothing about the response looks wrong.
+
+    Each reported activation is therefore checked against the real neuron at
+    the reported index, computed independently from a per-layer capture.
+    """
+    from backend.runtime.interpreter import run_inference
+    from backend.runtime.hook_framework import HookManager
+
+    tokens = gpt2_tokenizer(
+        "The capital of France is", return_tensors="pt"
+    )["input_ids"]
+    n_layers = eager_model.config.n_layer
+
+    per_layer: dict[int, list[torch.Tensor]] = {}
+    for layer in range(n_layers):
+        manager = HookManager()
+        manager.bind(eager_model)
+        capture: list[torch.Tensor] = []
+        manager.register_hook(layer, "mlp", store=capture)
+        with torch.no_grad():
+            eager_model(tokens)
+        manager.clear()
+        per_layer[layer] = capture
+
+    result = run_inference(
+        "The capital of France is",
+        max_new_tokens=1,
+        model=eager_model,
+        tokenizer=gpt2_tokenizer,
+    )
+
+    neurons = result["neuron_activations"]
+    assert neurons, "no neuron activations were produced"
+
+    checked = 0
+    for entry in neurons:
+        hidden = per_layer[entry.layer][0]
+        if hidden.dim() == 3:
+            hidden = hidden[0]
+        if entry.index >= hidden.shape[-1]:
+            continue
+
+        expected = torch.tanh(
+            hidden.abs().mean(dim=0)[entry.index] * 3.0
+        )
+        assert float(entry.activation) == pytest.approx(
+            float(expected), abs=1e-5
+        ), (
+            "neuron reported at (layer %d, index %d) carries the activation "
+            "of some other neuron -- reported index %d does not name the "
+            "neuron that was read (got %r, expected %r)"
+            % (
+                entry.layer,
+                entry.index,
+                entry.index,
+                entry.activation,
+                float(expected),
+            )
+        )
+        checked += 1
+
+    assert checked, "no neuron index was in range; the test proved nothing"
+
+
+def test_per_token_activations_survive_the_dto(eager_model, gpt2_tokenizer):
+    """A computed field must not be silently dropped on the way out.
+
+    `run_inference` builds a per-token activation list for every neuron and
+    passes it as `token_activations=...`, but `NeuronActivation` did not
+    declare the field. Pydantic discards undeclared constructor arguments
+    without complaint, so the computation happened on every call and every
+    caller received nothing -- the per-token breakdown was always empty.
+
+    Silent field loss is the same defect as a fabricated value: the response
+    looks well-formed, carries no error, and is missing the data. This asserts
+    the data actually arrives, and that it matches an independent computation.
+    """
+    from backend.runtime.interpreter import run_inference
+    from backend.runtime.hook_framework import HookManager
+
+    tokens = gpt2_tokenizer(
+        "The capital of France is", return_tensors="pt"
+    )["input_ids"]
+    seq_len = tokens.shape[1]
+
+    manager = HookManager()
+    manager.bind(eager_model)
+    capture: list[torch.Tensor] = []
+    manager.register_hook(0, "mlp", store=capture)
+    with torch.no_grad():
+        eager_model(tokens)
+    manager.clear()
+    hidden = capture[0][0]  # [seq, 4*n_embd]
+
+    result = run_inference(
+        "The capital of France is",
+        max_new_tokens=1,
+        model=eager_model,
+        tokenizer=gpt2_tokenizer,
+    )
+
+    neurons = [n for n in result["neuron_activations"] if n.layer == 0]
+    assert neurons, "no layer-0 neurons reported"
+
+    checked = 0
+    for entry in neurons:
+        assert hasattr(entry, "token_activations"), (
+            "NeuronActivation has no token_activations attribute; the "
+            "per-token data was dropped rather than delivered"
+        )
+        if entry.index >= hidden.shape[-1]:
+            continue
+        expected = torch.tanh(hidden[:, entry.index] * 3.0).tolist()
+        assert entry.token_activations == pytest.approx(expected, abs=1e-5), (
+            "neuron %d per-token activations do not match an independent "
+            "computation (got %r, expected %r)"
+            % (entry.index, entry.token_activations, expected)
+        )
+        assert len(entry.token_activations) == seq_len
+        checked += 1
+
+    assert checked, "no neuron index was in range; the test proved nothing"
