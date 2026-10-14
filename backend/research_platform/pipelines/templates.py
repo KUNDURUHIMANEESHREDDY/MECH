@@ -1,36 +1,16 @@
-"""Built-in Interpretability Pipeline Templates."""
+"""Built-in Interpretability Pipeline Templates.
+
+This file used to be a byte-identical copy of
+``backend/mech_platform/pipelines/templates.py``. Two copies of pipeline
+templates is not a convenience: a template change in one and not the other
+is a pipeline that behaves differently depending on the import path.
+
+Rather than maintain two copies, this module delegates. The implementation
+lives in ``backend.mech_platform.pipelines.templates``.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from backend.mech_platform.pipelines.templates import PipelineTemplates
 
-
-class PipelineTemplates:
-    """Pre-configured pipeline templates for common research workflows."""
-
-    TEMPLATES = {
-        "sae_analysis": {
-            "name": "SAE Feature Analysis Pipeline",
-            "stages": ["Prompt", "Activation Search", "SAE Feature Lookup", "Dataset Examples", "Report"],
-        },
-        "circuit_discovery": {
-            "name": "Circuit Discovery Pipeline",
-            "stages": ["Prompt", "Attention Head Ranking", "Circuit Graph Mapping", "Report"],
-        },
-        "causal_tracing": {
-            "name": "Causal Tracing & Patching Pipeline",
-            "stages": ["Prompt", "Breakpoint Pause", "Activation Patch", "Logit Lens Projection", "Compare"],
-        },
-        "attribution_patching": {
-            "name": "Attribution Patching Pipeline",
-            "stages": ["Prompt", "Gradient Attribution", "Patch Set Application", "Compare"],
-        },
-        "model_comparison": {
-            "name": "Cross-Architecture Model Comparison Pipeline",
-            "stages": ["Prompt", "Model A Execution", "Model B Execution", "Normalized DTO Comparison", "Report"],
-        },
-    }
-
-    @classmethod
-    def list_templates(cls) -> List[Dict[str, Any]]:
-        return [{"id": k, **v} for k, v in cls.TEMPLATES.items()]
+__all__ = ["PipelineTemplates"]

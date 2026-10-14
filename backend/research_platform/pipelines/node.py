@@ -1,31 +1,16 @@
-"""Graph Pipeline Node Base Interface."""
+"""Graph Pipeline Node Base Interface.
+
+This file used to be a byte-identical copy of
+``backend/mech_platform/pipelines/node.py``. Two copies of a pipeline
+node interface is not a convenience: an interface change in one and not
+the other breaks callers that import the other.
+
+Rather than maintain two copies, this module delegates. The implementation
+lives in ``backend.mech_platform.pipelines.node``.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from backend.mech_platform.pipelines.node import PipelineNode
 
-
-class PipelineNode:
-    """Base interface for graph pipeline nodes."""
-
-    def __init__(self, node_id: str, node_type: str) -> None:
-        self.node_id = node_id
-        self.node_type = node_type
-
-    def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        raise NotImplementedError
-
-    def validate(self, inputs: Dict[str, Any]) -> bool:
-        return True
-
-    def serialize(self) -> Dict[str, Any]:
-        return {
-            "node_id": self.node_id,
-            "node_type": self.node_type,
-        }
-
-    def metadata(self) -> Dict[str, Any]:
-        return {
-            "name": self.__class__.__name__,
-            "version": "1.0.0",
-        }
+__all__ = ["PipelineNode"]
