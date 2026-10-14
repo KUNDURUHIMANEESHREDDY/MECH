@@ -1,7 +1,39 @@
 """Tests for the closed validation loop: live pipeline vs published
 (TransformerLens-paper) baselines -> ReproducibilityReport -> 0.85 gate.
 """
-from agents.critic import Critic, CONFIDENCE_THRESHOLD
+import os
+import tempfile
+
+import pytest
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from agents.critic import Critic, CONFIDENCE_THRESHOLD  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _signing_keys(monkeypatch):
+    """Generate a test signing key and configure trusted keys for attestation."""
+    _key = Ed25519PrivateKey.generate()
+    _seed = _key.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    _key_file = tempfile.NamedTemporaryFile(suffix=".key", delete=False)
+    _key_file.write(_seed)
+    _key_file.close()
+    _KEY_PATH = _key_file.name
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", _KEY_PATH)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _KEY_PATH)
+    from backend.core.provenance import reset_trusted_key_ids_cache
+    reset_trusted_key_ids_cache()
+    yield
+    try:
+        os.unlink(_KEY_PATH)
+    except OSError:
+        pass
 
 
 def mapped_minimality(out):
