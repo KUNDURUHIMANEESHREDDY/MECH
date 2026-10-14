@@ -107,7 +107,16 @@ class Critic:
             }
 
     def is_confident(self, validation_result: Dict[str, Any]) -> bool:
-        """Whether a validation result is confident *and* peer-accepted.
+        """Whether a validation result clears the automated validation gate.
+
+        This checks the *automated rule-check* acceptance (confidence >=
+        0.85 and an explicit ``peer_review.decision == "Accept"``), NOT
+        human peer review. The ``peer_review`` block produced by
+        ``LiveValidationExecutor`` carries ``kind == "automated-rule-check"``
+        and ``is_human_peer_review is False``; human acceptance, when it
+        exists, lives in the separate ``human_peer_review`` block — see
+        :meth:`has_human_peer_acceptance`. Publication interfaces must not
+        present an automated Accept as human peer review.
 
         The peer-review decision must be exactly "Accept". This used to be
 
@@ -132,6 +141,25 @@ class Critic:
             review = validation_result.get("peer_review", {})
             decision = str(review.get("decision", "") or "").strip()
             return score >= CONFIDENCE_THRESHOLD and decision == "Accept"
+        except Exception:
+            return False
+
+    @staticmethod
+    def has_human_peer_acceptance(validation_result: Any) -> bool:
+        """Whether a *human* peer review explicitly accepted the result.
+
+        Automated rule-check acceptance (``peer_review.decision == "Accept"``
+        with ``is_human_peer_review is False``) does NOT count. Only an
+        explicit ``human_peer_review.decision == "Accept"`` counts. Absent,
+        empty, pending, revise, and reject all return False.
+        """
+        if not isinstance(validation_result, dict):
+            return False
+        review = validation_result.get("human_peer_review")
+        if not isinstance(review, dict):
+            return False
+        try:
+            return str(review.get("decision", "") or "").strip() == "Accept"
         except Exception:
             return False
 
@@ -343,10 +371,19 @@ class Critic:
                 # metrics and does not re-measure them; the pipeline run is the
                 # only honest source. An absent record stays absent rather than
                 # being defaulted, which preserves the fail-closed direction.
+                #
+                # The originating run travels with it as `pipeline_result` so
+                # that commitment verification can recompute the record's
+                # input/output commitments against the data they were made
+                # from. The Critic's top-level `observed_metrics` are MAPPED
+                # (unmeasured entries become None), so they must not be
+                # mistaken for the pipeline's committed outputs.
                 "measurement_record": run.get("measurement_record")
                 if isinstance(run, dict) else None,
+                "pipeline_result": run if isinstance(run, dict) else None,
                 "field_provenance": field_map(
-                    ("status", "paper_id", "n_prompts", "observed_metrics", "report", "gate"),
+                    ("status", "paper_id", "n_prompts", "observed_metrics", "report", "gate",
+                     "pipeline_result"),
                     "live",
                 ),
                 "paper_id": paper_id,

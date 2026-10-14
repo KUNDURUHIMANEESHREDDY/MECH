@@ -18,70 +18,26 @@ PROVENANCE_VALUES = {"live", "seeded", "reference", "unavailable"}
 
 EVIDENCE_DIR = os.environ.get("MECH_EVIDENCE_DIR", "backend/storage/evidence")
 
-#: Comma-separated paths to trusted signing key files. Each path is loaded
-#: and its public key fingerprint (key_id) is computed. Only envelopes whose
-#: attestation key_id matches one of these trusted key_ids are considered
-#: attested. If unset, no envelope is considered attested (fail-closed).
-_TRUSTED_KEY_PATHS_ENV = "MECH_TRUSTED_SIGNING_KEY_PATH"
+# Trusted key management is now centralized in provenance.py
+from backend.core.provenance import (
+    load_trusted_key_ids,
+    reset_trusted_key_ids_cache,
+)
 
-#: Parsed and cached trusted key IDs. None = not yet loaded.
-_TRUSTED_KEY_IDS: Optional[set[str]] = None
-
-
-def _load_trusted_key_ids() -> set[str]:
-    """Load trusted signing key IDs from MECH_TRUSTED_SIGNING_KEY_PATH.
-
-    Returns a set of key_id strings (format: "ed25519:<16-char-hex>").
-    Returns empty set if env var is not set, meaning no key is trusted
-    (fail-closed: no envelope will be attested).
-    """
-    global _TRUSTED_KEY_IDS
-    if _TRUSTED_KEY_IDS is not None:
-        return _TRUSTED_KEY_IDS
-
-    paths_env = os.environ.get(_TRUSTED_KEY_PATHS_ENV, "").strip()
-    if not paths_env:
-        _TRUSTED_KEY_IDS = set()
-        return _TRUSTED_KEY_IDS
-
-    try:
-        from backend.science.integrity import signing as _signing
-    except Exception:
-        # If signing module unavailable, trust nothing
-        _TRUSTED_KEY_IDS = set()
-        return _TRUSTED_KEY_IDS
-
-    trusted = set()
-    for path_str in paths_env.split(","):
-        path_str = path_str.strip()
-        if not path_str:
-            continue
-        try:
-            pub_hex = _signing.public_key_hex(path_str)
-            key_id = _signing.key_id_for(pub_hex)
-            trusted.add(key_id)
-        except Exception:
-            # Individual bad key is ignored; continue with others
-            continue
-
-    _TRUSTED_KEY_IDS = trusted
-    return _TRUSTED_KEY_IDS
-
-
-def _reset_trusted_key_ids_cache() -> None:
-    """Clear the trusted key IDs cache. Used by tests when env vars change."""
-    global _TRUSTED_KEY_IDS
-    _TRUSTED_KEY_IDS = None
+# Re-export for backwards compatibility
+_load_trusted_key_ids = load_trusted_key_ids
+_reset_trusted_key_ids_cache = reset_trusted_key_ids_cache
 
 
 def _is_key_trusted(key_id: Optional[str]) -> bool:
     """Return True iff key_id is in the trusted set."""
     if key_id is None:
         return False
-    trusted = _load_trusted_key_ids()
+    trusted = load_trusted_key_ids()
     if not trusted:
         return False
     return key_id in trusted
+
 
 # Numeric step-result keys promoted to Evidence nodes by from_run().
 EVIDENCE_KEYS = ("delta", "clean_ld", "patched_ld", "circuit_score",
@@ -371,11 +327,80 @@ def _record_path(run_id: str, directory: Optional[str] = None) -> str:
     return str(target)
 
 
+#: Serializes evidence commits across processes and threads. Same-target
+#: os.replace calls race on Windows file locking (WinError 5) and on POSIX
+#: without advisory locking. Uses a cross-process file lock that works on
+#: both Windows (LockFileEx) and POSIX (fcntl.flock).
+import threading
+import os
+import sys
+
+_save_lock = threading.Lock()  # process-local fast path
+_cross_process_lock_path = None  # set on first use
+
+def _acquire_cross_process_lock(target_dir: str) -> tuple:
+    """Acquire a cross-process exclusive lock on the evidence directory.
+    Returns (lock_handle, lock_path) or raises on failure.
+    Uses non-blocking locks with retry to avoid deadlocks in multi-threaded scenarios.
+    """
+    import os
+    import time
+    lock_path = os.path.join(target_dir, ".evidence_write.lock")
+    deadline = time.monotonic() + 30.0  # 30 second timeout
+    
+    if sys.platform == "win32":
+        import msvcrt
+        # On Windows, use non-blocking lock with retry
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_BINARY)
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return fd, lock_path
+            except OSError as e:
+                # On Windows, PermissionError (13) means lock held by another process
+                # EDEADLK (36) means deadlock - retry
+                if e.errno not in (13, 36) or time.monotonic() >= deadline:
+                    os.close(fd)
+                    raise
+                time.sleep(0.01)  # 10ms backoff
+    else:
+        import fcntl
+        # On POSIX, use non-blocking flock with retry
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return fd, lock_path
+            except OSError as e:
+                if e.errno not in (11, 35) or time.monotonic() >= deadline:  # EAGAIN, EWOULDBLOCK
+                    os.close(fd)
+                    raise
+                time.sleep(0.01)  # 10ms backoff
+
+
+def _release_cross_process_lock(fd: int, lock_path: str) -> None:
+    """Release a cross-process lock acquired with _acquire_cross_process_lock."""
+    import os
+    import sys
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+        try:
+            os.unlink(lock_path)
+        except OSError:
+            pass
+
+
 #: Serializes evidence commits in this process. Same-target os.replace calls
 #: race on Windows file locking (WinError 5); production saves once per run
 #: from one worker thread, but the lock makes last-wins deterministic
-#: everywhere. Cross-process races are out of scope: the backend is one
-#: process and the evidence dir is its private state.
+#: everywhere. Cross-process races are prevented by a file-based lock.
 _save_lock = threading.Lock()
 
 
@@ -455,9 +480,15 @@ def envelope_status(run_id: str,
     Returns a status dict; never raises. `"legacy"` means the file predates
     envelopes and is served unverified (quarantine decides its fate, not this
     function). `"valid"` means the bytes verify under the embedded key AND the
-    signing key is in the configured trusted set (MECH_TRUSTED_SIGNING_KEY_PATH).
-    Envelopes with valid signatures but untrusted keys get
-    `attested: False, signature: "untrusted"`. Callers that pin a key must
+    signing key is in the configured trusted set (MECH_TRUSTED_SIGNING_KEY_PATH)
+    AND, when the embedded record claims measurement attestation
+    (`attested is True` or a `measurement_record` is present), that claim
+    itself verifies (trusted-key signature, weight-derived identity,
+    recomputed commitments). Envelopes with valid signatures but untrusted keys get
+    `attested: False, signature: "untrusted"`. A forged measurement claim
+    verifies as unattested even though the envelope bytes are authentic:
+    the envelope proves this backend wrote the bytes, not that the bytes
+    are evidence. Callers that pin a key must
     additionally compare `key_id`.
     """
     try:
@@ -526,6 +557,31 @@ def envelope_status(run_id: str,
                 "reason": ("signature verifies but the signing key is not in the "
                            "configured trusted key set")[:200],
                 "key_id": key_id}
+    # The envelope proves this backend wrote these bytes. That alone says
+    # nothing about whether the bytes are measurement evidence, so a
+    # record that CLAIMS measurement attestation must clear it: trusted-key
+    # signature on its measurement record, weight-derived model identity,
+    # and commitments that recompute from the embedded record. A forged
+    # `attested: True` boolean with no (or a bogus) measurement record
+    # saves fine but verifies as unattested here. Plain records that claim
+    # nothing keep the envelope-level verdict.
+    embedded = data["record"]
+    claims_measurement = (isinstance(embedded, dict)
+                          and (embedded.get("attested") is True
+                               or "measurement_record" in embedded))
+    if claims_measurement:
+        try:
+            from backend.agents import evidence_policy as _policy
+            embedded_ok = _policy._is_attested(embedded)
+        except Exception:
+            embedded_ok = False
+        if not embedded_ok:
+            return {"envelope": "v1", "attested": False,
+                    "signature": "valid",
+                    "reason": ("envelope signature verifies under a trusted "
+                               "key but the embedded record is not valid "
+                               "measurement evidence")[:200],
+                    "key_id": key_id}
     return {"envelope": "v1", "attested": True, "signature": "valid",
             "key_id": key_id, "reason": None}
 
@@ -611,27 +667,32 @@ def save_run_record(run_id: str, record: Dict[str, Any],
     # last-wins stays deterministic. A crash can only orphan a sidecar, which
     # readers ignore (list only reads *.json).
     import tempfile
-    with _save_lock:
-        fd, tmp_path = tempfile.mkstemp(dir=target, prefix=f"{run_id}.json.tmp.")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(envelope, f, indent=2, default=str)
-                f.flush()
-                os.fsync(f.fileno())
-            # Rename first, then fsync directory to persist the directory entry.
-            # This order ensures the file data is durable (fsynced before rename),
-            # and the directory entry update is persisted after the rename.
-            _replace_with_retry(tmp_path, path)
+    # Cross-process lock (outer) + thread lock (inner) for full serialization
+    cross_fd, cross_lock_path = _acquire_cross_process_lock(target)
+    try:
+        with _save_lock:
+            fd, tmp_path = tempfile.mkstemp(dir=target, prefix=f"{run_id}.json.tmp.")
             try:
-                _fsync_dir(target)
-            except OSError:
-                pass
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(envelope, f, indent=2, default=str)
+                    f.flush()
+                    os.fsync(f.fileno())
+                # Rename first, then fsync directory to persist the directory entry.
+                # This order ensures the file data is durable (fsynced before rename),
+                # and the directory entry update is persisted after the rename.
+                _replace_with_retry(tmp_path, path)
+                try:
+                    _fsync_dir(target)
+                except OSError:
+                    pass
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+    finally:
+        _release_cross_process_lock(cross_fd, cross_lock_path)
     return path
 
 
