@@ -78,6 +78,56 @@ class GPT2Adapter(ModelAdapter):
         super().__init__(_gpt2_spec(variant, mock_mode))
         self._hooks: List[Any] = []
         self._hook_outputs: Dict[int, Any] = {}
+        self._fingerprint: Optional[str] = None
+
+    # ------------------------------------------------------------------ #
+    #  Model identity                                                      #
+    # ------------------------------------------------------------------ #
+
+    def model_fingerprint(self) -> Optional[str]:
+        """A content hash of the weights currently loaded, or `None`.
+
+        Derived from tensor values, not from `self.spec.model_id`. A label is
+        an assertion about provenance; a hash is evidence of it. The distinction
+        is the whole point: a swapped checkpoint keeps its model id, keeps its
+        shapes, and passes every tensor-level check, while the fingerprint
+        changes. That is precisely the case this exists to catch -- activations
+        captured under one checkpoint and patched under another are shape-
+        compatible, so nothing downstream notices.
+
+        Cached after the first call: the weights are fixed for the life of the
+        adapter, and rehashing ~124M parameters on every result would be a
+        real cost for no additional guarantee. A caller that mutates weights in
+        place must invalidate the cache itself, which no current code path
+        does -- recorded here rather than defended against.
+
+        `None` in mock mode, where there are no weights to describe. Returning
+        a string derived from the mock's construction would be worse than
+        returning nothing: it would fingerprint a fiction.
+        """
+        if self._model is None:
+            return None
+        if self._fingerprint is not None:
+            return self._fingerprint
+
+        import torch  # local: this module imports torch lazily by design
+
+        digest = hashlib.sha256()
+        for name, param in sorted(self._model.named_parameters()):
+            digest.update(name.encode("utf-8"))
+            tensor = param.detach().to("cpu")
+            digest.update(str(tuple(tensor.shape)).encode("utf-8"))
+            digest.update(tensor.to(torch.float32).contiguous().numpy().tobytes())
+
+        self._fingerprint = f"sha256:{digest.hexdigest()[:32]}"
+        return self._fingerprint
+
+    def same_model_as(self, other: Any) -> Optional[bool]:
+        """Whether two adapters hold the same weights. `None` if unknowable."""
+        mine, theirs = self.model_fingerprint(), other.model_fingerprint()
+        if mine is None or theirs is None:
+            return None
+        return mine == theirs
 
     # ------------------------------------------------------------------ #
     #  Real HuggingFace implementation                                     #
@@ -469,28 +519,85 @@ class GPT2Adapter(ModelAdapter):
         }
 
     def patch_activation(self, prompt: str, layer: int, neuron_index: int, patch_value: float) -> PatchResult:
-        """Patch a specific neuron in the MLP layer."""
+        """Overwrite one coordinate of one layer's MLP output.
+
+        What this writes, precisely: the method registers a **forward** hook on
+        `transformer.h[layer].mlp`, so `output` is the module's return value --
+        after `c_proj`, `d_model` wide, sitting in the residual stream. Measured:
+
+            MLP forward-hook output shape  : (1, seq, 768)   # d_model
+            internal MLP hidden (4*d_model): 3072
+
+        So `neuron_index` is a **residual-stream coordinate, not an MLP neuron**.
+        A GPT-2 MLP neuron lives in the 3072-wide post-GELU hidden and is not
+        reachable through this hook. Both an ablation of a neuron and an
+        overwrite of a residual channel produce a finite number; only one is
+        what a caller asking for "a neuron" means. The parameter name is kept
+        for compatibility with existing callers, and
+        `test_activation_patch_placement.py` pins the distinction so it cannot
+        quietly regress.
+
+        An out-of-range index raises rather than returning an unchanged
+        result. The previous guard skipped the write and returned a well-formed
+        `PatchResult` with `delta == 0.0`, which is indistinguishable from an
+        intervention that genuinely had no effect.
+        """
         if not self.spec.mock_mode and self._model is not None:
             import torch
             inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
-            
+
+            width = self.spec.d_model
+            if not isinstance(neuron_index, int) or not 0 <= neuron_index < width:
+                raise IndexError(
+                    f"neuron_index {neuron_index!r} is outside the residual "
+                    f"stream of width {width} (valid: 0..{width - 1}). This "
+                    f"method patches the MLP output at transformer.h[{layer}]"
+                    f".mlp, not the {4 * width}-wide internal hidden. "
+                    f"Refusing rather than returning delta=0.0, which would "
+                    f"be indistinguishable from an intervention with no effect."
+                )
+
             with torch.no_grad():
-                orig_logits = self._model(**inputs).logits[0, -1, :]
+                # Eager, matching every other intervention on this adapter.
+                # `patch_activation` was the one site that did not force it, so
+                # its `delta` was computed under sdpa while `patch_head_output`
+                # and `run_isolated_circuit` computed theirs under eager. Two
+                # methods on the same adapter therefore reported numbers from
+                # different attention kernels, and comparing them was comparing
+                # across an unrecorded change of implementation. Measured
+                # divergence on a layer-5 residual-coordinate patch: 0.0625.
+                previous_impl = getattr(
+                    self._model.config, "_attn_implementation", None)
+                self._model.config._attn_implementation = "eager"
+                try:
+                    orig_logits = self._model(**inputs).logits[0, -1, :]
+                finally:
+                    self._model.config._attn_implementation = previous_impl
             orig_top = orig_logits.topk(1)
             original_logit = float(orig_top.values[0])
             top_token_before = self._tokenizer.decode([orig_top.indices[0]])
 
             def patch_hook(module, input, output):
-                if output.shape[-1] > neuron_index:
-                    output[0, -1, neuron_index] = patch_value
-                return output
+                # Copy rather than mutate in place: the returned tensor may be
+                # referenced elsewhere, and an in-place write from a forward
+                # hook is invisible to anything holding that reference.
+                patched = output.clone()
+                patched[0, -1, neuron_index] = patch_value
+                return patched
 
             layer_module = self._model.transformer.h[layer].mlp
             handle = layer_module.register_forward_hook(patch_hook)
 
             try:
-                with torch.no_grad():
-                    patched_logits = self._model(**inputs).logits[0, -1, :]
+                previous_impl = getattr(
+                    self._model.config, "_attn_implementation", None)
+                self._model.config._attn_implementation = "eager"
+                try:
+                    with torch.no_grad():
+                        patched_logits = self._model(
+                            **inputs).logits[0, -1, :]
+                finally:
+                    self._model.config._attn_implementation = previous_impl
                 patched_top = patched_logits.topk(1)
                 patched_logit_for_orig_token = float(patched_logits[orig_top.indices[0]])
                 top_token_after = self._tokenizer.decode([patched_top.indices[0]])
@@ -717,8 +824,36 @@ class GPT2Adapter(ModelAdapter):
         self, prompt: str, layer: int, head_index: int,
         patch_vector: Optional[List[float]] = None,
         score_token_id: Optional[int] = None,
+        position: Optional[int] = None,
     ) -> PatchResult:
         """Patch the output of a specific attention head (head-level causal intervention).
+
+        Scope
+        -----
+        `position` selects which sequence positions the write covers, and it
+        applies to **both** modes:
+
+            position=None  every position of every batch row (the default)
+            position=<int> that position in every batch row
+
+        It used to apply to neither consistently. Zero ablation wrote
+        `x[..., start:end]` -- all positions -- while vector injection wrote
+        `x[0, -1, start:end]`, batch 0's final position only. Both are reached
+        by omitting an argument, so the difference was invisible at the call
+        site and the two modes were not comparable:
+
+            patch_vector=None      delta = -1.687500
+            patch_vector=[0.0]*64  delta = -0.937500
+
+        Defaults have not moved for zero ablation, which already meant all
+        positions. They have for vector injection, which previously meant the
+        last position -- see `test_patch_scope_and_indexing.py`.
+
+        Validation
+        ----------
+        `layer`, `head_index` and the length of `patch_vector` are checked
+        before anything is computed. An out-of-range head previously returned
+        `delta: 0.0` and a short vector broadcast across the whole head.
 
         `score_token_id` selects which token's logit `original_logit` /
         `patched_logit` / `delta` refer to. Without it they report the logit of
@@ -748,6 +883,43 @@ class GPT2Adapter(ModelAdapter):
             # head-level causal result, because each one compares a capture
             # against a patched pass. Small, universal, and indistinguishable
             # from a weak causal effect.
+            #
+            # Validated before anything is computed. Both of these used to fail
+            # late, and one failed silently:
+            #
+            #  * An out-of-range head computed a slice past the end of the
+            #    tensor; `head_patch_hook`'s `if x.shape[-1] < end` guard then
+            #    returned the input untouched and the caller received
+            #    `delta: 0.0` -- identical to what ablating a causally inert
+            #    head returns. Measured at head 12 (the model has 0..11):
+            #    delta +0.000000, against +0.312500 for real head 11. A typo
+            #    in a discovered head list read as "this head does nothing".
+            #
+            #  * A wrong-length vector broadcast: `x[0, -1, start:end] = v`
+            #    accepts a length-1 `v` and fills all 64 components with it.
+            #    Measured, `[0.5]` and `[0.5] * 64` both give -0.937500.
+            _d_head = self.spec.d_model // self.spec.num_heads
+            if not isinstance(layer, int) or not (0 <= layer < self.spec.num_layers):
+                raise ValueError(
+                    f"layer {layer!r} is out of range; this model has "
+                    f"{self.spec.num_layers} layers "
+                    f"(0..{self.spec.num_layers - 1})")
+            if not isinstance(head_index, int) or not (
+                    0 <= head_index < self.spec.num_heads):
+                raise ValueError(
+                    f"head {head_index!r} is out of range; layer {layer} has "
+                    f"{self.spec.num_heads} heads "
+                    f"(0..{self.spec.num_heads - 1}). Patching a head outside "
+                    f"this range previously returned delta 0.0 rather than "
+                    f"failing, which is indistinguishable from an inert head.")
+            if patch_vector is not None and len(patch_vector) != _d_head:
+                raise ValueError(
+                    f"patch_vector has length {len(patch_vector)}; a GPT-2 "
+                    f"head occupies {_d_head} components (d_model "
+                    f"{self.spec.d_model} / {self.spec.num_heads} heads). A "
+                    f"shorter vector would broadcast across the whole head "
+                    f"rather than fail.")
+
             config = self._model.config
             previous_impl = getattr(config, "_attn_implementation", None)
             if previous_impl != "eager":
@@ -776,10 +948,29 @@ class GPT2Adapter(ModelAdapter):
                     if patch_vector is not None:
                         # Inject specific vector (e.g. mean ablation vector)
                         v = torch.tensor(patch_vector, device=x.device, dtype=x.dtype)
-                        x[0, -1, start:end] = v
                     else:
-                        # Zero ablation
-                        x[..., start:end] = 0.0
+                        v = 0.0
+                    # One scope for both modes.
+                    #
+                    # They used to differ, and the difference was invisible at
+                    # the call site because both are reached by omitting an
+                    # argument: zero ablation wrote `x[..., start:end]` -- every
+                    # position, every batch row -- while vector injection wrote
+                    # `x[0, -1, start:end]`, batch 0's final position only.
+                    #
+                    # Measured, both meaning "zero head 3 of layer 5":
+                    #     patch_vector=None      delta = -1.687500
+                    #     patch_vector=[0.0]*64  delta = -0.937500
+                    #
+                    # So a caller comparing "head ablated" against "head set
+                    # to v" was comparing two different experiments, and
+                    # neither result said which it had run. `position=None`
+                    # now means all positions for both, so the modes are
+                    # comparable; pass an index to restrict deliberately.
+                    if position is None:
+                        x[..., start:end] = v
+                    else:
+                        x[:, position, start:end] = v
                     return (x,) + tuple(inp[1:])
 
                 layer_module = self._model.transformer.h[layer].attn.c_proj

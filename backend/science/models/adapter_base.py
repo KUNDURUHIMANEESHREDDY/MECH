@@ -52,6 +52,30 @@ class PatchResult:
     layer: int
     neuron_index: int
     patch_value: float
+    #: Fingerprint of the weights this result was measured against.
+    #:
+    #: Optional only because three adapter classes construct `PatchResult` at
+    #: nine sites and the field cannot be required until all of them populate
+    #: it -- a required field with unpopulated constructors raises at runtime
+    #: rather than being absent, which trades a silent gap for a crash.
+    #:
+    #: `None` means "no identity was recorded", and `tests/pytest/
+    #: test_model_identity_seal.py` holds this red until that is impossible.
+    #: Identity must be compared by fingerprint and never by shape: two
+    #: checkpoints of one family agree on `layer` and `neuron_index` by
+    #: construction, and every tensor-level check passes across a swap.
+    model_fingerprint: Optional[str] = None
+
+    def same_model_as(self, other: "PatchResult") -> Optional[bool]:
+        """Whether two results may be compared. `None` if either is unsealed.
+
+        Deliberately not a bool. `False` would mean "definitely different
+        models" and `True` would mean "safe to compare"; collapsing the
+        unrecorded case into either is how a gap becomes a result.
+        """
+        if self.model_fingerprint is None or other.model_fingerprint is None:
+            return None
+        return self.model_fingerprint == other.model_fingerprint
 
 
 @dataclass
