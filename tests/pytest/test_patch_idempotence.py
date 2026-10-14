@@ -72,7 +72,7 @@ def test_patching_with_the_captured_vector_changes_nothing(adapter, layer, head)
     vector = captured[layer][head]
 
     result = adapter.patch_head_output(
-        PROMPT, layer=layer, head_index=head, patch_vector=vector
+        PROMPT, layer=layer, head_index=head, patch_vector=vector, position=-1
     )
 
     assert result.original_logit == result.patched_logit, (
@@ -114,7 +114,7 @@ def test_the_patch_hook_actually_fired_during_the_idempotent_call(adapter):
     probe = module.register_forward_pre_hook(spy)
     try:
         adapter.patch_head_output(
-            PROMPT, layer=layer, head_index=head, patch_vector=vector
+            PROMPT, layer=layer, head_index=head, patch_vector=vector, position=-1
         )
     finally:
         probe.remove()
@@ -143,7 +143,7 @@ def test_the_captured_slice_is_the_one_written_back(adapter):
 
     own = adapter.patch_head_output(
         PROMPT, layer=layer, head_index=head,
-        patch_vector=captured[layer][head],
+        patch_vector=captured[layer][head], position=-1,
     )
     crossed = adapter.patch_head_output(
         PROMPT, layer=layer, head_index=head,
@@ -179,7 +179,7 @@ def test_idempotence_holds_for_every_head_of_one_layer(adapter):
     for head in range(adapter.spec.num_heads):
         result = adapter.patch_head_output(
             PROMPT, layer=layer, head_index=head,
-            patch_vector=captured[layer][head],
+            patch_vector=captured[layer][head], position=-1,
         )
         if result.delta != 0.0:
             offenders.append((head, result.delta))
@@ -300,6 +300,13 @@ def test_the_capture_rounding_is_below_float32_resolution(adapter):
     result = adapter.patch_head_output(
         PROMPT, layer=layer, head_index=head,
         patch_vector=[float(v) for v in exact],
+          # The slice above is read at [0, -1, ...], the final position,
+          # which is what capture_head_outputs returns. patch_head_output now
+          # writes every position by default, so without this the round trip
+          # broadcasts one position's vector across the whole sequence and
+          # fails at 0.0625 or 0.125 -- not a rounding effect, which is
+          # exactly what this test exists to isolate.
+          position=-1,
     )
     assert result.delta == 0.0, (
         f"patching with the exact (unrounded) vector still moved the logit by "

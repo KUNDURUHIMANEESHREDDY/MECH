@@ -325,26 +325,56 @@ def test_concurrent_writers_neither_lose_nor_corrupt_an_entry(cache):
     Each thread writes a tensor whose value encodes its own layer, so a
     returned entry carrying the wrong number is detected as corruption rather
     than passing as "some entry was found".
+
+    Worker failures are collected, not asserted in-thread.
+
+    This is the harness defect a review caught, and it is worth stating
+    because the test was green while unable to fail: `worker` asserted, an
+    uncaught `AssertionError` in a thread prints a traceback and ends the
+    thread, `join()` returns normally, `is_alive()` is False -- and the `put`
+    had already happened, so `count()` was still correct. A worker that read
+    back another layer's tensor and died on that assertion left the suite
+    green. The only reason it looked covered was the count check beneath it,
+    which sees lost writes and cannot see corrupted reads.
+
+    Fixed by collecting exceptions into a list guarded by the same barrier
+    structure, asserting the collection is empty, and then re-verifying every
+    stored id against its expected value after every worker has finished.
     """
     threads, per_thread = 8, 50
+    start = threading.Barrier(threads)
+    failures: list[str] = []
+    expected: dict[str, float] = {}
+    lock = threading.Lock()
 
     def worker(index: int) -> None:
-        for layer in range(per_thread):
-            entry = _entry(
-                session_id=f"s{index}",
-                layer=layer,
-                tensor=torch.full((2,), float(layer)),
-            )
-            stored_id = cache.put(entry)
-            fetched = cache.get(stored_id)
-            assert fetched is not None, (
-                f"an entry stored by thread {index} was lost immediately"
-            )
-            assert float(fetched.tensor[0]) == float(layer), (
-                f"thread {index} read back layer {float(fetched.tensor[0])} "
-                f"after storing layer {layer} -- an entry was corrupted or "
-                f"another entry was returned"
-            )
+        start.wait(timeout=30)          # every writer begins together
+        try:
+            for layer in range(per_thread):
+                entry = _entry(
+                    session_id=f"s{index}",
+                    layer=layer,
+                    tensor=torch.full((2,), float(layer)),
+                )
+                stored_id = cache.put(entry)
+                with lock:
+                    expected[stored_id] = float(layer)
+
+                fetched = cache.get(stored_id)
+                if fetched is None:
+                    with lock:
+                        failures.append(
+                            f"thread {index}: entry stored immediately gone")
+                    continue
+                if float(fetched.tensor[0]) != float(layer):
+                    with lock:
+                        failures.append(
+                            f"thread {index}: read back layer "
+                            f"{float(fetched.tensor[0])} after storing "
+                            f"{layer}")
+        except BaseException as exc:            # noqa: BLE001 - recorded
+            with lock:
+                failures.append(f"thread {index}: {type(exc).__name__}: {exc}")
 
     workers = [
         threading.Thread(target=worker, args=(i,)) for i in range(threads)
@@ -355,9 +385,33 @@ def test_concurrent_writers_neither_lose_nor_corrupt_an_entry(cache):
         t.join(timeout=60)
 
     assert not any(t.is_alive() for t in workers), "a writer thread hung"
+
+    # Every worker must have run to completion. This is the assertion whose
+    # absence made the corruption case invisible.
+    assert not failures, (
+        f"{len(failures)} of {threads * per_thread} concurrent writes failed "
+        f"or corrupted; first: {failures[:3]}"
+    )
+
     assert cache.count() == threads * per_thread, (
         f"cache holds {cache.count()} entries after "
         f"{threads * per_thread} concurrent puts -- entries were lost"
+    )
+
+    # And re-verify independently, once everything has settled, so a corrupted
+    # read is caught even if the worker's own check somehow passed.
+    mismatched = []
+    for stored_id, layer in expected.items():
+        found = cache.get(stored_id)
+        if found is None:
+            mismatched.append(f"{stored_id} (layer {layer}) missing")
+        elif float(found.tensor[0]) != layer:
+            mismatched.append(
+                f"{stored_id} holds layer {float(found.tensor[0])}, "
+                f"expected {layer}")
+    assert not mismatched, (
+        f"{len(mismatched)} entries hold the wrong tensor after concurrent "
+        f"writes: {mismatched[:3]}"
     )
 
 
