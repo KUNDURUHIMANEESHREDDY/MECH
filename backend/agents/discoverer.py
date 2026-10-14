@@ -132,18 +132,24 @@ class Discoverer:
                 # Do not place the synthetic result under ``result``: that
                 # key is consumed by validation, evidence graphs, and the
                 # scribe as scientific evidence.
-                return {
+                out = {
                     "status": "unavailable",
                     "provenance": provenance_of(res),
-                    "field_provenance": field_map(
-                        ("status", "discovery_id", "reason", "result"),
-                        provenance_of(res),
-                    ),
                     "validation_eligible": False,
                     "publication_eligible": False,
                     "discovery_id": res.get("discovery_id", ""),
                     "reason": blocked_reason(res, "Discovery"),
                 }
+                # Built from `out` rather than a fixed tuple. The tuple named
+                # `result`, which this branch deliberately does not return, so
+                # the map claimed a field the response did not contain -- and a
+                # provenance map is a lookup keyed by field name, so an entry
+                # with no field behind it trains a consumer to read the map as
+                # a description of the payload.
+                out["field_provenance"] = field_map(
+                    tuple(out), provenance_of(res),
+                )
+                return out
             # `**res` first, the guarded verdict last.
             #
             # The spread used to come last, so it overwrote the keys this
@@ -158,7 +164,17 @@ class Discoverer:
             # value being spread in agreed with the value being guarded. But the
             # guard decided nothing, and it would start mattering the moment that
             # predicate diverged from a bare provenance comparison.
-            return {
+            # Built from the response's own keys, not a fixed tuple.
+            #
+            # `**res` copies the engine's payload verbatim. The map used to
+            # name three fields, so a live response returned every field the
+            # engine chose to emit with no statement of their standing --
+            # measured at ten unmarked keys on a payload carrying `raw_traces`,
+            # `per_prompt` and `metrics`, all measurement-shaped values
+            # reaching the caller at `provenance: "live"`. Those are the
+            # fields a consumer quotes, and the guarded-verdict ordering above
+            # protects only the three keys the wrapper decided for itself.
+            out = {
                 **res,
                 "status": "completed",
                 "provenance": "live",
@@ -167,21 +183,19 @@ class Discoverer:
                 # A result that measured nothing arrives unattested and stays
                 # ineligible downstream.
                 "attested": res.get("attested", False),
-                "field_provenance": field_map(
-                    ("status", "result", "discovery_id"), "live"
-                ),
             }
+            out["field_provenance"] = field_map(tuple(out), "live")
+            return out
         except Exception as exc:
-            return {
+            out = {
                 "status": "error",
                 "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "error", "result"), "unavailable"
-                ),
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "error": str(exc)[:500],
             }
+            out["field_provenance"] = field_map(tuple(out), "unavailable")
+            return out
 
     def cross_model(self, source_model: str = "gpt2",
                     target_model: str = "gpt2-medium",
