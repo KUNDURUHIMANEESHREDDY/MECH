@@ -300,6 +300,10 @@ MEASUREMENT_LAYERS: Dict[str, str] = {
         "max/mean/min statistics from the returned heads; returns status "
         "'unavailable' rather than stamping 'live' when the engine cannot "
         "answer",
+    "backend/services/gpt2_engine.py":
+        "loads GPT-2 Small, runs forward pass, captures attention/neuron "
+        "activations, and calls attest_measurement with the actual model "
+        "identity; the numbers it labels are the ones it just produced",
 }
 
 #: Wrappers that stamp `live` only after verifying an inner claim of liveness.
@@ -396,12 +400,13 @@ SUBSCRIPT = "subscript-assign"
 def _live_stamp_sites() -> List[Tuple[str, int, str]]:
     """Every site that writes `provenance: "live"` without the helper.
 
-    Returned as ``(relative path, line, shape)``. Three shapes, because the
-    defect takes three shapes:
+    Returned as ``(relative path, line, shape)``. Four shapes, because the
+    defect takes four shapes:
 
       * ``res.setdefault("provenance", "live")``
       * ``{"provenance": "live", ...}``          -- a dict literal
       * ``obj["provenance"] = "live"``           -- a subscript assignment
+      * ``attest_measurement(...)``              -- the authoritative helper
 
     The original guard matched only the first. A dict literal is the most
     natural way to write this bug and was completely invisible to it -- which is
@@ -427,6 +432,10 @@ def _live_stamp_sites() -> List[Tuple[str, int, str]]:
                 if name == "setdefault" and len(node.args) >= 2:
                     if (_is_key(node.args[0]) and _is_live(node.args[1])):
                         found.append((node.lineno, SETDEFAULT))
+                # attest_measurement is the authoritative live-stamping helper.
+                # A call to it counts as a valid measurement-layer stamp.
+                elif name == "attest_measurement":
+                    found.append((node.lineno, "attest_measurement"))
             elif isinstance(node, ast.Dict):
                 for key, value in zip(node.keys, node.values):
                     if _is_key(key) and _is_live(value):
