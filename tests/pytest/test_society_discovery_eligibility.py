@@ -32,11 +32,42 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import os
+import tempfile
 
 import pytest
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+
+# Generate a test signing key for attestation. The key FILE is created
+# once at import, but the environment points at it per-test: a
+# process-global `os.environ` assignment here would leak into every other
+# test module and break whichever ran second.
+_key = Ed25519PrivateKey.generate()
+_seed = _key.private_bytes(
+    serialization.Encoding.Raw,
+    serialization.PrivateFormat.Raw,
+    serialization.NoEncryption(),
+)
+# Use a fixed path in temp directory to avoid Windows file locking issues
+_KEY_PATH = os.path.join(tempfile.gettempdir(), f"mech_test_key_{os.getpid()}.key")
+with open(_KEY_PATH, "wb") as f:
+    f.write(_seed)
+
+from backend.core.provenance import reset_trusted_key_ids_cache  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _test_keys(monkeypatch):
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", _KEY_PATH)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _KEY_PATH)
+    reset_trusted_key_ids_cache()
+    yield
+    reset_trusted_key_ids_cache()
 
 from backend.agents import discoverer as disc_mod  # noqa: E402
 from backend.interpretability.discovery.live_discovery import (  # noqa: E402
@@ -47,6 +78,10 @@ from backend.interpretability.discovery.live_discovery import (  # noqa: E402
 from backend.agents.evidence_policy import discovery_is_live  # noqa: E402
 
 GOAL = "Reproduce IOI on gpt2-small and find causally important heads"
+
+# Clean up the key file on exit
+import atexit
+atexit.register(lambda: os.unlink(_KEY_PATH) if os.path.exists(_KEY_PATH) else None)
 
 
 # ── patching ─────────────────────────────────────────────────────────────
