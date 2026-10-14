@@ -134,7 +134,7 @@ class RepresentationEngine:
             ious.append(max_iou)
 
         import random
-        stability = sum(ious) / len(ious) if ious else 0.92 + (random.random() * 0.05)
+        stability = sum(ious) / len(ious) if ious else 0.0
         concept.quality.stability = round(stability, 4)
         return concept.quality.stability
 

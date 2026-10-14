@@ -8,7 +8,6 @@ Maintains a full Reasoning Trace and Discovery Tree for auditability.
 from __future__ import annotations
 
 import collections
-import random
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -151,26 +150,25 @@ class AutoHypothesisTester:
         }
 
     def measure(self, experiment_spec: Dict[str, Any]) -> Dict[str, Any]:
-        """Step 5 (Multi-Agent): Statistician runs model and collects data."""
-        actual_firing = random.random() > 0.5 
+        """Step 5 (Multi-Agent): Statistician runs model and collects data.
+
+        This method requires a real model measurement. If no measurement
+        engine is available, returns an inconclusive result with provenance
+        marked as unavailable rather than generating random data.
+        """
+        # This is a placeholder for real measurement. In a real implementation,
+        # this would call a model inference engine to measure actual firing.
+        # For now, we return an inconclusive result with explicit provenance.
         expected = experiment_spec["expected_firing"]
-        
-        if actual_firing == expected:
-            return {
-                "type": "supportive", 
-                "metric": "activation_match", 
-                "score": 0.9, 
-                "prompt": experiment_spec["prompt"],
-                "desc": f"Expected firing={expected}, actual={actual_firing}."
-            }
-        else:
-            return {
-                "type": "falsifying", 
-                "metric": "activation_mismatch", 
-                "score": -0.8, 
-                "prompt": experiment_spec["prompt"],
-                "desc": f"Expected firing={expected}, actual={actual_firing}. Counterexample worked."
-            }
+        return {
+            "type": "inconclusive",
+            "metric": "activation_measurement_unavailable",
+            "score": 0.0,
+            "prompt": experiment_spec["prompt"],
+            "desc": f"Expected firing={expected}; no measurement engine available to determine actual firing.",
+            "provenance": "unavailable",
+            "measured": False,
+        }
 
     def review(self, hypothesis: Hypothesis, critique: str, exp_spec: Dict[str, Any], result: Dict[str, Any], trace: ReasoningTrace) -> Evidence:
         """Step 6 (Multi-Agent): Reviewer looks at all evidence and decides."""

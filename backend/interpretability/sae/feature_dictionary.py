@@ -5,7 +5,6 @@ Manages feature metadata, activation frequency statistics, and feature indices.
 
 from __future__ import annotations
 
-import random
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -105,12 +104,13 @@ class FeatureDictionary:
         return self._proxies.get(feature_id).resolve() if feature_id in self._proxies else None
 
     def find_nearest_neighbors(self, feature_id: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """Mock: Returns features with highest cosine similarity to target."""
+        """Returns nearest neighbors using encoder weights and similarity search.
+
+        Real implementation would load encoder weights and use FAISS or similar.
+        Without loaded SAE weights, this returns unavailable rather than mock data.
+        """
         # Real implementation would load encoder weights and use FAISS or similar
-        return [
-            {"id": f"{self.model_id}_L{self.layer}_F{random.randint(0, self.size)}", "similarity": 0.92},
-            {"id": f"{self.model_id}_L{self.layer}_F{random.randint(0, self.size)}", "similarity": 0.88}
-        ]
+        return []
 
     def list_features(self, limit: int = 10) -> List[FeatureProxy]:
         return list(self._proxies.values())[:limit]
