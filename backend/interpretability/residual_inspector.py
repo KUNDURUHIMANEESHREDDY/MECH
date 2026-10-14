@@ -105,7 +105,29 @@ class ResidualInspector:
         self,
         token_index: int = 0,
     ) -> List[float]:
-        """Get L2 norms of residual vectors across all layers."""
+        """Get L2 norms of residual vectors across all layers.
+
+        This is **not** the same series as the logit-lens residual stream, and
+        the difference is one entry, not a rounding error:
+
+            this method   range(num_layers) -> 12 entries for GPT-2:
+                           the embedding through block 10. There is no entry
+                           for the final normalised residual.
+
+            logit lens    n_layers + 1      -> 13 entries:
+                           the same 12, plus the residual *after* `ln_f`.
+
+        So ``get_residual_norms()[-1]`` is block 10's output here, while the
+        logit lens's last entry is ``ln_f(block 11)`` -- a normalised tensor
+        that differs enough to change a top-1 prediction. Indexing one with
+        the other's indices yields the wrong layer, and nothing in either
+        response said so.
+
+        `gpt2_engine.get_layer_metadata().residual_convention` states the
+        logit-lens convention at the source. Recorded here too because this is
+        a separate router and a caller reaches either one without seeing the
+        other.
+        """
         return [
             self.get_residual_norm(layer_idx, token_index)
             for layer_idx in range(self.repository.num_layers)

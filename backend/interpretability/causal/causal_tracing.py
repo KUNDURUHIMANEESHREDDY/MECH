@@ -37,6 +37,23 @@ class CausalTracingEngine:
                 "layer": l,
                 "indirect_effect": causal_effect,
                 "top_causal_component": "MLP" if l in [8, 9] else "Attention",
+                # Per-entry, not per-list-index.
+                #
+                # The response marks the *list* by index, which says "row 3
+                # came from the reference curve" and nothing about the fields
+                # inside row 3. A caller who does
+                # `trace["layer_effects"][3]["indirect_effect"]` -- the
+                # natural way to read it -- gets a bare float with no marker
+                # attached. 14 numbers in this response were unmarked that
+                # way.
+                #
+                # Carried inside the entry, the marking survives extraction,
+                # which is the only property that matters for a field someone
+                # will quote.
+                "field_provenance": {
+                    "indirect_effect": "reference",
+                    "top_causal_component": "reference",
+                },
             })
 
         return {
