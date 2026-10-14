@@ -9,16 +9,13 @@ Methodology (Refined):
 
 from __future__ import annotations
 
-import hashlib
-import json
 import random
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..models.gpt2_adapter import GPT2Adapter
 from .dataset_versioning import DatasetVersioningEngine
 from .reproducibility_report import ReproducibilityReportEngine
-from backend.core.provenance import _MEASUREMENT_BOUNDARY_ID
+from backend.core.provenance import attest_measurement
 
 # Canonical IOI prompt templates (Wang et al. 2022)
 # ABB: When Alice and Bob went... Alice gave -> Bob (Incorrect/Corrupted)
@@ -628,13 +625,12 @@ class IOIReproductionPipeline:
             ],
         )
 
-        return {
+        result = {
             "pipeline": "IOIReproductionPipeline-HighFidelity",
             "status": "completed",
-            "provenance": "live",
             # Attested here: faithfulness/minimality/recovery were measured
             # above through live capture/inject on loaded weights.
-            "attested": True,
+            # attest_measurement will set provenance and attested
             "field_provenance": _field_map(
                 ("status", "observed_metrics", "raw_traces",
                  "reproducibility_report", "manifest_id",
@@ -661,17 +657,33 @@ class IOIReproductionPipeline:
             "raw_traces": raw_traces,
             "manifest_id": manifest.manifest_id,
             "model_id": self.adapter.spec.model_id,
-            # Cryptographically bound measurement record:
-            "measurement_record": {
-                "model_identity": {"name": self.adapter.spec.model_id, "content_hash": hashlib.sha256(self.adapter.spec.model_id.encode()).hexdigest()[:32]},
-                "input_commitment": "ioi_reproduction_pipeline",
-                "output_commitment": hashlib.sha256(json.dumps(observed_metrics, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()[:32],
-                "execution_context": {
-                    "timestamp": time.time(),
-                    "measurement_boundary_id": _MEASUREMENT_BOUNDARY_ID,
-                },
-            },
         }
+
+        # Attach cryptographically bound measurement record.
+        #
+        # Live mode measures through backend.services.gpt2_engine, so the
+        # fingerprint comes from those loaded weights — not from
+        # self.adapter, which in live mode is a metadata-only handle that
+        # never loaded weights (its fingerprint would be None and the
+        # record would fall back to a name-derived hash, which
+        # verification rejects). Commitments cover retained fields so the
+        # policy boundary (and the Critic's forwarded copy) can recompute
+        # them. The output basis deliberately includes
+        # `reproducibility_report`, which the Critic never sets top-level
+        # (it regenerates its own `report` from mapped metrics): that is
+        # what lets a genuine forwarded record verify against the nested
+        # `pipeline_result` instead of colliding with the Critic's mapped
+        # `observed_metrics`.
+        from backend.services import gpt2_engine as _engine
+
+        result = attest_measurement(
+            result,
+            model_loaded=self.adapter.spec.model_id,
+            model_content_hash=_engine.weights_fingerprint(),
+            input_fields=["raw_traces", "manifest_id"],
+            output_fields=["observed_metrics", "reproducibility_report"],
+        )
+        return result
 
     def run(self, n_prompts: int = 100, seed: int = 42, model_variant: str = "small") -> Dict[str, Any]:
         # Validate input bounds explicitly - fail closed with a clear error.
