@@ -4,9 +4,41 @@ These tests verify that Critic.reproduce forwards the pipeline's
 measurement_record into its result dict, so that _is_attested and
 reproduction_is_live correctly reflect the pipeline's attestation state.
 """
+import os
+import tempfile
 
-from agents.critic import Critic
-from agents.evidence_policy import reproduction_is_live, _is_attested
+import pytest
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+# Generate a test signing key. The key FILE is created once at import, but
+# the environment points at it per-test: a process-global `os.environ`
+# assignment here would leak into every other test module and break
+# whichever ran second.
+_key = Ed25519PrivateKey.generate()
+_seed = _key.private_bytes(
+    serialization.Encoding.Raw,
+    serialization.PrivateFormat.Raw,
+    serialization.NoEncryption(),
+)
+_key_file = tempfile.NamedTemporaryFile(suffix=".key", delete=False)
+_key_file.write(_seed)
+_key_file.close()
+_KEY_PATH = _key_file.name
+
+from backend.agents.critic import Critic  # noqa: E402
+from backend.agents.evidence_policy import reproduction_is_live, _is_attested  # noqa: E402
+from backend.core.provenance import reset_trusted_key_ids_cache  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _test_keys(monkeypatch):
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", _KEY_PATH)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _KEY_PATH)
+    reset_trusted_key_ids_cache()
+    yield
+    reset_trusted_key_ids_cache()
 
 
 def test_the_critic_forwards_the_measurement_record():

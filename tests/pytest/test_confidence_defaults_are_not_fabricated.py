@@ -8,13 +8,13 @@ that omits the argument silently inherits it.
 The four fixed instances, all of which *manufactured* confidence:
 
   GraphNode.confidence_score            1.0   -- total certainty, in the
-                                                 evidence store
+                                                  evidence store
   MechanismRegistry seed entry           0.96  -- with replication_score 0.985
-                                                 and status "Validated"
+                                                  and status "Validated"
   register_mechanism confidence default  0.95  -- plus 0.90 and 0.85 for the
-                                                 two quality scores
+                                                  two quality scores
   seeded knowledge-graph SUPPORTS edge  0.95  -- a confidence on evidence that
-                                                 was transcribed from a paper
+                                                  was transcribed from a paper
 
 `register_mechanism` was the most damaging, because it did not merely default a
 score: it set `status: "Validated"` unconditionally, turning an unevidenced claim
@@ -35,12 +35,79 @@ key), and "" was an accepted value, so a validation with a 0.90 score and no
 peer review at all passed. A missing review is now a failed review. See
 `test_missing_peer_review_is_not_an_accept` below.
 """
-
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 
 import pytest
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+# `is_confident` first requires `validation_is_live`, which requires a
+# genuinely verifiable measurement record (trusted-key signature,
+# weight-derived identity, recomputable commitments). Hand-written records
+# cannot clear that gate, so the fixtures below are built with
+# `attest_measurement` itself, signed by a session key that is also
+# trusted. The content hash stands in for a weight-derived fingerprint.
+# The key FILE is created once at import, but the environment points at
+# it per-test: a process-global `os.environ` assignment here would leak
+# into every other test module and break whichever ran second.
+_key = Ed25519PrivateKey.generate()
+_seed = _key.private_bytes(
+    serialization.Encoding.Raw,
+    serialization.PrivateFormat.Raw,
+    serialization.NoEncryption(),
+)
+_key_file = tempfile.NamedTemporaryFile(suffix=".key", delete=False)
+_key_file.write(_seed)
+_key_file.close()
+_KEY_PATH = _key_file.name
+
+from backend.core.provenance import (  # noqa: E402
+    attest_measurement,
+    reset_trusted_key_ids_cache,
+)
+
+
+@pytest.fixture(autouse=True)
+def _test_keys(monkeypatch):
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", _KEY_PATH)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _KEY_PATH)
+    reset_trusted_key_ids_cache()
+    yield
+    reset_trusted_key_ids_cache()
+
+
+def _attested_base(**extra: object) -> dict:
+    """A payload that clears `validation_is_live` (signed, trusted,
+    weight-bound, commitments recomputable). Confidence and peer review
+    are added by the caller afterwards, outside the commitment basis."""
+    base: dict = {
+        "status": "completed",
+        "validation_eligible": True,
+        "publication_eligible": True,
+        "validated": True,
+    }
+    attested = attest_measurement(
+        dict(base),
+        model_loaded="gpt2",
+        model_content_hash="sha256:test-weight-fingerprint",
+        signing_key=_KEY_PATH,
+    )
+    payload: dict = {
+        "status": "completed",
+        "provenance": "live",
+        "attested": True,
+        "validation_eligible": True,
+        "publication_eligible": True,
+        "validated": True,
+        "measurement_record": attested["measurement_record"],
+    }
+    payload.update(extra)
+    return payload
 
 
 # ── The evidence store ──────────────────────────────────────────────────────
@@ -103,8 +170,6 @@ def test_seeded_knowledge_graph_carries_no_invented_confidence():
         assert node.metadata.get("publication_eligible") is False
 
 
-# ── The mechanism registry ──────────────────────────────────────────────────
-
 def test_registering_a_mechanism_does_not_validate_it():
     """Registration is bookkeeping; it is not evidence.
 
@@ -166,8 +231,8 @@ def test_a_new_claim_is_not_pre_validated():
     passing only an id, title and description produced a claim that was already
     validated, at 0.95 confidence, with one replication and one supporting
     experiment in hand. `supporting_experiments=1` was the sharpest edge: it
-    asserted an experiment had been run and had come out in favour, when the only
-    thing that had happened was the constructor.
+    asserted an experiment had been run and had come out in favour, when the
+    only thing that had happened was the constructor.
     """
     from backend.interpretability.discovery.mechanism_claim_registry import (
         RegisteredMechanismClaim,
@@ -199,6 +264,7 @@ def test_deserialising_a_claim_does_not_promote_it_to_validated():
     claim = RegisteredMechanismClaim.from_dict(
         {"claim_id": "c", "title": "t", "description": "d"}
     )
+
     assert claim.status == "Hypothesized"
     assert claim.confidence is None
     assert claim.replications == 0
@@ -276,7 +342,9 @@ def test_replicator_does_not_multiply_component_count_into_experiments():
     assert not re.search(r"supporting_experiments\s*=\s*len\(", src), (
         "an evidence count is being derived from a component count again"
     )
-    assert not re.search(r"supporting_experiments\s*=\s*\w+\s*\*\s*\d+", src)
+    assert not re.search(r"supporting_experiments\s*=\s*\w+\s*\*\s*\d+", src), (
+        "an evidence count is being derived from a component count again"
+    )
 
 
 # ── Conservative defaults, pinned so they are not "improved" ───────────────
@@ -301,19 +369,13 @@ def test_missing_confidence_defaults_to_zero_and_stays_conservative():
     critic = Critic()
 
     def live(confidence, decision="Accept"):
-        return {
-            "status": "completed",
-            "provenance": "live",
-            "attested": True,
-            "validation_eligible": True,
-            "publication_eligible": True,
-            "validated": True,
-            "confidence": confidence,
-            "peer_review": {"decision": decision},
-        }
+        return _attested_base(
+            confidence={"confidence_score": confidence},
+            peer_review={"decision": decision},
+        )
 
     # Reaches the threshold check and clears it.
-    assert critic.is_confident(live({"confidence_score": CONFIDENCE_THRESHOLD})) is True
+    assert critic.is_confident(live(CONFIDENCE_THRESHOLD)) is True
 
     # Absent confidence -> 0.0 -> below threshold. This is the case being pinned:
     # if the default were ever raised toward 0.95, this would flip to True.
@@ -322,7 +384,7 @@ def test_missing_confidence_defaults_to_zero_and_stays_conservative():
 
     # And the gate itself still holds: a high score on a non-live payload is
     # rejected, so raising the default could not smuggle one through anyway.
-    not_live = live({"confidence_score": 1.0})
+    not_live = live(1.0)
     not_live["provenance"] = "unavailable"
     assert critic.is_confident(not_live) is False
 
@@ -350,15 +412,9 @@ def test_missing_peer_review_is_not_an_accept():
     critic = Critic()
 
     def payload(peer_review):
-        record = {
-            "status": "completed",
-            "provenance": "live",
-            "attested": True,
-            "validation_eligible": True,
-            "publication_eligible": True,
-            "validated": True,
-            "confidence": {"confidence_score": CONFIDENCE_THRESHOLD},
-        }
+        record = _attested_base(
+            confidence={"confidence_score": CONFIDENCE_THRESHOLD},
+        )
         if peer_review is not _ABSENT:
             record["peer_review"] = peer_review
         return record

@@ -216,9 +216,14 @@ def test_verification_checks_cryptographic_binding(monkeypatch):
         monkeypatch.setenv("MECH_SIGNING_KEY_PATH", str(key_file))
         monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", str(key_file))
         
-        # Valid record with measurement_record
+        # Valid record with measurement_record. The content hash stands in
+        # for a weight-derived fingerprint: verification rejects
+        # name-derived hashes even when signed, so the fixture must be
+        # weight-bound (explicitly here).
         result = {"status": "ok", "output": {"value": 42}}
-        attested = attest_measurement(result, model_loaded="gpt2")
+        attested = attest_measurement(
+            result, model_loaded="gpt2",
+            model_content_hash="sha256:test-weight-fingerprint")
         
         from backend.core import evidence_graph as eg_mod
         eg_mod.save_run_record(VALID, attested, directory=tmp)
