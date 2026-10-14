@@ -109,6 +109,12 @@ class EmbeddingHook(BaseHook):
         if self._hook_ref is not None:
             self._hook_ref.remove()
             self._hook_ref = None
+            # Clear the handle too. `register_hook` branches on exactly this
+            # (`hook.handle is None`) to decide whether to attach, so a hook
+            # that has been detached but still reports a handle claims a live
+            # registration carrying a dead id. Measured: after `remove_hook`,
+            # every hook type still returned the old handle.
+            self.handle = None
             bus.emit(HOOK_REMOVED, hook_name=self.name, layer=self._layer_idx)
 
     @property
@@ -169,6 +175,12 @@ class AttentionHook(BaseHook):
         if self._hook_ref is not None:
             self._hook_ref.remove()
             self._hook_ref = None
+            # Clear the handle too. `register_hook` branches on exactly this
+            # (`hook.handle is None`) to decide whether to attach, so a hook
+            # that has been detached but still reports a handle claims a live
+            # registration carrying a dead id. Measured: after `remove_hook`,
+            # every hook type still returned the old handle.
+            self.handle = None
             bus.emit(HOOK_REMOVED, hook_name=self.name, layer=self._layer_idx)
 
     @property
@@ -219,6 +231,12 @@ class MLPHook(BaseHook):
         if self._hook_ref is not None:
             self._hook_ref.remove()
             self._hook_ref = None
+            # Clear the handle too. `register_hook` branches on exactly this
+            # (`hook.handle is None`) to decide whether to attach, so a hook
+            # that has been detached but still reports a handle claims a live
+            # registration carrying a dead id. Measured: after `remove_hook`,
+            # every hook type still returned the old handle.
+            self.handle = None
             bus.emit(HOOK_REMOVED, hook_name=self.name, layer=self._layer_idx)
 
     @property
@@ -254,6 +272,12 @@ class ResidualHook(BaseHook):
         if self._hook_ref is not None:
             self._hook_ref.remove()
             self._hook_ref = None
+            # Clear the handle too. `register_hook` branches on exactly this
+            # (`hook.handle is None`) to decide whether to attach, so a hook
+            # that has been detached but still reports a handle claims a live
+            # registration carrying a dead id. Measured: after `remove_hook`,
+            # every hook type still returned the old handle.
+            self.handle = None
             bus.emit(HOOK_REMOVED, hook_name=self.name, layer=self._layer_idx)
 
     @property
@@ -288,6 +312,12 @@ class LogitHook(BaseHook):
         if self._hook_ref is not None:
             self._hook_ref.remove()
             self._hook_ref = None
+            # Clear the handle too. `register_hook` branches on exactly this
+            # (`hook.handle is None`) to decide whether to attach, so a hook
+            # that has been detached but still reports a handle claims a live
+            # registration carrying a dead id. Measured: after `remove_hook`,
+            # every hook type still returned the old handle.
+            self.handle = None
             bus.emit(HOOK_REMOVED, hook_name=self.name, layer=self._layer_idx)
 
     @property
@@ -302,9 +332,21 @@ class CustomHook(BaseHook):
 
         def my_hook(module, inputs, outputs):
             ...
+            return None            # observe only
+
+        def my_patcher(module, inputs, outputs):
+            return new_output      # replace the output
 
         hook = CustomHook(my_hook, name="my_custom")
         manager.register(hook, layer_idx=5)
+
+    The return value follows PyTorch's forward-hook contract: return a tensor
+    and it replaces the module's output, for every later hook and for the
+    caller; return None and the output passes through unchanged.
+
+    The `store` argument remains available for hooks that want their results
+    recorded, but it is no longer populated implicitly from the return value.
+    Doing that made a patch indistinguishable from a capture.
     """
 
     def __init__(self, fn: Callable, name: str = "custom", store: list | None = None):
@@ -322,10 +364,26 @@ class CustomHook(BaseHook):
 
         def _hook(module, inputs, outputs):
             if not self.is_enabled:
-                return
+                return None
             result = self._fn(module, inputs, outputs)
-            if result is not None:
-                self._store.append(result)
+            # PyTorch's forward-hook contract: returning a tensor replaces the
+            # module's output, for every hook registered after this one and
+            # for the caller.
+            #
+            # This used to swallow the return and append it to `_store`
+            # instead. So a hook written to patch an output was captured into a
+            # list while the forward pass carried on untouched -- the store
+            # filled, the hook reported success, and the model returned the
+            # value it would have returned anyway. Measured: with a replacer
+            # and an observer registered in that order, the observer saw the
+            # original output, not the replacement.
+            #
+            # Nothing caught it because the hook *appeared* to work. A user
+            # reaching for the documented extension point to modify a forward
+            # pass gets a silent no-op, which is the failure mode this project
+            # exists to reject. Observe by appending to your own list and
+            # returning None; replace by returning the new output.
+            return result
 
         self._hook_ref = self._target_module.register_forward_hook(_hook)
         h = HookHandle(name=self._name, layer_idx=layer_idx, hook_type="custom")
@@ -337,6 +395,9 @@ class CustomHook(BaseHook):
         if self._hook_ref is not None:
             self._hook_ref.remove()
             self._hook_ref = None
+            # As above: clearing the handle is what makes a detached hook
+            # report itself as detached.
+            self.handle = None
             bus.emit(HOOK_REMOVED, hook_name=self._name, layer=self._layer_idx)
 
     @property

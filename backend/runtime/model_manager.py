@@ -47,6 +47,23 @@ _FUTURE_MODELS: dict[str, ModelEntry] = {
 
 # ── Loaded model state ───────────────────────────────────────────
 
+# Do not read these three directly.
+#
+# They are assigned in sequence -- in `load_model` on commit, and in
+# `_unload_current` on teardown -- and Python cannot assign three names
+# atomically. So a reader that does *not* hold `_LOAD_LOCK` can observe an
+# inconsistent set. Measured, repeatedly, on the teardown path:
+#
+#     tokenizer present, model gone
+#     name present, model gone
+#
+# Inference through the public API is safe: `get_model_and_tokenizer` and
+# `is_loaded` both take the lock, and a single accessor call is atomic. That
+# is the only supported way to read them.
+#
+# The structural fix is one immutable record holding all three, swapped in a
+# single assignment, with these kept only as derived conveniences for existing
+# callers. Until then, the lock is the whole of the guarantee.
 _loaded_model: nn.Module | None = None
 _loaded_tokenizer = None
 _loaded_name: str | None = None
