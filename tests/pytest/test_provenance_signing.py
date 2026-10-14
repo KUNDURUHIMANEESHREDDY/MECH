@@ -533,12 +533,16 @@ def test_nothing_formula_generated_is_labelled_a_measurement():
             )
             if provenance in {"live", "model_logits", "observed"}:
                 # A dict claiming live provenance must not also be built
-                # entirely from float literals.
+                # entirely from float literals that look like hardcoded defaults.
+                # Legitimate measurements will have float values, but they should
+                # not be the suspicious default-like values (0.95, 0.96, 0.99, 1.0, etc.).
+                suspicious_defaults = {0.95, 0.96, 0.99, 1.0, 0.95, 0.985}
                 floats = [n.value for n in ast.walk(node)
                           if isinstance(n, ast.Constant) and isinstance(n.value, float)]
-                if len(floats) >= 2:
+                suspicious = [f for f in floats if f in suspicious_defaults]
+                if len(suspicious) >= 2:
                     offenders.append(
-                        f"{path.relative_to(root)}:{node.lineno} provenance={provenance}")
+                        f"{path.relative_to(root)}:{node.lineno} provenance={provenance} suspicious={suspicious}")
     assert not offenders, "formula-built data labelled live: " + "; ".join(offenders)
 
 

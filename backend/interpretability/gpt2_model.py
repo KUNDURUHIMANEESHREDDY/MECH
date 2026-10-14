@@ -55,6 +55,27 @@ class GPT2Model:
     def device(self) -> str:
         return self._device
 
+    def model_content_hash(self, length: int = 32) -> str:
+        """Compute a cryptographic hash of the actual model weights.
+
+        This binds measurements to the exact weights that produced them,
+        not just the model name. Uses SHA-256 of all parameter tensors.
+
+        Args:
+            length: Number of hex characters to return (default 32 = 128 bits).
+
+        Returns:
+            Hex string of the model weight hash.
+        """
+        import hashlib
+        hasher = hashlib.sha256()
+        # Hash all parameters in a deterministic order
+        for name, param in sorted(self._model.named_parameters()):
+            # Include parameter name and its data
+            hasher.update(name.encode())
+            hasher.update(param.detach().cpu().numpy().tobytes())
+        return hasher.hexdigest()[:length]
+
     @property
     def prompt(self) -> str:
         return self._prompt

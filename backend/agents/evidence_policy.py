@@ -12,6 +12,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
 
+# Lazy import to avoid circular dependency
+def _get_verification():
+    from backend.core.provenance import (
+        verify_measurement_record,
+        verify_payload_commitments,
+        load_trusted_key_ids,
+    )
+    return verify_measurement_record, verify_payload_commitments, load_trusted_key_ids
+
 
 def _is_attested(payload: Any) -> bool:
     """True iff the payload carries a valid measurement record.
@@ -19,7 +28,14 @@ def _is_attested(payload: Any) -> bool:
     This is the single source of truth for scientific attestation. A bare
     `attested: True` boolean is NOT sufficient — the record must have been
     produced by the measurement boundary via `attest_measurement`, which
-    embeds a cryptographically bound `measurement_record`.
+    embeds a cryptographically bound `measurement_record`, and three
+    things must verify:
+
+    1. The record is signed by a key in the configured trusted set
+       (self-signed records are forgeries, not evidence).
+    2. The model content hash is weight-derived, never name-derived.
+    3. The input/output commitments recompute from the payload they
+       travel with (post-attest tampering fails).
     """
     record = _record(payload)
     if record.get("attested") is not True:
@@ -27,9 +43,30 @@ def _is_attested(payload: Any) -> bool:
     mr = record.get("measurement_record")
     if not isinstance(mr, dict):
         return False
-    # Must have the four binding fields
+
+    # Must have the four binding fields (structural check)
     required = ("model_identity", "input_commitment", "output_commitment", "execution_context")
-    return all(k in mr for k in required)
+    if not all(k in mr for k in required):
+        return False
+
+    # Cryptographic verification of the measurement record: signature,
+    # trusted key, and weight-derived model identity.
+    try:
+        verify_fn, verify_commitments_fn, load_keys = _get_verification()
+        trusted_keys = load_keys()
+        verification = verify_fn(mr, trusted_keys)
+        if not verification.get("valid", False):
+            return False
+    except Exception:
+        # Verification failure means not attested
+        return False
+
+    # Commitment verification: the record must describe THIS payload.
+    try:
+        commitments = verify_commitments_fn(record)
+        return bool(commitments.get("valid", False))
+    except Exception:
+        return False
 
 
 _COMPLETED_STATUSES = {"completed", "complete", "ok", "passed", "success"}

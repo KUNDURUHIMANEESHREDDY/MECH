@@ -52,6 +52,43 @@ def _loaded_model_id() -> Optional[str]:
     return name if isinstance(name, str) and name else SUPPORTED_MODEL
 
 
+#: Cached fingerprint of the loaded weights. Weights are fixed for the life
+#: of the process (nothing here mutates them), so hashing ~500MB of tensors
+#: once is enough; every attested measurement cites the same value.
+_weights_fingerprint_cache: Optional[str] = None
+
+
+def weights_fingerprint() -> Optional[str]:
+    """SHA-256 fingerprint of the actually-loaded weight tensors, or None.
+
+    This is the value measurement records bind as the model content hash:
+    a fingerprint of the artifacts in memory, not of the model name. A
+    swapped checkpoint keeps its model id and shapes while this changes,
+    which is precisely the case it exists to catch.
+
+    Returns None when no model is loaded (nothing to fingerprint) or when
+    hashing fails. Callers must treat None as "no weight identity
+    available" and must not substitute a name-derived hash: verification
+    rejects name-derived content hashes.
+    """
+    global _weights_fingerprint_cache
+    if _weights_fingerprint_cache is not None:
+        return _weights_fingerprint_cache
+    if _model is None:
+        return None
+    try:
+        # Cross-module private access, deliberately: the public surface is
+        # capture(), which takes an adapter this engine does not have. The
+        # state-dict hash is the stable primitive underneath it.
+        from backend.science.reproducibility.model_fingerprint import (
+            ModelFingerprintEngine as _Fingerprint,
+        )
+        _weights_fingerprint_cache = _Fingerprint._sha256_state_dict(_model)
+    except Exception:
+        return None
+    return _weights_fingerprint_cache
+
+
 def is_available() -> bool:
     return ML_AVAILABLE
 
@@ -226,7 +263,8 @@ def _attest_info(description: Dict[str, Any]) -> Dict[str, Any]:
     withholding it as unlabeled.
     """
     return attest_measurement(description,
-                              model_loaded=_loaded_model_id())
+                              model_loaded=_loaded_model_id(),
+                              model_content_hash=weights_fingerprint())
 
 
 def model_identity() -> Dict[str, Any]:
@@ -369,6 +407,32 @@ def architecture() -> Dict[str, Any]:
                 "num_attention_heads": _n_heads(),
                 "num_mlp_neurons": d_mlp,
                 "residual_stream_dim": _d_model(),
+                # The convention, stated where a caller reads it rather than
+                # in a comment on the one function that has to special-case it.
+                #
+                # GPT-2's recorded stream has n_layers + 1 entries, not
+                # n_layers: HuggingFace's `output_hidden_states` places the
+                # *normalised* final residual (after `ln_f`) in the last slot,
+                # in place of block n-1's raw output. That is why the last
+                # entry must not be passed through `ln_f` a second time --
+                # doing so applied the learned scale and bias twice, leaving
+                # the argmax correct while the probabilities were wrong.
+                #
+                # This is a GPT-2 convention and must not be assumed elsewhere.
+                # Llama and Gemma have no `ln_f`, so the same call yields a
+                # differently shaped and differently shaped-*meaning* series.
+                # `ResidualInspector.get_residual_norms` walks
+                # `range(num_layers)` and therefore returns n_layers entries
+                # with no final one; it is a different series, not a
+                # shorter one.
+                "residual_convention": (
+                    f"n_layers + 1 entries: [0] is the token embedding, "
+                    f"[1..{_n_layers() - 1}] are the raw block outputs, and "
+                    f"[{_n_layers()}] is the final residual AFTER ln_f "
+                    f"(not a raw block output; do not normalise it again). "
+                    f"GPT-2-specific -- architectures without ln_f do not "
+                    f"follow this convention."
+                ),
                 "components": [
                     {
                         "id": "ln_1",
@@ -1440,7 +1504,11 @@ def infer(prompt: str, model_name: str) -> Dict[str, Any]:
             #   infer("Hello", "gpt2-large")["d_model"]    -> 768   (gpt2-small)
             #
             # and the dispatcher then stamped provenance="live" on top of it.
+            #
+            # `prompt` is retained (not just consumed) so the input
+            # commitment binds the actual input text.
             "model_requested": model_name,
+            "prompt": prompt,
             "tokens": tokens,
             "generated_text": "".join(t["text"] for t in tokens),
             "attention_maps": attention_maps,
@@ -1451,6 +1519,9 @@ def infer(prompt: str, model_name: str) -> Dict[str, Any]:
         },
         model_loaded=_loaded_model_id(),
         model_requested=model_name,
+        model_content_hash=weights_fingerprint(),
+        input_fields=["prompt", "model_requested"],
+        output_fields=["tokens", "generated_text"],
     )
 
 
@@ -1700,4 +1771,17 @@ def logit_lens(layer: int, prompt: str, top_k: int = 5) -> Dict[str, Any]:
         "prompt": prompt,
         "top_token": toks[0]["token"] if toks else "",
         "top_k_tokens": toks,
+        # This list is a truncation, not a distribution.
+        #
+        # Measured on the final layer of "The capital of France is": five of
+        # 50257 entries, summing to 0.243318. Nothing in the response said so,
+        # so a consumer summing `top_k_tokens` -- the obvious thing to do with
+        # a list of probabilities -- gets 0.243 and either reports it or
+        # silently renormalises. Stated here so the truncation is part of the
+        # contract rather than a discovery.
+        "probability_is_truncated": True,
+        "probabilities_reported": len(toks),
+        "probabilities_total": int(_model.config.vocab_size),
+        "probabilities_reported_mass": round(
+            sum(float(t["prob"]) for t in toks), 6),
     }

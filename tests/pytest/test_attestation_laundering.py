@@ -28,7 +28,9 @@ typed in, and treating them identically is exactly what makes the label forgeabl
 `is_failure_status` check below it never runs for a pre-labelled record. A
 result could claim `status: "failed"` and still come back attested.
 """
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -42,8 +44,36 @@ from backend.core.provenance import (  # noqa: E402
 )
 from backend.agents.evidence_policy import _is_attested  # noqa: E402
 
+# ────────────────────────────────────────────────────────────────────────────
+# Test fixture: generate a signing key for tests that need attested records
+# ────────────────────────────────────────────────────────────────────────────
 
-# â”€â”€ the laundering path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ #
+@pytest.fixture
+def signing_key():
+    """Generate a temporary Ed25519 signing key for tests."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    
+    key = Ed25519PrivateKey.generate()
+    seed = key.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    with tempfile.NamedTemporaryFile(suffix=".key", delete=False) as f:
+        f.write(seed)
+        key_path = f.name
+    
+    yield key_path
+    
+    # Cleanup
+    try:
+        os.unlink(key_path)
+    except OSError:
+        pass
+
+
+# â”€â”€ the laundering path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ #
 
 def test_a_bare_live_label_is_not_upgraded_to_attested():
     """The core defect: a label a caller typed in is not a measurement."""
@@ -85,14 +115,19 @@ def test_a_forged_label_cannot_satisfy_the_evidence_gate():
 
 # â”€â”€ what must keep working â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ #
 
-def test_a_real_measurement_is_still_attested():
-    out = attest_measurement({"status": "ok", "value": 1.0})
+def test_a_real_measurement_is_still_attested(signing_key, monkeypatch):
+    from backend.core.provenance import reset_trusted_key_ids_cache
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", signing_key)
+    reset_trusted_key_ids_cache()
+    out = attest_measurement({"status": "ok", "value": 1.0}, model_loaded="gpt2",
+                             model_content_hash="sha256:test-weight-fingerprint",
+                             signing_key=signing_key)
     assert out["provenance"] == LIVE
     assert out["attested"] is True
     assert _is_attested(out) is True
 
 
-def test_re_wrapping_a_genuine_measurement_is_not_attested_twice():
+def test_re_wrapping_a_genuine_measurement_is_not_attested_twice(signing_key, monkeypatch):
     """There is no legitimate double-attest, and the docs say why.
 
     This module's contract routes wrappers and orchestrators through
@@ -101,10 +136,13 @@ def test_re_wrapping_a_genuine_measurement_is_not_attested_twice():
     no right to assert it. Re-attesting one therefore withholds it -- and that
     is the safe direction to be wrong in.
     """
-    once = attest_measurement({"status": "ok", "value": 1.0})
+    from backend.core.provenance import reset_trusted_key_ids_cache
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", signing_key)
+    reset_trusted_key_ids_cache()
+    once = attest_measurement({"status": "ok", "value": 1.0}, model_loaded="gpt2", signing_key=signing_key)
     assert once["provenance"] == LIVE and once["attested"] is True
 
-    twice = attest_measurement(dict(once))
+    twice = attest_measurement(dict(once), model_loaded="gpt2", signing_key=signing_key)
 
     assert twice.get("attested") is False, (
         "re-attesting an already-labelled record was treated as idempotent; "
@@ -161,11 +199,16 @@ def test_writing_both_keys_does_not_launder():
     assert out["provenance"] != LIVE
 
 
-def test_a_genuine_measurement_keeps_its_attestation_when_passed_on():
+def test_a_genuine_measurement_keeps_its_attestation_when_passed_on(signing_key, monkeypatch):
     """Wrappers are routed through `pass_through`, which must not strip it."""
-    from backend.core.provenance import pass_through
+    from backend.core.provenance import pass_through, reset_trusted_key_ids_cache
 
-    measured = attest_measurement({"status": "ok", "value": 1.0})
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", signing_key)
+    reset_trusted_key_ids_cache()
+
+    measured = attest_measurement({"status": "ok", "value": 1.0}, model_loaded="gpt2",
+                                  model_content_hash="sha256:test-weight-fingerprint",
+                                  signing_key=signing_key)
     assert _is_attested(pass_through(measured)) is True, (
         "pass_through discarded a genuine attestation")
 

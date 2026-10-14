@@ -58,7 +58,8 @@ class MechanisticBenchmarkRunner:
             clean_hits = 0
             corr_hits = 0
             per_prompt = []
-            for subj, io_name in pairs:
+            for entry in pairs:
+                subj, io_name = entry["subject"], entry["io"]
                 clean = lm.clean_prompt(subj, io_name)
                 corr = lm.corrupted_prompt(subj, io_name)
                 io_id = token_ids[io_name]
@@ -74,6 +75,7 @@ class MechanisticBenchmarkRunner:
                 corr_hits += 1 if corr_ok else 0
                 per_prompt.append({
                     "subject": subj, "io": io_name,
+                    "pool_index": entry["pool_index"],
                     "clean_top1": clean_base["top1"],
                     "clean_correct": clean_ok,
                     "corrupted_top1": corr_base["top1"],
@@ -81,26 +83,31 @@ class MechanisticBenchmarkRunner:
                 })
             accuracy = clean_hits / len(pairs)
             robustness = corr_hits / len(pairs)
-            return {
-                "benchmark_id": benchmark_id,
-                "status": "completed",
-                "provenance": "live",
-                # Attested here: accuracy/robustness were computed from the
-                # per-prompt runs this function just executed above.
-                "attested": True,
-                "field_provenance": field_map(
-                    ("benchmark_id", "status", "accuracy",
-                     "robustness_score", "eval_samples", "per_prompt"),
-                    "live",
-                ),
-                "method": ("clean top-1 agreement plus corrupted-variant "
-                           "top-1 agreement over a fixed IOI prompt panel"),
-                "model_id": "gpt2-small",
-                "accuracy": round(accuracy, 4),
-                "robustness_score": round(robustness, 4),
-                "eval_samples": len(pairs),
-                "per_prompt": per_prompt,
-            }
+            from backend.core.provenance import attest_measurement
+            from backend.services import gpt2_engine as _engine
+            return attest_measurement(
+                {
+                    "benchmark_id": benchmark_id,
+                    "status": "completed",
+                    "field_provenance": field_map(
+                        ("benchmark_id", "status", "accuracy",
+                         "robustness_score", "eval_samples", "per_prompt"),
+                        "live",
+                    ),
+                    "method": ("clean top-1 agreement plus corrupted-variant "
+                               "top-1 agreement over a fixed IOI prompt panel"),
+                    "model_id": "gpt2-small",
+                    "accuracy": round(accuracy, 4),
+                    "robustness_score": round(robustness, 4),
+                    "eval_samples": len(pairs),
+                    "per_prompt": per_prompt,
+                },
+                model_loaded="gpt2-small",
+                model_requested="gpt2-small",
+                model_content_hash=_engine.weights_fingerprint(),
+                input_fields=["per_prompt"],
+                output_fields=["accuracy", "robustness_score"],
+            )
         except lm.LiveUnavailable as exc:
             return {
                 "benchmark_id": benchmark_id,

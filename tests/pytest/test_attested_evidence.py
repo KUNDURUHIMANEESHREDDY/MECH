@@ -7,6 +7,9 @@ wrapper boundary (dispatcher._mark), policy predicates
 """
 import os
 import sys
+import tempfile
+
+import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if REPO_ROOT not in sys.path:
@@ -18,19 +21,59 @@ from backend.core.provenance import (  # noqa: E402
     attest_measurement,
     pass_through,
     withhold,
+    reset_trusted_key_ids_cache,
 )
+
+# Generate a test signing key. The file is created once at import, but the
+# environment is pointed at it per-test (see `_test_keys`): assigning
+# `os.environ` here would leak into every other test module in the session,
+# and whichever module was imported last would decide trust for all of
+# them. Signing uses this key explicitly; trust must resolve to it too.
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+_key = Ed25519PrivateKey.generate()
+_seed = _key.private_bytes(
+    serialization.Encoding.Raw,
+    serialization.PrivateFormat.Raw,
+    serialization.NoEncryption(),
+)
+_key_file = tempfile.NamedTemporaryFile(suffix=".key", delete=False)
+_key_file.write(_seed)
+_key_file.close()
+_KEY_PATH = _key_file.name
+
+
+@pytest.fixture(autouse=True)
+def _test_keys(monkeypatch):
+    monkeypatch.setenv("MECH_TRUSTED_SIGNING_KEY_PATH", _KEY_PATH)
+    monkeypatch.setenv("MECH_SIGNING_KEY_PATH", _KEY_PATH)
+    reset_trusted_key_ids_cache()
+    yield
+    reset_trusted_key_ids_cache()
 
 
 def _eligible(**overrides):
-    payload = {"status": "completed", "provenance": "live",
-               "attested": True, "validation_eligible": True,
-               "publication_eligible": True,
-               "measurement_record": {
-                   "model_identity": {"name": "gpt2", "content_hash": "abcd1234"},
-                   "input_commitment": "input123",
-                   "output_commitment": "output123",
-                   "execution_context": {"timestamp": 1234567890.0, "measurement_boundary_id": "boundary123"},
-               }}
+    # Create a properly attested payload using attest_measurement.
+    # The content hash stands in for a weight-derived fingerprint (the
+    # measurement layer supplies the real one); it must NOT be
+    # name-derived, which verification rejects.
+    base = {"status": "completed",
+            "validation_eligible": True,
+            "publication_eligible": True}
+    attested = attest_measurement(
+        base,
+        model_loaded="gpt2",
+        model_content_hash="sha256:test-weight-fingerprint",
+        signing_key=_KEY_PATH
+    )
+    payload = {
+        "status": "completed",
+        "provenance": "live",
+        "attested": True,
+        "validation_eligible": True,
+        "publication_eligible": True,
+        "measurement_record": attested["measurement_record"],
+    }
     payload.update(overrides)
     return payload
 
@@ -113,8 +156,24 @@ def test_validation_reproduction_gate_require_attestation():
     valid = _eligible(validated=True)
     assert pol.validation_is_live(valid) is True
     assert pol.validation_is_live(_eligible(validated=True, attested=False)) is False
-    assert pol.reproduction_is_live(_eligible(mock_mode=False)) == \
-        _eligible(mock_mode=False)
+    
+    # reproduction_is_live returns the record if live, {} otherwise.
+    # Compare without the timestamp, signature, and boundary_id since attest_measurement creates new ones each call.
+    repro_result = pol.reproduction_is_live(_eligible(mock_mode=False))
+    expected = _eligible(mock_mode=False)
+    # Remove timestamps, signatures, and boundary_ids for comparison
+    def remove_variable_fields(d):
+        if isinstance(d, dict):
+            return {k: remove_variable_fields(v) for k, v in d.items() 
+                    if k not in ("timestamp", "signature", "measurement_boundary_id")}
+        elif isinstance(d, list):
+            return [remove_variable_fields(v) for v in d]
+        else:
+            return d
+    
+    assert remove_variable_fields(repro_result) == remove_variable_fields(expected), \
+        "reproduction_is_live should return the record when live"
+    
     assert pol.reproduction_is_live(_eligible(mock_mode=False, attested=False)) == {}
     assert pol.gate_is_live(_eligible(passed=True)) is True
     assert pol.gate_is_live(_eligible(passed=True, attested=False)) is False
@@ -131,18 +190,24 @@ def _executor_step():
 
 
 def _discover_step(attested=True):
-    result = {"status": "completed", "provenance": "live",
+    result = {"status": "completed",
               "validation_eligible": True, "publication_eligible": True,
               "discovery_id": "d1", "result": {"delta": 0.0146}}
     if attested:
+        # Use attest_measurement to create a properly signed record.
+        # Start with a clean dict without provenance (attest_measurement adds it).
+        # The content hash stands in for a weight-derived fingerprint.
+        base = dict(result, model_loaded="gpt2")
+        attested_result = attest_measurement(
+            base,
+            model_loaded="gpt2",
+            model_content_hash="sha256:test-weight-fingerprint",
+            signing_key=_KEY_PATH
+        )
+        # attest_measurement mutates and returns the same dict
         result["attested"] = True
-        # Add minimal valid measurement_record to satisfy _is_attested
-        result["measurement_record"] = {
-            "model_identity": {"name": "gpt2", "content_hash": "abcd1234"},
-            "input_commitment": "input123",
-            "output_commitment": "output123",
-            "execution_context": {"timestamp": 1234567890.0, "measurement_boundary_id": "boundary123"},
-        }
+        result["provenance"] = "live"
+        result["measurement_record"] = attested_result["measurement_record"]
         step_attested = True
     else:
         step_attested = False
