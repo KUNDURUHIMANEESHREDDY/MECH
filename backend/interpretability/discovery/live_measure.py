@@ -14,6 +14,7 @@ intervention twice in one process lifetime.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
@@ -58,6 +59,60 @@ def dims() -> Tuple[int, int, int]:
     n_layers = int(engine._model.config.n_layer)
     n_heads = int(engine._model.config.n_head)
     return n_layers, n_heads, int(engine._model.config.n_embd // n_heads)
+
+
+#: Smallest clean-minus-corrupted gap that may be divided by.
+#:
+#: Every normalised effect in this module divides the measured effect by
+#: `clean_base - corrupted_base`. That denominator is the size of the effect
+#: being measured, so when the two prompts barely differ the quotient is
+#: dominated by rounding rather than by anything the model did.
+#:
+#: Measured: a degenerate pair -- the same token on both sides -- gives
+#: `logit_diff` 0.0 on both sides, so the gap is exactly 0.0. Normalising by
+#: it produces `inf`, the most confident-looking number this module can emit,
+#: from a prompt that measured nothing. Nothing guarded it; `denom` was
+#: computed and divided.
+#:
+#: The floor is 0.01, not "anything non-zero", and that number is derived
+#: rather than picked. A gap below 0.01 amplifies an effect of order 1 into a
+#: quotient above 100, which is larger than the clean-corrupted gap it claims
+#: to normalise -- the number stops describing the measurement. An earlier
+#: draft used 1e-6 with `>=`, and accepted exactly 1e-6: the quotient was
+#: 1e6, which is the pathology this constant exists to prevent.
+MIN_DENOMINATOR = 0.01
+
+
+def denominator_is_usable(denom: float) -> bool:
+    """Whether `denom` is large enough to normalise an effect by.
+
+    False for zero, for a near-zero gap, and for anything that is not a finite
+    number. Callers must treat False as "report the measurement as
+    unavailable", never as "report a normalised effect".
+    """
+    try:
+        value = float(denom)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(value):
+        return False
+    return abs(value) >= MIN_DENOMINATOR
+
+
+def normalise_effect(effect: float, denom: float) -> Optional[float]:
+    """`effect / denom`, or None when the denominator cannot carry it.
+
+    Returning None rather than raising: the caller is assembling a report, and
+    a refusal it can render as "unavailable" is more useful than an exception
+    it has to catch. Returning `inf` is not an option -- it reads as the
+    strongest possible result.
+    """
+    if not denominator_is_usable(denom):
+        return None
+    value = float(effect) / float(denom)
+    if not math.isfinite(value):
+        return None
+    return value
 
 
 def single_token_names(names: List[str]) -> Dict[str, Optional[int]]:

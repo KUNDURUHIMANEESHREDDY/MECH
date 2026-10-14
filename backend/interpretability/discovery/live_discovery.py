@@ -22,13 +22,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
-import uuid
 from statistics import mean
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.agents.evidence_policy import field_map
-from backend.core.provenance import set_evidence_level, _MEASUREMENT_BOUNDARY_ID
+from backend.core.provenance import attest_measurement
 
 from . import live_measure as lm
 
@@ -55,6 +53,13 @@ MIN_PROMPTS_FOR_VALIDATION = 10
 #: prompts, and two was chosen to keep a run affordable. Two observations is
 #: enough to compute a mean and not enough to support a claim about it.
 MIN_PROMPTS_FOR_INTERACTION = 5
+
+#: Number of held-out prompts used for validation. The validation panel is
+#: allocated from pool entries discovery did not use (see
+#: `_allocate_validation_panel`), never by fixed offset: with a cyclic
+#: pool, an offset that once meant "held out" wraps into the discovery
+#: range as soon as the discovery count grows.
+HELD_OUT_PROMPTS = 3
 
 
 def _discovery_id(hypothesis_statement: str, prompts: List[Dict[str, Any]],
@@ -170,14 +175,100 @@ def recall(discovery_id: str) -> Optional[Dict[str, Any]]:
     return dict(result) if isinstance(result, dict) else None
 
 
-def prompt_panel(n_prompts: int, offset: int = 0) -> List[Tuple[str, str]]:
-    """Deterministic ordered subject/IO name pairs (no randomness)."""
+def prompt_panel(n_prompts: int, offset: int = 0) -> List[Dict[str, Any]]:
+    """Deterministic ordered subject/IO name pairs with their pool indices.
+
+    Returns a list of dicts with keys: "subject", "io", "pool_index".
+    This makes panel composition auditable and enables disjointness checks.
+    """
     if n_prompts <= 0:
         return []
     panel = []
+    pool_size = len(PAIR_POOL)
     for i in range(n_prompts):
-        panel.append(PAIR_POOL[(offset + i) % len(PAIR_POOL)])
+        pool_index = (offset + i) % pool_size
+        subj, io = PAIR_POOL[pool_index]
+        panel.append({"subject": subj, "io": io, "pool_index": pool_index})
     return panel
+
+
+def _allocate_panel(used_indices: object, n: int) -> Optional[List[Dict[str, Any]]]:
+    """First consecutive run of `n` pool entries none of which is used.
+
+    `used_indices` is the set of `pool_index` values already taken by
+    earlier panels. Scanning pool order keeps allocation deterministic
+    across processes. Returns None when no disjoint run of the requested
+    size fits — the caller must then fail closed (emit no panel), never
+    emit an overlapping one. Non-integer entries (including bools) are
+    not valid indices and are ignored.
+    """
+    if not isinstance(used_indices, (set, frozenset)) or n <= 0:
+        return None
+    used = {i for i in used_indices
+            if isinstance(i, int) and not isinstance(i, bool)}
+    pool_size = len(PAIR_POOL)
+    for start in range(pool_size):
+        candidate = [(start + i) % pool_size for i in range(n)]
+        if all(c not in used for c in candidate):
+            return [
+                {"subject": PAIR_POOL[c][0], "io": PAIR_POOL[c][1],
+                 "pool_index": c}
+                for c in candidate
+            ]
+    return None
+
+
+def _panel_indices(panel: object) -> Optional[set]:
+    """Integer `pool_index` set for a panel, or None if unverifiable."""
+    if not isinstance(panel, list) or not panel:
+        return None
+    indices = set()
+    for entry in panel:
+        if not isinstance(entry, dict):
+            return None
+        idx = entry.get("pool_index")
+        if not isinstance(idx, int) or isinstance(idx, bool):
+            return None
+        indices.add(idx)
+    return indices
+
+
+def pair_for_index(pool_index: int) -> Optional[Tuple[str, str]]:
+    """Canonical (subject, io) pair for a pool index, or None.
+
+    The single authority mapping indices to content. Validators use it
+    to bind a panel entry's recorded names to its claimed index, so a
+    forged entry cannot borrow a disjoint index while naming an
+    overlapping prompt.
+    """
+    if not isinstance(pool_index, int) or isinstance(pool_index, bool):
+        return None
+    if 0 <= pool_index < len(PAIR_POOL):
+        return PAIR_POOL[pool_index]
+    return None
+
+
+def _allocate_validation_panel(
+    discovery_panel: List[Dict[str, Any]],
+    n_held_out: int = HELD_OUT_PROMPTS,
+) -> Optional[List[Dict[str, Any]]]:
+    """Allocate a held-out panel disjoint from discovery, or None.
+
+    Scans the pool in order for the first run of `n_held_out` consecutive
+    entries none of which discovery used. Disjointness is decided by the
+    recorded `pool_index` sets — not by an offset convention — so a
+    discovery of any size gets a genuinely fresh panel or an explicit
+    refusal. When discovery already covers the pool (or leaves too few
+    consecutive free entries, e.g. 28 of 30 used with 3 required), there
+    is no disjoint panel to emit and this returns None instead of a
+    self-overlapping one; the validator then fails closed.
+    """
+    if not isinstance(discovery_panel, list) or n_held_out <= 0:
+        return None
+    used = _panel_indices(discovery_panel)
+    if used is None:
+        return None
+    return _allocate_panel(used, n_held_out)
 
 
 class LiveIOIDiscovery:
@@ -243,25 +334,63 @@ class LiveIOIDiscovery:
                 "IOI comparison tokens are not single vocabulary items: "
                 + ", ".join(missing))
         n_layers, n_heads, _ = lm.dims()
-        pairs = prompt_panel(max(1, n_prompts))
 
-        prompts = []
-        for subj, io_name in pairs:
-            clean = lm.clean_prompt(subj, io_name)
-            corr = lm.corrupted_prompt(subj, io_name)
-            io_id = token_ids[io_name]
-            subj_id = token_ids[subj]
-            assert io_id is not None and subj_id is not None
-            clean_base = lm.baseline(clean, io_id, subj_id)
-            corr_base = lm.baseline(corr, io_id, subj_id)
-            prompts.append({
-                "subject": subj, "io": io_name,
-                "clean": clean, "corrupted": corr,
-                "io_id": io_id, "subj_id": subj_id,
-                "clean_top1": clean_base["top1"],
-                "clean_diff": round(clean_base["logit_diff"], 4),
-                "corrupted_diff": round(corr_base["logit_diff"], 4),
-            })
+        # Discovery panel: starts at offset 0, uses n_prompts entries
+        discovery_panel = prompt_panel(max(1, n_prompts), offset=0)
+
+        def _measure_baselines(panel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """Clean/corrupted baselines for a panel's entries."""
+            measured = []
+            for panel_entry in panel:
+                subj = panel_entry["subject"]
+                io_name = panel_entry["io"]
+                clean = lm.clean_prompt(subj, io_name)
+                corr = lm.corrupted_prompt(subj, io_name)
+                io_id = token_ids[io_name]
+                subj_id = token_ids[subj]
+                assert io_id is not None and subj_id is not None
+                clean_base = lm.baseline(clean, io_id, subj_id)
+                corr_base = lm.baseline(corr, io_id, subj_id)
+                measured.append({
+                    "subject": subj, "io": io_name,
+                    "pool_index": panel_entry["pool_index"],
+                    "clean": clean, "corrupted": corr,
+                    "io_id": io_id, "subj_id": subj_id,
+                    "clean_top1": clean_base["top1"],
+                    "clean_diff": round(clean_base["logit_diff"], 4),
+                    "corrupted_diff": round(corr_base["logit_diff"], 4),
+                })
+            return measured
+
+        prompts = _measure_baselines(discovery_panel)
+
+        # Interaction (tuning) panel: a disjoint panel for the pairwise
+        # edge stage, allocated from pool entries neither discovery nor
+        # validation uses. Estimating interactions on discovery prompts
+        # would carry the same selection bias the held-out requirement
+        # exists to prevent. When no disjoint panel fits (discovery
+        # already covers the pool), fall back to the discovery prefix —
+        # the pre-existing behavior — and record what was actually used
+        # in `interaction_panel` so the manifest stays honest.
+        validation_panel = _allocate_validation_panel(discovery_panel)
+        _used_for_interaction = set(_panel_indices(discovery_panel) or set())
+        if validation_panel is not None:
+            _used_for_interaction |= set(_panel_indices(validation_panel) or set())
+        interaction_panel = _allocate_panel(
+            _used_for_interaction, max(1, n_interaction_prompts))
+        if interaction_panel is not None:
+            pair_source = _measure_baselines(interaction_panel)
+        else:
+            # No disjoint tuning panel fits: fall back to the discovery
+            # prefix (the pre-existing behavior) and record those
+            # identifiers, so the manifest shows what was measured.
+            pair_source = prompts[:max(1, min(n_interaction_prompts,
+                                              len(prompts)))]
+            interaction_panel = [
+                {"subject": p["subject"], "io": p["io"],
+                 "pool_index": p["pool_index"]}
+                for p in pair_source
+            ]
 
         # Stage A: full-head screen on the first prompt.
         screen = prompts[0]
@@ -303,10 +432,19 @@ class LiveIOIDiscovery:
         ]
 
         # Stage D: pairwise interaction edges (earlier layer -> later layer).
+        # Measured on the interaction panel (`pair_source`), not on the
+        # discovery prompts: reusing discovery deltas here would estimate
+        # interactions on the same examples that selected the heads.
         edge_pool = [cand for cand, _, _ in scored[:EDGE_PAIR_HEADS]]
-        pair_prompts = prompts[:max(1, min(n_interaction_prompts, len(prompts)))]
-        singles: Dict[Tuple[int, int], List[float]] = {
-            cand: verified[cand][:len(pair_prompts)] for cand in edge_pool}
+        pair_prompts = pair_source
+        singles: Dict[Tuple[int, int], List[float]] = {}
+        for cand in edge_pool:
+            cand_deltas = []
+            for prompt in pair_prompts:
+                patched = lm.ablate(prompt["clean"], prompt["io_id"],
+                                     prompt["subj_id"], {cand})
+                cand_deltas.append(patched - prompt["clean_diff"])
+            singles[cand] = cand_deltas
         edges = []
         unresolved = []
         for i, first in enumerate(edge_pool):
@@ -361,6 +499,20 @@ class LiveIOIDiscovery:
         disc_id = _discovery_id(hypothesis_statement, prompts, self.model_id)
         mean_faithfulness = round(mean(faithfulness), 4) if faithfulness else 0.0
         adequacy = _adequacy(len(prompts), len(pair_prompts), mean_faithfulness)
+        if validation_panel is None:
+            # No disjoint held-out panel exists for this discovery size,
+            # so no validation decision can ever be supported, regardless
+            # of prompt counts. Say so explicitly rather than leaving
+            # count-derived eligibility flags asserting the opposite.
+            adequacy["validation_eligible"] = False
+            adequacy["publication_eligible"] = False
+            adequacy["ineligible_because"] = (
+                (adequacy["ineligible_because"] or []) + [
+                    f"no disjoint {HELD_OUT_PROMPTS}-prompt validation "
+                    f"panel fits after {len(prompts)} discovery prompts "
+                    f"in a pool of {len(PAIR_POOL)}"
+                ]
+            )
 
         # Evidence level: INTERVENTIONAL (causal intervention via ablation/injection)
         # Upgraded to CAUSALLY_VALIDATED if validation-eligible
@@ -371,36 +523,16 @@ class LiveIOIDiscovery:
         result = {
             "discovery_id": disc_id,
             "status": "completed",
-            "provenance": "live",
             # Attested here because this module ran the measurements above:
             # per-prompt capture/inject on live weights, not a relabel of
             # someone else's numbers. Wrappers must propagate this, never
-            # invent it.
-            "attested": True,
-            # Cryptographically bound measurement record:
-            "measurement_record": {
-                "model_identity": {"name": self.model_id, "content_hash": hashlib.sha256(self.model_id.encode()).hexdigest()[:32]},
-                "input_commitment": "ioi_discovery_circuit",
-                "output_commitment": hashlib.sha256(json.dumps({
-                    "discovery_id": disc_id,
-                    "heads": [lm.head_label(layer, head) for layer, head in circuit],
-                    "head_effects": head_effects,
-                    "edges": edges,
-                    "unresolved_interactions": unresolved,
-                    "faithfulness": mean_faithfulness,
-                    "completeness": round(mean(completeness), 4) if completeness else 0.0,
-                    "edges": edges,
-                }, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()[:32],
-                "execution_context": {
-                    "timestamp": time.time(),
-                    "measurement_boundary_id": _MEASUREMENT_BOUNDARY_ID,
-                },
-            },
+            # invent it. attest_measurement will set provenance and attested.
             "field_provenance": field_map(
                 ("status", "discovery_id", "method", "model_id",
                  "n_prompts", "heads", "head_effects", "edges",
                  "unresolved_interactions", "faithfulness", "completeness",
-                 "baselines"),
+                 "baselines", "discovery_panel", "validation_panel",
+                 "interaction_panel"),
                 "live",
             ),
             **adequacy,
@@ -415,6 +547,7 @@ class LiveIOIDiscovery:
             "completeness": round(mean(completeness), 4) if completeness else 0.0,
             "per_prompt_recovery": [
                 {"subject": prompt["subject"], "io": prompt["io"],
+                 "pool_index": prompt["pool_index"],
                  "faithfulness": round(faith, 4), "completeness": round(comp, 4)}
                 for prompt, faith, comp in zip(prompts, faithfulness, completeness)
             ],
@@ -422,6 +555,41 @@ class LiveIOIDiscovery:
             "discovery_provenance": "live",
             "synthetic_fields": [],
             "evidence_level": evidence_level,
+            # Panel composition for disjointness verification. Both the
+            # validation and the interaction (tuning) panels are
+            # allocated, not offset-derived: when no disjoint panel fits
+            # (discovery already covers the pool), validation is None and
+            # validation fails closed rather than remeasuring discovery
+            # prompts under a held-out label. interaction_panel records
+            # the prompts the edge stage actually measured — the
+            # allocated panel, or the discovery prefix it fell back to.
+            "discovery_panel": discovery_panel,
+            "validation_panel": validation_panel,
+            "interaction_panel": interaction_panel,
         }
+
+        # Attest the discovery measurement: binds model, inputs, outputs, execution context
+        # attest_measurement will set provenance="live" and attested=True.
+        #
+        # The model fingerprint comes from the engine weights this run
+        # actually measured through (lm runs every forward pass on
+        # backend.services.gpt2_engine's loaded model), not from a model
+        # name and not from a second adapter copy: fingerprinting weights
+        # other than the measured ones would bind the wrong artifact.
+        # Commitments cover retained fields only, so recomputation at the
+        # policy boundary sees exactly what creation hashed.
+        from backend.services import gpt2_engine as _engine
+
+        result = attest_measurement(
+            result,
+            model_loaded=self.model_id,
+            model_requested=self.model_id,
+            model_content_hash=_engine.weights_fingerprint(),
+            input_fields=["baselines", "discovery_panel",
+                          "validation_panel", "interaction_panel"],
+            output_fields=["heads", "head_effects", "edges",
+                           "unresolved_interactions", "faithfulness",
+                           "completeness"],
+        )
         remember(result)
         return result
