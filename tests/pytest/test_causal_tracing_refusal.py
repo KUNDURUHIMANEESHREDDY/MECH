@@ -32,6 +32,8 @@ wrong test -- the honest refusal is the correct behaviour today.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from backend.interpretability.causal.causal_tracing import CausalTracingEngine
@@ -40,13 +42,43 @@ CLEAN = "The capital of France is"
 CORRUPTED = "The capital of Rome is"
 
 
+def _engine_is_unimplemented() -> bool:
+    """Whether causal tracing is still the deliberately-unimplemented stub.
+
+    Read from the module's own docstring, the same way
+    `test_experiment_not_executed.py` reads its capability state. When someone
+    replaces this module with a real ablation sweep the flag flips and the
+    tests below stop demanding a synthetic curve.
+    """
+    return "NOT IMPLEMENTED" in (inspect.getdoc(
+        __import__("backend.interpretability.causal.causal_tracing",
+                   fromlist=["x"])) or "")
+
+
+#: Applied to every assertion that only makes sense while the engine refuses.
+#:
+#: Without this, implementing the module correctly turns the suite red. That
+#: is the failure this guards: a test named "the synthesised curve is not an
+#: ablation sweep" would fail the day a real ablation sweep lands, and the
+#: person who did the work would be pushed to delete the test rather than to
+#: trust it -- which is precisely backwards. An implementation-specific
+#: synthetic curve must never become a permanent scientific invariant.
+requires_unimplemented = pytest.mark.skipif(
+    not _engine_is_unimplemented(),
+    reason="causal tracing is implemented; the refusal and synthetic-curve "
+           "assertions no longer apply. `implemented_causal_effect_is_a_real_"
+           "ablation_sweep` takes over.",
+)
+
+
 @pytest.fixture
 def trace():
     return CausalTracingEngine().trace_causal_effect(CLEAN, CORRUPTED)
 
 
-# ── the refusal itself ─────────────────────────────────────────────────
+# â”€â”€ the refusal itself â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+@requires_unimplemented
 def test_an_unimplemented_engine_refuses_rather_than_reporting_success(trace):
     """The headline verdict must be a refusal.
 
@@ -64,6 +96,7 @@ def test_an_unimplemented_engine_refuses_rather_than_reporting_success(trace):
     assert trace["reason"], "a refusal must say why"
 
 
+@requires_unimplemented
 def test_the_response_does_not_claim_to_have_run_the_supplied_prompts(trace):
     """Echoing the prompts back must not read as having run them.
 
@@ -83,6 +116,7 @@ def test_the_response_does_not_claim_to_have_run_the_supplied_prompts(trace):
     )
 
 
+@requires_unimplemented
 def test_the_synthesised_curve_is_not_an_ablation_sweep(trace):
     """The layer effects must match the documented closed form, not the model.
 
@@ -102,8 +136,9 @@ def test_the_synthesised_curve_is_not_an_ablation_sweep(trace):
         )
 
 
-# ── the actual defect: unmarked fabricated numbers ─────────────────────
+# â”€â”€ the actual defect: unmarked fabricated numbers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+@requires_unimplemented
 def test_every_unmeasured_number_is_marked_reference(trace):
     """No synthesised value may reach the caller unmarked.
 
@@ -140,6 +175,7 @@ def test_every_unmeasured_number_is_marked_reference(trace):
     )
 
 
+@requires_unimplemented
 def test_the_headline_numbers_are_not_asserted_as_facts(trace):
     """A synthesised headline must not read as a finding.
 
@@ -163,6 +199,7 @@ def test_the_headline_numbers_are_not_asserted_as_facts(trace):
         )
 
 
+@requires_unimplemented
 def test_the_declared_maximum_agrees_with_the_returned_curve_or_is_marked(trace):
     """If the headline is retained, it must at least match what it summarises.
 
@@ -185,4 +222,81 @@ def test_the_declared_maximum_agrees_with_the_returned_curve_or_is_marked(trace)
     ), (
         f"max_indirect_effect is {trace['max_indirect_effect']} but the "
         f"curve peaks at {derived['indirect_effect']}"
+    )
+
+# -- the implemented state ----------------------------------------------
+#
+# The refusal tests above are skipped once the engine is real. That must not
+# leave the file asserting nothing, or the moment someone implements causal
+# tracing this file quietly stops contributing. The tests below take over.
+
+
+@pytest.mark.skipif(
+    _engine_is_unimplemented(),
+    reason="causal tracing is still the unimplemented stub; the assertions "
+           "that describe a real ablation sweep do not apply yet",
+)
+def test_implemented_causal_effect_is_a_real_ablation_sweep(trace):
+    """Once implemented, the response must describe a measurement.
+
+    Deliberately written as the inverse of the refusal contract rather than
+    as a check for one particular implementation: whatever the method does
+    internally, the numbers it returns must be marked as measured rather than
+    as reference, and must not carry the closed-form shape the stub used.
+    """
+    assert trace.get("trace_measured") is True, (
+        f"the engine is implemented but reports trace_measured="
+        f"{trace.get('trace_measured')!r}"
+    )
+
+    effects = trace.get("layer_effects") or []
+    assert effects, "a real sweep returned no layers"
+
+    measured = {
+        str(k): v for k, v in trace.get("layer_effects_field_provenance", {}).items()
+    }
+    unmarked = [e for e in effects
+                if measured.get(str(e.get("layer"))) == "reference"]
+    assert not unmarked, (
+        f"layers {len(unmarked)} of {len(effects)} are still marked "
+        f"'reference' after implementation; an unimplemented marker left in "
+        f"place would make real measurements look synthetic"
+    )
+
+    # The stub's closed form is a fixed expression; a real sweep is not.
+    stub_shape = sum(
+        1 for e in effects
+        if abs(float(e["indirect_effect"]) - round(
+            0.12 + (0.78 if e["layer"] in (8, 9) else 0.05 * (e["layer"] % 3)), 3
+        )) < 1e-9
+    )
+    assert stub_shape < len(effects), (
+        f"{stub_shape} of {len(effects)} layers still match the stub's "
+        f"closed-form expression; this looks like the synthetic curve with a "
+        f"new label on it"
+    )
+
+
+@pytest.mark.skipif(
+    _engine_is_unimplemented(),
+    reason="causal tracing is still the unimplemented stub",
+)
+def test_an_implemented_engine_still_labels_provenance_per_value(trace):
+    """The provenance discipline outlives the stub.
+
+    This was the defect this file found: `max_causal_layer` and
+    `max_indirect_effect` came back bare while `layer_effects` was marked
+    "reference". An implementation must not reintroduce it by assuming that
+    measured values no longer need saying so.
+    """
+    fp = trace.get("field_provenance") or {}
+    numeric = {
+        k for k, v in trace.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
+    covered = set(fp) | {
+        k for k in trace if k.endswith("_field_provenance")
+    }
+    assert not (numeric - covered), (
+        f"numeric fields returned without provenance: {sorted(numeric - covered)}"
     )

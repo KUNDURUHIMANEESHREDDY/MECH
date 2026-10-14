@@ -76,8 +76,28 @@ def test_patch_head_output_zeroes_exactly_one_head_slice():
     handle = adapter._model.transformer.h[layer].attn.c_proj.register_forward_hook(
         lambda m, i, o: baseline.__setitem__("heads", i[0].detach().clone())
     )
-    with torch.no_grad():
-        adapter._model(**inputs)
+    # The baseline must be captured under the *same* attention kernel as the
+    # patched run below, or the "every other head is untouched" comparison is
+    # really comparing two attention implementations.
+    #
+    # `patch_head_output` forces `attn_implementation="eager"` so that a
+    # captured head vector and the tensor patched back into it come from one
+    # kernel -- eager and sdpa over identical weights disagree at ~4e-04, which
+    # is enough to make an untouched head look changed. A bare
+    # `model(**inputs)` runs sdpa, which is what this line used to do, and the
+    # test then failed for a reason that had nothing to do with head slicing.
+    #
+    # Eager is also required for the *capture* here to be the quantity under
+    # test; see test_patch_idempotence.py for the measurements.
+    previous_impl = getattr(adapter._model.config, "_attn_implementation", None)
+    if previous_impl != "eager":
+        adapter._model.config._attn_implementation = "eager"
+    try:
+        with torch.no_grad():
+            adapter._model(**inputs)
+    finally:
+        if previous_impl is not None:
+            adapter._model.config._attn_implementation = previous_impl
     handle.remove()
 
     observed = {}
