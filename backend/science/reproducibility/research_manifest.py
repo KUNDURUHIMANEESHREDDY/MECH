@@ -98,6 +98,7 @@ class ResearchManifestEngine:
         audit_log: List[Any],
         reproducibility_score: float,
         verdict: str = "",
+        data_manifest: Optional[Any] = None,
     ) -> ResearchManifest:
         """Assemble artifacts into a Merkle-root manifest.
 
@@ -107,6 +108,9 @@ class ResearchManifestEngine:
         which was never signed, was still labelled VALIDATED. The label was an
         assertion the pipeline made about itself rather than a summary of
         anything it measured.
+
+        If `data_manifest` is provided, it is included in the Merkle root and
+        recorded in `component_hashes`.
         """
 
         # 1. Compute individual hashes
@@ -114,19 +118,26 @@ class ResearchManifestEngine:
         cert_hash = self._compute_hash(certificate) # assumed dict or asdicted
         audit_hash = self._compute_hash(audit_log)
 
+        component_hashes = {
+            "snapshot": snapshot_hash,
+            "certificate": cert_hash,
+            "audit_log": audit_hash
+        }
+
+        # Include data manifest if provided
+        if data_manifest is not None:
+            data_hash = self._compute_hash(data_manifest)
+            component_hashes["data_manifest"] = data_hash
+
         # 2. Build Merkle-style root
-        # root = hash(snapshot_hash + cert_hash + audit_hash)
-        combined = f"{snapshot_hash}{cert_hash}{audit_hash}"
+        # root = hash of all component hashes in sorted key order for determinism
+        combined = "".join(component_hashes[k] for k in sorted(component_hashes.keys()))
         root_sha = hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
         return ResearchManifest(
             experiment_id=experiment_id,
             root_sha256=root_sha,
-            component_hashes={
-                "snapshot": snapshot_hash,
-                "certificate": cert_hash,
-                "audit_log": audit_hash
-            },
+            component_hashes=component_hashes,
             reproducibility_score=reproducibility_score,
             status=derive_manifest_status(
                 verdict=verdict,
@@ -181,20 +192,51 @@ class ResearchManifestEngine:
         return verify(manifest.root_sha256, manifest.signature,
                       public_key).to_dict()
 
-    def verify(self, manifest: ResearchManifest, snapshot_data: Any, cert_data: Any, audit_data: List[Any]) -> bool:
-        """Verifies the integrity of the entire research object."""
+    def verify(self, manifest: ResearchManifest, snapshot_data: Any, cert_data: Any, audit_data: List[Any], data_manifest_data: Optional[Any] = None) -> Dict[str, Any]:
+        """Verifies the integrity of the entire research object.
+
+        Returns a dict with individual component verification results and overall
+        status. Does not verify the cryptographic signature -- use
+        `verify_manifest_signature` for that.
+
+        Returns:
+            Dict with keys:
+                - "components_verified": bool (all component hashes match)
+                - "root_verified": bool (Merkle root matches)
+                - "component_results": Dict[str, bool] (per-component)
+                - "all_verified": bool (components + root)
+        """
         # Recalculate hashes
         s_hash = self._compute_hash(snapshot_data)
         c_hash = self._compute_hash(cert_data)
         a_hash = self._compute_hash(audit_data)
 
+        component_results = {}
+
         # Verify component hashes match manifest
-        if s_hash != manifest.component_hashes.get("snapshot"): return False
-        if c_hash != manifest.component_hashes.get("certificate"): return False
-        if a_hash != manifest.component_hashes.get("audit_log"): return False
+        component_results["snapshot"] = s_hash == manifest.component_hashes.get("snapshot")
+        component_results["certificate"] = c_hash == manifest.component_hashes.get("certificate")
+        component_results["audit_log"] = a_hash == manifest.component_hashes.get("audit_log")
+
+        # Verify data manifest if present
+        if data_manifest_data is not None:
+            d_hash = self._compute_hash(data_manifest_data)
+            component_results["data_manifest"] = d_hash == manifest.component_hashes.get("data_manifest")
+        elif "data_manifest" in manifest.component_hashes:
+            # Manifest expects a data manifest but none was provided for verification
+            component_results["data_manifest"] = False
+
+        components_verified = all(component_results.values())
 
         # Verify root
-        combined = f"{s_hash}{c_hash}{a_hash}"
+        expected_components = {k: v for k, v in manifest.component_hashes.items() if k in component_results}
+        combined = "".join(expected_components[k] for k in sorted(expected_components.keys()))
         root_sha = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+        root_verified = root_sha == manifest.root_sha256
 
-        return root_sha == manifest.root_sha256
+        return {
+            "components_verified": components_verified,
+            "root_verified": root_verified,
+            "component_results": component_results,
+            "all_verified": components_verified and root_verified,
+        }
