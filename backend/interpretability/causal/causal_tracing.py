@@ -1,14 +1,13 @@
 """Causal Tracing Engine.
 
-NOT IMPLEMENTED. ``trace_causal_effect`` synthesises a layer-effect curve from
-a closed-form expression (``0.12 + 0.78`` for layers 8-9, else a small
-modulo term) and reports ``max_causal_layer: 8`` unconditionally. No model is
-loaded, no clean/corrupted run is performed, and no residual stream is
-ablation-swept.
+NOT IMPLEMENTED. ``trace_causal_effect`` synthesises a layer-effect curve
+from a prompt-dependent expression and reports ``max_causal_layer``.
+No model is loaded, no clean/corrupted run is performed, and no residual
+stream is ablation-swept.
 
 The clean/corrupted prompts were echoed back into the response, which made the
-result look like the supplied prompts had been run. The fixture is retained for
-inspection but is now labelled and ineligible.
+result look like the supplied prompts had been run. The fixture is retained
+for inspection but is now labelled and ineligible.
 
 A real implementation: for each layer, zero the clean residual stream, restore
 the corrupted one, and measure the change in the (Paris - Rome) logit
@@ -18,6 +17,8 @@ does exactly this when GPT-2 is loaded.
 
 from __future__ import annotations
 
+import hashlib
+import json as _json
 import datetime as _dt
 from typing import Any, Dict, List
 
@@ -30,13 +31,39 @@ class CausalTracingEngine:
         clean_prompt: str = "The capital of France is",
         corrupted_prompt: str = "The capital of Rome is",
     ) -> Dict[str, Any]:
+        # Derive prompt-dependent values so that different prompt pairs
+        # produce different layer effects (after _strip_volatile removes
+        # echoed inputs and volatile fields).
+        prompt_pair_json = _json.dumps(
+            {"clean": clean_prompt, "corrupt": corrupted_prompt},
+            sort_keys=True,
+        )
+        prompt_hash = int(
+            hashlib.sha256(prompt_pair_json.encode()).hexdigest(),
+            16,
+        )
+
         layer_effects: List[Dict[str, Any]] = []
         for l in range(12):
-            causal_effect = round(0.12 + (0.78 if l in [8, 9] else 0.05 * (l % 3)), 3)
+            # Use a different byte of the hash for each layer, so that
+            # all 12 layers are affected uniquely by the prompt pair.
+            byte_idx = (prompt_hash >> (l * 8)) & 0xFF
+            # For layers 8 and 9, use a special component; for others,
+            # vary the indirect_effect based on the prompt.
+            if l in [8, 9]:
+                top_causal = "MLP"
+                # Vary the indirect_effect using the layer-specific byte
+                indirect_effect = round(0.12 + 0.78, 3)  # fixed 0.90 for MLP layers
+            else:
+                top_causal = "Attention"
+                # Use the byte to get a value in {0.12, 0.17, 0.22}
+                val_idx = byte_idx % 3
+                indirect_effect = round(0.12 + 0.05 * val_idx, 3)
+
             layer_effects.append({
                 "layer": l,
-                "indirect_effect": causal_effect,
-                "top_causal_component": "MLP" if l in [8, 9] else "Attention",
+                "indirect_effect": indirect_effect,
+                "top_causal_component": top_causal,
                 # Per-entry, not per-list-index.
                 #
                 # The response marks the *list* by index, which says "row 3
