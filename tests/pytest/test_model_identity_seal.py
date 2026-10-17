@@ -27,15 +27,20 @@ already invented -- for datasets, and never extended to checkpoints.
 
 What is red here, and why it stays red
 --------------------------------------
-`test_the_seal_cannot_be_forgotten` fails. Nine `PatchResult(...)` sites across
-three adapter classes still pass no fingerprint, so `model_fingerprint` is
-`None` and any two results can be compared without objection. Making that
-impossible requires populating all nine sites, and for the two non-GPT-2
-adapters it first requires giving *them* a fingerprint method. That is the
-correct next step and it is not a mechanical edit; it is left red rather than
-half-applied, because a required field with unpopulated constructors raises at
-runtime instead of being absent -- trading a silent gap for a crash is not an
-improvement.
+`test_the_seal_cannot_be_forgotten` fails. `PatchResult(...)` sites across three
+adapter classes still pass no fingerprint, so `model_fingerprint` is `None` and
+any two results can be compared without objection. Making that impossible
+requires populating every site, and for the two non-GPT-2 adapters it first
+requires giving *them* a fingerprint method. That is the correct next step and
+it is not a mechanical edit; it is left red rather than half-applied, because a
+required field with unpopulated constructors raises at runtime instead of being
+absent -- trading a silent gap for a crash is not an improvement.
+
+How many sites that is, is deliberately not written down here. This paragraph
+said "nine"; the census reported eight when it was last measured. A count in
+prose cannot notice when the code moves, and this one did not.
+`test_the_seal_cannot_be_forgotten` counts the offenders from the source on
+every run -- read the number there, and nowhere else.
 
 The controls below are the ones that are satisfiable now, and each is checked
 against a deliberately-broken twin so it cannot pass vacuously.
@@ -167,9 +172,10 @@ def test_patch_results_record_which_weights_they_were_measured_against(adapter):
 
     assert result.model_fingerprint == adapter.model_fingerprint(), (
         "PatchResult carries no model identity, so it cannot be distinguished "
-        "from a result measured under different weights. Nine construction "
-        "sites need populating across gpt2_adapter, hf_adapter and "
-        "transformer_lens_adapter."
+        "from a result measured under different weights. "
+        "test_the_seal_cannot_be_forgotten lists the construction sites that "
+        "still omit a fingerprint -- read the census there rather than a count "
+        "here."
     )
 
 

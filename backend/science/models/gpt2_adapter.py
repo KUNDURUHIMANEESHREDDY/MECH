@@ -239,6 +239,7 @@ class GPT2Adapter(ModelAdapter):
                         layer=layer, token_index=tok_idx, neuron_index=n_idx,
                         activation_value=round(float(vec[n_idx]), 4),
                         context_prompt=prompt,
+                        provenance="live",
                     ))
             return results
 
@@ -250,6 +251,7 @@ class GPT2Adapter(ModelAdapter):
                 activation_value=_mock_activation(layer, n, prompt),
                 context_prompt=prompt,
                 top_k_tokens=[{"token": " Paris", "prob": 0.82}, {"token": " France", "prob": 0.11}],
+                provenance="seeded",
             )
             for n in n_indices
         ]
@@ -610,7 +612,8 @@ class GPT2Adapter(ModelAdapter):
                     top_token_after=top_token_after,
                     layer=layer,
                     neuron_index=neuron_index,
-                    patch_value=patch_value
+                    patch_value=patch_value,
+                    provenance="live",
                 )
             finally:
                 handle.remove()
@@ -621,6 +624,7 @@ class GPT2Adapter(ModelAdapter):
             original_logit=original, patched_logit=patch_value, delta=round(patch_value - original, 4),
             top_token_before=" Paris", top_token_after=" France" if abs(patch_value - original) > 1.0 else " Paris",
             layer=layer, neuron_index=neuron_index, patch_value=patch_value,
+            provenance="seeded",
         )
 
     def capture_head_outputs(self, prompt: str) -> Dict[int, Dict[int, List[float]]]:
@@ -990,7 +994,8 @@ class GPT2Adapter(ModelAdapter):
                         top_token_after=top_token_after,
                         layer=layer,
                         neuron_index=head_index, # overloaded as head index
-                        patch_value=0.0 # overloaded as zero ablation
+                        patch_value=0.0, # overloaded as zero ablation
+                        provenance="live",
                     )
                 finally:
                     handle.remove()
@@ -1005,7 +1010,8 @@ class GPT2Adapter(ModelAdapter):
         return PatchResult(
             original_logit=0.82, patched_logit=0.45, delta=-0.37,
             top_token_before=" Paris", top_token_after=" France",
-            layer=layer, neuron_index=head_index, patch_value=0.0
+            layer=layer, neuron_index=head_index, patch_value=0.0,
+            provenance="seeded",
         )
 
     def run_isolated_circuit(self, prompt: str, head_list: List[str]) -> Dict[str, Any]:
@@ -1103,6 +1109,7 @@ class GPT2Adapter(ModelAdapter):
                 top5 = logits.topk(5)
                 result = {
                     "status": "ok",
+                    "provenance": "live",
                     "top_token": self._tokenizer.decode([top5.indices[0]]),
                     "top_tokens": [
                         {"token": self._tokenizer.decode([idx]), "logit": round(float(l), 3)}
@@ -1130,8 +1137,20 @@ class GPT2Adapter(ModelAdapter):
                 if previous_impl is not None:
                     config._attn_implementation = previous_impl
 
-        # Mock Path
-        return {"top_token": " Mary", "top_tokens": [{"token": " Mary", "logit": 3.2}]}
+        # Mock Path. A fixed fixture, not a measurement, and labelled as such.
+        # `status` is deliberately absent so that callers gating on
+        # `status == "ok"` -- `ioi_pipeline`'s isolated-circuit step does --
+        # refuse it instead of reporting it. Adding `status: "ok"` here would
+        # make that pipeline accept a fixture as a live isolated-circuit run.
+        return {
+            "top_token": " Mary",
+            "top_tokens": [{"token": " Mary", "logit": 3.2}],
+            "provenance": "seeded",
+            "measured": False,
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": "Fixed mock fixture; no weights were run. Not evidence.",
+        }
 
     def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:
         if not self.spec.mock_mode and self._model is not None:

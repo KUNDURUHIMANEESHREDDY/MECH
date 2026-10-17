@@ -20,6 +20,24 @@ class ActivationResult:
     activation_value: float
     context_prompt: str
     top_k_tokens: List[Dict[str, Any]] = field(default_factory=list)
+    #: Shape of the model that produced this result, read from the config that
+    #: was actually loaded rather than from the spec table. Optional because
+    #: only ``HFAdapterMixin`` records it, and ``None`` means the construction
+    #: site did not. A hardcoded head count is how a Llama-3 gets measured as a
+    #: 2B, so where the loaded value is available it is the one recorded.
+    num_layers: Optional[int] = None
+    num_heads: Optional[int] = None
+    d_model: Optional[int] = None
+    #: How this result was produced: ``"live"``, ``"seeded"``, or
+    #: ``"unavailable"``.
+    #:
+    #: ``None`` means the construction site did not record it -- the same
+    #: contract as ``PatchResult.model_fingerprint`` below, so an unrecorded
+    #: value is visibly absent rather than silently plausible. This exists
+    #: because ``GPT2Adapter``'s mock branch returns fixed tokens and
+    #: activations, and a caller holding only the result had no way to tell
+    #: those from measurements.
+    provenance: Optional[str] = None
 
 
 @dataclass
@@ -65,6 +83,10 @@ class PatchResult:
     #: checkpoints of one family agree on `layer` and `neuron_index` by
     #: construction, and every tensor-level check passes across a swap.
     model_fingerprint: Optional[str] = None
+    #: How this result was produced: ``"live"``, ``"seeded"``, or
+    #: ``"unavailable"``. ``None`` means the construction site did not record
+    #: it; see ``ActivationResult.provenance``.
+    provenance: Optional[str] = None
 
     def same_model_as(self, other: "PatchResult") -> Optional[bool]:
         """Whether two results may be compared. `None` if either is unsealed.
@@ -118,9 +140,21 @@ class ModelAdapter(ABC):
             self._model, self._tokenizer = self._manager.get_model_and_tokenizer(
                 self.spec.hf_repo_id
             )
-        except Exception:
-            # Graceful degradation: fall back to mock mode if weights unavailable
+        except Exception as exc:
+            # Graceful degradation: fall back to mock mode if weights unavailable.
+            #
+            # `simulated` is set alongside `mock_mode`, not replaced by it. The
+            # comment on `simulated` above says downstream provenance checks
+            # treat it as "not a measurement", and this path does fabricate its
+            # output -- flipping only `mock_mode` left an adapter that could not
+            # load its weights reporting `simulated is False`.
             self.spec = ModelSpec(**{**self.spec.__dict__, "mock_mode": True})
+            self.simulated = True
+            self.simulation_reason = (
+                f"Weights for {self.spec.hf_repo_id} could not be loaded "
+                f"({type(exc).__name__}: {exc}). This adapter returns its mock "
+                f"fixtures, not model output."
+            )
 
     @abstractmethod
     def get_activations(

@@ -753,3 +753,201 @@ def test_deepseek_architectures_are_not_claimed_to_be_one_family():
     assert len(variants) >= 2, (
         "DeepSeek has two distinct architectures here; collapsing them to one "
         "would attribute a measurement to the wrong shape")
+
+
+# ── The construction sites themselves ───────────────────────────────────
+#
+# Every check above reads source text, and that is how a defect survived them:
+# `get_activations` and `patch_activation` were certified by the presence of
+# strings like `_hidden` and `_ablated_forward`, while the calls those helpers
+# feed passed keywords `ActivationResult` and `PatchResult` do not accept. Both
+# methods raised `TypeError` on every live call, for all five families, and the
+# suite stayed green.
+#
+# A source check cannot see that. The source is not wrong about which helper it
+# calls; it is wrong about the shape of the value it builds. So these two tests
+# execute the sites instead of reading them.
+
+
+def _result_field_specs():
+    import dataclasses
+
+    from backend.science.models.adapter_base import (
+        ActivationResult,
+        PatchResult,
+    )
+
+    specs = {}
+    for name, cls in (("ActivationResult", ActivationResult),
+                      ("PatchResult", PatchResult)):
+        fields = dataclasses.fields(cls)
+        specs[name] = {
+            "all": [f.name for f in fields],
+            "required": [
+                f.name for f in fields
+                if f.default is dataclasses.MISSING
+                and f.default_factory is dataclasses.MISSING
+            ],
+        }
+    return specs
+
+
+def test_every_result_construction_site_matches_its_dataclass():
+    """An unknown keyword raises at runtime, not at review.
+
+    `get_activations` passed `num_layers`, `num_heads` and `d_model` to a
+    dataclass that had none of them, and omitted `context_prompt`;
+    `patch_activation` passed `patch_success` and `reason` while omitting
+    `original_logit`, `patched_logit` and `delta`. The first two are reached the
+    moment a family adapter has weights, and nothing executed them.
+
+    Mechanical rather than by eye, so it stays true as fields move.
+    """
+    specs = _result_field_specs()
+    models_dir = ROOT / "backend" / "science" / "models"
+
+    offenders = []
+    for path in sorted(models_dir.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = (getattr(node.func, "id", None)
+                    or getattr(node.func, "attr", None))
+            if name not in specs:
+                continue
+            if any(k.arg is None for k in node.keywords):
+                continue  # `**kwargs` cannot be checked statically
+
+            spec = specs[name]
+            keywords = {k.arg for k in node.keywords if k.arg is not None}
+            by_position = set(spec["all"][:len(node.args)])
+            unexpected = sorted(keywords - set(spec["all"]))
+            missing = sorted(set(spec["required"]) - keywords - by_position)
+            if unexpected or missing:
+                offenders.append(
+                    f"{path.relative_to(ROOT)}:{node.lineno} {name}"
+                    f" unexpected={unexpected} missing={missing}")
+
+    assert not offenders, (
+        "these construction sites raise TypeError on the live path:\n  "
+        + "\n  ".join(offenders))
+
+
+class _StubParameters:
+    """Enough of a module for `next(self._model.parameters()).device`."""
+
+    def __init__(self, torch):
+        self._torch = torch
+
+    def parameters(self):
+        return iter([self._torch.zeros(1)])
+
+
+class _StubOutput:
+    def __init__(self, logits):
+        self.logits = logits
+
+
+def _live_family_adapter(cls, variant, torch):
+    """A family adapter standing in for one with weights loaded.
+
+    `_FamilyAdapter` short-circuits every method on `spec.mock_mode`, so the
+    mixin is unreachable while that is true -- which is exactly why the suite
+    never ran these lines. Flipping it on the spec is what "weights are loaded"
+    means to the dispatch. The model is faked: the subject is the shape of the
+    result, and a real multi-gigabyte download would be testing something else.
+    """
+    from backend.science.models.adapter_base import ModelSpec
+
+    adapter = cls(variant=variant, mock_mode=True)
+    adapter.spec = ModelSpec(**{**adapter.spec.__dict__, "mock_mode": False})
+    adapter._model = _StubParameters(torch)
+    adapter._require_model = lambda: None
+    adapter._decode = lambda token_id: f"tok{token_id}"
+    return adapter
+
+
+@pytest.mark.parametrize("cls,variant,specs", FAMILIES)
+def test_get_activations_returns_typed_results_on_the_live_path(cls, variant,
+                                                               specs):
+    """The success path builds the declared type, not a TypeError."""
+    torch = pytest.importorskip("torch")
+    from backend.science.models.adapter_base import ActivationResult
+
+    adapter = _live_family_adapter(cls, variant, torch)
+    rows = torch.zeros(1, 4, 8)
+    adapter._hidden = lambda prompt, layer: rows
+
+    results = adapter.get_activations("hello", 0)
+
+    assert isinstance(results, list) and results, (
+        f"{cls.__name__}.get_activations returned {type(results).__name__}, "
+        f"which is not a list of results")
+    for result in results:
+        assert isinstance(result, ActivationResult)
+        # The loaded shape, which is the whole reason these fields are on the
+        # result: a spec-table head count measures a Llama-3 as a 2B.
+        assert (result.num_layers, result.num_heads, result.d_model) == (
+            adapter.spec.num_layers, adapter.spec.num_heads,
+            adapter.spec.d_model)
+        assert result.context_prompt == "hello", (
+            "the prompt the activation was read from is not recorded")
+        assert result.provenance == "live", (
+            "a measured activation must not be unlabelled")
+
+
+@pytest.mark.parametrize("cls,variant,specs", FAMILIES)
+def test_patch_activation_returns_a_typed_result_or_a_reasoned_refusal(
+        cls, variant, specs):
+    """Both branches, and the quantities the GPT-2 adapter defines.
+
+    `delta` is asserted against the two logits rather than against a literal,
+    because the invariant that makes a cross-family number meaningful is that
+    the same three quantities are defined the same way on both adapters.
+    """
+    torch = pytest.importorskip("torch")
+    from backend.science.models.adapter_base import PatchResult
+
+    # ── success path ────────────────────────────────────────────────────
+    adapter = _live_family_adapter(cls, variant, torch)
+    clean = torch.tensor([[[0.0, 5.0, 1.0]]])
+    patched = torch.tensor([[[0.0, 1.0, 9.0]]])
+    adapter._forward = lambda prompt, **kw: {"out": _StubOutput(clean)}
+    adapter._ablated_forward = lambda *a, **kw: patched
+
+    result = adapter.patch_activation("hello", 0, 1, 0.25)
+
+    assert isinstance(result, PatchResult), (
+        f"{cls.__name__}.patch_activation returned {type(result).__name__} "
+        f"instead of a result: {result!r}")
+    assert result.original_logit == 5.0, (
+        "original_logit must be the clean run's top logit")
+    assert result.patched_logit == 1.0, (
+        "patched_logit must be the same token's logit after the ablation")
+    assert result.delta == result.patched_logit - result.original_logit
+    assert result.top_token_before == "tok1"
+    assert result.top_token_after == "tok2"
+    assert result.patch_value == 0.25
+    assert result.provenance == "live"
+
+    # ── ablation-failed path ────────────────────────────────────────────
+    adapter = _live_family_adapter(cls, variant, torch)
+    adapter._forward = lambda prompt, **kw: {"out": _StubOutput(clean)}
+
+    def ablation_fails(*args, **kwargs):
+        raise RuntimeError("simulated failure in the ablation forward pass")
+
+    adapter._ablated_forward = ablation_fails
+    refusal = adapter.patch_activation("hello", 0, 1, 0.25)
+
+    assert not isinstance(refusal, PatchResult), (
+        "a failed ablation returned a well-formed PatchResult. With no measured "
+        "logits it can only report delta=0.0, which the GPT-2 adapter's own "
+        "docstring rejects: it is indistinguishable from an intervention that "
+        "genuinely had no effect.")
+    assert refusal["status"] == "unavailable"
+    assert refusal["measured"] is False
+    assert refusal["validation_eligible"] is False
+    assert "simulated failure" in refusal["reason"], (
+        "the refusal must carry why the ablation failed")

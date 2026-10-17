@@ -182,12 +182,14 @@ class HFAdapterMixin:
             ActivationResult(
                 layer=layer, token_index=int(position), neuron_index=int(n),
                 activation_value=round(float(rows[position, n]), 6),
+                context_prompt=prompt,
                 # Read from the config that was actually loaded, not from the
                 # table. A hardcoded head count is how a Llama-3 gets measured as
                 # a 2B.
                 num_layers=self.spec.num_layers,
                 num_heads=self.spec.num_heads,
                 d_model=self.spec.d_model,
+                provenance=LIVE,
             )
             for position in range(min(4, rows.shape[0]))
             for n in indices
@@ -304,22 +306,30 @@ class HFAdapterMixin:
             patched = None
 
         if patched is None:
-            return PatchResult(
-                patch_success=False,
-                top_token_before=clean_top, top_token_after=clean_top,
-                layer=layer, neuron_index=neuron_index, patch_value=patch_value,
-                reason=self._load_failure or "The ablation did not complete.",
-            )
+            # Not a `PatchResult`. The previous code built one with
+            # `top_token_before == top_token_after` and no measured logits --
+            # the same shape the GPT-2 adapter's docstring rejects, because a
+            # well-formed result whose delta says "no effect" is
+            # indistinguishable from an intervention that genuinely had none.
+            # A refusal that names the failure is the honest answer, and it is
+            # the shape every other unavailable path in this mixin returns.
+            return self._forward_error(prompt)
 
         patched_logits = patched[0, -1].float().to(device)
+        # The same three quantities, defined the same way as in the GPT-2
+        # adapter: the clean run's top logit, that same token's logit after the
+        # ablation, and their difference. Cross-model comparability rests on
+        # this being one definition and not two.
+        original_logit = float(clean_logits.max())
+        patched_logit = float(patched_logits[int(clean_logits.argmax())])
         return PatchResult(
-            # Success is measured as the top token changing, which is the same
-            # criterion the GPT-2 adapter uses.
-            patch_success=bool(patched_logits.argmax() != clean_logits.argmax()),
+            original_logit=original_logit,
+            patched_logit=patched_logit,
+            delta=patched_logit - original_logit,
             top_token_before=clean_top,
             top_token_after=self._decode(int(patched_logits.argmax())),
             layer=layer, neuron_index=neuron_index, patch_value=patch_value,
-            reason=None,
+            provenance=LIVE,
         )
 
     def get_residual_stream(self, prompt: str) -> Dict[str, Any]:
