@@ -23,20 +23,32 @@ class CampaignVectorEntry:
 
 
 class CampaignEmbeddingsEngine:
-    """Vector database index for campaign summaries allowing fast semantic retrieval."""
+    """Vector index over campaign summaries.
+
+    It does not perform semantic retrieval: the vectors are hashes (see
+    `_compute_mock_vector`), so `find_similar_campaigns` returns a stable
+    ordering, not a relevance measure.
+    """
 
     def __init__(self) -> None:
-        init_entry = CampaignVectorEntry(
-            campaign_id="camp_s6_ioi",
-            topic="Indirect Object Identification Circuit Discovery",
-            summary_text="Investigated IOI circuit in GPT-2 Small using SAE L8 and causal path patching.",
-            vector=[0.12, 0.85, 0.44, 0.92, 0.31, 0.78, 0.15, 0.64],
-            indexed_at=_dt.datetime.utcnow().isoformat() + "Z",
-        )
-        self.index: Dict[str, CampaignVectorEntry] = {init_entry.campaign_id: init_entry}
+        # Empty, not seeded. A `camp_s6_ioi` entry with a fixed vector and an
+        # invented IOI summary used to be installed here, and
+        # `MetaResearchEngine.run_closed_feedback_loop` defaults its
+        # `campaign_id` to that same id -- so a replay of a campaign that never
+        # ran found a record waiting for it.
+        self.index: Dict[str, CampaignVectorEntry] = {}
 
     def _compute_mock_vector(self, text: str) -> List[float]:
-        """Generates a deterministic 8-dimensional embedding from text."""
+        """A deterministic 8-dimensional vector derived from a character sum.
+
+        This is a hash, not an embedding. Nothing was trained and no text
+        encoder was run: two texts that mean the same thing produce unrelated
+        vectors, and two unrelated texts that share a character sum produce
+        near-identical ones. Cosine similarity between these vectors is
+        therefore not semantic similarity, and `find_similar_campaigns` marks
+        its scores accordingly rather than presenting them as retrieval
+        quality.
+        """
         seed = sum(ord(c) for c in text)
         return [round(math.sin(seed * (i + 1)) * 0.5 + 0.5, 4) for i in range(8)]
 
@@ -66,7 +78,19 @@ class CampaignEmbeddingsEngine:
                 "campaign_id": entry.campaign_id,
                 "topic": entry.topic,
                 "summary_text": entry.summary_text,
+                # Kept so the ordering stays reproducible, but it is a
+                # similarity between hash vectors, not between meanings.
                 "similarity_score": similarity,
+                "similarity_is_semantic": False,
+                "source": "mock_hash_vector",
+                "measured": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "reason": (
+                    "Cosine similarity over deterministic hash vectors "
+                    "(_compute_mock_vector). No embedding model was run, so "
+                    "this is not semantic similarity and not evidence."
+                ),
             })
 
         results.sort(key=lambda x: x["similarity_score"], reverse=True)

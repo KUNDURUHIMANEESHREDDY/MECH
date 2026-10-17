@@ -52,10 +52,39 @@ def test_token_inspector():
     assert "peak_activation" in res
 
 
-def test_prediction_inspector():
+def test_prediction_inspector_refuses_to_invent_predictions():
+    """The inspector must not manufacture a prediction distribution.
+
+    It previously returned five invented predictions (" Paris" at logit 14.8 /
+    probability 0.82 and four more), a fixed entropy of 0.65, and a logit lens
+    mapping layers 0/6/11 to fixed strings. This test asserted
+    `len(res["predictions"]) == 3`, so it passed on fabrications and would have
+    passed no matter which tokens were invented.
+
+    The property that matters is the inverse, so it is asserted directly: with
+    no model bound, every result-bearing field is empty and the record says so.
+    """
     insp = PredictionInspector()
     res = insp.inspect(prompt="The capital of France is", top_k=3)
+
+    # No result may be present, at any top_k.
+    assert res["predictions"] == []
+    assert res["entropy"] is None
+    assert res["logit_lens"] is None
+
+    # ...and the record must declare that, rather than leave the consumer to
+    # infer it from empty fields.
+    assert res["status"] == "unavailable"
+    assert res["provenance"] == "unavailable"
+    assert res["measured"] is False
+    assert res["validation_eligible"] is False
+    assert res["publication_eligible"] is False
+    assert res["reason"], "a refusal must carry a reason"
+
+    # Control: the echo fields are honoured, so the empty results cannot be an
+    # accident of the arguments never being read.
     assert res["top_k"] == 3
-    assert len(res["predictions"]) == 3
-    assert "entropy" in res
-    assert "logit_lens" in res
+    assert res["prompt"] == "The capital of France is"
+
+    # A larger top_k must not manufacture predictions to fill the gap.
+    assert insp.inspect(prompt="x", top_k=5)["predictions"] == []

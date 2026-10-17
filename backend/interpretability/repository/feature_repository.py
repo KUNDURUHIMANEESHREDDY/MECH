@@ -13,22 +13,19 @@ class FeatureRepository:
     """Repository for SAE features and interpretability descriptions."""
 
     def __init__(self) -> None:
-        self._features: Dict[int, Dict[str, Any]] = {
-            1402: {
-                "feature_id": 1402,
-                "label": "Indirect Object Identification",
-                "activation": 4.12,
-                "description": "Fires on indirect object tokens in IOI sequences",
-                "dataset_examples": ["John gave a book to Mary", "Alice sent a letter to Bob"],
-            },
-            789: {
-                "feature_id": 789,
-                "label": "Capital Cities Probe",
-                "activation": 3.85,
-                "description": "Fires on capital city names",
-                "dataset_examples": ["The capital of France is Paris", "Tokyo is in Japan"],
-            },
-        }
+        # Empty by construction.
+        #
+        # This previously seeded two complete feature records -- feature 1402
+        # "Indirect Object Identification" at activation 4.12, and feature 789
+        # "Capital Cities Probe" at 3.85, each with a description and dataset
+        # examples. No SAE was trained, no encoder was loaded, and no
+        # activation was read for either, so `search_features` returned
+        # invented features through the same path as stored ones, and a caller
+        # filtering on `min_activation` got hits.
+        #
+        # Real records need a loader; until one exists this repository holds
+        # nothing rather than a fixture.
+        self._features: Dict[int, Dict[str, Any]] = {}
 
     def search_features(self, query: str = "", min_activation: Optional[float] = None) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []

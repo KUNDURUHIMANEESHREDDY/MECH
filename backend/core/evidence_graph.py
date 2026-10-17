@@ -148,7 +148,30 @@ class TraceableEvidenceGraph:
     """DAG graph tracking full evidence provenance from neuron activations to final paper."""
 
     def __init__(self) -> None:
-        self.nodes: List[Dict[str, Any]] = [
+        # Demo-free, matching `from_run` and `empty`.
+        #
+        # This constructor used to seed a seven-node IOI example -- neuron
+        # L8_N402, "SAE #1402", a hypothesis "L8_N402 mediates IOI", an
+        # Evidence node labelled "Logit delta -4.2", and "Mechanistic Paper
+        # #1" -- plus six edges, for every instance.
+        #
+        # `AIScientistEngine` builds this class with no arguments and reports
+        # `to_dict()["nodes_count"]` in its campaign summary, so a campaign
+        # that had measured nothing advertised seven pieces of evidence and a
+        # publication. The illustrative graph is still available, but only by
+        # asking for it: see `demo`.
+        self.nodes: List[Dict[str, Any]] = []
+        self.edges: List[Dict[str, Any]] = []
+
+    @classmethod
+    def demo(cls) -> "TraceableEvidenceGraph":
+        """The illustrative IOI graph, for catalog and UI inspection only.
+
+        Every node is marked ``measured`` False with ``provenance``
+        "reference", so a consumer cannot rank it as evidence.
+        """
+        graph = cls()
+        graph.nodes = [
             {"id": "n_402", "type": "Neuron", "label": "L8_N402"},
             {"id": "f_1402", "type": "Feature", "label": "SAE #1402"},
             {"id": "c_ioi", "type": "Circuit", "label": "IOI Circuit"},
@@ -157,7 +180,7 @@ class TraceableEvidenceGraph:
             {"id": "ev_ioi", "type": "Evidence", "label": "Logit delta -4.2"},
             {"id": "pub_ioi", "type": "Publication", "label": "Mechanistic Paper #1"},
         ]
-        self.edges: List[Dict[str, Any]] = [
+        graph.edges = [
             {"source": "n_402", "target": "f_1402", "relation": "encodes"},
             {"source": "f_1402", "target": "c_ioi", "relation": "forms"},
             {"source": "c_ioi", "target": "h_ioi", "relation": "suggests"},
@@ -165,6 +188,10 @@ class TraceableEvidenceGraph:
             {"source": "exp_ioi", "target": "ev_ioi", "relation": "yields"},
             {"source": "ev_ioi", "target": "pub_ioi", "relation": "substantiates"},
         ]
+        for node in graph.nodes:
+            node["measured"] = False
+            node["provenance"] = "reference"
+        return graph
 
     def get_provenance_trace(self, target_id: str = "pub_ioi") -> List[Dict[str, Any]]:
         return list(self.nodes)

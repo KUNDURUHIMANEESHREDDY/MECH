@@ -33,22 +33,16 @@ class ExecutionEpisodesEngine:
     """Store for immutable execution episode records with vector similarity search."""
 
     def __init__(self) -> None:
-        init_ep = ExecutionEpisode(
-            episode_id="ep_ioi_001",
-            campaign_id="camp_s6_ioi",
-            model_name="GPT-2 Small",
-            plan_summary={"goal": "Circuit Discovery", "target_layer": 8},
-            simulation_output={"predicted_runtime_sec": 48.0, "confidence_pct": 94.0},
-            decision_record={"target_backend": "Ray", "precision": "FP16"},
-            execution_telemetry={"throughput_tok_per_sec": 1420.5, "gpu_utilization_pct": 94.2},
-            diagnostics_record=None,
-            outcome_status="Success",
-            total_duration_sec=51.2,
-            total_cost_usd=0.12,
-            vector=[0.18, 0.82, 0.45, 0.89, 0.22, 0.71, 0.38, 0.95],
-            recorded_at=_dt.datetime.utcnow().isoformat() + "Z",
-        )
-        self.episodes: Dict[str, ExecutionEpisode] = {init_ep.episode_id: init_ep}
+        # Empty by construction.
+        #
+        # This used to seed one complete episode for every engine, before any
+        # job had been recorded: "ep_ioi_001", outcome "Success", throughput
+        # 1420.5 tok/s, GPU utilisation 94.2%, duration 51.2 s, cost $0.12, and
+        # a simulation confidence of 94.0%. No job ran, so every one of those
+        # values was a literal. An episode store that already contains a
+        # successful run is the worst default available here, because a reader
+        # cannot tell it apart from a run that was actually recorded.
+        self.episodes: Dict[str, ExecutionEpisode] = {}
 
     def _compute_vector(self, model_name: str, outcome_status: str, duration: float) -> List[float]:
         text = f"{model_name}_{outcome_status}_{duration}"

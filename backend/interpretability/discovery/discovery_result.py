@@ -38,7 +38,21 @@ class DiscoveryResultDTO:
         self.evidence = evidence
         self.confidence = confidence
         self.uncertainty = uncertainty
-        self.provenance = provenance or {"prompt": "The capital of France is", "model": "GPT-2 Small"}
+        # No invented default. This used to fall back to a specific prompt and
+        # model ("The capital of France is" / "GPT-2 Small") for every caller
+        # that omitted provenance, which asserts that a particular prompt was
+        # run against a particular model. Provenance that was not supplied is
+        # recorded as unavailable, so a downstream evidence gate can tell the
+        # difference instead of reading a plausible fiction.
+        self.provenance = provenance if provenance is not None else {
+            "source": "unavailable",
+            "measured": False,
+            "reason": (
+                "No provenance was supplied when this discovery was "
+                "constructed, so its prompt, model, config, and seed are "
+                "unknown."
+            ),
+        }
         self.artifacts = artifacts or []
         self.related_features = related_features or []
         self.related_circuits = related_circuits or []
