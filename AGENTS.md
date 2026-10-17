@@ -53,6 +53,14 @@ report is not a test failure — re-run on a still tree. Override with
 `MECH_SKIP_SOURCE_STABILITY_CHECK=1`. See
 `docs/audit/source-stability-guard.md`.
 
+`tests/pytest/test_capture_screenshots.py` analyses `scripts/capture_screenshots.cjs`
+with `@babel/parser`, which the linter resolves out of `frontend/node_modules`.
+Those checks therefore need the frontend toolchain (`npm --prefix frontend
+install`). Without it the module skips and says so, rather than aborting
+collection for the entire suite. Set `MECH_REQUIRE_JS_LINT=1` to turn that skip
+into a hard failure — do so in any CI that installs the toolchain, so the
+checks cannot go missing without anyone noticing.
+
 Run targeted files while iterating; reserve full runs for checkpoints.
 
 ## Layering

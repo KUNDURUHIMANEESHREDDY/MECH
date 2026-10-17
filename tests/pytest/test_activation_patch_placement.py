@@ -87,10 +87,11 @@ def _logits_with_residual_coordinate_forced(adapter, layer: int, index: int,
     """Independent probe: force one coordinate of one layer's MLP output.
 
     A separate hook doing one thing, so agreement with `patch_activation` is
-    evidence. It deliberately does *not* mutate the module output in place --
-    it returns a copy -- so if the production hook's in-place write is the
-    thing being measured, that shows up as a difference rather than being
-    mirrored here.
+    evidence. It returns a copy rather than mutating the module output, but
+    that copy is *not* what makes an in-place write detectable: cloning and
+    writing in place produce the same values, so the comparison below cannot
+    see the difference, whatever this probe does. That property is asserted
+    separately by `test_patch_activation_does_not_write_in_place`.
     """
     def _force(module, _inputs, output):
         patched = output.clone()
@@ -177,6 +178,66 @@ def test_patch_activation_matches_an_independent_write_to_the_same_coordinate(
         f"reports."
     )
     assert result.delta != 0.0, "the intervention changed nothing"
+
+
+@needs_weights
+def test_patch_activation_does_not_write_in_place(adapter):
+    """The hook's write must not reach holders of the original tensor.
+
+    `patch_hook` copies before writing, in its own words because "the returned
+    tensor may be referenced elsewhere, and an in-place write from a forward
+    hook is invisible to anything holding that reference."
+
+    The placement test above cannot see this property: cloning and writing in
+    place return the same *values*, so both sides still agree and it stays
+    green. Measured, not assumed -- reinstating the in-place write leaves that
+    test passing, and `test_mutation_detection.py` reported it as a surviving
+    mutation.
+
+    So the aliasing is asserted directly. Hooks fire in registration order, so
+    a hook registered before `patch_activation` runs sees the module's output
+    tensor just before the patch hook does. If production writes in place, the
+    very same tensor object carries the patched value afterwards; if it
+    copies, the object is untouched.
+
+    Every pass is checked rather than the last one, so the assertion does not
+    depend on how many forward passes the method makes or on which of them is
+    the patched one.
+    """
+    index, value = 7, 2.25
+    mlp = adapter._model.transformer.h[LAYER].mlp
+    seen: list = []
+
+    def _snapshot(_module, _inputs, output):
+        seen.append((output, float(output[0, -1, index])))
+        return None
+
+    handle = mlp.register_forward_hook(_snapshot)
+    try:
+        adapter.patch_activation(PROMPT, LAYER, index, value)
+    finally:
+        handle.remove()
+
+    assert seen, (
+        "the MLP forward hook never fired, so nothing was measured"
+    )
+    assert any(before != value for _, before in seen), (
+        f"coordinate {index} already held the patched value {value} in every "
+        f"pass, so an in-place write would be indistinguishable from none and "
+        f"this check would prove nothing"
+    )
+
+    changed = [
+        (before, float(tensor[0, -1, index]))
+        for tensor, before in seen
+        if float(tensor[0, -1, index]) != before
+    ]
+    assert not changed, (
+        f"patch_activation wrote in place: the module's own output tensor held "
+        f"{changed[0][0]:.6f} at coordinate {index} and holds "
+        f"{changed[0][1]:.6f} afterwards. Copying in `patch_hook` is what stops "
+        f"the write being invisible to anything still holding that reference."
+    )
 
 
 @needs_weights

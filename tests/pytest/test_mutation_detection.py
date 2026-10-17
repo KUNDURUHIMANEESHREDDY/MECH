@@ -46,8 +46,12 @@ MUTATIONS = [
         "patched = output.clone()\n                patched[0, -1, neuron_index] "
         "= patch_value\n                return patched",
         "output[0, -1, neuron_index] = patch_value\n                return output",
+        # Points at the test that asserts the *aliasing* property. The
+        # placement test previously named here stayed green under this
+        # mutation, because cloning and writing in place return the same
+        # values -- a mutation that survived until this node was corrected.
         "tests/pytest/test_activation_patch_placement.py::"
-        "test_patch_activation_matches_an_independent_write_to_the_same_coordinate",
+        "test_patch_activation_does_not_write_in_place",
     ),
     (
         "model_fingerprint returns a constant",

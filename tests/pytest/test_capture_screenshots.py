@@ -42,7 +42,9 @@ implementation.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +58,47 @@ CAPTURE = SCRIPTS / "capture_screenshots.cjs"
 LINTER = SCRIPTS / "capture_lint.cjs"
 WRAPPER = SCRIPTS / "capture_screenshots.py"
 VUE_DIR = ROOT / "frontend" / "src"
+#: Where `scripts/capture_lint.cjs` resolves `@babel/parser` from -- it joins
+#: these segments itself. Checked below rather than assumed present.
+PARSER_DIR = ROOT / "frontend" / "node_modules" / "@babel" / "parser"
+
+
+def node_toolchain_problem() -> str:
+    """Why the JavaScript linter cannot run, or "" when it can.
+
+    `capture_lint.cjs` parses the capture script with `@babel/parser` out of
+    `frontend/node_modules`. Two tests further down call the linter from their
+    `parametrize` lists, so those calls happen at *collection* time, and a
+    missing install therefore aborted collection for the whole suite with a
+    `MODULE_NOT_FOUND` traceback. Zero tests ran, and the failure read as a
+    broken repository rather than as a toolchain nobody had installed.
+
+    Probed on the filesystem so collection spawns no subprocess. A directory
+    that exists but is damaged is deliberately left to fail loudly inside the
+    tests, which is the correct outcome.
+    """
+    if shutil.which("node") is None:
+        return "node is not on PATH"
+    if not PARSER_DIR.is_dir():
+        return f"{PARSER_DIR.relative_to(ROOT).as_posix()} is missing"
+    return ""
+
+
+_TOOLCHAIN_PROBLEM = node_toolchain_problem()
+if _TOOLCHAIN_PROBLEM:
+    _reason = (
+        f"the JavaScript capture linter cannot run: {_TOOLCHAIN_PROBLEM}. "
+        f"These tests analyse scripts/capture_screenshots.cjs with "
+        f"@babel/parser, so they need the frontend toolchain -- install it with "
+        f"`npm --prefix frontend install` to run them. Set "
+        f"MECH_REQUIRE_JS_LINT=1 to make this a hard failure instead of a skip."
+    )
+    # A skip is visible in the summary and is not a pass; the opt-in makes it
+    # impossible for a CI that *does* install the toolchain to skip silently.
+    if os.environ.get("MECH_REQUIRE_JS_LINT") == "1":
+        raise RuntimeError(_reason)
+    pytest.skip(_reason, allow_module_level=True)
+
 
 sys.path.insert(0, str(ROOT))
 from scripts import capture_screenshots as wrapper  # noqa: E402
