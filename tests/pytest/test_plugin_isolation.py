@@ -490,3 +490,45 @@ def test_a_worker_cannot_raise_its_own_cpu_allowance(tmp_path):
     # Unknown keys are dropped rather than reaching the OS layer.
     assert set(resolve_limits({"open_ports": 1})) == set(DEFAULT_LIMITS)
     assert resolve_limits("not a dict") == DEFAULT_LIMITS
+
+
+# --------------------------------------------------------------------------- #
+# Worker environment
+# --------------------------------------------------------------------------- #
+
+def test_worker_environment_is_an_allowlist_not_a_denylist(monkeypatch):
+    """A credential must be absent because it was never named, not because a
+    denylist happened to anticipate it.
+
+    ``_child_env`` keeps a short list of variables a Python process needs to
+    boot, so a host secret is excluded by default. This pins that property: a
+    denylist would be wrong the first time a host exported a name it had not
+    thought of.
+    """
+    from backend.plugins.runner import _child_env
+
+    secrets = {
+        "MECH_API_TOKEN": "decision-token",
+        "MECH_TOKEN_FILE": r"C:\evil\token",
+        "MECH_STORAGE_DB": r"C:\evil\db.sqlite",
+        "MECH_EXPORT_ROOT": r"C:\evil\export",
+        "MECH_WORKSPACE_ROOTS": r"C:\evil\ws",
+        "MECH_PLUGIN_TRUSTED_ROOTS": r"C:\evil\trusted",
+        # Deliberately not shaped like a real key: a literal `sk-` here reads
+        # as a live credential to secret scanners and to GitHub push
+        # protection, which is noise a test should not create.
+        "OPENAI_API_KEY": "test-openai-key-not-real",
+        "ANTHROPIC_API_KEY": "test-anthropic-key-not-real",
+        "AWS_SECRET_ACCESS_KEY": "aws-should-not-travel",
+        "GITHUB_TOKEN": "gh-should-not-travel",
+        "DATABASE_URL": "postgres://should-not-travel",
+    }
+    for name, value in secrets.items():
+        monkeypatch.setenv(name, value)
+
+    env = _child_env()
+
+    leaked = sorted(name for name in env if name in secrets)
+    assert not leaked, f"worker environment leaked {leaked}"
+    # The marker the worker keys off must survive the allowlist.
+    assert env.get("MECH_PLUGIN_WORKER") == "1"

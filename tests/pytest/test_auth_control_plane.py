@@ -134,3 +134,25 @@ def test_is_public_path_unit():
     assert auth_mod.is_public_path("/openapi.json", "GET") is False
     # CORS preflight carries no credentials by design; the real request still gates.
     assert auth_mod.is_public_path("/api/status", "OPTIONS") is True
+
+
+def test_token_path_cannot_be_redirected_from_the_environment(monkeypatch, tmp_path):
+    """F-4: a redirectable token path lets an attacker choose which file is read.
+
+    ``MECH_TOKEN_FILE`` used to do exactly that, so any process able to set an
+    environment variable before the first ``get_bearer_token()`` call picked the
+    path the control-plane token was persisted to and read from. It is now
+    ignored; the path is fixed relative to the auth module.
+
+    The value override (``MECH_API_TOKEN``) is a different seam and stays: it
+    sets the token itself rather than where it lives, and the rest of this file
+    depends on it.
+    """
+    attacker_path = tmp_path / "attacker_chosen_token"
+    attacker_path.write_text("attacker-chosen-token\n", encoding="utf-8")
+    monkeypatch.setenv("MECH_TOKEN_FILE", str(attacker_path))
+
+    resolved = auth_mod._token_file()
+
+    assert resolved != attacker_path
+    assert resolved.name == auth_mod._TOKEN_FILENAME

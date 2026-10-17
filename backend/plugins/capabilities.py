@@ -49,14 +49,16 @@ granted for:
 Everything else is refused, including ``~/.ssh``, ``~/.config``, browser
 profiles, other projects on the machine, and the host's own credential files.
 
-Residual risk, stated plainly: because the import roots are granted, a
-third-party plugin can read MECH's own source. That is a real confidentiality
-cost and it is the price of letting bundled plugins import from the package.
-Denying it means either vendoring the plugin API into a separate importable
-package or dropping bundled plugins' ability to use it; both are larger
-changes than this fix, and neither can be validated on a machine that is
-currently not allowed to run the test suite. The host's *data* -- the
-database, results, artifacts -- is outside the granted roots and is not exposed.
+Residual risk, stated plainly: the granted import roots include
+``backend/plugins``, so a third-party plugin can read the plugin subsystem's own
+source. Measured on this host through the installed hook, that is the whole
+extent of it: ``backend/core/auth.py``, ``backend/main.py``,
+``backend/storage/mech.db`` and ``backend/storage/.mech_api_token`` are all
+refused, so the control plane and the host's data are not exposed -- only the
+API the plugin is already compiled against. That is the price of letting bundled
+plugins import from the package; removing it means vendoring the plugin API into
+a separate importable package or dropping bundled plugins' ability to use it,
+and both are larger changes than this fix.
 
 Audit hooks cannot be removed once installed, which is the property we want:
 plugin code cannot unhook itself.
@@ -163,10 +165,16 @@ _PROCESS_EVENTS = (
 #: event means a sibling added by a future CPython does not reopen the hole.
 #:
 #: Honest limit, recorded rather than papered over: the POSIX analogue could not
-#: be exercised on this host. `_posixsubprocess.fork_exec` reached directly
+#: be exercised on this host, and `_posixsubprocess.fork_exec` reached directly
 #: instead of through `subprocess.Popen` raises no event that this list can
-#: match, so on POSIX the worker's resource limits are the only control over
-#: that route. That is an open question, not a solved one.
+#: match, so there is nothing here for a prefix to catch. What did change is
+#: *reachability*: `_posixsubprocess` and `subprocess` are both outside the
+#: import allowlist, so the only way to hold one was the `sys.modules` pivot that
+#: `PluginSandbox._guarded_module` now refuses. That refusal is verified on this
+#: host for the module-alias reads; the POSIX syscall path itself remains
+#: unverified here and is an open question, not a solved one. The durable fix is
+#: still a runtime control on POSIX (seccomp or equivalent), because an audit
+#: hook observes CPython and this route never crosses it.
 _PROCESS_EVENT_PREFIXES = ("_winapi.",)
 
 #: Exact-match set, so the hook's hot path does not rescan the tuple.
@@ -188,12 +196,19 @@ def _is_process_event(event: str) -> bool:
 #: `ctypes` is not a process policy. It is a bypass of *every* control in this
 #: module at once, which is why it has its own entry. The static gate blocks the
 #: *name* (`ctypes` is not an allowlisted import root), on the assumption that
-#: that is sufficient. It is not: every allowlisted module holds a live
+#: that is sufficient. It is not: every allowlisted module held a live
 #: reference to `sys`, and `sys.modules` holds whatever the worker has already
-#: imported. Measured on this host, all four pass `PluginSandbox.analyze_ast`
-#: and are the real `sys` module:
+#: imported. Measured on this host before that was closed, all four passed
+#: `PluginSandbox.analyze_ast` and were the real `sys` module:
 #:
 #:     collections._sys   hashlib._sys   logging._sys   re._sys
+#:
+#: `PluginSandbox` now refuses those reads twice over: the lint gate rejects the
+#: literal form, and `_guarded_module` refuses the attribute at runtime, so the
+#: same object reached under another name is refused too. This entry stays
+#: because the argument that used to justify trusting the name gate ("`ctypes`
+#: cannot be imported") is a *static* argument, and the audit hook is the layer a
+#: source-level trick cannot reach.
 #:
 #: Once a plugin holds a foreign function, no audit event describes what it
 #: does -- this hook observes CPython, and the syscall happens below it.

@@ -90,22 +90,21 @@ const API_TIMEOUT_MS = 120000;
 /**
  * The bearer token the backend accepts, or null if none is discoverable.
  *
- * Mirrors `backend/core/auth.py`: env var first, then the persisted file.
+ * Mirrors `backend/core/auth.py`: env var first, then the persisted file at a
+ * fixed path. The backend deliberately does not honour a `MECH_TOKEN_FILE`
+ * override -- a redirectable token path is a way to point the control plane at
+ * a file an attacker wrote -- so this resolves the same one path.
  */
 function resolveToken() {
   const fromEnv = (process.env.MECH_API_TOKEN || "").trim();
   if (fromEnv) return fromEnv;
-  const configured = (process.env.MECH_TOKEN_FILE || "").trim();
-  const candidates = configured
-    ? [path.resolve(configured)]
-    : [path.join(ROOT, "backend", "storage", ".mech_api_token")];
-  for (const file of candidates) {
-    try {
-      const value = fs.readFileSync(file, "utf8").trim();
-      if (value) return value;
-    } catch {
-      /* try the next candidate */
-    }
+  try {
+    const value = fs
+      .readFileSync(path.join(ROOT, "backend", "storage", ".mech_api_token"), "utf8")
+      .trim();
+    if (value) return value;
+  } catch {
+    /* no persisted token: the caller warns rather than sending none */
   }
   return null;
 }

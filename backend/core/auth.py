@@ -58,9 +58,16 @@ def _storage_dir() -> Path:
 
 
 def _token_file() -> Path:
-    configured = os.environ.get("MECH_TOKEN_FILE", "").strip()
-    if configured:
-        return Path(configured)
+    """The one place the token is read from and written to.
+
+    Deliberately not configurable from the environment. ``MECH_TOKEN_FILE``
+    used to redirect this path, which meant any process able to set an
+    environment variable before the first ``get_bearer_token()`` call chose
+    where the control-plane token was persisted and read -- an
+    attacker-controlled path pointing at a file it had written. The seam did
+    not earn its keep: nothing in this repository sets the variable, and the
+    path below is already fixed relative to this module.
+    """
     return _storage_dir() / _TOKEN_FILENAME
 
 

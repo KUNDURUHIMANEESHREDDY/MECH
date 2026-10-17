@@ -15,7 +15,7 @@ from backend.plugins.plugin_sandbox import PluginSandbox, SecurityViolation
 
 
 # ---------------------------------------------------------------------------
-# AST lint — bypasses that yielded arbitrary code execution
+# AST lint â€” bypasses that yielded arbitrary code execution
 # ---------------------------------------------------------------------------
 
 BYPASSES = {
@@ -73,7 +73,7 @@ def test_type_builtin_removed():
 
 
 # ---------------------------------------------------------------------------
-# _read_source_dir — `entry` path traversal
+# _read_source_dir â€” `entry` path traversal
 # ---------------------------------------------------------------------------
 
 
@@ -121,7 +121,7 @@ def test_entry_inside_directory_still_works(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# install_plugin — silent overwrite
+# install_plugin â€” silent overwrite
 # ---------------------------------------------------------------------------
 
 
@@ -149,7 +149,7 @@ def test_install_name_cannot_traverse(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _resolve_source — install sources must be trusted roots
+# _resolve_source â€” install sources must be trusted roots
 # ---------------------------------------------------------------------------
 
 
@@ -207,7 +207,7 @@ def test_remote_source_rejected():
 
 
 # ---------------------------------------------------------------------------
-# load_from_path — must not import arbitrary modules
+# load_from_path â€” must not import arbitrary modules
 # ---------------------------------------------------------------------------
 
 
@@ -234,7 +234,7 @@ def test_load_from_path_allows_library_plugin():
 
 
 # ---------------------------------------------------------------------------
-# Runtime path — plugin code must not run in the backend process
+# Runtime path â€” plugin code must not run in the backend process
 # ---------------------------------------------------------------------------
 
 
@@ -315,3 +315,191 @@ def test_bundled_sample_plugin_still_loads():
     assert sources, "sample plugin should contain a .py source"
     plugin = PluginLoader().load_from_file_sandboxed(sources[0])
     assert plugin.manifest.plugin_id
+
+
+# ---------------------------------------------------------------------------
+# Module-alias pivots -- `collections._sys` and friends
+#
+# Every allowlisted stdlib module holds live module objects as plain
+# attributes. Reading one handed the plugin the whole interpreter:
+# `sys.modules` reaches any module the host has imported -- including
+# `backend.core.auth`, whose `get_bearer_token()` returns the live
+# control-plane token -- and `logging.os.environ` is every environment
+# variable in the process. The names are not dunders, so a dunder rule could
+# not see them.
+#
+# The aliases below were measured on this host against the modules that are
+# actually imported, not assumed from the stdlib layout.
+# ---------------------------------------------------------------------------
+
+ESCAPE_ALIASES = {
+    "collections._sys": "import collections\nx = collections._sys\n",
+    "logging.sys": "import logging\nx = logging.sys\n",
+    "logging.os": "import logging\nx = logging.os\n",
+    "enum.sys": "import enum\nx = enum.sys\n",
+    "enum.bltns": "import enum\nx = enum.bltns\n",
+}
+
+# The same pivots as (module, attribute), for driving the runtime guard
+# directly with the lint gate deliberately out of the way.
+ESCAPE_ATTRS = {
+    "collections._sys": ("collections", "_sys"),
+    "logging.sys": ("logging", "sys"),
+    "logging.os": ("logging", "os"),
+    "enum.sys": ("enum", "sys"),
+    "enum.bltns": ("enum", "bltns"),
+}
+
+
+@pytest.mark.parametrize("label", sorted(ESCAPE_ALIASES))
+def test_module_alias_pivot_rejected_by_lint(label):
+    with pytest.raises(SecurityViolation):
+        PluginSandbox.analyze_ast(ESCAPE_ALIASES[label])
+
+
+@pytest.mark.parametrize("label", sorted(ESCAPE_ATTRS))
+def test_runtime_guard_refuses_escape_attributes(label):
+    """The runtime layer must hold on its own, with no lint gate involved.
+
+    This calls the guarded import directly: `analyze_ast` is never consulted,
+    so a regression that removed only the static rule would still fail here.
+    """
+    module_name, attr = ESCAPE_ATTRS[label]
+    guarded = PluginSandbox._guarded_import(module_name)  # noqa: SLF001
+    with pytest.raises(SecurityViolation):
+        getattr(guarded, attr)
+
+
+def test_import_from_alias_pivot_rejected():
+    """`from collections import _sys` produces no Attribute node at all."""
+    source = "from collections import _sys\nx = _sys\n"
+    with pytest.raises(SecurityViolation):
+        PluginSandbox.analyze_ast(source)
+    with pytest.raises(SecurityViolation):
+        PluginSandbox.execute(source)
+
+
+def test_bearer_token_module_is_not_reachable_from_plugin_code():
+    """The F-1 proof of concept, asserted with the route actually live.
+
+    `backend.core.auth` is imported first on purpose. Without it the lookup
+    raises KeyError on the unpatched tree as well, which made an earlier
+    version of this test pass for the wrong reason. With it imported, the
+    unpatched tree really reaches the module and the patched tree is refused at
+    `collections._sys`. The token itself is never read or echoed, so a
+    regression cannot leak the thing this test protects.
+    """
+    import backend.core.auth  # noqa: F401  -- makes the route reachable
+
+    with pytest.raises(SecurityViolation):
+        PluginSandbox.execute(
+            "import collections\n"
+            "auth = collections._sys.modules['backend.core.auth']\n"
+        )
+
+
+def test_environment_is_not_reachable_from_plugin_code():
+    """The F-2 proof of concept, asserted closed end to end."""
+    with pytest.raises(SecurityViolation):
+        PluginSandbox.execute(
+            "import logging\n"
+            "leaked = dict(logging.os.environ)\n"
+        )
+
+
+def test_nested_module_attribute_is_guarded():
+    """A forwarded submodule must not become an unguarded way back in."""
+    with pytest.raises(SecurityViolation):
+        PluginSandbox.execute(
+            "import logging.handlers\nx = logging.handlers.os\n")
+
+
+def test_guard_does_not_refuse_ordinary_field_names():
+    """`self.os` is a field, not the module: refusing it bought nothing.
+
+    The earlier name-level rule refused working code -- `self.io = None`,
+    `self.os = 'win32'`, `self.builtins = []` -- while missing the payload it
+    was written for. A store binds a field; only a load can be a pivot.
+    """
+    PluginSandbox.analyze_ast(textwrap.dedent(
+        """
+        class C:
+            def __init__(self):
+                self.os = 'win32'
+                self.builtins = []
+                self.io = None
+        """
+    ))
+
+
+def test_forwarded_stdlib_still_works():
+    """Forwarding a function leaves it bound to the real module globals.
+
+    `collections.namedtuple` calls `_sys._getframe(1)` internally; closing the
+    pivot must not break it, or the fix trades one defect for another.
+    """
+    namespace = PluginSandbox.execute(textwrap.dedent(
+        """
+        import collections
+        from collections import OrderedDict
+        Point = collections.namedtuple('Point', ['x', 'y'])
+        point = Point(1, 2)
+        ordered = OrderedDict()
+        ordered['a'] = 1
+        """
+    ))
+    assert namespace["point"].x == 1
+    assert list(namespace["ordered"]) == ["a"]
+
+
+def test_guarded_module_hides_the_real_module_object():
+    """The real module must not be recoverable off the proxy it hands back."""
+    namespace = PluginSandbox.execute("import collections\n")
+    guarded = namespace["collections"]
+    assert guarded.__name__ == "collections"
+    assert "_sys" not in guarded.__dict__, (
+        "the proxy must not carry the real module's escape attributes")
+    with pytest.raises(SecurityViolation):
+        guarded._sys  # noqa: B018
+
+
+# ---------------------------------------------------------------------------
+# Aliased imports -- the case the lint rule structurally cannot catch
+#
+# The AST rule matches an attribute read whose base is a Name in the import
+# allowlist, so `import collections as c; c._sys` produces nothing for it to
+# match. The runtime proxy is what closes this, and these tests pin that: if the
+# proxy regressed, the lint gate would still pass and the escape would return.
+# ---------------------------------------------------------------------------
+
+ALIASED_PIVOTS = {
+    "aliased_sys": "import collections as c\nx = c._sys\n",
+    "aliased_logging_os": "import logging as L\nx = L.os.environ\n",
+    "aliased_enum_bltns": "import enum as E\nx = E.bltns\n",
+}
+
+
+@pytest.mark.parametrize("label", sorted(ALIASED_PIVOTS))
+def test_the_lint_gate_alone_does_not_catch_an_aliased_pivot(label):
+    """Assert the premise, so the test above cannot pass vacuously.
+
+    If a future change made `analyze_ast` catch the alias form, this stops being
+    the runtime layer's job -- and this test says so out loud instead of leaving
+    the proxy looking load-bearing when it is not.
+    """
+    PluginSandbox.analyze_ast(ALIASED_PIVOTS[label])  # must not raise
+
+
+@pytest.mark.parametrize("label", sorted(ALIASED_PIVOTS))
+def test_aliased_pivot_is_closed_by_the_runtime_layer(label):
+    with pytest.raises(SecurityViolation):
+        PluginSandbox.execute(ALIASED_PIVOTS[label])
+
+
+def test_aliased_legitimate_import_still_works():
+    namespace = PluginSandbox.execute(
+        "import collections as c\n"
+        "Point = c.namedtuple('Point', ['x'])\n"
+        "point = Point(1)\n"
+    )
+    assert namespace["point"].x == 1

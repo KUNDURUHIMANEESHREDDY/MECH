@@ -117,6 +117,22 @@ class PluginSandbox:
         '__loader__', '__spec__', '__import__', '__get__',
     })
 
+    #: Attributes that are a *live module object* held on an allowlisted
+    #: stdlib module. Reading one hands the plugin back the interpreter.
+    #: Measured on this host across the modules actually imported:
+    #:
+    #:   collections._sys   logging.sys   logging.os   enum.sys   enum.bltns
+    #:
+    #: `logging.os` is the whole of `os` with no underscore to hide behind.
+    #: These are refused only in a *load* context (see ``analyze_ast``):
+    #: `self.os = 'win32'` and `self.builtins = []` are ordinary field writes,
+    #: and the earlier attempt at a name-level rule failed precisely because it
+    #: could not tell a module from a field. A store binds a field; only a load
+    #: can be a pivot.
+    ESCAPE_MODULE_ATTRS = frozenset({
+        '_sys', 'sys', 'os', 'builtins', 'bltns', '_os', '_builtins',
+    })
+
     # Deliberately NOT listed above: the module names an allowlisted module
     # holds as plain attributes (`pathlib.sys`, `pathlib.os`, `logging.io`, …).
     # They were added once, to close the `pathlib.sys.modules['_winapi']` pivot,
@@ -139,11 +155,24 @@ class PluginSandbox:
     # (`capabilities._FFI_EVENT_PREFIXES`). Both are asserted in
     # `tests/pytest/test_plugin_capabilities.py`.
     #
-    # Known open path, recorded rather than concealed: an alias such as
-    # `collections._sys` still reaches `sys.modules`, so a plugin can read
-    # `os.environ` -- which raises no audit event -- and any module the worker
-    # has already imported. This scan cannot close that, and no purely static
-    # rule can; it needs a runtime control in the worker.
+    # Closed path, recorded so it is not reopened. An alias such as
+    # `collections._sys` reached `sys.modules`, so a plugin could read
+    # `os.environ` -- which raises no audit event -- and call into any module
+    # the host had already imported, including `backend.core.auth`, whose
+    # `get_bearer_token()` returned the live control-plane token. Measured
+    # byte-for-byte against `backend/storage/.mech_api_token`. No purely static
+    # rule can close that, because the pivot is a normal attribute read on an
+    # allowlisted module under a name that is not a dunder.
+    #
+    # What closes it is `_guarded_module` below: the module the plugin receives
+    # is a `types.ModuleType` proxy whose `__getattr__` refuses
+    # `ESCAPE_MODULE_ATTRS`. The proxy wraps the real module in a closure rather
+    # than an attribute, so the reference is not recoverable from the proxy's
+    # own `__dict__`, and legitimate uses keep working because forwarding a
+    # *function* (`collections.namedtuple`) leaves that function bound to the
+    # real module globals, where its internal `_sys._getframe(1)` still
+    # resolves. `analyze_ast` refuses the literal form first, so the install-time
+    # gate and the runtime guard fail independently.
 
     @staticmethod
     def _is_dunder_literal(node: ast.AST) -> bool:
@@ -183,6 +212,15 @@ class PluginSandbox:
             raise SecurityViolation(
                 f"Importing module '{module}' is forbidden in sandbox.")
 
+        # `from collections import _sys` is the same pivot as the attribute
+        # form, spelled so that no `ast.Attribute` node is produced at all.
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name in cls.ESCAPE_MODULE_ATTRS:
+                    raise SecurityViolation(
+                        f"Importing '{node.module}.{alias.name}' is forbidden "
+                        "in sandbox.")
+
     @classmethod
     def analyze_ast(cls, source_code: str):
         """
@@ -200,6 +238,17 @@ class PluginSandbox:
                 if node.attr in cls.FORBIDDEN_ATTRS:
                     raise SecurityViolation(
                         f"Accessing attribute '{node.attr}' is forbidden in sandbox.")
+                # `collections._sys`, `logging.os`, `enum.bltns`: a read of a
+                # module-valued attribute on a name imported from the
+                # allowlist. Narrowed to a Name base so `self.os` stays legal,
+                # and to a Load so `self.os = 'win32'` stays legal.
+                if (node.attr in cls.ESCAPE_MODULE_ATTRS
+                        and isinstance(node.ctx, ast.Load)
+                        and isinstance(node.value, ast.Name)
+                        and node.value.id in cls.ALLOWED_IMPORT_ROOTS):
+                    raise SecurityViolation(
+                        f"Accessing '{node.value.id}.{node.attr}' is forbidden "
+                        "in sandbox.")
 
             elif isinstance(node, ast.Name):
                 if node.id in cls.FORBIDDEN_NAMES:
@@ -225,6 +274,51 @@ class PluginSandbox:
                    for prefix in cls.ALLOWED_IMPORT_PREFIXES)
 
     @classmethod
+    def _guarded_module(cls, module):
+        """A view of ``module`` that refuses reads of ``ESCAPE_MODULE_ATTRS``.
+
+        The real module is captured in a closure rather than stored on the
+        proxy, so it is not recoverable from the proxy's own ``__dict__`` or
+        through ``type()``. The check is by attribute *name*, which is O(1) and
+        does not walk the module; the plugin cannot reach the same object under
+        a different name because computed access needs ``getattr``/``vars``/
+        ``dir`` (absent from ``ALLOWED_BUILTINS``) and dunder reads are refused
+        by ``FORBIDDEN_ATTRS``.
+
+        Forwarding a *function* returns that function unchanged, still bound to
+        the real module's globals, so internal stdlib uses keep working
+        (`collections.namedtuple` calls `_sys._getframe(1)` internally) while
+        the plugin's own read of `collections._sys` is refused. A forwarded
+        *module* is itself wrapped, so `logging.handlers` cannot be used to
+        step around the guard and read `logging.sys` on the real object.
+        """
+        escape = cls.ESCAPE_MODULE_ATTRS
+        module_name = getattr(module, "__name__", "<module>")
+
+        class _GuardedModule(types.ModuleType):
+            def __getattr__(self, name):
+                if name in escape:
+                    raise SecurityViolation(
+                        f"Accessing '{module_name}.{name}' is forbidden in "
+                        "sandbox.")
+                value = getattr(module, name)
+                if isinstance(value, types.ModuleType) \
+                        and not isinstance(value, _GuardedModule):
+                    return cls._guarded_module(value)
+                return value
+
+        proxy = _GuardedModule(module_name)
+        # A module's expected public surface, copied so ordinary introspection
+        # does not fail. `__loader__`/`__spec__` are deliberately not copied:
+        # the AST gate refuses them anyway, and they carry import machinery.
+        for attr in ("__doc__", "__file__", "__package__"):
+            try:
+                object.__setattr__(proxy, attr, getattr(module, attr))
+            except AttributeError:
+                pass
+        return proxy
+
+    @classmethod
     def _guarded_import(cls, name, globals=None, locals=None, fromlist=(), level=0):
         """``__import__`` restricted to the allowlist.
 
@@ -233,13 +327,19 @@ class PluginSandbox:
         legitimate ``import json`` in a plugin. A guarded implementation keeps
         allowed imports working while still refusing os/subprocess/socket even
         if the AST gate above is bypassed.
+
+        What it returns is a :meth:`_guarded_module` view, not the real module.
+        Allowlisting a module was never the same as trusting every attribute on
+        it: `collections._sys`, `logging.os` and `enum.bltns` are live module
+        objects, and handing them back was the whole of the escape.
         """
         if level:
             raise SecurityViolation("Relative imports are forbidden in sandbox.")
         if not cls._module_permitted(name):
             raise SecurityViolation(
                 f"Importing module '{name}' is forbidden in sandbox.")
-        return __import__(name, globals, locals, fromlist, level)
+        return cls._guarded_module(
+            __import__(name, globals, locals, fromlist, level))
 
     @classmethod
     def execute(cls, source_code: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
