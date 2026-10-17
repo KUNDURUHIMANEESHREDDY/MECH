@@ -393,8 +393,8 @@ def _shutdown(proxy):
         pass
 
 
-def test_the_repository_root_is_not_a_granted_read_root():
-    """The checkout root grants access to the bearer token and the database.
+def test_the_repository_root_is_not_a_granted_read_root(monkeypatch):
+    """No granted read root may contain the credential subtree.
 
     `default_readable_roots()` derived its set from every `sys.path` entry, and
     the worker puts `_REPO_ROOT` and `_BACKEND` on that path while the runner
@@ -405,21 +405,189 @@ def test_the_repository_root_is_not_a_granted_read_root():
     not exposed".
 
     Measured on this host before the fix; pinned here so it cannot return.
+
+    The assertion used to be `r == repo` / `r == storage`, which is strictly
+    weaker than the control it protects. `_within` grants a root *and
+    everything beneath it*, so the question is containment, not equality -- and
+    the worker puts `_BACKEND` on `sys.path` too. `backend/` is not equal to
+    the checkout root, so it survived the equality filter, and it is an
+    ancestor of `backend/storage`. Measured on this host with the worker's own
+    path shape and the real hook: `backend/` was a granted read root, `listdir
+    backend/storage` returned the directory, and `open(mech.db)` read the
+    SQLite header. The containment assertion below is the property the hook
+    enforces; the equality assertions are kept because they are still true and
+    still worth pinning.
     """
     import backend.plugins.capabilities as caps
 
     repo = caps._repo_root()
     assert repo is not None, "could not locate the repository root"
+    backend = repo / "backend"
+    storage = backend / "storage"
+
+    # Reproduce the worker's path shape (backend/plugins/worker.py:28-33). If
+    # this is left to whatever the test runner happens to have on `sys.path`,
+    # the case under test can be absent and the assertion passes vacuously --
+    # which is how the equality version stayed green while `backend/` granted.
+    monkeypatch.setattr(sys, "path", list(sys.path) + [str(repo), str(backend)])
+
     roots = caps.default_readable_roots()
 
     assert not any(r == repo for r in roots), (
         "the repository root is a granted read root, which exposes "
         "backend/storage/.mech_api_token and the experiment database to any "
         "installed plugin")
-    storage = repo / "backend" / "storage"
     assert not any(r == storage for r in roots)
+
+    # The property the hook enforces. A root that covers the credential subtree
+    # is the same grant as naming the directory, because `_within` walks
+    # parents.
+    secrets = (storage / ".mech_api_token", storage / "mech.db")
+    offenders = sorted(
+        str(root) for root in roots
+        if any(root == s or root in s.parents for s in secrets)
+    )
+    assert not offenders, (
+        f"a granted read root contains backend/storage, which holds the "
+        f"control-plane bearer token and the experiment database: {offenders}. "
+        f"`_within` grants everything beneath a root, so this exposes the same "
+        f"files as naming the directory would.")
+
     # The SDK directory still grants, so a plugin can import what it is written
     # against. Without this the containment would break every plugin.
     assert any(r == (repo / "backend" / "plugins") for r in roots), (
         "the plugin SDK directory is not readable; plugins can no longer import "
         "the package they are written against")
+
+
+def test_ordinary_plugin_attributes_are_not_rejected_by_the_static_gate():
+    """A name-level ban cannot tell a module from a field, and is bypassable.
+
+    `FORBIDDEN_ATTRS` briefly listed `sys`, `os`, `io`, `importlib`,
+    `subprocess`, `ctypes` and `builtins`, to close the `pathlib.sys` pivot.
+    The rule is "this attribute NAME is banned on any object", so it had both
+    failure modes at once. Measured on this host:
+
+    * it rejected ordinary plugin code -- `self.io = None`,
+      `self.os = 'win32'`, `self.builtins = []` are all legitimate and were
+      all refused;
+    * and it still did not block the pivot, because the allowlisted modules
+      hold those references under other names too. `collections._sys`,
+      `hashlib._sys`, `logging._sys` and `re._sys` are the real `sys` module,
+      and the gate accepted every one of them (as it did `enum.bltns` and
+      `dataclasses.builtins` for `builtins`).
+
+    So it cost real functionality and bought nothing against the payload it was
+    written for. It was removed, and this test pins the false positives so the
+    ban is not "restored" as obvious hardening without noticing the price.
+
+    The load-bearing controls are elsewhere and are asserted elsewhere: process
+    creation is refused by capability regardless of how `_winapi` is reached
+    (`test_the_private_winapi_event_is_blocked_by_the_hook`), and FFI is refused
+    by capability (`test_ffi_is_refused_...`).
+    """
+    from backend.plugins.plugin_sandbox import PluginSandbox, SecurityViolation
+
+    sandbox = PluginSandbox()
+
+    # Legitimate plugin code. None of these may raise.
+    for source in (
+        "def f(obj):\n    obj.io = None\n",
+        "def f(obj):\n    obj.os = 'win32'\n",
+        "def f(obj):\n    obj.builtins = []\n",
+        "class Cfg:\n    sys = 1\n    io = None\n",
+    ):
+        sandbox.analyze_ast(source)
+
+    # Not a blanket loosening: the interpreter-escape attributes still hold, so
+    # this test cannot pass by the gate being disabled.
+    for source in (
+        "x = ().__class__\n",
+        "x = f.__globals__\n",
+        "x = f.__code__\n",
+    ):
+        with pytest.raises(SecurityViolation):
+            sandbox.analyze_ast(source)
+
+
+def test_ffi_is_refused_by_the_hook_because_it_defeats_every_other_control():
+    """`ctypes` bypasses process, read AND network confinement at once.
+
+    The AST gate blocks the *name* `ctypes` (it is not an allowlisted import
+    root), which is why FFI was assumed unreachable. It is reachable anyway:
+    an allowlisted module holds a live reference to `sys`, and `sys.modules`
+    holds everything the worker process has imported.
+
+    Once a plugin holds a foreign function, no control in this module can see
+    it. There is no audit event for "called CreateFileW"; the hook observes
+    CPython, and the syscall happens below it. Measured on this host through an
+    installed hook:
+
+        ctypes.WinDLL('kernel32').CreateFileW / ReadFile  -> read
+            backend/storage/mech.db, defeating the path allow-lists above
+        ctypes.WinDLL('kernel32').CreateProcessW          -> started a process
+            with none of the job-object limits
+
+    So the FFI operation itself has to be refused. `ctypes` raises
+    `ctypes.dlopen` / `ctypes.dlsym` as it resolves a library, which is the
+    point at which the hook can still refuse; that is now covered by namespace
+    (`capabilities._FFI_EVENT_PREFIXES`).
+
+    The probe asserts reachability before asserting refusal, so it cannot pass
+    because the call was malformed -- the failure mode reported against the
+    `_winapi` test this file used to carry.
+    """
+    import subprocess as _sp
+
+    probe = textwrap.dedent(
+        """
+        import sys
+        sys.path.insert(0, {repo!r})
+
+        from backend.plugins.capabilities import (
+            CapabilityViolation, install_capability_hook,
+        )
+
+        LIB = "kernel32" if sys.platform == "win32" else None
+
+        # Imported before the hook goes on, so this measures the FFI call
+        # rather than the import.
+        import ctypes
+
+        # Step one: no hook. Prove the operation is reachable and well-formed.
+        try:
+            ctypes.CDLL(LIB)
+            print("REACHABLE\\tyes")
+        except BaseException as exc:
+            print("REACHABLE\\tno -- " + type(exc).__name__)
+
+        # Step two: the identical operation, under the hook.
+        install_capability_hook()
+        try:
+            ctypes.CDLL(LIB)
+            print("VERDICT\\tALLOWED")
+        except CapabilityViolation:
+            print("VERDICT\\tREFUSED")
+        except BaseException as exc:
+            print("VERDICT\\tOTHER " + type(exc).__name__)
+        """
+    ).format(repo=str(REPO_ROOT))
+
+    out = _sp.run([sys.executable, "-c", probe], capture_output=True,
+                  text=True, cwd=str(REPO_ROOT), timeout=120)
+    assert out.returncode == 0, out.stderr
+
+    fields: dict[str, str] = {}
+    for line in out.stdout.splitlines():
+        if "\t" in line:
+            key, _, value = line.partition("\t")
+            fields[key.strip()] = value.strip()
+
+    assert fields.get("REACHABLE") == "yes", (
+        f"the probe never reached the FFI call, so it proves nothing about the "
+        f"hook: {fields}")
+    assert fields.get("VERDICT") == "REFUSED", (
+        f"loading a foreign library was {fields.get('VERDICT')!r} under the "
+        f"capability hook. A plugin holding a foreign function can read any "
+        f"file and start any process, with no audit event for the hook to see: "
+        f"{out.stdout!r}")

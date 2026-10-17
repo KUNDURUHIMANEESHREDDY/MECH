@@ -117,6 +117,34 @@ class PluginSandbox:
         '__loader__', '__spec__', '__import__', '__get__',
     })
 
+    # Deliberately NOT listed above: the module names an allowlisted module
+    # holds as plain attributes (`pathlib.sys`, `pathlib.os`, `logging.io`, …).
+    # They were added once, to close the `pathlib.sys.modules['_winapi']` pivot,
+    # and removed because a name-level rule does neither job. Measured on this
+    # host:
+    #
+    #   * it refused legitimate plugin code -- `self.io = None`,
+    #     `self.os = 'win32'` and `self.builtins = []` are ordinary and were all
+    #     rejected, because the rule cannot tell a module from a field;
+    #   * and it did not block the pivot, because the same modules are reachable
+    #     under other names -- `collections._sys`, `hashlib._sys`,
+    #     `logging._sys` and `re._sys` are the real `sys` module and this scan
+    #     accepted every one of them, as it did `enum.bltns` for `builtins`.
+    #
+    # A control that refuses working code while missing the payload it was
+    # written for is worse than no control, because it implies a guarantee it
+    # does not provide. What holds instead is the dynamic layer, which refuses
+    # the *operation* however the module was reached: process creation by
+    # namespace (`capabilities._PROCESS_EVENT_PREFIXES`) and FFI by namespace
+    # (`capabilities._FFI_EVENT_PREFIXES`). Both are asserted in
+    # `tests/pytest/test_plugin_capabilities.py`.
+    #
+    # Known open path, recorded rather than concealed: an alias such as
+    # `collections._sys` still reaches `sys.modules`, so a plugin can read
+    # `os.environ` -- which raises no audit event -- and any module the worker
+    # has already imported. This scan cannot close that, and no purely static
+    # rule can; it needs a runtime control in the worker.
+
     @staticmethod
     def _is_dunder_literal(node: ast.AST) -> bool:
         """True for a bare ``__x__`` string, the getattr-escape payload."""

@@ -85,7 +85,7 @@ _NETWORK_EVENTS = (
 # Audit events that mean "this is about to start another program".
 #
 # These are **audit event names, not Python function names**, and the hook matches
-# them by exact equality (`if event in process_events`). The distinction is not
+# them through `_is_process_event`, below. The distinction is not
 # cosmetic, and the most important case is `os.exec`:
 #
 #     os.execv(...)   raises the audit event "os.exec"
@@ -113,23 +113,36 @@ _NETWORK_EVENTS = (
 # raises; it is harmless to keep and is listed so the policy is explicit rather
 # than accidental.
 #
-# One measured gap, deliberately left to the static layer rather than papered
-# over. On Windows `subprocess.Popen` raises a second, private event:
+# The list above is not sufficient on its own, because CPython also raises
+# *private* per-platform events for the same operations. On Windows:
 #
 #     subprocess.Popen  ->  ['subprocess.Popen', '_winapi.CreateProcess']
 #
-# `_winapi.CreateProcess` is not on this list, and the hook does not block it --
-# calling it under an installed hook reaches the OS layer rather than raising
-# CapabilityViolation. So a plugin that could reach `_winapi` could spawn a
-# process through the back door. It cannot: `PluginSandbox.analyze_ast` rejects
-# `import _winapi` before any code runs ("Importing module '_winapi' is forbidden
-# in sandbox"), which is the defence-in-depth split this module's docstring
-# describes -- the audit hook is the dynamic layer, the AST scan the static one,
-# and neither is redundant.
+# `_winapi.CreateProcess` is the event that actually creates the process. It was
+# absent from this list, so the operation was refused by *name* rather than by
+# capability: `subprocess.Popen` was blocked, but reaching
+# `_winapi.CreateProcess` any other way created a process whose child inherited
+# none of the confinement -- not this hook, not the path allow-lists, not the
+# network deny, and not the worker's job-object limits.
 #
-# That makes the import ban load-bearing, so it is asserted rather than assumed.
-# `test_the_private_winapi_escape_is_blocked_by_the_static_gate` checks both
-# halves, and fails deliberately if the hook ever starts covering it.
+# That route was reachable, and the static layer did not cover it either. The
+# claim used to be that `PluginSandbox.analyze_ast` rejects `import _winapi`, so
+# the escape was unreachable. The gate rejects the *name*; the payload never
+# used it. `import pathlib` is allowlisted, `sys` was not a forbidden attribute,
+# and `'_winapi'` is not a dunder literal, so all of
+#
+#     import pathlib
+#     pathlib.sys.modules['_winapi'].CreateProcess(None, 'cmd.exe', ...)
+#
+# passed the scan while `import _winapi` was correctly rejected. Measured on
+# this host before the fix: the call raised its audit event and reached the OS
+# layer rather than raising CapabilityViolation.
+#
+# Private events are therefore matched by namespace, below, rather than
+# enumerated one at a time. An exact-match list cannot be trusted to stay
+# complete against private CPython internals: a new sibling event in the same
+# module would silently become a hole, which is exactly how this one went
+# unnoticed.
 _PROCESS_EVENTS = (
     "subprocess.Popen",
     "os.system",
@@ -142,6 +155,64 @@ _PROCESS_EVENTS = (
     "os.fork1",
     "pty.spawn",
 )
+
+#: Private per-platform event namespaces, matched by prefix rather than listed.
+#:
+#: `_winapi` is CPython's Windows API module, and every process it creates
+#: raises `_winapi.CreateProcess`. Matching the namespace instead of the single
+#: event means a sibling added by a future CPython does not reopen the hole.
+#:
+#: Honest limit, recorded rather than papered over: the POSIX analogue could not
+#: be exercised on this host. `_posixsubprocess.fork_exec` reached directly
+#: instead of through `subprocess.Popen` raises no event that this list can
+#: match, so on POSIX the worker's resource limits are the only control over
+#: that route. That is an open question, not a solved one.
+_PROCESS_EVENT_PREFIXES = ("_winapi.",)
+
+#: Exact-match set, so the hook's hot path does not rescan the tuple.
+_PROCESS_EVENT_SET = frozenset(_PROCESS_EVENTS)
+
+
+def _is_process_event(event: str) -> bool:
+    """Whether `event` names process creation that this policy refuses.
+
+    One definition for the hook and for the tests, so a test asserting coverage
+    cannot drift from the rule the hook actually applies.
+    """
+    return (event in _PROCESS_EVENT_SET
+            or event.startswith(_PROCESS_EVENT_PREFIXES))
+
+
+#: Foreign-function interface, matched by namespace for the same reason as above.
+#:
+#: `ctypes` is not a process policy. It is a bypass of *every* control in this
+#: module at once, which is why it has its own entry. The static gate blocks the
+#: *name* (`ctypes` is not an allowlisted import root), on the assumption that
+#: that is sufficient. It is not: every allowlisted module holds a live
+#: reference to `sys`, and `sys.modules` holds whatever the worker has already
+#: imported. Measured on this host, all four pass `PluginSandbox.analyze_ast`
+#: and are the real `sys` module:
+#:
+#:     collections._sys   hashlib._sys   logging._sys   re._sys
+#:
+#: Once a plugin holds a foreign function, no audit event describes what it
+#: does -- this hook observes CPython, and the syscall happens below it.
+#: Measured through an installed hook before this entry existed:
+#:
+#:     ctypes.WinDLL('kernel32').CreateFileW / ReadFile
+#:         -> read backend/storage/mech.db, defeating the path allow-lists that
+#:            the read-confinement rule exists to enforce
+#:     ctypes.WinDLL('kernel32').CreateProcessW
+#:         -> started a process with none of the worker's job-object limits
+#:
+#: `ctypes` raises `ctypes.dlopen` and `ctypes.dlsym` while resolving a library,
+#: which is the only point at which this hook can still refuse an FFI call.
+_FFI_EVENT_PREFIXES = ("ctypes.",)
+
+
+def _is_ffi_event(event: str) -> bool:
+    """Whether `event` is a foreign-function call out of the interpreter."""
+    return event.startswith(_FFI_EVENT_PREFIXES)
 
 # Flags that mean "this open will modify the file".
 #
@@ -261,6 +332,30 @@ def _is_credential_location(path: Path) -> bool:
     return False
 
 
+def _credential_subtree(grant: Path) -> Path:
+    """The checkout subtree holding the bearer token and the database."""
+    return grant / "backend" / "storage"
+
+
+def _contains_checkout_credentials(candidate: Path, grant: Path) -> bool:
+    """Whether granting ``candidate`` would grant the checkout's credentials.
+
+    Containment rather than equality, because the hook's ``_within`` treats a
+    root as covering everything *beneath* it. ``backend/`` is the case that
+    matters: the worker puts ``_BACKEND`` on ``sys.path`` alongside
+    ``_REPO_ROOT`` (``backend/plugins/worker.py:28-33``), and it is not equal to
+    the checkout root while being the ancestor of ``backend/storage``. An
+    equality test against the checkout root therefore let it through.
+
+    Measured on this host with the worker's own path shape and the real hook:
+    ``backend/`` was a granted read root, ``os.listdir('backend/storage')``
+    returned the directory, and ``open('backend/storage/mech.db')`` read the
+    SQLite header. ``.mech_api_token`` is written to that same directory.
+    """
+    storage = _credential_subtree(grant)
+    return candidate == storage or candidate in storage.parents
+
+
 def _python_roots() -> Set[Path]:
     """The interpreter's own installation.
 
@@ -360,10 +455,12 @@ def default_readable_roots() -> Set[Path]:
             continue
         if _is_credential_location(resolved):
             continue
-        # The checkout root is not a readable root merely because it is on the
-        # import path; its storage subtree holds the bearer token and the
-        # database, and those are the host's data.
-        if grant is not None and resolved == grant:
+        # Neither the checkout root nor anything containing the credential
+        # subtree is a readable root merely because it is on the import path.
+        # `backend/` is the entry that mattered: it is not equal to the
+        # checkout root, so it survived an equality test, but `_within` grants
+        # everything beneath a root and `backend/storage` is beneath it.
+        if grant is not None and _contains_checkout_credentials(resolved, grant):
             continue
         roots.add(resolved)
     if grant is not None:
@@ -383,14 +480,21 @@ def resolve_readable_roots(
     directory to do so. `readable_roots` is exactly the parameter an attacker
     would aim at, so the filter has to apply to it and not only to the defaults.
     """
+    grant = _normalize(_repo_root()) if _repo_root() is not None else None
+
     readable: Set[Path] = default_readable_roots()
     for root in readable_roots:
         try:
             resolved = _normalize(root)
         except Exception:  # noqa: BLE001
             continue
-        if not _is_credential_location(resolved):
-            readable.add(resolved)
+        if _is_credential_location(resolved):
+            continue
+        # Same containment rule as the defaults, or the filter above could be
+        # stepped around by passing the parent directory in as configuration.
+        if grant is not None and _contains_checkout_credentials(resolved, grant):
+            continue
+        readable.add(resolved)
     # Writing implies reading, so the writable set is readable too.
     for root in writable_roots:
         try:
@@ -430,7 +534,6 @@ def install_capability_hook(
     readable = resolve_readable_roots(roots, readable_roots)
 
     network_events = frozenset() if allow_network else frozenset(_NETWORK_EVENTS)
-    process_events = frozenset(_PROCESS_EVENTS)
 
     def _within(path: Path, allowed: Set[Path]) -> bool:
         return any(path == root or root in path.parents for root in allowed)
@@ -443,9 +546,20 @@ def install_capability_hook(
                 f"(blocked: {event} {target!r})"
             )
 
-        if event in process_events:
+        # `_is_process_event` covers the private per-platform namespaces too,
+        # because a closed list cannot be trusted to enumerate them completely
+        # (`_winapi.CreateProcess` is the one that was missing).
+        if _is_process_event(event):
             raise CapabilityViolation(
                 f"process creation is not permitted in a plugin worker "
+                f"(blocked: {event})"
+            )
+
+        # `ctypes` resolves a library before it can call into it, and that step
+        # raises an event. It is the only place this hook can see an FFI call.
+        if _is_ffi_event(event):
+            raise CapabilityViolation(
+                f"foreign function calls are not permitted in a plugin worker "
                 f"(blocked: {event})"
             )
 

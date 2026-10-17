@@ -48,6 +48,13 @@ REPLICATION_FLOOR = 0.75
 RECOVERY_FLOOR = 0.50
 MINIMALITY_FLOOR = 0.50
 
+#: The verdict's binding predicate. It is the strictest of the four: the three
+#: rate floors can all be met while this one still fails, because confidence is
+#: their mean, so passing the floors (0.75, 0.50, 0.50) yields only 0.7917. It
+#: is reported in ``checks`` for that reason -- a rejecting verdict must name
+#: the predicate that rejected it.
+CONFIDENCE_FLOOR = 0.85
+
 
 def _wilson_interval(k: int, n: int, z: float = 1.96) -> Dict[str, Any]:
     """Wilson score 95% interval for a binomial proportion.
@@ -307,7 +314,21 @@ class LiveValidationExecutor:
         ]
         confidence = round(0.5 + 0.5 * mean(
             [replication_rate, min(1.0, recovery), minimality]), 4)
-        validated = all(check["passed"] for check in checks) and confidence >= 0.85
+        # The confidence predicate is a conjunct of `validated`, so it belongs
+        # in `checks`. It was previously evaluated only in the verdict, which
+        # meant a payload could carry three passing checks and `validated:
+        # False` with nothing in `checks` naming the rejection -- and at the
+        # published floors this is the predicate that decides the outcome.
+        checks.append({
+            "check": f"confidence>={CONFIDENCE_FLOOR}",
+            "value": confidence,
+            "passed": confidence >= CONFIDENCE_FLOOR,
+            "method": ("0.5 + 0.5 * mean(replication_rate, recovery, "
+                       "minimality)"),
+        })
+        # Verdict and evidence now share one definition, so they cannot drift:
+        # `validated` is exactly "every reported check passed".
+        validated = all(check["passed"] for check in checks)
         replication_interval = _wilson_interval(replicated, len(heads))
         minimality_interval = _wilson_interval(necessary, len(heads))
         scope = (

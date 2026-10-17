@@ -252,15 +252,16 @@ def test_the_denylist_event_names_match_what_cpython_raises():
     rather than waved through:
 
     * a sub-event of a denylisted operation (`os.startfile/2`);
-    * a private CPython event for a module the static gate forbids outright.
-      `_winapi.CreateProcess` is the real one: the capability hook does **not**
-      block it, so a plugin that could import `_winapi` could spawn a process.
-      It cannot, because `PluginSandbox.analyze_ast` rejects the import before
-      execution -- "Importing module '_winapi' is forbidden in sandbox." The
-      second half of this test asserts that, so the layering is checked rather
-      than assumed.
+    * a private CPython event for the same operation. `_winapi.CreateProcess`
+      is the real one, and only the public name was listed, so the refusal was
+      by name rather than by capability. It is now matched by namespace
+      (`capabilities._PROCESS_EVENT_PREFIXES`) and refused by the hook;
+      `test_the_private_winapi_event_is_blocked_by_the_hook` asserts that
+      directly. This test requires only that *some* raised event is denylisted,
+      which is why it stayed green while the gap was open -- so it now asks the
+      policy function the hook itself calls rather than re-implementing it.
     """
-    from backend.plugins.capabilities import _PROCESS_EVENTS
+    from backend.plugins.capabilities import _PROCESS_EVENTS, _is_process_event
 
     events = _spy_events()
     checked = 0
@@ -270,7 +271,7 @@ def test_the_denylist_event_names_match_what_cpython_raises():
         if api == "os.forkpty":
             continue  # pty is POSIX-only; its absence here proves nothing
 
-        denylisted = [e for e in raised if e in _PROCESS_EVENTS]
+        denylisted = [e for e in raised if _is_process_event(e)]
         assert denylisted, (
             f"{api} raises {raised}, none of which is on the process denylist "
             f"-- that API can start a program unblocked. "
@@ -284,65 +285,117 @@ def test_the_denylist_event_names_match_what_cpython_raises():
 
 @pytest.mark.skipif(sys.platform != "win32",
                     reason="_winapi is the Windows-specific escape")
-def test_the_private_winapi_escape_is_blocked_by_the_static_gate():
-    """`_winapi.CreateProcess` is not on the denylist. Nothing else covers it.
+def test_the_private_winapi_event_is_blocked_by_the_hook():
+    """`_winapi.CreateProcess` is the event that actually creates the process.
 
-    The capability hook lets it through -- verified by calling it directly under
-    an installed hook, where it reached the OS layer rather than raising
-    `CapabilityViolation`. So the only thing standing between a plugin and
-    `CreateProcess` is the AST gate's import ban.
+    On Windows `subprocess.Popen` raises two events:
 
-    That makes the import ban load-bearing, and it was previously untested. This
-    asserts both halves: the hook really does not block the call, and the gate
-    really does reject the import. If someone adds `_winapi.CreateProcess` to the
-    denylist the first half flips and this test should be revisited rather than
-    quietly passing.
+        subprocess.Popen  ->  ['subprocess.Popen', '_winapi.CreateProcess']
+
+    Only the first was denylisted, so the operation was refused by *name*
+    rather than by capability. Anything reaching `_winapi.CreateProcess` by
+    another route still created a process, and the child inherited none of the
+    confinement -- not the audit hook, not the path allow-lists, not the
+    network deny, and not the worker's job-object limits. The route was
+    reachable, because `import pathlib` is allowlisted, `sys` is not a
+    forbidden attribute, and `'_winapi'` is not a dunder literal:
+
+        import pathlib
+        m = pathlib.sys.modules['_winapi']
+        m.CreateProcess(None, 'x.exe', None, None, 0, 0, None, None, None)
+
+    Measured on this host: every line above passed `analyze_ast`, while
+    `import _winapi` was correctly rejected.
+
+    The test this replaces asserted the *absence* of hook coverage, on the
+    theory that the import ban was therefore load-bearing. It also passed
+    vacuously: it called `CreateProcess` with ten arguments, but the real
+    signature takes nine, so the call raised `TypeError` having raised no audit
+    event at all. `REACHED_OS TypeError` and a genuine reachability result both
+    satisfy that test's `startswith("REACHED_OS")` assertion, which is why the
+    gap it documents was never confirmed to be reachable.
+
+    This version asserts the *observation* rather than the outcome. Step one
+    proves the call is well-formed by confirming it reaches the OS layer and
+    raises its audit event with no hook installed; only then does step two
+    assert that the installed hook refuses the identical call. A malformed call
+    now fails step one instead of masquerading as a pass.
     """
-    import os
     import subprocess as _sp
 
-    from backend.plugins.capabilities import (
-        CapabilityViolation,
-        install_capability_hook,
-    )
     from backend.plugins.plugin_sandbox import PluginSandbox, SecurityViolation
 
     probe = textwrap.dedent(
         """
         import sys
         sys.path.insert(0, {repo!r})
+
+        events = []
+        sys.addaudithook(lambda event, args: events.append(event))
+
         from backend.plugins.capabilities import (
-            install_capability_hook, CapabilityViolation,
+            CapabilityViolation, install_capability_hook,
         )
-        install_capability_hook()
+
         import _winapi
+
+        # A path that cannot exist, so even an unrefused call starts nothing.
+        BOGUS = "Z:__mech_probe_no_such_exe__.exe"
+
+        # Step one: no hook installed yet, so this measures the call itself.
         try:
-            _winapi.CreateProcess(None, "cmd.exe", None, None, 0, 0,
-                                  None, None, 0, None)
-            print("REACHED_OS")
+            _winapi.CreateProcess(None, BOGUS, None, None, 0, 0,
+                                  None, None, None)
         except CapabilityViolation:
-            print("BLOCKED")
-        except Exception as exc:
-            print("REACHED_OS " + type(exc).__name__)
+            print("WELLFORMED\\tno -- refused with no hook installed")
+        except OSError:
+            print("WELLFORMED\\tyes")
+        except BaseException as exc:
+            print("WELLFORMED\\tno -- " + type(exc).__name__)
+        print("EVENT\\t" + str("_winapi.CreateProcess" in events))
+
+        # Step two: the identical call, under the hook that governs plugins.
+        install_capability_hook()
+        try:
+            _winapi.CreateProcess(None, BOGUS, None, None, 0, 0,
+                                  None, None, None)
+            print("VERDICT\\tNOT_BLOCKED")
+        except CapabilityViolation:
+            print("VERDICT\\tBLOCKED")
+        except BaseException as exc:
+            print("VERDICT\\tOTHER " + type(exc).__name__)
         """
     ).format(repo=str(ROOT))
 
     out = _sp.run([sys.executable, "-c", probe], capture_output=True,
                   text=True, cwd=str(ROOT), timeout=120)
     assert out.returncode == 0, out.stderr
-    hook_verdict = out.stdout.strip().splitlines()[-1]
 
-    # Half one: the dynamic layer does not cover this.
-    assert hook_verdict.startswith("REACHED_OS"), (
-        f"the capability hook now blocks _winapi.CreateProcess ({hook_verdict!r}). "
-        f"If that is deliberate, add it to _PROCESS_EVENTS and update this test.")
+    fields: dict[str, str] = {}
+    for line in out.stdout.splitlines():
+        if "\t" in line:
+            key, _, value = line.partition("\t")
+            fields[key.strip()] = value.strip()
 
-    # Half two: the static layer does, so the escape is not reachable.
+    assert fields.get("WELLFORMED") == "yes", (
+        f"the probe never reached _winapi with a well-formed call, so it proves "
+        f"nothing about the hook: {fields}")
+    assert fields.get("EVENT") == "True", (
+        f"the call did not raise '_winapi.CreateProcess', so this is not "
+        f"exercising the event the denylist matches: {fields}")
+    assert fields.get("VERDICT") == "BLOCKED", (
+        f"_winapi.CreateProcess was {fields.get('VERDICT')!r} under the "
+        f"capability hook. That call creates a process outside every plugin "
+        f"limit, so it must be refused by capability and not only by the static "
+        f"import ban: {out.stdout!r}")
+
+    # Defence in depth: the static gate still rejects the literal import, so a
+    # plugin cannot reach the module by name either.
     sandbox = PluginSandbox()
     for source in ("import _winapi\n",
                    "from _winapi import CreateProcess\n",
                    "import _winapi\n_winapi.CreateProcess(None,'cmd.exe',"
-                   "None,None,0,0,None,None,0,None)\n"):
+                   "None,None,0,0,None,None,None)\n"):
         with pytest.raises(SecurityViolation):
             sandbox.analyze_ast(source)
 
