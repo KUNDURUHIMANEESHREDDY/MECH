@@ -3,14 +3,27 @@
 Validates discoveries and reflects on runs. Wraps:
 - backend.validation.validation_engine.ScientificValidationEngine
   .validate_discovery(discovery_id, hypothesis_statement)
-  (validated == confidence >= 0.85 AND peer review == Accept)
+  A router rather than a verdict: a live discovery is handed to
+  `LiveValidationExecutor.validate`, and anything not live fails closed. The
+  engine's own reproduction, benchmark, peer-review and confidence helpers
+  return deterministic reference values and are deliberately not consulted, so
+  the previous `validated == confidence >= 0.85 AND peer review == Accept`
+  description no longer holds. `validated` is exactly "every reported check
+  passed" -- the replication, recovery and minimality rate floors plus the
+  confidence predicate.
 - backend.research_platform.meta.self_reflection_engine.SelfReflectionEngine
   .generate_reflection_report(campaign_id, successful_hypotheses,
   failed_hypotheses, compute_used_gb_hours, planner_decisions)
 
-CONFIDENCE_THRESHOLD mirrors the 0.85 gate inside ScientificValidationEngine
-so the Supervisor can fail-fast without re-running validation. All validation
-inputs must also carry explicit live provenance and downstream eligibility.
+CONFIDENCE_THRESHOLD mirrors `live_validation.CONFIDENCE_FLOOR`, the binding
+predicate of that verdict: the three rate floors can all be met while it still
+fails, so it is the number that decides the outcome. It is duplicated rather
+than imported so the Supervisor can fail-fast without constructing a validation
+executor, and `tests/pytest/test_confidence_defaults_are_not_fabricated.py`
+asserts the two agree. `ScientificValidationEngine` was named here as the gate's
+home and has no threshold at all; an unpinned mirror is one that can silently
+disagree with the verdict it claims to mirror. All validation inputs must also
+carry explicit live provenance and downstream eligibility.
 """
 
 from __future__ import annotations

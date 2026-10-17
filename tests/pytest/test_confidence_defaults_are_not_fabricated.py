@@ -463,3 +463,64 @@ def test_no_confidence_default_is_a_plausible_float(module_path):
         f"{module_path} defaults a confidence to {offenders}; an unmeasured "
         f"confidence must default to None"
     )
+
+
+# ── The mirrored threshold ──────────────────────────────────────────────────
+
+def test_critic_threshold_matches_the_live_validation_floor():
+    """Two constants, one gate -- so they must not drift apart.
+
+    `critic.CONFIDENCE_THRESHOLD` exists so the Supervisor can fail-fast
+    without re-running validation. That is only sound while it equals the
+    predicate that actually decides `validated`, and nothing asserted the
+    relationship: the other assertions on this constant (`== 0.85` here,
+    `gate["threshold"] == CONFIDENCE_THRESHOLD == 0.85` in
+    `test_validation_loop.py`, `CONFIDENCE_THRESHOLD * 100` in
+    `test_benchmark_executor_measurement.py`) all hardcode 0.85 on the critic
+    side, so raising `CONFIDENCE_FLOOR` alone would break none of them.
+
+    The direction that matters is the floor moving up: the critic would then
+    accept, on the fail-fast path, payloads the verdict rejects.
+    """
+    from backend.agents.critic import CONFIDENCE_THRESHOLD
+    from backend.validation.live_validation import CONFIDENCE_FLOOR
+
+    assert CONFIDENCE_THRESHOLD == CONFIDENCE_FLOOR, (
+        f"critic.CONFIDENCE_THRESHOLD is {CONFIDENCE_THRESHOLD} while the "
+        f"verdict's binding predicate, live_validation.CONFIDENCE_FLOOR, is "
+        f"{CONFIDENCE_FLOOR}. Above the floor the critic's fail-fast would "
+        f"accept what validation rejects; below it, reject what validation "
+        f"accepts. Either re-point the critic at CONFIDENCE_FLOOR or update "
+        f"this test together with the docstring that claims they mirror."
+    )
+
+
+def test_the_confidence_floor_is_the_binding_predicate():
+    """Why the mirror has to be exact rather than approximately right.
+
+    `CONFIDENCE_FLOOR` carries the comment that it is the strictest of the
+    four predicates, and this is that claim's arithmetic: at the three
+    published rate floors, confidence is 0.5 + 0.5 * mean(0.75, 0.50, 0.50) =
+    0.7917, so the confidence predicate is the one that rejects. If that stops
+    being true -- because a floor moved or the formula changed -- then the
+    constant the critic mirrors is no longer the one deciding the verdict, and
+    the comment justifying the mirror is stale.
+    """
+    from backend.validation.live_validation import (
+        CONFIDENCE_FLOOR,
+        MINIMALITY_FLOOR,
+        RECOVERY_FLOOR,
+        REPLICATION_FLOOR,
+    )
+
+    at_the_floors = round(
+        0.5 + 0.5 * ((REPLICATION_FLOOR + RECOVERY_FLOOR + MINIMALITY_FLOOR) / 3),
+        4,
+    )
+    assert at_the_floors < CONFIDENCE_FLOOR, (
+        f"at the rate floors ({REPLICATION_FLOOR}, {RECOVERY_FLOOR}, "
+        f"{MINIMALITY_FLOOR}) confidence reads {at_the_floors}, which clears "
+        f"CONFIDENCE_FLOOR = {CONFIDENCE_FLOOR}. The confidence predicate is "
+        f"no longer the binding one, so `critic.CONFIDENCE_THRESHOLD` is "
+        f"mirroring the wrong number."
+    )
