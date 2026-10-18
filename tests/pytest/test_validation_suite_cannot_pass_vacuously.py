@@ -144,11 +144,17 @@ def test_benchmarks_without_a_pipeline_have_no_module_returning_numbers():
     from science.reproducibility.arithmetic_pipeline import ArithmeticPipeline
     from science.reproducibility.sae_pipeline import SAEReproductionPipeline
 
-    # `ArithmeticPipeline` still has no implementation and must keep saying so.
+    # `ArithmeticPipeline` now measures, but with no route to weights it must
+    # still refuse rather than return a value. This used to require the words
+    # "not implemented"; the pipeline is implemented, so what it checks now is
+    # the property that actually protects the suite: no weights, no number.
     with pytest.raises(Exception) as excinfo:
         ArithmeticPipeline(model_manager=None).run()
-    assert "not implemented" in str(excinfo.value).lower(), (
-        "ArithmeticPipeline must refuse, not return a value")
+    assert "weights" in str(excinfo.value).lower(), (
+        "ArithmeticPipeline must refuse without weights, not return a value")
+    assert "not implemented" not in str(excinfo.value).lower(), (
+        "ArithmeticPipeline is implemented; the refusal must name the missing "
+        "weights rather than claim the measurement does not exist")
 
     # `SAEReproductionPipeline` no longer refuses: it trains a real top-k SAE.
     # What must not happen is a *fabricated* result -- one whose numbers did not

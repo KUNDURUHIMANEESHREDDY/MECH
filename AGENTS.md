@@ -40,11 +40,20 @@ qualified result — not when it manufactures an answer.
 
 ## Testing
 
-The suite is under `tests/pytest/` and takes roughly nine minutes.
+The suite is under `tests/pytest/`. A full run is dominated by tests that load
+real weights, so a cold run takes tens of minutes — do not read a long quiet
+stretch as a hang.
 
 ```powershell
 python -m pytest tests/pytest -q
 ```
+
+Collect `tests/pytest` as written. `tests/` also holds standalone experiment
+scripts beside the suite — `tests/test_process_tree_adversarial.py` drives
+`tests/mock_tree_worker.py` and is run directly, not collected — and a bare
+`pytest` from the repository root stops at `import file mismatch` on the
+duplicate basename, collecting nothing at all. The invocation above is the one
+that collects the suite.
 
 `tests/pytest/conftest.py` installs a source-stability guard: it snapshots
 watched sources at session start and end, and a run whose tree changed mid-run

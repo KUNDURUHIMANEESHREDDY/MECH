@@ -1,9 +1,46 @@
 'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
+const path = require('node:path');
+const fs = require('node:fs');
+
+function resolveApiToken() {
+  if (process.env.MECH_API_TOKEN) return process.env.MECH_API_TOKEN.trim();
+  const repoRoot = path.join(__dirname, '..', '..');
+  const resourcesPath = process.resourcesPath || path.join(__dirname, '..');
+  const candidates = [
+    path.join(repoRoot, 'backend', 'storage', '.mech_api_token'),
+    path.join(resourcesPath, 'backend', 'storage', '.mech_api_token'),
+    path.join(process.cwd(), 'backend', 'storage', '.mech_api_token'),
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) {
+        const val = fs.readFileSync(c, 'utf8').trim();
+        if (val) return val;
+      }
+    } catch {}
+  }
+  return '';
+}
+
+const apiTokenValue = resolveApiToken();
+const apiBaseValue = process.env.MECH_API_BASE || 'http://127.0.0.1:8000';
+
+try {
+  contextBridge.exposeInMainWorld('__MECH_API_TOKEN__', apiTokenValue);
+  contextBridge.exposeInMainWorld('__MECH_API_BASE__', apiBaseValue);
+} catch {
+  // If running in a context where contextBridge is unavailable
+  window.__MECH_API_TOKEN__ = apiTokenValue;
+  window.__MECH_API_BASE__ = apiBaseValue;
+}
 
 // Expose a safe, minimal API to the renderer via contextBridge.
 contextBridge.exposeInMainWorld('appApi', {
+  // Auth & Token
+  getApiToken: () => apiTokenValue,
+  getApiBase: () => apiBaseValue,
   // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),

@@ -114,3 +114,22 @@ _t18.log
 # the trusted renderer; never commit.
 .mech_api_token
 backend/storage/.mech_api_token
+
+# Publication artifacts (scripts/generate a paper). Regenerable runtime output:
+# supplementary bundles, bib files and figure metadata are written here per run.
+backend/science/publications/packages/
+backend/science/publications/figures/
+
+# Fitted tuned-lens translators (~27 MB of tensors per family). Regenerable:
+# `python scripts/train_tuned_lens.py`. The measured report that accompanies them
+# is committed instead (docs/results/tuned_lens_full_affine.json).
+backend/interpretability/algorithms/translators/
+
+# Runtime job persistence for the /api/v2 queue. Regenerable state, not source.
+backend/storage/v2_jobs/
+
+# Agent scratch: working notes and probe scripts from audit/engineering passes.
+# `_team/` notes are hand-written and worth keeping locally; `_audit_scratch/` is
+# throwaway probe output.
+_audit_scratch/
+_team/

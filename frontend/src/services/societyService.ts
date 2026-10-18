@@ -7,7 +7,7 @@
  * Mirrors the standalone-service pattern of inferenceService.ts.
  */
 
-import { apiUrl } from './api';
+import { apiUrl, authHeaders, apiToken } from './api';
 
 const SOCIETY_BASE = apiUrl('/api/society');
 
@@ -34,18 +34,20 @@ export interface SocietyRunStatus {
 export async function startSocietyRun(goal: string, modelName = 'gpt2'): Promise<SocietyRunStarted> {
   const res = await fetch(`${SOCIETY_BASE}/run`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ goal, model_name: modelName }),
   });
-  if (!res.ok) throw new Error(`Society run failed: ${res.statusText}`);
+  if (!res.ok) throw new Error(`Society run failed: ${res.status} ${res.statusText}`);
   const data = (await res.json()) as SocietyRunStarted & { error?: string };
   if (data.error || !data.runId) throw new Error(data.error ?? 'Society run rejected');
   return data;
 }
 
 export async function getSocietyRun(runId: string): Promise<SocietyRunStatus> {
-  const res = await fetch(`${SOCIETY_BASE}/runs/${encodeURIComponent(runId)}`);
-  if (!res.ok) throw new Error(`Society status failed: ${res.statusText}`);
+  const res = await fetch(`${SOCIETY_BASE}/runs/${encodeURIComponent(runId)}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  if (!res.ok) throw new Error(`Society status failed: ${res.status} ${res.statusText}`);
   return res.json() as Promise<SocietyRunStatus>;
 }
 
@@ -55,9 +57,17 @@ export interface SocietyStreamHandlers {
   onError: (message: string) => void;
 }
 
-/** Subscribe to a run's SSE stream. Returns an unsubscribe function. */
+/** Subscribe to a run's SSE stream. Returns an unsubscribe function.
+ *
+ * `EventSource` cannot set request headers, so the bearer token travels as a
+ * query parameter. The backend auth middleware accepts `?token=` for exactly
+ * this case: without it every SSE subscribe is rejected with 401 and the panel
+ * silently degrades to polling.
+ */
 export function streamSocietyRun(runId: string, handlers: SocietyStreamHandlers): () => void {
-  const url = `${SOCIETY_BASE}/stream?runId=${encodeURIComponent(runId)}`;
+  const token = apiToken();
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+  const url = `${SOCIETY_BASE}/stream?runId=${encodeURIComponent(runId)}${tokenParam}`;
   let closed = false;
   let source: EventSource | null = null;
   try {

@@ -137,11 +137,24 @@ class HFAdapterMixin:
     # ── the forward pass ─────────────────────────────────────────────────
 
     def _forward(self, prompt: str, **kwargs) -> Optional[Dict[str, Any]]:
-        """One cached forward pass. Returns None rather than raising."""
+        """One cached forward pass. Returns None rather than raising.
+
+        The cache key is ``(prompt, kwargs)``, not the prompt alone. Keying on
+        the prompt meant `get_logits(p)` -- a forward pass with no
+        `output_hidden_states` -- satisfied a later `get_activations(p, layer)`,
+        which then read `out.hidden_states`, found `None` and reported
+        `status: "unavailable", "No forward pass completed"`. A forward pass had
+        completed; the cached one simply did not carry the tensor that call
+        needed. The refusal was false, and it depended on call order: the same
+        two calls in the other order both measured. Measured on this host with
+        `qwen2.5-0.5b`: logits-then-activations returned `unavailable`,
+        activations-then-logits returned 32 activations.
+        """
         if getattr(self, "_model", None) is None:
             return None
+        key = (prompt, tuple(sorted(kwargs.items())))
         cache = getattr(self, "_cache", None)
-        if cache is not None and cache.get("prompt") == prompt:
+        if cache is not None and cache.get("key") == key:
             return cache
 
         torch = _torch()
@@ -158,8 +171,8 @@ class HFAdapterMixin:
                 f"({type(exc).__name__}: {str(exc)[:200]}).")
             return None
 
-        self._cache = {"prompt": prompt, "out": out,
-                       "encoded": encoded, "device": device}
+        self._cache = {"key": key, "prompt": prompt, "kwargs": dict(kwargs),
+                       "out": out, "encoded": encoded, "device": device}
         return self._cache
 
     # ── the five methods ─────────────────────────────────────────────────
@@ -207,7 +220,17 @@ class HFAdapterMixin:
         torch = _torch()
         device = next(self._model.parameters()).device
         layers = state["out"].attentions
-        if layers is None or layer >= len(layers):
+        # Two different absences, two different reasons. `attentions is None`
+        # means the loaded attention implementation did not return weights --
+        # `sdpa` (the transformers default for these configs) ignores
+        # `output_attentions=True` and warns instead of raising. That is not a
+        # layer problem, and reporting it as one ("Layer 0 is outside this
+        # model (24 layers)") sent the reader looking at the wrong thing while
+        # the number simply could not be produced. Loaded with
+        # `attn_implementation="eager"` the same call measures.
+        if layers is None:
+            return self._attention_unavailable_error(prompt)
+        if layer >= len(layers):
             return self._layer_error(prompt, layer)
 
         attn = layers[layer][0].float().to(device)  # (heads, T, T)
@@ -434,6 +457,30 @@ class HFAdapterMixin:
                 f"Layer {layer} is outside this model "
                 f"({self.spec.num_layers} layers), so no attention pattern "
                 f"exists for it. Nothing was measured."),
+        }
+
+    def _attention_unavailable_error(self, prompt: str) -> Dict[str, Any]:
+        """Attention weights were not returned by the loaded attention backend.
+
+        Distinct from :meth:`_layer_error`: the layer is in range, the tensor is
+        absent because the implementation did not compute it. `sdpa` and
+        `flash_attention_2` ignore `output_attentions=True`; loading with
+        `attn_implementation="eager"` makes the same call measure.
+        """
+        backend = getattr(getattr(self, "_model", None), "config", None)
+        impl = getattr(backend, "_attn_implementation", None) if backend else None
+        return {
+            "status": UNAVAILABLE,
+            "provenance": UNAVAILABLE,
+            "measured": False,
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": (
+                f"The model returned no attention weights "
+                f"(attention implementation {impl or 'unknown'!r} does not "
+                f"support output_attentions=True), so no attention pattern "
+                f"exists for any layer. Nothing was measured. Reload with "
+                f"attn_implementation='eager' to measure it."),
         }
 
     def config_agreement(self) -> Dict[str, Any]:

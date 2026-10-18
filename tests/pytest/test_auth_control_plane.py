@@ -156,3 +156,88 @@ def test_token_path_cannot_be_redirected_from_the_environment(monkeypatch, tmp_p
 
     assert resolved != attacker_path
     assert resolved.name == auth_mod._TOKEN_FILENAME
+
+
+# ---------------------------------------------------------------------------
+# Query-parameter credentials: the SSE / <img> seam
+# ---------------------------------------------------------------------------
+#
+# `EventSource` (used by the Research Society live stream) and `<img src>` cannot
+# set an `Authorization` header. Ten frontend call sites were therefore sending
+# no credentials at all and receiving 401 in standalone mode. The middleware now
+# also accepts `?token=` / `?bearer_token=` for exactly those transports.
+#
+# These tests pin both directions: the seam works, and it is still a *verified*
+# credential rather than an authentication bypass.
+
+
+def test_query_parameter_token_is_accepted(monkeypatch):
+    monkeypatch.setenv("MECH_API_TOKEN", "query-token-abc")
+    auth_mod.reset_cache()
+    try:
+        with _client() as c:
+            r = c.get("/api/status?token=query-token-abc")
+            r2 = c.get("/api/status?bearer_token=query-token-abc")
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "ok"
+        assert r2.status_code == 200, r2.text
+    finally:
+        auth_mod.reset_cache()
+
+
+def test_wrong_query_parameter_token_is_rejected(monkeypatch):
+    monkeypatch.setenv("MECH_API_TOKEN", "query-token-abc")
+    auth_mod.reset_cache()
+    try:
+        with _client() as c:
+            r = c.get("/api/status?token=wrong")
+        assert r.status_code == 401
+        assert "credentials" in r.json().get("detail", "")
+    finally:
+        auth_mod.reset_cache()
+
+
+def test_query_parameter_does_not_unlock_a_data_route_without_a_token(monkeypatch):
+    """The seam authenticates; it does not make a protected route public."""
+    monkeypatch.setenv("MECH_API_TOKEN", "query-token-abc")
+    auth_mod.reset_cache()
+    try:
+        with _client() as c:
+            anonymous = c.get("/api/society/runs")
+            authenticated = c.get("/api/society/runs?token=query-token-abc")
+        assert anonymous.status_code == 401
+        assert authenticated.status_code == 200, authenticated.text
+    finally:
+        auth_mod.reset_cache()
+
+
+def test_header_token_still_wins_and_public_paths_stay_public(monkeypatch):
+    monkeypatch.setenv("MECH_API_TOKEN", "query-token-abc")
+    auth_mod.reset_cache()
+    try:
+        with _client() as c:
+            # A valid header with no query parameter is unaffected by the seam.
+            header_only = c.get("/api/status", headers=auth_mod.auth_headers())
+            # Liveness stays public; the seam must not have widened the allowlist.
+            health = c.get("/health")
+            root = c.get("/")
+        assert header_only.status_code == 200
+        assert health.status_code == 200
+        assert root.status_code == 200
+    finally:
+        auth_mod.reset_cache()
+
+
+def test_query_string_is_not_persisted_in_the_request_log(monkeypatch):
+    """The token must not be written into MECH's own request log.
+
+    The middleware records ``request.url.path``, which excludes the query string.
+    Pinning it here means a future change to log the full URL cannot quietly
+    start persisting credentials.
+    """
+    from backend.core import request_log
+
+    request_log.record("GET", "/api/status", 200, 1.0)
+    entries = request_log.recent(limit=5) if hasattr(request_log, "recent") else []
+    for entry in entries:
+        assert "token=" not in str(entry.get("path", "")), entry

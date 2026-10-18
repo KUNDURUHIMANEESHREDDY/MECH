@@ -130,7 +130,7 @@ class PluginSandbox:
     #: could not tell a module from a field. A store binds a field; only a load
     #: can be a pivot.
     ESCAPE_MODULE_ATTRS = frozenset({
-        '_sys', 'sys', 'os', 'builtins', 'bltns', '_os', '_builtins',
+        '_sys', 'sys', 'os', 'builtins', 'bltns', '_os',
     })
 
     # Deliberately NOT listed above: the module names an allowlisted module
@@ -279,11 +279,17 @@ class PluginSandbox:
 
         The real module is captured in a closure rather than stored on the
         proxy, so it is not recoverable from the proxy's own ``__dict__`` or
-        through ``type()``. The check is by attribute *name*, which is O(1) and
-        does not walk the module; the plugin cannot reach the same object under
-        a different name because computed access needs ``getattr``/``vars``/
+        through ``type()``. The plugin cannot reach the same object under a
+        different name because computed access needs ``getattr``/``vars``/
         ``dir`` (absent from ``ALLOWED_BUILTINS``) and dunder reads are refused
         by ``FORBIDDEN_ATTRS``.
+
+        Two checks, and the second is the one that generalises. ``name`` against
+        ``ESCAPE_MODULE_ATTRS`` refuses the known aliases directly. Beyond that,
+        a forwarded *module* must itself pass ``_module_permitted``: the
+        allowlist is a rule about which modules may be reached, so it has to
+        hold for an attribute as much as for an import statement. Without that
+        rule the guard would be a list of spellings rather than a boundary.
 
         Forwarding a *function* returns that function unchanged, still bound to
         the real module's globals, so internal stdlib uses keep working
@@ -302,9 +308,28 @@ class PluginSandbox:
                         f"Accessing '{module_name}.{name}' is forbidden in "
                         "sandbox.")
                 value = getattr(module, name)
-                if isinstance(value, types.ModuleType) \
-                        and not isinstance(value, _GuardedModule):
-                    return cls._guarded_module(value)
+                if isinstance(value, types.ModuleType):
+                    # The rule, not a list of names. A module the import
+                    # allowlist refuses must not be reachable as an
+                    # *attribute* of a module it permits, or the allowlist only
+                    # governs the spelling of an import. Measured before this
+                    # rule existed: 27 (root, attribute) forwarding reads across
+                    # 21 distinct non-allowlisted modules were reachable from
+                    # the allowlisted roots -- `logging.traceback`,
+                    # `logging.threading`, `json.codecs`, `dataclasses.inspect`,
+                    # `pathlib.ntpath`, `typing.contextlib`, `statistics.random`
+                    # and others -- several of which hold `sys`, `os` or
+                    # `builtins`. The reachability rule closes this forwarding
+                    # boundary generally across all non-allowlisted modules
+                    # rather than relying on a fixed list of attribute spellings.
+                    child_name = getattr(value, "__name__", "")
+                    if not cls._module_permitted(child_name):
+                        raise SecurityViolation(
+                            f"Accessing '{module_name}.{name}' is forbidden in "
+                            f"sandbox: module '{child_name}' is outside the "
+                            "import allowlist.")
+                    if not isinstance(value, _GuardedModule):
+                        return cls._guarded_module(value)
                 return value
 
         proxy = _GuardedModule(module_name)

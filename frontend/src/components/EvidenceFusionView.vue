@@ -188,7 +188,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { apiUrl } from '../services/api';
+import { apiUrl, authHeaders } from '../services/api';
 
 type JsonRecord = Record<string, unknown>;
 type SourceTone = 'online' | 'offline' | 'loading' | 'partial';
@@ -215,7 +215,9 @@ function messageOf(error: unknown): string { return error instanceof Error ? err
 function isOffline(message: string): boolean { return /offline|failed to fetch|network|load|connection|timeout/i.test(message); }
 async function request<T>(path: string): Promise<T> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Browser is offline');
-  const response = await fetch(`${API_BASE}${path}`, { headers: { Accept: 'application/json' } });
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
   if (!response.ok) throw new Error(`GET ${path} returned ${response.status}`);
   return response.json() as Promise<T>;
 }

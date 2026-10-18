@@ -78,33 +78,35 @@ defineEmits<{
 const query = ref('');
 
 const sections = [
-  { title: 'Explore', items: ['explorer', 'gpt2', 'transformer', 'workspace', 'neuralexplorer', 'knowledgegraph', 'circuitexplorer'] },
+  { title: 'Explore', items: ['explorer', 'gpt2', 'gpt2explorer', 'transformer', 'transformerExplorer', 'network', 'steering', 'workspace', 'neuralexplorer', 'knowledgegraph', 'circuitexplorer'] },
   { title: 'Develop', items: ['models', 'prompts', 'debugger', 'build', 'benchmark', 'benchmarksuite'] },
-  { title: 'Research', items: ['experiments', 'sessions', 'reports', 'reasoning', 'evidencefusion', 'analytics', 'health'] },
+  { title: 'Research', items: ['experiments', 'sessions', 'reports', 'reasoning', 'evidencefusion', 'analytics', 'health', 'society'] },
   { title: 'General', items: ['campaigns', 'plugins', 'notebook', 'labnotebook', 'reproduction', 'settings', 'logging', 'projects', 'recent'] },
 ];
 
 const labels: Record<string, string> = {
-  explorer: 'Model Explorer', gpt2: 'GPT-2 Live', transformer: 'Transformer Visualizer',
+  explorer: 'Model Explorer', gpt2: 'GPT-2 Live', gpt2explorer: 'GPT-2 Neuron Explorer', transformer: 'Transformer Visualizer',
+  transformerExplorer: 'Transformer Explorer', network: 'Network', steering: 'Steering Lab',
   workspace: 'Workspace', neuralexplorer: 'Neural Explorer', knowledgegraph: 'Knowledge Graph',
   circuitexplorer: 'Circuit Explorer', models: 'Models', prompts: 'Prompts', debugger: 'Debugger',
   build: 'Build Log', benchmark: 'Benchmark', benchmarksuite: 'Benchmark Suite',
   experiments: 'Experiments', sessions: 'Sessions', reports: 'Reports',
   reasoning: 'Reasoning Trace', evidencefusion: 'Evidence Fusion', analytics: 'Analytics',
-  health: 'Health', campaigns: 'Campaigns', plugins: 'Plugins', notebook: 'Research Notebook',
+  health: 'Health', society: 'Society', campaigns: 'Campaigns', plugins: 'Plugins', notebook: 'Research Notebook',
   labnotebook: 'Lab Notebook', reproduction: 'Paper Reproduction', settings: 'Settings',
   logging: 'Logging', projects: 'Projects', recent: 'Recent Files',
 };
 
 const icons: Record<string, any> = {
-  explorer: markRaw(Network), gpt2: markRaw(Activity), transformer: markRaw(Workflow),
+  explorer: markRaw(Network), gpt2: markRaw(Activity), gpt2explorer: markRaw(Activity), transformer: markRaw(Workflow),
+  transformerExplorer: markRaw(Workflow), network: markRaw(Network), steering: markRaw(Activity),
   workspace: markRaw(BrainCircuit), neuralexplorer: markRaw(BrainCircuit),
   knowledgegraph: markRaw(Share2), circuitexplorer: markRaw(Waypoints),
   models: markRaw(Boxes), prompts: markRaw(Terminal), debugger: markRaw(Bug),
   build: markRaw(Hammer), benchmark: markRaw(Gauge), benchmarksuite: markRaw(ListChecks),
   experiments: markRaw(FlaskConical), sessions: markRaw(History), reports: markRaw(FileText),
   reasoning: markRaw(GitBranch), evidencefusion: markRaw(Scale), analytics: markRaw(TrendingUp),
-  health: markRaw(HeartPulse), campaigns: markRaw(Rocket), plugins: markRaw(Puzzle),
+  health: markRaw(HeartPulse), society: markRaw(Share2), campaigns: markRaw(Rocket), plugins: markRaw(Puzzle),
   notebook: markRaw(BookOpen), labnotebook: markRaw(ClipboardList),
   reproduction: markRaw(CopyCheck), settings: markRaw(Settings), logging: markRaw(ScrollText),
   projects: markRaw(FolderKanban), recent: markRaw(Clock),

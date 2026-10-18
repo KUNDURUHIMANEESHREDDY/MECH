@@ -503,3 +503,145 @@ def test_aliased_legitimate_import_still_works():
         "point = Point(1)\n"
     )
     assert namespace["point"].x == 1
+
+
+# ---------------------------------------------------------------------------
+# The allowlist as a rule about reachability, not a list of spellings
+#
+# The first version of this guard refused a fixed set of attribute *names*.
+# Measured with the name-only guard in place, 27 (root, attribute) forwarding
+# reads across 21 distinct non-allowlisted modules were still reachable as
+# attributes of allowlisted ones (and 74 reads across 42 modules in the recursive
+# closure) -- `logging.traceback`, `logging.threading`, `json.codecs`,
+# `dataclasses.inspect`, `pathlib.ntpath`, `typing.contextlib`, `statistics.random`
+# and more -- several of which hold `sys`, `os` or `builtins`.
+#
+# This test states the general property instead of re-listing payloads: no module
+# that the import allowlist refuses may be reachable as an attribute of a module
+# it permits. It enumerates the real closure, so it keeps working when CPython or
+# the stdlib introduces a new alias, which a hardcoded list would not.
+# ---------------------------------------------------------------------------
+
+def test_no_non_allowlisted_module_is_reachable_as_an_attribute():
+    import importlib
+    import sys
+    import types
+
+    # Independent ground-truth: critical system modules that must never be
+    # in the import allowlist or reachable as module attributes.
+    critical_forbidden = frozenset({
+        "os", "sys", "builtins", "subprocess", "socket", "ctypes", "io", "importlib",
+    })
+    assert not (PluginSandbox.ALLOWED_IMPORT_ROOTS & critical_forbidden), (
+        f"Allowlist contains critical modules: {PluginSandbox.ALLOWED_IMPORT_ROOTS & critical_forbidden}"
+    )
+
+    for root in PluginSandbox.ALLOWED_IMPORT_ROOTS:
+        if root == "__future__":
+            continue
+        importlib.import_module(root)
+
+    seen = set()
+    queue = []
+    for root in sorted(PluginSandbox.ALLOWED_IMPORT_ROOTS):
+        module = sys.modules.get(root)
+        if module is not None:
+            queue.append((root, module))
+
+    leaked = []
+    checked = 0
+    checked_modules = set()
+    while queue:
+        parent_name, module = queue.pop()
+        if id(module) in seen:
+            continue
+        seen.add(id(module))
+        for attr, value in list(vars(module).items()):
+            if not isinstance(value, types.ModuleType):
+                continue
+            child_name = getattr(value, "__name__", "")
+            queue.append((child_name, value))
+
+            # Ground-truth oracle check: critical modules must never be considered permitted
+            child_root = child_name.split(".")[0]
+            if child_root in critical_forbidden:
+                assert not PluginSandbox._module_permitted(child_name), (
+                    f"Critical module '{child_name}' erroneously considered permitted"
+                )
+
+            if PluginSandbox._module_permitted(child_name):
+                continue
+
+            checked += 1
+            checked_modules.add(child_name)
+            # Drive the guard off the real module object rather than through
+            # `_guarded_import(parent_name)`: for a dotted name like
+            # `re._compiler`, `__import__` returns the top-level `re`, so the
+            # attribute under test would not exist on it. The property here is
+            # the guard's refusal, and `_guarded_import` is covered separately.
+            guarded = PluginSandbox._guarded_module(module)
+            try:
+                forwarded = getattr(guarded, attr)
+            except SecurityViolation:
+                continue
+            if isinstance(forwarded, types.ModuleType):
+                leaked.append(f"{parent_name}.{attr} -> {child_name}")
+
+    # Guard against a vacuous pass: if the enumeration found nothing to check,
+    # the test proves nothing and must say so rather than go green.
+    assert checked > 0, "enumeration found no non-allowlisted modules to check"
+    assert not leaked, f"non-allowlisted modules reachable as attributes: {leaked}"
+    # Verify relevance: standard non-allowlisted modules must be in the checked population
+    assert any(name in checked_modules for name in ("traceback", "threading", "codecs", "inspect", "ntpath")), (
+        f"Expected standard non-allowlisted modules in checked set, got: {checked_modules}"
+    )
+
+
+def test_the_reachability_rule_closes_the_multihop_route():
+    """A permitted module that holds a refused one must not become a doorway.
+
+    Under the pre-fix name-only guard, non-allowlisted modules like traceback,
+    codecs, inspect and io were forwarded as attributes of allowlisted roots
+    because their names were not in ESCAPE_MODULE_ATTRS, opening arbitrary file
+    access (e.g. logging.io.open).
+
+    The reachability rule directly refuses accessing non-allowlisted modules
+    as attributes of permitted ones, as well as multi-hop routes traversing them.
+    """
+    for source in (
+        # Direct non-allowlisted attribute access (forwarded pre-fix, refused post-fix)
+        "import logging\nx = logging.traceback\n",
+        "import json\nx = json.codecs\n",
+        "import dataclasses\nx = dataclasses.inspect\n",
+        "import logging\nx = logging.io.open\n",
+        # Multi-hop routes
+        "import logging\nx = logging.traceback.sys\n",
+        "import logging\ne = dict(logging.threading.os.environ)\n",
+        "import json\nx = json.codecs.builtins\n",
+        "import dataclasses\nx = dataclasses.inspect.sys\n",
+        "import typing\ne = dict(typing.contextlib.os.environ)\n",
+    ):
+        with pytest.raises(SecurityViolation):
+            PluginSandbox.execute(source)
+
+
+def test_refusing_attributes_does_not_break_permitted_nesting():
+    """The rule must refuse refused modules, not nesting as such.
+
+    `logging.handlers` and `collections.abc` are inside the allowlist by root,
+    so re-wrapping them must keep working -- otherwise the boundary would break
+    the package layout it is meant to permit.
+    """
+    import collections.abc
+    import logging.handlers
+
+    namespace = PluginSandbox.execute(textwrap.dedent(
+        """
+        import logging.handlers
+        import collections.abc
+        rotated = logging.handlers.RotatingFileHandler
+        seq = collections.abc.Sequence
+        """
+    ))
+    assert namespace["rotated"] is logging.handlers.RotatingFileHandler
+    assert namespace["seq"] is collections.abc.Sequence

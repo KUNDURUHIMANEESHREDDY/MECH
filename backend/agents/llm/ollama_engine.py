@@ -19,9 +19,18 @@ from .prompts import HYPOTHESIS_GENERATION_PROMPT, EXPERIMENT_EVALUATION_PROMPT
 class OllamaEngine(LLMEngine):
     """LLM Engine using a local Ollama instance via urllib."""
 
-    def __init__(self, model: str = "llama3", endpoint: str = "http://localhost:11434/v1/chat/completions") -> None:
+    #: Default socket timeout for a generation call. Bounded on purpose: an
+    #: unreachable host must fail closed in seconds, not hang the Society run
+    #: that asked for a hypothesis. Overridable per instance, and the engine
+    #: factory passes `MECH_OLLAMA_TIMEOUT` through here.
+    DEFAULT_TIMEOUT = 10.0
+
+    def __init__(self, model: str = "llama3",
+                 endpoint: str = "http://localhost:11434/v1/chat/completions",
+                 timeout: float = DEFAULT_TIMEOUT) -> None:
         self.model = model
         self.endpoint = endpoint
+        self.timeout = float(timeout)
 
     def _call_api(self, prompt: str) -> str:
         """Helper to make the REST call to local Ollama."""
@@ -42,7 +51,7 @@ class OllamaEngine(LLMEngine):
         )
         
         try:
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
                 return result["choices"][0]["message"]["content"].strip()
         except urllib.error.URLError as e:
@@ -70,12 +79,24 @@ class OllamaEngine(LLMEngine):
         try:
             response_text = self._call_api(prompt)
             hypotheses = self._parse_json_response(response_text)
-            if isinstance(hypotheses, list):
-                return hypotheses[:max_candidates]
-            return [hypotheses] # In case it returns a single object
+            candidates = hypotheses if isinstance(hypotheses, list) else [hypotheses]
+            accepted = [
+                c for c in candidates
+                if isinstance(c, dict) and bool(str(c.get("description") or "").strip())
+            ]
+            if not accepted:
+                return [{
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "reason": "Ollama generation returned no valid hypotheses with descriptions",
+                }]
+            return accepted[:max_candidates]
         except Exception as e:
-            print(f"Warning: Ollama generation failed ({e}). Falling back to mock.")
-            return self._mock_generate(feature_report, max_candidates)
+            return [{
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": f"Ollama generation failed: {e}",
+            }]
 
     def evaluate_experiment(self, hypothesis: str, experiment_result: Dict[str, Any]) -> Dict[str, Any]:
         prompt = EXPERIMENT_EVALUATION_PROMPT.format(
@@ -85,30 +106,72 @@ class OllamaEngine(LLMEngine):
         
         try:
             response_text = self._call_api(prompt)
-            return self._parse_json_response(response_text)
+            result = self._parse_json_response(response_text)
+            if not isinstance(result, dict) or "error" in result or not ("type" in result or "rationale" in result):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "type": "inconclusive",
+                    "reason": f"Ollama evaluation returned invalid response: {result}",
+                    "rationale": f"Evaluation unavailable: {result}",
+                }
+            return result
         except Exception as e:
-            print(f"Warning: Ollama evaluation failed ({e}). Falling back to mock.")
-            return self._mock_evaluate(hypothesis, experiment_result)
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "type": "inconclusive",
+                "reason": f"Ollama evaluation failed: {e}",
+                "rationale": f"Ollama evaluation failed: {e}",
+            }
 
     def generate_critique(self, hypothesis: str) -> Dict[str, Any]:
         from .prompts import SKEPTIC_CRITIQUE_PROMPT
         prompt = SKEPTIC_CRITIQUE_PROMPT.format(hypothesis=hypothesis)
         try:
             response_text = self._call_api(prompt)
-            return self._parse_json_response(response_text)
+            result = self._parse_json_response(response_text)
+            if not isinstance(result, dict) or "error" in result or not ("critique" in result or "alternative_explanation" in result):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "reason": f"Ollama critique returned invalid response: {result}",
+                    "critique": "",
+                    "alternative_explanation": "",
+                }
+            return result
         except Exception as e:
-            print(f"Warning: Ollama critique failed ({e}). Falling back to mock.")
-            return {"critique": "Might be a spurious correlation.", "alternative_explanation": "Fires on something else."}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": f"Ollama critique failed: {e}",
+                "critique": "",
+                "alternative_explanation": "",
+            }
 
     def generate_counterexample(self, hypothesis: str, critique: str = "") -> Dict[str, Any]:
         from .prompts import COUNTEREXAMPLE_GENERATION_PROMPT
         prompt = COUNTEREXAMPLE_GENERATION_PROMPT.format(hypothesis=hypothesis, critique=critique)
         try:
             response_text = self._call_api(prompt)
-            return self._parse_json_response(response_text)
+            result = self._parse_json_response(response_text)
+            if not isinstance(result, dict) or "error" in result or not ("prompt" in result or "expected_firing" in result):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "reason": f"Ollama counterexample returned invalid response: {result}",
+                    "prompt": "",
+                    "expected_firing": False,
+                }
+            return result
         except Exception as e:
-            print(f"Warning: Ollama counterexample failed ({e}). Falling back to mock.")
-            return self._mock_counterexample(hypothesis)
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": f"Ollama counterexample failed: {e}",
+                "prompt": "",
+                "expected_firing": False,
+            }
             
     def review_evidence(self, hypothesis: str, critique: str, experiment_spec: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         from .prompts import REVIEWER_CONSENSUS_PROMPT
@@ -121,34 +184,48 @@ class OllamaEngine(LLMEngine):
         )
         try:
             response_text = self._call_api(prompt)
-            return self._parse_json_response(response_text)
+            result = self._parse_json_response(response_text)
+            if not isinstance(result, dict) or "error" in result or not ("verdict" in result or "rationale" in result):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "verdict": "inconclusive",
+                    "rationale": f"Ollama review returned invalid response: {result}",
+                    "reason": f"Ollama review returned invalid response: {result}",
+                }
+            return result
         except Exception as e:
-            print(f"Warning: Ollama review failed ({e}). Falling back to mock.")
-            return {"verdict": "needs_revision", "rationale": "Mock reviewer says needs more data."}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "verdict": "inconclusive",
+                "rationale": f"Ollama review failed: {e}",
+                "reason": f"Ollama review failed: {e}",
+            }
 
-    # --- Mocks for fallback if Ollama isn't running ---
+    # --- Mocks replaced with fail-closed behavior to prevent fabricated scientific reasoning ---
 
     def _mock_generate(self, feature_report: Dict[str, Any], max_candidates: int) -> List[Dict[str, Any]]:
-        fid = feature_report.get("feature_index", "Unknown")
-        return [
-            {
-                "description": f"Feature {fid} fires on French locations (Ollama Mock).",
-                "initial_confidence": 0.65
-            },
-            {
-                "description": f"Feature {fid} fires on Python syntax (Ollama Mock).",
-                "initial_confidence": 0.45
-            }
-        ][:max_candidates]
+        return [{
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "reason": "Mock hypothesis generation is disabled. Ensure Ollama is running.",
+        }]
         
     def _mock_evaluate(self, hypothesis: str, experiment_result: Dict[str, Any]) -> Dict[str, Any]:
         return {
-            "type": "supportive",
-            "rationale": "Mock evaluation: result aligns with the hypothesis (Ollama Mock)."
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "type": "inconclusive",
+            "reason": "Mock evaluation is disabled. Ensure Ollama is running.",
+            "rationale": "Mock evaluation is disabled.",
         }
         
     def _mock_counterexample(self, hypothesis: str) -> Dict[str, Any]:
         return {
-            "prompt": "Paris Hilton went to the store.",
-            "expected_firing": False
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "prompt": "",
+            "expected_firing": False,
+            "reason": "Mock counterexample generation is disabled. Ensure Ollama is running.",
         }

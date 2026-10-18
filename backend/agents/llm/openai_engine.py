@@ -68,7 +68,11 @@ class OpenAIEngine(LLMEngine):
 
     def generate_hypotheses(self, feature_report: Dict[str, Any], max_candidates: int = 3) -> List[Dict[str, Any]]:
         if not self.api_key:
-            return self._mock_generate(feature_report, max_candidates)
+            return [{
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": "OPENAI_API_KEY environment variable is not set.",
+            }]
             
         prompt = HYPOTHESIS_GENERATION_PROMPT.format(
             max_candidates=max_candidates,
@@ -78,16 +82,34 @@ class OpenAIEngine(LLMEngine):
         try:
             response_text = self._call_api(prompt)
             hypotheses = self._parse_json_response(response_text)
-            if isinstance(hypotheses, list):
-                return hypotheses[:max_candidates]
-            return [hypotheses] # In case it returns a single object
+            candidates = hypotheses if isinstance(hypotheses, list) else [hypotheses]
+            accepted = [
+                c for c in candidates
+                if isinstance(c, dict) and bool(str(c.get("description") or "").strip())
+            ]
+            if not accepted:
+                return [{
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "reason": "OpenAI generation returned no valid hypotheses with descriptions",
+                }]
+            return accepted[:max_candidates]
         except Exception as e:
-            print(f"Warning: LLM generation failed ({e}). Falling back to mock.")
-            return self._mock_generate(feature_report, max_candidates)
+            return [{
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": f"OpenAI API call failed: {e}",
+            }]
 
     def evaluate_experiment(self, hypothesis: str, experiment_result: Dict[str, Any]) -> Dict[str, Any]:
         if not self.api_key:
-            return self._mock_evaluate(hypothesis, experiment_result)
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "type": "inconclusive",
+                "reason": "OPENAI_API_KEY environment variable is not set.",
+                "rationale": "Evaluation unavailable: OPENAI_API_KEY is not set.",
+            }
             
         prompt = EXPERIMENT_EVALUATION_PROMPT.format(
             hypothesis=hypothesis,
@@ -96,41 +118,101 @@ class OpenAIEngine(LLMEngine):
         
         try:
             response_text = self._call_api(prompt)
-            return self._parse_json_response(response_text)
+            result = self._parse_json_response(response_text)
+            if not isinstance(result, dict) or "error" in result or not ("type" in result or "rationale" in result):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "type": "inconclusive",
+                    "reason": f"OpenAI evaluation returned invalid response: {result}",
+                    "rationale": f"Evaluation unavailable: {result}",
+                }
+            return result
         except Exception as e:
-            print(f"Warning: LLM evaluation failed ({e}). Falling back to mock.")
-            return self._mock_evaluate(hypothesis, experiment_result)
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "type": "inconclusive",
+                "reason": f"OpenAI API call failed: {e}",
+                "rationale": f"Evaluation failed: {e}",
+            }
 
     def generate_critique(self, hypothesis: str) -> Dict[str, Any]:
         if not self.api_key:
-            return {"critique": "Might be spurious (mock).", "alternative_explanation": "Fires on something else (mock)."}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": "OPENAI_API_KEY environment variable is not set.",
+                "critique": "",
+                "alternative_explanation": "",
+            }
             
         from .prompts import SKEPTIC_CRITIQUE_PROMPT
         prompt = SKEPTIC_CRITIQUE_PROMPT.format(hypothesis=hypothesis)
         try:
             response_text = self._call_api(prompt)
-            return self._parse_json_response(response_text)
+            result = self._parse_json_response(response_text)
+            if not isinstance(result, dict) or "error" in result or not ("critique" in result or "alternative_explanation" in result):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "reason": f"OpenAI critique returned invalid response: {result}",
+                    "critique": "",
+                    "alternative_explanation": "",
+                }
+            return result
         except Exception as e:
-            print(f"Warning: LLM critique failed ({e}). Falling back to mock.")
-            return {"critique": "Might be spurious.", "alternative_explanation": "Fires on something else."}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": f"OpenAI API call failed: {e}",
+                "critique": "",
+                "alternative_explanation": "",
+            }
 
     def generate_counterexample(self, hypothesis: str, critique: str = "") -> Dict[str, Any]:
         if not self.api_key:
-            return self._mock_counterexample(hypothesis)
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": "OPENAI_API_KEY environment variable is not set.",
+                "prompt": "",
+                "expected_firing": False,
+            }
             
         from .prompts import COUNTEREXAMPLE_GENERATION_PROMPT
         prompt = COUNTEREXAMPLE_GENERATION_PROMPT.format(hypothesis=hypothesis, critique=critique)
         
         try:
             response_text = self._call_api(prompt)
-            return self._parse_json_response(response_text)
+            result = self._parse_json_response(response_text)
+            if not isinstance(result, dict) or "error" in result or not ("prompt" in result or "expected_firing" in result):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "reason": f"OpenAI counterexample returned invalid response: {result}",
+                    "prompt": "",
+                    "expected_firing": False,
+                }
+            return result
         except Exception as e:
-            print(f"Warning: LLM counterexample failed ({e}). Falling back to mock.")
-            return self._mock_counterexample(hypothesis)
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "reason": f"OpenAI API call failed: {e}",
+                "prompt": "",
+                "expected_firing": False,
+            }
             
     def review_evidence(self, hypothesis: str, critique: str, experiment_spec: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         if not self.api_key:
-            return {"verdict": "needs_revision", "rationale": "Mock reviewer says needs more data."}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "verdict": "inconclusive",
+                "rationale": "Review unavailable: OPENAI_API_KEY is not set.",
+                "reason": "OPENAI_API_KEY environment variable is not set.",
+            }
             
         from .prompts import REVIEWER_CONSENSUS_PROMPT
         prompt = REVIEWER_CONSENSUS_PROMPT.format(
@@ -142,34 +224,48 @@ class OpenAIEngine(LLMEngine):
         )
         try:
             response_text = self._call_api(prompt)
-            return self._parse_json_response(response_text)
+            result = self._parse_json_response(response_text)
+            if not isinstance(result, dict) or "error" in result or not ("verdict" in result or "rationale" in result):
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "verdict": "inconclusive",
+                    "rationale": f"OpenAI review returned invalid response: {result}",
+                    "reason": f"OpenAI review returned invalid response: {result}",
+                }
+            return result
         except Exception as e:
-            print(f"Warning: LLM review failed ({e}). Falling back to mock.")
-            return {"verdict": "needs_revision", "rationale": "Mock reviewer says needs more data."}
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "verdict": "inconclusive",
+                "rationale": f"Review failed: {e}",
+                "reason": f"OpenAI API call failed: {e}",
+            }
 
-    # --- Mocks for local development without API keys ---
+    # --- Mocks replaced with fail-closed behavior to prevent fabricated scientific reasoning ---
 
     def _mock_generate(self, feature_report: Dict[str, Any], max_candidates: int) -> List[Dict[str, Any]]:
-        fid = feature_report.get("feature_index", "Unknown")
-        return [
-            {
-                "description": f"Feature {fid} fires on French locations.",
-                "initial_confidence": 0.65
-            },
-            {
-                "description": f"Feature {fid} fires on Python syntax.",
-                "initial_confidence": 0.45
-            }
-        ][:max_candidates]
+        return [{
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "reason": "Mock hypothesis generation is disabled. Configure OPENAI_API_KEY for live generation.",
+        }]
         
     def _mock_evaluate(self, hypothesis: str, experiment_result: Dict[str, Any]) -> Dict[str, Any]:
         return {
-            "type": "supportive",
-            "rationale": "Mock evaluation: result aligns with the hypothesis."
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "type": "inconclusive",
+            "reason": "Mock evaluation is disabled. Configure OPENAI_API_KEY for live evaluation.",
+            "rationale": "Mock evaluation is disabled.",
         }
         
     def _mock_counterexample(self, hypothesis: str) -> Dict[str, Any]:
         return {
-            "prompt": "Paris Hilton went to the store.",
-            "expected_firing": False
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "prompt": "",
+            "expected_firing": False,
+            "reason": "Mock counterexample generation is disabled. Configure OPENAI_API_KEY for live counterexamples.",
         }

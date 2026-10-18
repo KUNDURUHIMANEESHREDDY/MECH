@@ -9,12 +9,18 @@ Each task defines:
 
 from __future__ import annotations
 
+import importlib
 import math
 import random
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+
+#: The project's NOT_RUN marker. Imported rather than redefined: `LiveUnavailable`
+#: is what every caller in this codebase already catches for "this could not be
+#: measured", and a second class here would split that vocabulary in two.
+from backend.science.models.adapter_base import LiveUnavailable
 
 
 class BenchmarkTask(str, Enum):
@@ -87,7 +93,11 @@ class BenchmarkResult:
     # What the interval bounds. May not be the primary score.
     confidence_interval_target: Optional[str] = None
     confidence_interval_derived: bool = False
-    n_samples: int = 0
+    #: Prompts the pipeline actually used. Optional, and None means the pipeline
+    #: did not report its stimulus size -- not that it used zero. A caller's
+    #: requested count is not recorded here, because a request is not a
+    #: measurement of what ran.
+    n_samples: Optional[int] = None
     #: How many independent seeds the score rests on.
     #:
     #: `n_samples` counts prompts; it says nothing about how many times the
@@ -393,6 +403,183 @@ TASK_CATALOGUE: Dict[BenchmarkTask, BenchmarkTaskSpec] = {
 }
 
 
+@dataclass(frozen=True)
+class _PipelineRef:
+    """Where a task's measurement lives, and what it actually reports.
+
+    ``metric_key`` is read from the pipeline's own ``observed_metrics`` literal,
+    not from ``BenchmarkTaskSpec.primary_metric``. For LOGIT_LENS the two are the
+    same quantity under two spellings (``final_layer_acc`` / 
+    ``final_layer_top1_accuracy``). For GREATER_THAN and SAE they are different
+    quantities, which is why ``comparable`` exists.
+    """
+
+    module: str
+    cls: str
+    #: ``"mock_mode"`` -> ``Cls(mock_mode=False)``;
+    #: ``"model_manager"`` -> ``Cls(ModelManager())``.
+    style: str
+    metric_key: str
+    #: True only when ``metric_key`` is the same quantity as the task's published
+    #: reference. A fidelity computed across two different quantities is a
+    #: number with no meaning, so where this is False the pipeline's measurement
+    #: is surfaced as NOT_RUN with its evidence attached rather than converted
+    #: into an unlike comparison.
+    comparable: bool
+    #: Optional keys inside ``observed_metrics`` naming the real stimulus size and
+    #: the per-trial outcomes, so the reported sample count and any interval come
+    #: from what the pipeline measured rather than from the caller's request.
+    n_key: Optional[str] = None
+    trials_key: Optional[str] = None
+    correct_key: Optional[str] = None
+    #: A result-level list whose length is the number of prompts actually used.
+    count_key: Optional[str] = None
+    #: Why the metric is not the reference quantity, when ``comparable`` is False.
+    incomparable_because: Optional[str] = None
+
+
+#: task -> pipeline. Nothing here is imported until the task is dispatched, so a
+#: module that is missing, renamed, or mid-edit cannot break `import
+#: benchmark_tasks` or the application start-up; it degrades to a NOT_RUN that
+#: names the module.
+_PIPELINE_TABLE: Dict[BenchmarkTask, _PipelineRef] = {
+    BenchmarkTask.GREATER_THAN: _PipelineRef(
+        "backend.science.reproducibility.greater_than_pipeline",
+        "GreaterThanCircuitPipeline", "mock_mode",
+        metric_key="comparison_accuracy", comparable=False,
+        n_key="n_prompts", trials_key="n_prompts", correct_key="n_above_chance",
+        incomparable_because=(
+            "comparison_accuracy is the fraction of prompts whose valid "
+            "completions carry more mass than the invalid ones; the published "
+            "reference (Hanna et al.) is circuit_faithfulness, a circuit "
+            "recovery score. A fraction of prompts and a recovery score are "
+            "not the same quantity."),
+    ),
+    BenchmarkTask.LOGIT_LENS: _PipelineRef(
+        "backend.science.reproducibility.logit_lens_pipeline",
+        "LogitLensPipeline", "mock_mode",
+        metric_key="final_layer_top1_accuracy", comparable=True,
+        count_key="layer_results",
+    ),
+    BenchmarkTask.SAE: _PipelineRef(
+        "backend.science.reproducibility.sae_pipeline",
+        "SAEReproductionPipeline", "mock_mode",
+        metric_key="reconstruction_mse", comparable=False,
+        n_key="n_activations",
+        incomparable_because=(
+            "reconstruction_mse is a sum of squared error over the feature "
+            "dimension; the published reference is reconstruction_r2, a "
+            "coefficient of determination. An error and an R^2 are not the same "
+            "quantity. The pipeline reports a normalised error separately as "
+            "normalized_mse; whether that normalisation makes it the published "
+            "R^2 is the pipeline owner's call, and this dispatcher does not "
+            "perform the conversion on their behalf."),
+    ),
+    BenchmarkTask.COPY_TASK: _PipelineRef(
+        "backend.science.reproducibility.copy_task_pipeline",
+        "CopyTaskPipeline", "model_manager",
+        # Deliberately the catalogue's name, not a guess at which of the
+        # pipeline's keys is equivalent. The pipeline reports `copy_score`,
+        # `prefix_match_accuracy`, `copy_behaviour_gain` and two shuffled
+        # controls, and its own `score_units` field says `copy_score` is "a mean
+        # attention fraction at the copied position" -- an attention fraction is
+        # not a fidelity, and `prefix_match_accuracy` is a behavioural accuracy.
+        # Choosing between them is the pipeline owner's call, so this refuses
+        # with the key list instead of picking one and reporting a fidelity from
+        # a quantity nobody declared. Values are not quoted here: the pipeline is
+        # under active edit and a number in this table would go stale silently.
+        metric_key="copy_fidelity", comparable=True,
+    ),
+    BenchmarkTask.ARITHMETIC: _PipelineRef(
+        "backend.science.reproducibility.arithmetic_pipeline",
+        "ArithmeticPipeline", "model_manager",
+        metric_key="arithmetic_faithfulness", comparable=True,
+    ),
+    BenchmarkTask.FACTUAL_RECALL: _PipelineRef(
+        "backend.science.reproducibility.factual_recall_pipeline",
+        "FactualRecallPipeline", "model_manager",
+        metric_key="causal_effect_score", comparable=True,
+    ),
+    BenchmarkTask.UNIVERSALITY: _PipelineRef(
+        "backend.science.reproducibility.universality_pipeline",
+        "UniversalityPipeline", "mock_mode",
+        metric_key="alignment_fidelity", comparable=True,
+    ),
+}
+
+#: The two tasks dispatched before this table existed. Kept for the message
+#: below, so "what is wired" is answered from the code rather than from prose.
+_LEGACY_WIRED_PIPELINES = ("IOIReproductionPipeline", "InductionHeadsPipeline")
+
+
+def _wired_pipeline_names() -> List[str]:
+    return sorted({ref.cls for ref in _PIPELINE_TABLE.values()}
+                  | set(_LEGACY_WIRED_PIPELINES))
+
+
+class PipelineNotRun(LiveUnavailable, NotImplementedError):
+    """The task produced no measurement. NOT_RUN, not ERROR.
+
+    Inherits both markers on purpose. ``LiveUnavailable`` is what this codebase
+    catches for "not measured"; ``NotImplementedError`` is what callers of this
+    executor already expected for a task with no pipeline, and the message keeps
+    the wording they assert on. The distinction the project cares about is that
+    this is a statement about *scope*, not a measurement that broke, and the
+    reason says which of the two it is.
+    """
+
+    def __init__(self, task_id: Any, reason: str, *,
+                 measured_evidence: Optional[Dict[str, Any]] = None) -> None:
+        self.task_id = str(getattr(task_id, "value", task_id))
+        self.reason = reason
+        #: A refusal can still carry a measurement -- the greater-than pipeline
+        #: reports the per-prompt comparison evidence behind its refusal.
+        #: Dropping it would lose a finding because it arrived with a NOT_RUN.
+        self.measured_evidence = measured_evidence
+        super().__init__(
+            f"No measurement pipeline is implemented for task "
+            f"{self.task_id!r} in this environment: {reason} Wired pipelines: "
+            f"{', '.join(_wired_pipeline_names())}. A task that produces no "
+            f"measurement is reported as NOT_RUN; it is never replaced with the "
+            f"published reference value plus noise."
+        )
+
+
+def _build_pipeline(pipeline_cls: Any, style: str) -> Any:
+    """Construct a pipeline without touching the network or loading weights here."""
+    if style == "mock_mode":
+        return pipeline_cls(mock_mode=False)
+    if style == "model_manager":
+        from backend.science.models.model_manager import ModelManager
+        return pipeline_cls(ModelManager())
+    raise ValueError(f"Unknown pipeline construction style {style!r}.")
+
+
+def _observed_metrics(result: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(result, dict):
+        return None
+    metrics = result.get("observed_metrics")
+    return metrics if isinstance(metrics, dict) else None
+
+
+def _pipeline_n(result: Any, metrics: Dict[str, Any],
+                ref: _PipelineRef) -> Optional[int]:
+    """How many prompts the pipeline actually used, or None if it did not say.
+
+    None is recorded as None rather than as the caller's requested sample count:
+    a request is not a fact about what ran.
+    """
+    if ref.n_key:
+        value = metrics.get(ref.n_key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return int(value)
+    if ref.count_key and isinstance(result, dict):
+        seq = result.get(ref.count_key)
+        if isinstance(seq, list):
+            return len(seq)
+    return None
+
+
 class BenchmarkTaskExecutor:
     """
     Executes a single benchmark task on a model.
@@ -467,6 +654,16 @@ class BenchmarkTaskExecutor:
         else:
             # REFERENCE or PRODUCTION -- run the task's real pipeline.
             outcome = self._run_pipeline_dispatch(task, model_id, mode, n)
+
+        if "n_samples" in outcome:
+            # A pipeline owns its own stimulus size, so `n_samples` here is a
+            # request rather than a fact about what ran. Where the pipeline
+            # reports how many prompts it used, that number is recorded; the
+            # generic dispatch reports None when the pipeline does not say, and
+            # None is honest where the caller's number would not be. IOI and
+            # INDUCTION_HEADS do not set this key, so their behaviour is
+            # unchanged.
+            n = outcome["n_samples"]
 
         score = outcome["score"]
         if score is None:
@@ -660,10 +857,24 @@ class BenchmarkTaskExecutor:
         """Run the task's real reproduction pipeline.
 
         Returns the measured primary score plus whatever the pipeline actually
-        reported. Raises for a task with no implemented pipeline rather than
-        substituting a value: six of the eight catalogue tasks have no
-        measurement implementation, and inventing one would be exactly the
-        failure this file was rewritten to remove.
+        reported. A task whose pipeline is absent, unimportable, or refuses
+        raises :class:`PipelineNotRun` -- a NOT_RUN carrying the reason and any
+        measured evidence -- rather than substituting a value. Inventing one
+        would be exactly the failure this file was rewritten to remove.
+
+        Dispatch is table-driven and every import is lazy (see
+        ``_PIPELINE_TABLE``), so a pipeline module that is missing or mid-edit
+        degrades to a stated NOT_RUN instead of an ImportError at start-up. The
+        two tasks with a hand-written call shape, IOI and INDUCTION_HEADS, are
+        still dispatched first and unchanged: they pass arguments the generic
+        table cannot express (``n_prompts``/``n_sequences``), and their results
+        are what the existing attestation path is pinned against.
+
+        A fidelity is only computed where the pipeline's metric is the same
+        quantity as the task's published reference. Where it is not, the
+        measurement is surfaced through ``PipelineNotRun.measured_evidence``
+        with the mismatch named, because a percentage agreement between two
+        different quantities reads as a reproduction and is not one.
 
         `backend` is intentionally not consulted. There is one measurement path
         -- the reproduction pipelines -- and they all run the same model. The
@@ -755,14 +966,101 @@ class BenchmarkTaskExecutor:
                 "mechanism": (result.get("mechanism") or {}).get("mechanism"),
             }
 
-        raise NotImplementedError(
-            f"No measurement pipeline is implemented for task "
-            f"{task.task_id!r}. Tasks with a real implementation: IOI "
-            f"(IOIReproductionPipeline), INDUCTION_HEADS "
-            f"(InductionHeadsPipeline). This previously fell through to a "
-            f"stub returning the published reference value plus noise, which "
-            f"reproduces the paper by construction."
-        )
+        # ── table-driven dispatch for every other catalogue task ──────────
+        ref = _PIPELINE_TABLE.get(task.task_id)
+        if ref is None:
+            raise PipelineNotRun(
+                task.task_id,
+                "no pipeline is registered for this task.",
+            )
+
+        try:
+            module = importlib.import_module(ref.module)
+        except Exception as exc:
+            # Not an ImportError at start-up: this module is imported here, at
+            # dispatch time, and a failure is a stated NOT_RUN naming it.
+            raise PipelineNotRun(
+                task.task_id,
+                f"{ref.module} could not be imported ({type(exc).__name__}: "
+                f"{exc}), so no pipeline ran.",
+            ) from exc
+
+        pipeline_cls = getattr(module, ref.cls, None)
+        if pipeline_cls is None:
+            raise PipelineNotRun(
+                task.task_id,
+                f"{ref.module} does not define {ref.cls}.",
+            )
+
+        if mock_mode:
+            return {
+                "score": self._fixture_score(task),
+                "fixture": True,
+                "patch_success_rate": None,
+                "overlap_pct": None,
+                "trials": None,
+                "correct": None,
+                "tokens": None,
+                "backend_effective": "mock fixture",
+            }
+
+        try:
+            pipeline = _build_pipeline(pipeline_cls, ref.style)
+            result = pipeline.run()
+        except LiveUnavailable as exc:
+            # The pipeline refused, and the refusal is a finding with its own
+            # evidence attached. Both are carried forward.
+            raise PipelineNotRun(
+                task.task_id,
+                f"{ref.cls} refused: {exc}",
+                measured_evidence=getattr(exc, "measured_evidence", None),
+            ) from exc
+
+        metrics = _observed_metrics(result)
+        if metrics is None:
+            raise PipelineNotRun(
+                task.task_id,
+                f"{ref.cls} returned no observed_metrics, so no primary score "
+                f"exists.",
+            )
+
+        score = metrics.get(ref.metric_key)
+        if score is None:
+            raise PipelineNotRun(
+                task.task_id,
+                f"{ref.cls} returned no '{ref.metric_key}' (keys present: "
+                f"{sorted(metrics)}), so no primary score exists.",
+                measured_evidence={"observed_metrics": metrics},
+            )
+
+        if not ref.comparable:
+            raise PipelineNotRun(
+                task.task_id,
+                f"{ref.cls} measured '{ref.metric_key}' = {score!r}, but this "
+                f"task's published reference is "
+                f"'{task.reference.metric_name}' = {task.reference.metric_value} "
+                f"({task.reference.source_paper}). "
+                f"{ref.incomparable_because} No fidelity is computed against a "
+                f"quantity the pipeline did not measure.",
+                measured_evidence={"observed_metrics": metrics},
+            )
+
+        return {
+            "score": score,
+            "fixture": False,
+            "patch_success_rate": None,
+            "overlap_pct": None,
+            "trials": (metrics.get(ref.trials_key) if ref.trials_key else None),
+            "correct": (metrics.get(ref.correct_key) if ref.correct_key else None),
+            # Nothing here tokenises a prompt for a count, so no throughput is
+            # claimed. `None` reads as "not measured"; 0 would read as measured.
+            "tokens": None,
+            "backend_effective": ref.cls,
+            # The pipeline owns its stimulus size. Where it reports one, it is
+            # recorded; where it does not, None is recorded rather than the
+            # caller's requested count.
+            "n_samples": _pipeline_n(result, metrics, ref),
+        }
 
     def _fixture_score(self, task: BenchmarkTaskSpec) -> float:
         """A value centred on the published reference. Explicitly a fixture."""

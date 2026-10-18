@@ -20,4 +20,4 @@ class FutureWorkGenerator:
         if not is_reproduced:
             directions.append("Investigate the discrepancies between this reproduction and original published results, focusing on dataset drift or model versioning.")
             
-        return "## Future Work\n\n" + "\n".join([f"* {d}" for d in directions])
+        return "\n".join([f"* {d}" for d in directions])

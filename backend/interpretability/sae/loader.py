@@ -16,6 +16,22 @@ module refuses to hand back an SAE that has none. It previously:
 
 `activate()` now performs the real encoding when weights are present and
 returns an explicit unavailable envelope when they are not.
+
+The pre-encoder centering is a checkpoint property, not a constant
+-----------------------------------------------------------------
+``ReLU((h - b_pre) @ W_enc + b_enc)`` has two spellings in the wild. Some
+checkpoints carry a dedicated ``b_pre``; the ``mats_sae_training`` / Cunningham
+format carries no such tensor and centers the encoder on ``b_dec``, the decoder
+bias that is also the data mean. Only the first was read, so the second format
+was encoded uncentered -- and that is not a slightly worse decomposition.
+Measured on this host, the layer-8 GPT-2 dictionary reports 51 active features
+at relative L2 0.243 when centered on ``b_dec``, and 1558 at 5.56 when it is
+not. The fallback is now made, and ``SAEConfig.pre_encoder_center`` records
+which vector was used, so the arithmetic is visible in the result.
+
+``encoder.bias`` is no longer a fallback for it. In SAELens that bias *is*
+``b_enc``, which is added after the matmul; subtracting it from the input as
+well applies it twice, with the centering's sign inverted.
 """
 
 from __future__ import annotations
@@ -43,16 +59,64 @@ class SAEConfig:
     version: str
     checkpoint_sha: str = ""
     verified_at: Optional[str] = None
+    #: The activation the dictionary was trained on. An SAE is only meaningful
+    #: for this one hook point on this one model; the loader refuses a
+    #: mismatch rather than encoding a different activation.
+    hook_point: str = ""
+    model_id: str = ""
+    dataset: str = ""
+    l1_coefficient: Optional[float] = None
+    revision: str = ""
+    #: Which checkpoint field the encoder input is centered on: ``"b_pre"``
+    #: when the checkpoint carries a dedicated one, ``"b_dec"`` when the
+    #: format centers on the decoder bias (the ``mats_sae_training`` /
+    #: Cunningham convention, which is also what this repository's own trainer
+    #: writes -- ``sae_pipeline`` stores ``"b_pre": sae.b_dec`` and computes
+    #: ``(x - b_dec) @ W_enc + b_enc``), and ``""`` when there is nothing to
+    #: subtract.
+    #:
+    #: Recorded rather than folded silently into ``b_pre``, because it decides
+    #: whether the numbers below are a decomposition or noise: measured on this
+    #: host, the layer-8 GPT-2 dictionary reports 51 active features at relative
+    #: L2 0.243 when centered on ``b_dec`` and 1558 at 5.56 when it is not.
+    pre_encoder_center: str = ""
+
+    def applies_to(self, layer: int, hook_point: str) -> bool:
+        """Whether this dictionary describes the given activation."""
+        if not self.hook_point:
+            return True  # unknown provenance: caller decides, and is told so
+        return (int(layer) == int(self.layer)
+                and str(hook_point) == self.hook_point)
+
+
+def _cfg_fact(cfg: Any, *names: str) -> Any:
+    """First present attribute among ``names`` on a checkpoint config."""
+    for name in names:
+        value = getattr(cfg, name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _layer_from_hook(hook_point: Any) -> int:
+    """``blocks.8.hook_resid_pre`` -> ``8``; ``-1`` when it does not parse."""
+    import re
+
+    match = re.search(r"blocks\.(\d+)\.", str(hook_point or ""))
+    return int(match.group(1)) if match else -1
 
 
 class SAE:
     """A loaded Sparse Autoencoder instance backed by real weight tensors."""
 
     def __init__(self, config: SAEConfig, weights: Any = None,
-                 biases: Optional[Dict[str, Any]] = None) -> None:
+                 biases: Optional[Dict[str, Any]] = None,
+                 decoder: Any = None, bias_dec: Any = None) -> None:
         self.config = config
         self.weights = weights  # torch.Tensor [d_in, d_sae]
         self.biases = biases or {}
+        self.decoder = decoder  # torch.Tensor [d_sae, d_in] or None
+        self.bias_dec = bias_dec
         self.id = str(uuid.uuid4())
 
     @property
@@ -95,8 +159,12 @@ class SAE:
         """Encode a hidden state into sparse feature firings.
 
         The real encoding is ``ReLU((h - b_pre) @ W_enc + b_enc)``, keeping the
-        top ``d_sae``/top_k activations. Without weights there is nothing to
-        apply, so this refuses instead of returning fixed feature indices.
+        top ``d_sae``/top_k activations. ``b_pre`` here is the checkpoint's own
+        pre-encoder centering vector, which for a ``mats_sae_training``
+        checkpoint is its ``b_dec``; see ``SAEConfig.pre_encoder_center`` for
+        which one was read, because centering decides whether the output is a
+        decomposition or noise. Without weights there is nothing to apply, so
+        this refuses instead of returning fixed feature indices.
         """
         if not self.loaded:
             return {
@@ -148,6 +216,112 @@ class SAE:
         """High-throughput feature extraction for a dataset."""
         return [self.activate(item) for item in dataset]
 
+    # -- decoder side ----------------------------------------------------
+
+    def feature_direction(self, index: int) -> Dict[str, Any]:
+        """The decoder row for a feature: its direction in activation space.
+
+        A feature index with no direction is only a label; the direction is what
+        lets a reader ask what the feature *does* to the residual stream. No
+        decoder weights means this refuses rather than returning a placeholder.
+        """
+        if self.decoder is None:
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "measured": False,
+                "reason": ("This checkpoint carries no decoder weights (W_dec), "
+                           "so a feature direction cannot be reported."),
+            }
+        import torch
+
+        row = self.decoder[int(index)]
+        if not torch.is_tensor(row):
+            row = torch.as_tensor(row)
+        row = row.detach().float().reshape(-1)
+        norm = float(row.norm())
+        top = torch.topk(row.abs(), min(8, row.numel()))
+        return {
+            "status": "completed",
+            "provenance": "live",
+            "measured": True,
+            "feature_index": int(index),
+            "dim": int(row.numel()),
+            "l2_norm": round(norm, 6),
+            "unit": bool(norm > 0),
+            "top_dims": [
+                {"dim": int(i), "value": round(float(row[i]), 6)}
+                for i in top.indices.tolist()
+            ],
+            "hook_point": self.config.hook_point,
+            "model_id": self.config.model_id,
+        }
+
+    def reconstruction_error(self, hidden_state: Any,
+                             feature_indices: List[int]) -> Dict[str, Any]:
+        """Relative L2 error of the reconstruction from the given features.
+
+        This is the measurement that says whether the dictionary actually
+        explains the activation, so it is computed from real tensors or refused.
+        """
+        if self.decoder is None or self.weights is None:
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "measured": False,
+                "reason": "Encoder or decoder weights are missing.",
+            }
+        import torch
+
+        h = hidden_state
+        if not torch.is_tensor(h):
+            h = torch.as_tensor(h)
+        h = h.detach().float().reshape(-1).to(self.weights.device)
+
+        acts = self.activate(hidden_state)
+        if acts.get("status") != "completed":
+            return acts
+
+        b_pre = self.biases.get("b_pre")
+        shifted = h if b_pre is None else h - torch.as_tensor(
+            b_pre, device=h.device, dtype=h.dtype).reshape(-1)
+        latent = shifted @ self.weights.float()
+        b_enc = self.biases.get("b_enc")
+        if b_enc is not None:
+            latent = latent + torch.as_tensor(
+                b_enc, device=latent.device, dtype=latent.dtype).reshape(1, -1)
+        latent = torch.relu(latent).squeeze(0)
+
+        dec = self.decoder.float().to(h.device)
+        recon = latent @ dec
+        if self.bias_dec is not None:
+            recon = recon + torch.as_tensor(
+                self.bias_dec, device=h.device, dtype=h.dtype).reshape(-1)
+
+        numerator = float((h - recon).norm())
+        denominator = float(h.norm())
+        return {
+            "status": "completed",
+            "provenance": "live",
+            "measured": True,
+            "relative_l2_error": round(numerator / denominator, 6)
+            if denominator > 0 else None,
+            "n_active_features": int((latent > 0).sum()),
+            "d_sae": int(self.config.d_sae),
+            "hook_point": self.config.hook_point,
+            "model_id": self.config.model_id,
+        }
+
+    def assert_applies_to(self, layer: int, hook_point: str) -> None:
+        """Refuse to encode an activation this dictionary does not describe."""
+        if self.config.applies_to(layer, hook_point):
+            return
+        raise SAELoadError(
+            f"This SAE was trained on {self.config.model_id or 'a model'} at "
+            f"{self.config.hook_point!r} (layer {self.config.layer}); it does "
+            f"not describe layer {layer} at {hook_point!r}. Encoding that "
+            f"activation would return feature indices that mean nothing.")
+
 
 class SAEProvider(ABC):
     """Abstract base for SAE model providers."""
@@ -162,20 +336,71 @@ class SAEProvider(ABC):
         ...
 
 
-def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any]]:
-    """Open real SAE weights from disk and hash the file.
+class _LanguageModelSAERunnerConfig:
+    """Allowlist target for the metadata class inside Bloom's checkpoints.
 
-    `weights_only=True` is not a stylistic preference here. `weights_only=False`
+    Those files pickle ``sae_training.config.LanguageModelSAERunnerConfig`` (a
+    plain hyper-parameter container) alongside the tensor state dict, so
+    ``torch.load(weights_only=True)`` refuses them: the class is an unsupported
+    global and ``sae_training`` is not installed here.
+
+    Rather than falling back to ``weights_only=False`` -- an arbitrary-code-
+    execution load on a downloaded artefact -- this empty class is registered
+    under that exact module path and allowlisted, so the unpickler reconstructs
+    the container into it. Nothing in the file is executed: the class has no
+    methods for it to reach.
+
+    ``__module__`` and ``__qualname__`` are assigned explicitly because the
+    allowlist key is ``<module>.<qualname>``; a class defined inside a function
+    would register as ``...<locals>.LanguageModelSAERunnerConfig`` and silently
+    fail to match.
+    """
+
+    __module__ = "sae_training.config"
+    __qualname__ = "LanguageModelSAERunnerConfig"
+
+
+def _install_metadata_module():
+    """Register the shim module the pickled path resolves against.
+
+    Returns the previously-registered modules so the caller can restore them;
+    the shim is never left installed after a load.
+    """
+    import sys
+    import types
+
+    module = types.ModuleType("sae_training.config")
+    module.LanguageModelSAERunnerConfig = _LanguageModelSAERunnerConfig
+    package = types.ModuleType("sae_training")
+    package.config = module
+    saved = {name: sys.modules.get(name)
+             for name in ("sae_training", "sae_training.config")}
+    sys.modules["sae_training"] = package
+    sys.modules["sae_training.config"] = module
+    return saved
+
+
+def _restore_metadata_module(saved):
+    import sys
+
+    for name, previous in saved.items():
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+
+
+def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
+    """Open real SAE weights from disk, plus their decoder and provenance.
+
+    ``weights_only=True`` is not a stylistic preference. ``weights_only=False``
     is a pickle load, so a checkpoint from anywhere -- a downloaded artefact, a
     path handed in by an API caller, a file in a shared cache -- becomes
-    arbitrary code execution inside this process. The previous value was False,
-    and it was False with no comment saying why, so it read as an oversight that
-    a later reader might "fix" the wrong way.
+    arbitrary code execution inside this process.
 
-    `weights_only=True` refuses to reconstruct anything that is not a tensor,
-    dict, or a small set of primitives. A checkpoint that genuinely needs more
-    than that is a checkpoint that has to be converted first, which is the
-    correct place to make that decision deliberately.
+    Returns ``(W_enc, biases, meta)`` where ``meta`` carries ``W_dec``/``b_dec``
+    (needed to decode a feature back into an activation) and the training facts
+    from the checkpoint's own config.
     """
     if not os.path.exists(path):
         raise SAELoadError(f"SAE checkpoint not found: {path}")
@@ -192,16 +417,26 @@ def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any]]:
     except ImportError as exc:
         raise SAELoadError(f"torch is required to load SAE weights: {exc}")
 
+    payload = None
+    saved = _install_metadata_module()
     try:
-        state = torch.load(path, map_location="cpu", weights_only=True)
+        with torch.serialization.safe_globals([_LanguageModelSAERunnerConfig]):
+            payload = torch.load(path, map_location="cpu", weights_only=True)
     except Exception as exc:
-        # A checkpoint that cannot be loaded safely is refused, not retried with
-        # a permissive loader: retrying is how `weights_only=False` gets
-        # reintroduced two releases later.
         raise SAELoadError(
-            f"SAE checkpoint could not be loaded with weights_only=True, so it "
-            f"was refused rather than unpickled: {type(exc).__name__}: {exc}"
-        ) from exc
+            f"SAE checkpoint could not be loaded with weights_only=True, so "
+            f"it was refused rather than unpickled: "
+            f"{type(exc).__name__}: {exc}") from exc
+    finally:
+        _restore_metadata_module(saved)
+
+    # Two shapes in the wild: a bare state dict, and Bloom's
+    # {"cfg": <config>, "state_dict": OrderedDict}.
+    state = payload
+    config = None
+    if isinstance(payload, dict) and "state_dict" in payload:
+        state = payload.get("state_dict")
+        config = payload.get("cfg")
     if not isinstance(state, dict):
         raise SAELoadError(f"SAE checkpoint is not a state dict: {path}")
 
@@ -218,12 +453,37 @@ def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any]]:
         raise SAELoadError(
             f"SAE checkpoint has no encoder weights (W_enc): {path}")
 
-    biases = {
-        "b_pre": state.get("b_pre") if state.get("b_pre") is not None
-        else state.get("encoder.bias"),
-        "b_enc": state.get("b_enc"),
+    # The pre-encoder centering vector. Two conventions exist in the wild:
+    #
+    #   * ``b_pre`` -- a dedicated pre-encoder bias (SAELens v3 and later);
+    #   * ``b_dec`` -- no separate tensor; the encoder input is centered on the
+    #     decoder bias, which is the data mean. This is the
+    #     ``mats_sae_training`` / Cunningham convention, and it is what this
+    #     repository's own trainer writes: ``sae_pipeline`` saves
+    #     ``"b_pre": sae.b_dec`` and computes ``(x - b_dec) @ W_enc + b_enc``.
+    #
+    # Reading only ``b_pre`` left the second format uncentered, and that is not
+    # a slightly worse decomposition: measured on this host, the layer-8 GPT-2
+    # dictionary reports 1558 active features at relative L2 5.56 uncentered
+    # and 51 at 0.243 when centered on ``b_dec``. So the fallback is made, and
+    # which vector was used travels in ``meta["pre_encoder_center"]``.
+    #
+    # ``encoder.bias`` is deliberately no longer a fallback: in SAELens that
+    # bias *is* ``b_enc``, added after the matmul, so subtracting it from the
+    # input as well applies it twice with the centering's sign inverted.
+    b_pre = state.get("b_pre")
+    center = "b_pre" if b_pre is not None else ""
+    if b_pre is None and state.get("b_dec") is not None:
+        b_pre = state.get("b_dec")
+        center = "b_dec"
+    biases = {"b_pre": b_pre, "b_enc": state.get("b_enc")}
+    meta = {
+        "W_dec": state.get("W_dec"),
+        "b_dec": state.get("b_dec"),
+        "config": config,
+        "pre_encoder_center": center,
     }
-    return weights, biases
+    return weights, biases, meta
 
 
 class LocalCheckpointProvider(SAEProvider):
@@ -242,51 +502,96 @@ class LocalCheckpointProvider(SAEProvider):
                 raise SAELoadError(
                     f"environment variable {identifier[4:]!r} is not set, so "
                     "no SAE checkpoint path is known")
-        weights, biases = _load_tensors(path)
+        weights, biases, meta = _load_tensors(path)
 
-        import torch
         with open(path, "rb") as handle:
             file_sha = hashlib.sha256(handle.read()).hexdigest()
 
+        cfg = meta.get("config")
+        hook_point = _cfg_fact(cfg, "hook_point", "hook_name") or ""
         config = SAEConfig(
             d_in=int(getattr(weights, "shape")[0]),
             d_sae=int(getattr(weights, "shape")[1]),
-            model_name=version,
-            layer=-1,
+            model_name=_cfg_fact(cfg, "model_name") or version,
+            layer=_layer_from_hook(hook_point),
             repo_id=identifier,
             version=version,
             checkpoint_sha=f"sha256:{file_sha}",
+            hook_point=hook_point,
+            model_id=_cfg_fact(cfg, "model_name", "model_class_name") or "",
+            dataset=_cfg_fact(cfg, "dataset_path") or "",
+            l1_coefficient=_cfg_fact(cfg, "l1_coefficient"),
+            revision=_cfg_fact(cfg, "revision") or "",
+            pre_encoder_center=meta.get("pre_encoder_center") or "",
         )
-        return SAE(config, weights=weights, biases=biases)
+        return SAE(config, weights=weights, biases=biases,
+                   decoder=meta.get("W_dec"), bias_dec=meta.get("b_dec"))
 
 
 class HuggingFaceProvider(SAEProvider):
-    """Fetches real weights from the HF Hub, or raises."""
+    """Fetches real weights from the HF Hub using the registry's file layout.
+
+    ``identifier`` is either a registry layer (``"layer:8"``) or a literal
+    ``"repo_id:filename"``. The old implementation asked every repository for a
+    file called ``weights.pt``, which no real SAE repository uses, so every
+    fetch failed and the toy fixture was the only thing that ever loaded.
+    """
 
     def load(self, identifier: str, version: str) -> SAE:
+        from . import registry
+
+        revision = version
+        if identifier.startswith("layer:"):
+            try:
+                layer = int(identifier.split(":", 1)[1])
+            except ValueError:
+                raise SAELoadError(
+                    f"{identifier!r} is not 'layer:<int>'.")
+            entry = registry.resolve(layer)
+            if entry is None:
+                raise SAELoadError(
+                    f"No known SAE checkpoint for layer {layer}. Known layers: "
+                    f"{registry.available_layers()}.")
+            repo_id, filename, revision = entry.repo_id, entry.filename, entry.revision
+        elif ":" in identifier:
+            repo_id, filename = identifier.split(":", 1)
+        else:
+            raise SAELoadError(
+                f"{identifier!r} does not name a checkpoint. Use 'layer:8' for "
+                f"a registry entry, or 'repo_id:filename'.")
+
         try:
             from huggingface_hub import hf_hub_download
         except ImportError as exc:
             raise SAELoadError(
-                f"huggingface_hub is required to fetch {identifier}: {exc}")
+                f"huggingface_hub is required to fetch {repo_id}: {exc}")
         try:
-            path = hf_hub_download(repo_id=identifier,
-                                   filename="weights.pt",
-                                   revision=version)
+            path = hf_hub_download(repo_id=repo_id, filename=filename,
+                                   revision=revision)
         except Exception as exc:
             raise SAELoadError(
-                f"could not fetch SAE weights for {identifier}@{version}: {exc}")
+                f"could not fetch SAE weights for {repo_id}/{filename}: {exc}")
 
-        weights, biases = _load_tensors(path)
-        import torch
+        weights, biases, meta = _load_tensors(path)
         with open(path, "rb") as handle:
             file_sha = hashlib.sha256(handle.read()).hexdigest()
+        cfg = meta.get("config")
+        hook_point = _cfg_fact(cfg, "hook_point", "hook_name") or ""
         config = SAEConfig(
             d_in=int(weights.shape[0]), d_sae=int(weights.shape[1]),
-            model_name=identifier, layer=-1, repo_id=identifier, version=version,
+            model_name=_cfg_fact(cfg, "model_name") or repo_id,
+            layer=_layer_from_hook(hook_point),
+            repo_id=repo_id, version=version,
             checkpoint_sha=f"sha256:{file_sha}",
+            hook_point=hook_point,
+            model_id=_cfg_fact(cfg, "model_name", "model_class_name") or "",
+            dataset=_cfg_fact(cfg, "dataset_path") or "",
+            l1_coefficient=_cfg_fact(cfg, "l1_coefficient"),
+            revision=revision,
+            pre_encoder_center=meta.get("pre_encoder_center") or "",
         )
-        return SAE(config, weights=weights, biases=biases)
+        return SAE(config, weights=weights, biases=biases,
+                   decoder=meta.get("W_dec"), bias_dec=meta.get("b_dec"))
 
 
 class SAELensProvider(SAEProvider):
@@ -303,12 +608,14 @@ class SAELensProvider(SAEProvider):
             weights = sae.encoder.weight.detach()
         except Exception as exc:
             raise SAELoadError(f"sae_lens could not load {identifier}: {exc}")
+        b_pre = getattr(sae.encoder, "b_pre", None)
         return SAE(
             SAEConfig(d_in=int(weights.shape[0]), d_sae=int(weights.shape[1]),
                       model_name=identifier, layer=-1, repo_id=identifier,
-                      version=version),
+                      version=version,
+                      pre_encoder_center="b_pre" if b_pre is not None else ""),
             weights=weights,
-            biases={"b_pre": getattr(sae.encoder, "b_pre", None),
+            biases={"b_pre": b_pre,
                     "b_enc": getattr(sae.encoder, "b_enc", None)},
         )
 

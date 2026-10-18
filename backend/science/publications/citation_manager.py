@@ -1,3 +1,4 @@
+import os
 from typing import Dict, Any, List
 
 class CitationManager:
@@ -44,7 +45,7 @@ class CitationManager:
         """
         Generates a formatted list of references.
         """
-        section = ["## References\n"]
+        section = []
         for paper in papers:
             if style == "APA":
                 section.append(self.format_apa(paper))
@@ -55,6 +56,10 @@ class CitationManager:
         return "\n".join(section)
 
     def export_bib_file(self, papers: List[Dict[str, str]], filepath: str):
+        # `packages/` is gitignored and absent on a fresh checkout, so the
+        # parent directory is created rather than letting the write raise
+        # FileNotFoundError after the draft has already been assembled.
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
         with open(filepath, 'w') as f:
             for paper in papers:
                 f.write(self.generate_bibtex(paper) + "\n\n")

@@ -42,15 +42,43 @@ class AttributionPatchingEngine:
         ) % (2 ** 31)
 
         nodes: List[Dict[str, Any]] = [
-            {"layer": 8, "neuron": (402 + prompt_hash % 100), "attribution_score": round(0.8 + (prompt_hash % 10) * 0.01, 2)},
-            {"layer": 8, "head": (9 + prompt_hash % 5), "attribution_score": round(0.7 + (prompt_hash % 10) * 0.01, 2)},
-            {"layer": 9, "neuron": (112 + prompt_hash % 200), "attribution_score": round(0.6 + (prompt_hash % 10) * 0.01, 2)},
+            {
+                "layer": 8,
+                "neuron": (402 + prompt_hash % 100),
+                "attribution_score": round(0.8 + (prompt_hash % 10) * 0.01, 2),
+                "field_provenance": {
+                    "neuron": "reference",
+                    "attribution_score": "reference",
+                },
+            },
+            {
+                "layer": 8,
+                "head": (9 + prompt_hash % 5),
+                "attribution_score": round(0.7 + (prompt_hash % 10) * 0.01, 2),
+                "field_provenance": {
+                    "attribution_score": "reference",
+                },
+            },
+            {
+                "layer": 9,
+                "neuron": (112 + prompt_hash % 200),
+                "attribution_score": round(0.6 + (prompt_hash % 10) * 0.01, 2),
+                "field_provenance": {
+                    "neuron": "reference",
+                    "attribution_score": "reference",
+                },
+            },
         ]
         return {
-            "method": method,
+            "method": "not_implemented",
+            "requested_method": method,
             "method_available": False,
             "status": "unavailable",
             "provenance": "reference",
+            "field_provenance": {
+                "linearized_approximation_error": "reference",
+                "top_attributed_nodes": "reference",
+            },
             "attribution_measured": False,
             "validation_eligible": False,
             "publication_eligible": False,

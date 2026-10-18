@@ -20,15 +20,21 @@ and the improvement over the untuned lens is measured and reported.
 
 Scope, stated plainly
 ---------------------
-The translator is **diagonal** affine -- a per-dimension scale and shift,
-`2 * d_model` parameters per layer, ~18k for GPT-2 small across 12 layers. The
-tuned-lens paper uses a full affine per layer (~590k per layer for d=768).
+The default translator is **full affine** -- a per-layer ``d x d`` weight plus a
+``d`` bias, ``d*d + d`` parameters (~590k per layer for GPT-2 small), which
+matches the published modified architecture. It can rotate between features,
+which a per-dimension map cannot.
 
-That is a real restriction, not a detail. A diagonal map can correct per-feature
-gain and offset but cannot rotate between features, so it will recover less
-than a full affine map. Every figure reported here is therefore a measurement
-*of this restricted variant*, and `translator_kind` says so in the payload. It
-would be misleading to report these numbers as "the tuned lens".
+Two caveats are reported rather than buried. The calibration corpus here is
+orders of magnitude smaller than a published tuned lens uses, so the held-out
+KL reduction is the only figure that means anything and it will be far below a
+paper number. And an L2 penalty toward the identity map is applied, because an
+unregularised 590k-parameter map will memorise a small calibration set; the
+penalty strength is in the payload as ``identity_decay``.
+
+The cheaper ``diagonal_affine`` family is still fittable (`kind=`), so the
+shortfall of the restricted map against full rank is a measurement you can take
+rather than an assertion. ``translator_kind`` says which one produced a payload.
 
 Fail-closed
 -----------
@@ -48,9 +54,20 @@ from .logit_lens import LogitLens, ProjectionModel
 LIVE = "live"
 UNAVAILABLE = "unavailable"
 
-#: The translator family actually implemented. Reported in every payload,
-#: because "tuned lens" unqualified would imply the full affine map.
-TRANSLATOR_KIND = "diagonal_affine"
+#: Translator families this module can fit. ``full_affine`` is the published
+#: tuned lens -- a per-layer ``d x d`` weight plus a ``d`` bias, so the map can
+#: rotate between features. ``diagonal_affine`` is the cheaper per-dimension
+#: scale-and-shift, retained so its shortfall against full rank is measured
+#: rather than asserted.
+FULL_AFFINE = "full_affine"
+DIAGONAL_AFFINE = "diagonal_affine"
+
+#: Fitted by default. The published method is full affine, so the default is no
+#: longer the restricted variant.
+DEFAULT_TRANSLATOR_KIND = FULL_AFFINE
+
+#: Backwards-compatible alias for callers that imported the old constant.
+TRANSLATOR_KIND = DEFAULT_TRANSLATOR_KIND
 
 
 class TunedLens(ProjectionModel):
@@ -69,7 +86,8 @@ class TunedLens(ProjectionModel):
     def __init__(self, engine: Optional[Any] = None) -> None:
         self.logit_lens = LogitLens(engine=engine)
         self.engine = self.logit_lens.engine
-        # layer -> {"scale": tensor(d,), "shift": tensor(d,)}
+        # layer -> {"kind": ..., "weight"/"bias" (full affine) or
+        #           "scale"/"shift" (diagonal)}
         self.translators: Dict[int, Dict[str, Any]] = {}
         self.training_report: Optional[Dict[str, Any]] = None
 
@@ -89,6 +107,8 @@ class TunedLens(ProjectionModel):
         learning_rate: float = 1e-3,
         seed: int = 42,
         holdout: bool = True,
+        kind: str = DEFAULT_TRANSLATOR_KIND,
+        identity_decay: float = 1e-3,
     ) -> Dict[str, Any]:
         """Fit the per-layer translators against the model's own predictions.
 
@@ -142,49 +162,107 @@ class TunedLens(ProjectionModel):
         device = hidden[0].device
         unembed = model.transformer.wte.weight  # tied
 
+        # The translator objective is a matmul against the unembedding, not a
+        # model forward pass, so it does not need to share the model's device.
+        # When the engine holds GPT-2 on CPU this is the difference between a
+        # minutes-long fit and an hour-long one; the collected tensors are
+        # already detached, so moving them costs a copy and nothing else.
+        compute_device = (torch.device("cuda") if torch.cuda.is_available()
+                          else device)
+        hidden = [h.to(compute_device) for h in hidden]
+        final_logits = final_logits.to(compute_device)
         target_log_probs = torch.log_softmax(final_logits.float(), dim=-1)
+        unembed = unembed.to(compute_device)
+        device = compute_device
+        layers = list(range(1, n_layers + 1))
 
-        scale = {L: torch.ones(d_model, device=device, requires_grad=True)
-                 for L in range(1, n_layers + 1)}
-        shift = {L: torch.zeros(d_model, device=device, requires_grad=True)
-                 for L in range(1, n_layers + 1)}
-        params = list(scale.values()) + list(shift.values())
+        if kind not in (FULL_AFFINE, DIAGONAL_AFFINE):
+            return self._unavailable_report(
+                f"Unknown translator kind {kind!r}; expected {FULL_AFFINE!r} or "
+                f"{DIAGONAL_AFFINE!r}.")
+
+        # Both families start at the identity map -- I and 0 for full affine,
+        # 1 and 0 for diagonal -- so the untuned and initial-tuned lenses are
+        # the same function and the reported reduction is measured from a
+        # neutral starting point rather than from a lucky initialisation.
+        if kind == FULL_AFFINE:
+            weight = {L: torch.eye(d_model, device=device, requires_grad=True)
+                      for L in layers}
+        else:
+            weight = {L: torch.ones(d_model, device=device, requires_grad=True)
+                      for L in layers}
+        bias = {L: torch.zeros(d_model, device=device, requires_grad=True)
+                for L in layers}
+        params = list(weight.values()) + list(bias.values())
         optimiser = torch.optim.Adam(params, lr=learning_rate)
 
-        # Measured with no translator applied: scale 1, shift 0, so this is the
-        # untuned lens's KL. `.item()` here because nothing differentiates it.
+        def translate(L, h):
+            if kind == FULL_AFFINE:
+                return h @ weight[L].T + bias[L]
+            return h * weight[L] + bias[L]
+
+        def identity_penalty():
+            """L2 distance from the identity map.
+
+            A full-rank translator is ``d*d + d`` parameters per layer -- about
+            590k for GPT-2 small. On a calibration set this small it can drive
+            the in-sample KL toward zero by memorising, so the penalty keeps it
+            near the identity unless the data supports moving away. It is
+            reported, so the figure is not read as an unregularised fit.
+            """
+            if not identity_decay:
+                return None
+            total = None
+            for L in layers:
+                anchor = (torch.eye(d_model, device=device)
+                          if kind == FULL_AFFINE else 1.0)
+                pen = ((weight[L] - anchor) ** 2).sum()
+                total = pen if total is None else total + pen
+            return identity_decay * total
+
+        # Measured with no translator applied, i.e. the untuned lens's KL.
         with torch.no_grad():
             before = {L: float(self._mean_kl(torch, hidden[L], target_log_probs,
-                                             unembed, None, None).item())
-                      for L in scale}
+                                             unembed).item())
+                      for L in layers}
 
         for _ in range(int(steps)):
             optimiser.zero_grad()
             total = None
-            for L in scale:
-                kl = self._mean_kl(torch, hidden[L], target_log_probs,
-                                   unembed, scale[L], shift[L])
+            for L in layers:
+                kl = self._mean_kl(torch, hidden[L], target_log_probs, unembed,
+                                   translated=translate(L, hidden[L].float()))
                 total = kl if total is None else total + kl
+            pen = identity_penalty()
+            if pen is not None:
+                total = total + pen
             total.backward()
             optimiser.step()
 
-        after = {L: float(self._mean_kl(torch, hidden[L], target_log_probs,
-                                        unembed, scale[L], shift[L]).item())
-                 for L in scale}
+        after = {L: float(self._mean_kl(
+                     torch, hidden[L], target_log_probs, unembed,
+                     translated=translate(L, hidden[L].float())).item())
+                 for L in layers}
 
         heldout = None
         if held_prompts:
-            heldout = self._holdout_report(torch, held_prompts, unembed,
-                                          scale, shift)
+            heldout = self._holdout_report(
+                torch, held_prompts, unembed,
+                lambda L, h: translate(L, h.float()), layers)
 
         self.translators = {
-            L: {"scale": scale[L].detach().clone(),
-                "shift": shift[L].detach().clone()}
-            for L in scale
+            L: ({"kind": kind,
+                 "weight": weight[L].detach().clone(),
+                 "bias": bias[L].detach().clone()}
+                if kind == FULL_AFFINE else
+                {"kind": kind,
+                 "scale": weight[L].detach().clone(),
+                 "shift": bias[L].detach().clone()})
+            for L in layers
         }
 
         per_layer = []
-        for L in sorted(scale):
+        for L in layers:
             b, a = before[L], after[L]
             entry = {
                 "layer": L,
@@ -215,10 +293,15 @@ class TunedLens(ProjectionModel):
         heldout_improved = [p for p in usable
                             if p.get("holdout_improved") is True]
 
+        n_params_per_layer = (d_model * d_model + d_model
+                              if kind == FULL_AFFINE else 2 * d_model)
+        n_params = n_params_per_layer * len(layers)
         report = {
             "status": "completed",
             "provenance": LIVE,
-            "translator_kind": TRANSLATOR_KIND,
+            "translator_kind": kind,
+            "parameters_per_layer": n_params_per_layer,
+            "identity_decay": float(identity_decay),
             "model_id": getattr(self.engine, "MODEL_ID", None),
             "n_calibration_prompts": len(calibration_prompts),
             "n_fit_prompts": len(fit_prompts),
@@ -228,8 +311,8 @@ class TunedLens(ProjectionModel):
             "steps": int(steps),
             "learning_rate": float(learning_rate),
             "seed": int(seed),
-            "layers_trained": sorted(scale),
-            "parameters_fitted": 2 * d_model * len(scale),
+            "layers_trained": sorted(layers),
+            "parameters_fitted": n_params,
             "per_layer": per_layer,
             "layers_improved": len(improved),
             "layers_total": len(usable),
@@ -245,20 +328,26 @@ class TunedLens(ProjectionModel):
             "validation_eligible": False,
             "publication_eligible": False,
             "reason": (
-                f"Fitted {2 * d_model * len(scale)} diagonal-affine parameters "
-                f"over {len(usable)} layers on {len(fit_prompts)} calibration "
-                f"prompts ({int(hidden[0].shape[0])} tokens)"
+                f"Fitted {n_params} {kind} parameters "
+                f"({n_params_per_layer} per layer) over {len(usable)} layers on "
+                f"{len(fit_prompts)} calibration prompts "
+                f"({int(hidden[0].shape[0])} tokens)"
                 + (f", scored on {len(held_prompts)} held-out prompts"
                    if heldout else ", with no held-out split")
                 + f". {len(improved)} of {len(usable)} layers improved in "
                   f"sample"
                 + (f"; {len(heldout_improved)} of {len(usable)} improved "
                    f"out of sample." if heldout else ".")
-                + f" Published-restricted: this is the {TRANSLATOR_KIND} "
-                  f"variant, not the full affine translator, so these figures "
-                  f"must not be quoted as 'the tuned lens'. The calibration set "
-                  f"is also orders of magnitude smaller than a published tuned "
-                  f"lens uses."
+                + (f" Full-affine translators match the published modified "
+                   f"architecture, but the calibration set is orders of "
+                   f"magnitude smaller than a published tuned lens uses, and "
+                   f"the identity penalty ({identity_decay}) is this module's "
+                   f"addition, so these figures are not a reproduction of the "
+                   f"paper's numbers."
+                   if kind == FULL_AFFINE else
+                   f" Published-restricted: this is the {DIAGONAL_AFFINE} "
+                   f"variant, not the full affine translator, so these figures "
+                   f"must not be quoted as 'the tuned lens'.")
             ),
         }
         self.training_report = report
@@ -281,20 +370,25 @@ class TunedLens(ProjectionModel):
             return prompts, []
         return fit, held
 
-    def _holdout_report(self, torch, held_prompts, unembed, scale, shift):
+    def _holdout_report(self, torch, held_prompts, unembed, translate_fn, layers):
         """Score the fitted translators on prompts they never saw."""
         hidden, final_logits = self._collect_hidden(held_prompts)
         if hidden is None or not hidden:
             return None
+        # Score on the same device the translators were fitted on.
+        target_device = getattr(unembed, "device", None)
+        if target_device is not None:
+            hidden = [h.to(target_device) for h in hidden]
+            final_logits = final_logits.to(target_device)
         target = torch.log_softmax(final_logits.float(), dim=-1)
 
         per_layer = {}
-        for L in sorted(scale):
+        for L in layers:
             with torch.no_grad():
-                b = float(self._mean_kl(torch, hidden[L], target, unembed,
-                                        None, None).item())
-                a = float(self._mean_kl(torch, hidden[L], target, unembed,
-                                        scale[L], shift[L]).item())
+                b = float(self._mean_kl(torch, hidden[L], target, unembed).item())
+                a = float(self._mean_kl(
+                    torch, hidden[L], target, unembed,
+                    translated=translate_fn(L, hidden[L])).item())
             per_layer[L] = {
                 "kl_untuned": round(b, 6),
                 "kl_tuned": round(a, 6),
@@ -433,9 +527,14 @@ class TunedLens(ProjectionModel):
             model = engine._model
             row = torch.tensor(hidden[index][-1], dtype=torch.float32)
             entry = self.translators[layer]
-            scale = entry["scale"].float().to(row.device)
-            shift = entry["shift"].float().to(row.device)
-            translated = row * scale + shift
+            if entry.get("kind") == FULL_AFFINE:
+                w = entry["weight"].float().to(row.device)
+                b = entry["bias"].float().to(row.device)
+                translated = row @ w.T + b
+            else:
+                s = entry["scale"].float().to(row.device)
+                sh = entry["shift"].float().to(row.device)
+                translated = row * s + sh
 
             # Earlier entries are pre-ln_f; the last is already normalised.
             if layer != n_layers - 1:
@@ -475,6 +574,9 @@ class TunedLens(ProjectionModel):
                 f"no trained translator for layer {layer}; trained layers are "
                 f"{sorted(self.translators)}")
         entry = self.translators[layer]
+        if entry.get("kind") == FULL_AFFINE:
+            return (hidden @ entry["weight"].to(hidden.device).T
+                    + entry["bias"].to(hidden.device))
         return hidden * entry["scale"] + entry["shift"]
 
     # ── internals ────────────────────────────────────────────────────────
@@ -524,8 +626,8 @@ class TunedLens(ProjectionModel):
         return collected, torch.cat(finals, dim=0)
 
     @staticmethod
-    def _mean_kl(torch, hidden, target_log_probs, unembed,
-                 scale=None, shift=None):
+    def _mean_kl(torch, hidden, target_log_probs, unembed, *,
+                 translated=None):
         """Mean KL(target || projection) over tokens, in nats.
 
         Returns a **tensor**, not a float. This runs inside the training loop,
@@ -536,13 +638,10 @@ class TunedLens(ProjectionModel):
 
         Convert with `.item()` at the reporting boundary, not here.
         """
-        h = hidden.float()
-        # Scale and shift are applied independently. Requiring both-or-neither
-        # made `h * scale + shift` raise on a legitimate "scale only" call.
-        if scale is not None:
-            h = h * scale
-        if shift is not None:
-            h = h + shift
+        # `translated` is the already-translated hidden state. Taking it as an
+        # argument keeps _mean_kl free of any knowledge of which translator
+        # family produced it, so both share one KL implementation.
+        h = (translated if translated is not None else hidden).float()
         logits = torch.nn.functional.layer_norm(
             h, (h.shape[-1],)) @ unembed.T.float()
         log_probs = torch.log_softmax(logits, dim=-1)
@@ -554,6 +653,78 @@ class TunedLens(ProjectionModel):
         target = target_log_probs[:n]
         kl = (target.exp() * (target - log_probs[:n])).sum(dim=-1)
         return kl[:n].mean()
+
+    # -- persistence ------------------------------------------------------
+
+    def save(self, path: str) -> Dict[str, Any]:
+        """Persist the fitted translators and their report to ``path``.
+
+        This is the "pre-train, then reuse" seam: training is the expensive
+        part, and a lens that has to be refitted for every process is not a
+        vendored artifact. The file is written with ``torch.save`` and loaded
+        with ``weights_only=True``, so it holds tensors and primitives only.
+        """
+        if not self.translators or self.training_report is None:
+            return {"status": "unavailable", "provenance": UNAVAILABLE,
+                    "reason": "No trained translators to save."}
+        torch = self._torch()
+        if torch is None:
+            return {"status": "unavailable", "provenance": UNAVAILABLE,
+                    "reason": "torch is not importable, so nothing can be saved."}
+        import hashlib
+        import os
+
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        payload = {
+            "translator_kind": self.training_report.get("translator_kind"),
+            "report": self.training_report,
+            "translators": {int(L): dict(v) for L, v in self.translators.items()},
+        }
+        torch.save(payload, path)
+        with open(path, "rb") as handle:
+            digest = hashlib.sha256(handle.read()).hexdigest()
+        return {"status": "saved", "provenance": LIVE, "path": path,
+                "sha256": f"sha256:{digest}",
+                "size_bytes": os.path.getsize(path),
+                "translator_kind": payload["translator_kind"]}
+
+    def load(self, path: str) -> Dict[str, Any]:
+        """Load translators written by :meth:`save`, or report why not.
+
+        Refuses an unknown translator kind and a missing file rather than
+        returning an empty lens that would silently project untransformed.
+        """
+        import os
+
+        torch = self._torch()
+        if torch is None:
+            return {"status": "unavailable", "provenance": UNAVAILABLE,
+                    "reason": "torch is not importable, so nothing can be loaded."}
+        if not os.path.isfile(path):
+            return {"status": "unavailable", "provenance": UNAVAILABLE,
+                    "reason": f"No translator file at {path!r}."}
+        try:
+            payload = torch.load(path, map_location="cpu", weights_only=True)
+        except Exception as exc:
+            return {"status": "unavailable", "provenance": UNAVAILABLE,
+                    "reason": (f"{path!r} could not be loaded with "
+                               f"weights_only=True and was refused rather than "
+                               f"unpickled: {type(exc).__name__}: {exc}")}
+        if not isinstance(payload, dict) or "translators" not in payload:
+            return {"status": "unavailable", "provenance": UNAVAILABLE,
+                    "reason": f"{path!r} is not a tuned-lens checkpoint."}
+        kind = payload.get("translator_kind")
+        if kind not in (FULL_AFFINE, DIAGONAL_AFFINE):
+            return {"status": "unavailable", "provenance": UNAVAILABLE,
+                    "reason": f"Unknown translator kind {kind!r} in {path!r}."}
+        self.translators = {int(L): dict(v)
+                            for L, v in payload["translators"].items()}
+        self.training_report = payload.get("report")
+        return {"status": "loaded", "provenance": LIVE, "path": path,
+                "translator_kind": kind,
+                "layers": sorted(self.translators)}
 
     def _unavailable_report(self, reason: str) -> Dict[str, Any]:
         self.translators = {}

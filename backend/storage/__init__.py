@@ -7,6 +7,20 @@ that shared no column with the live ones here, and an `init_db()` with zero
 callers, so the file it opened was always empty with no schema.
 """
 
-from .database import DesktopStorage, StorageError, get_default_db_path
+from .database import (
+    DesktopStorage,
+    StorageError,
+    compare,
+    get_default_db_path,
+    history,
+    record_run,
+)
 
-__all__ = ["DesktopStorage", "StorageError", "get_default_db_path"]
+__all__ = [
+    "DesktopStorage",
+    "StorageError",
+    "compare",
+    "get_default_db_path",
+    "history",
+    "record_run",
+]

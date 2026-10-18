@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,38 @@ def get_default_db_path() -> Path:
     """Resolve the SQLite path from MECH_STORAGE_DB, else backend/storage/mech.db."""
     env_path = os.environ.get("MECH_STORAGE_DB")
     return Path(env_path) if env_path else DEFAULT_DB_PATH
+
+
+#: The path value that asks for an in-memory database.
+MEMORY_DB_PATH = ":memory:"
+
+#: A single shared in-memory database for this process.
+#:
+#: A bare ``:memory:`` makes every *connection* its own private database, so
+#: `initialize()`'s schema is invisible to the next query -- the caller sees
+#: ``no such table: settings``. A shared-cache URI makes every connection in the
+#: process address one database, which is what a caller writing
+#: ``MECH_STORAGE_DB=:memory:`` expects.
+MEMORY_DB_URI = "file:mech-in-memory?mode=memory&cache=shared"
+
+#: One connection held open for the process lifetime. A shared in-memory
+#: database is destroyed when its last connection closes, so without this the
+#: schema would vanish between two calls that each opened and closed their own
+#: connection.
+_MEMORY_KEEPALIVE: list[sqlite3.Connection] = []
+_MEMORY_LOCK = threading.Lock()
+
+
+def is_memory_path(db_path: Any) -> bool:
+    """Whether ``db_path`` asks for the shared in-memory database."""
+    return str(db_path) == MEMORY_DB_PATH
+
+
+def _hold_memory_database_open() -> None:
+    """Ensure the shared in-memory database exists and outlives any one query."""
+    with _MEMORY_LOCK:
+        if not _MEMORY_KEEPALIVE:
+            _MEMORY_KEEPALIVE.append(sqlite3.connect(MEMORY_DB_URI, uri=True))
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -84,6 +118,111 @@ def _is_link_like(entry: os.DirEntry) -> bool:
     return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
+def _is_number(value: Any) -> bool:
+    """Whether a stored score is a real number.
+
+    ``bool`` is excluded on purpose: it is an ``int`` subclass in Python, so
+    ``True`` would otherwise be written as the score 1.0.
+    """
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _dumps_traces(traces: list[Any] | None) -> str:
+    """Serialise per-sample traces, always as a JSON array."""
+    if traces is None:
+        traces = []
+    if not isinstance(traces, list):
+        raise StorageError("traces must be a list of per-sample trace objects")
+    return json.dumps(traces)
+
+
+def _dumps_detail(detail: dict[str, Any] | None) -> str | None:
+    """Serialise a run detail object; None stays SQL NULL rather than '{}'."""
+    if detail is None:
+        return None
+    if not isinstance(detail, dict):
+        raise StorageError("detail must be an object or None")
+    return json.dumps(detail)
+
+
+def _loads_or(raw: str | None, fallback: Any) -> Any:
+    """Parse a stored JSON column, falling back when the text is unusable."""
+    if raw is None:
+        return fallback
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _trace_key(trace: Any) -> str | None:
+    """The per-sample identity two traces are matched on.
+
+    A trace carrying neither ``prompt`` nor ``target`` cannot be matched to its
+    counterpart in the other run, so it yields None and the caller reports the
+    comparison as not comparable instead of guessing an alignment.
+    """
+    if not isinstance(trace, dict):
+        return None
+    for key in ("prompt", "target"):
+        value = trace.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _trace_outcome(trace: dict[str, Any]) -> str:
+    """A stable string for whatever the trace records about the sample.
+
+    The whole trace minus its identity is serialised with sorted keys so that
+    two traces differing in any recorded field hash differently, and one that
+    differs only in dict insertion order does not.
+    """
+    payload = {key: value for key, value in trace.items()
+               if key not in ("prompt", "target")}
+    return json.dumps(payload, sort_keys=True, default=repr)
+
+
+def _traces_delta(
+    traces_a: list[Any],
+    traces_b: list[Any],
+    not_comparable: list[str],
+) -> dict[str, Any] | None:
+    """Per-sample trace differences, or None with a reason when unmatched.
+
+    ``changed`` holds prompts, so two different samples that happen to share a
+    prompt collapse into one entry. That is acceptable -- such a prompt is
+    already ambiguous by the caller's own key -- and is preferable to inventing
+    an ordering the stored traces do not have.
+    """
+    if not isinstance(traces_a, list) or not isinstance(traces_b, list):
+        not_comparable.append("traces are not stored as JSON arrays")
+        return None
+    if not traces_a or not traces_b:
+        not_comparable.append(
+            "one side has no recorded traces, so per-sample outcomes cannot "
+            "be matched")
+        return None
+    keyed_a = [_trace_key(trace) for trace in traces_a]
+    keyed_b = [_trace_key(trace) for trace in traces_b]
+    if any(key is None for key in keyed_a + keyed_b):
+        not_comparable.append(
+            "traces carry no prompt/target key, so samples cannot be matched "
+            "across runs")
+        return None
+    by_key_b = {key: trace for key, trace in zip(keyed_b, traces_b)}
+    changed = [
+        key for key, trace in zip(keyed_a, traces_a)
+        if key in by_key_b
+        and _trace_outcome(trace) != _trace_outcome(by_key_b[key])
+    ]
+    return {
+        "n_traces_a": len(traces_a),
+        "n_traces_b": len(traces_b),
+        "changed": changed,
+    }
+
+
 class DesktopStorage:
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
@@ -136,6 +275,24 @@ class DesktopStorage:
                     enabled INTEGER NOT NULL DEFAULT 0,
                     installed_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS benchmark_runs (
+                    run_id TEXT PRIMARY KEY,
+                    benchmark TEXT NOT NULL,
+                    primary_metric TEXT,
+                    primary_score REAL,
+                    status TEXT NOT NULL,
+                    provenance TEXT NOT NULL,
+                    model_id TEXT,
+                    weights_fingerprint TEXT,
+                    git_commit TEXT,
+                    created_at TEXT NOT NULL,
+                    traces TEXT NOT NULL DEFAULT '[]',
+                    detail TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_benchmark_runs_benchmark_created
+                    ON benchmark_runs (benchmark, created_at DESC);
                 """
             )
             self._migrate(connection)
@@ -521,7 +678,18 @@ class DesktopStorage:
         return count, False
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
+        """A new connection to this store's database.
+
+        ``:memory:`` is redirected to the process-wide shared in-memory database
+        (see `MEMORY_DB_URI`). Connecting a bare ``:memory:`` here would hand
+        every caller a private empty database, which is the defect this
+        redirection exists to remove.
+        """
+        if is_memory_path(self.db_path):
+            _hold_memory_database_open()
+            connection = sqlite3.connect(MEMORY_DB_URI, uri=True)
+        else:
+            connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -596,6 +764,228 @@ class DesktopStorage:
             )
         return cursor.rowcount > 0
 
+    def record_run(
+        self,
+        *,
+        run_id: str | None = None,
+        benchmark: str,
+        primary_metric: str | None = None,
+        primary_score: float | None = None,
+        status: str,
+        provenance: str,
+        model_id: str | None = None,
+        weights_fingerprint: str | None = None,
+        git_commit: str | None = None,
+        traces: list[Any] | None = None,
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Insert one benchmark run and return the row as it was stored.
+
+        ``primary_score=None`` is written as SQL NULL and read back as None.
+        Substituting 0.0 would turn "this run never measured the metric" into a
+        measured zero, which is the one thing a benchmark record must not do:
+        downstream comparisons and charts would treat the fabricated value as
+        evidence.
+
+        ``INSERT OR REPLACE`` is used so a caller re-recording the same
+        ``run_id`` (a retry, or a corrected result) overwrites the earlier
+        attempt instead of failing on the primary key.
+        """
+        if not isinstance(benchmark, str) or not benchmark.strip():
+            raise StorageError("benchmark must be a non-empty string")
+        if not isinstance(status, str) or not status.strip():
+            raise StorageError("status must be a non-empty string")
+        if not isinstance(provenance, str) or not provenance.strip():
+            raise StorageError("provenance must be a non-empty string")
+        if primary_score is not None and not _is_number(primary_score):
+            raise StorageError(
+                "primary_score must be a number or None; a missing "
+                "measurement is None, never a placeholder number")
+        stored_run_id = run_id if run_id else uuid.uuid4().hex
+        if not isinstance(stored_run_id, str) or not stored_run_id.strip():
+            raise StorageError("run_id must be a non-empty string")
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO benchmark_runs (
+                    run_id, benchmark, primary_metric, primary_score, status,
+                    provenance, model_id, weights_fingerprint, git_commit,
+                    created_at, traces, detail
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    stored_run_id,
+                    benchmark,
+                    primary_metric,
+                    primary_score,
+                    status,
+                    provenance,
+                    model_id,
+                    weights_fingerprint,
+                    git_commit,
+                    self._now(),
+                    _dumps_traces(traces),
+                    _dumps_detail(detail),
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM benchmark_runs WHERE run_id = ?",
+                (stored_run_id,),
+            ).fetchone()
+        # Read back rather than echoing the arguments: the row is the record of
+        # what was actually stored, and it is what makes a NULL round-trip
+        # visible to the caller.
+        return self._run_from_row(row)
+
+    def history(
+        self, benchmark: str | None = None, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Recent runs, newest first, optionally for one benchmark.
+
+        ``limit`` is clamped to 1..500. A history view that can be asked for
+        zero rows, or for an unbounded scan, would either render as empty when
+        the caller meant "all" or pull the whole table into memory.
+        """
+        try:
+            bounded = int(limit)
+        except (TypeError, ValueError):
+            raise StorageError("limit must be an integer") from None
+        bounded = max(1, min(500, bounded))
+        sql = """
+            SELECT * FROM benchmark_runs
+        """
+        parameters: list[Any] = []
+        if benchmark is not None:
+            sql += " WHERE benchmark = ?"
+            parameters.append(benchmark)
+        # run_id breaks ties: two runs recorded inside the same clock tick
+        # share a created_at string, and an unstable order makes paging and
+        # diffs look like the data changed when it did not.
+        sql += " ORDER BY created_at DESC, run_id DESC LIMIT ?"
+        parameters.append(bounded)
+        with self._connect() as connection:
+            rows = connection.execute(sql, parameters).fetchall()
+        return [self._run_from_row(row) for row in rows]
+
+    def compare(self, run_a: str, run_b: str) -> dict[str, Any]:
+        """Compare two stored runs without ever inventing a score change.
+
+        ``score_delta`` is None unless the two rows measure the same metric on
+        the same benchmark and both actually carry a score. Returning 0.0 for a
+        missing measurement would read as "no change", which is a claim about
+        the model that the stored data does not support; the reason string
+        carries the explanation instead, and ``not_comparable`` lists every
+        reason so a caller cannot act on a delta without seeing them.
+        """
+        stored_a = self._get_run(run_a)
+        stored_b = self._get_run(run_b)
+        not_comparable: list[str] = []
+
+        same_benchmark = stored_a["benchmark"] == stored_b["benchmark"]
+        if not same_benchmark:
+            not_comparable.append(
+                f"different benchmarks: {stored_a['benchmark']!r} vs "
+                f"{stored_b['benchmark']!r}")
+
+        metrics = (stored_a["primary_metric"], stored_b["primary_metric"])
+        # A score only means something against a named metric, so two unnamed
+        # scores are not comparable: treating "no metric recorded" as a match
+        # would fabricate a delta between possibly different measurements. A
+        # one-sided name is not a match either.
+        same_metric = bool(metrics[0]) and metrics[0] == metrics[1]
+        primary_metric = metrics[0] if same_metric else None
+        if not same_metric:
+            not_comparable.append(
+                f"different primary metrics: {metrics[0]!r} vs {metrics[1]!r}")
+
+        scores = (stored_a["primary_score"], stored_b["primary_score"])
+        if scores[0] is None or scores[1] is None:
+            score_delta = None
+            missing = [
+                run_id for run_id, score in zip((run_a, run_b), scores)
+                if score is None
+            ]
+            score_delta_reason = (
+                "a primary score is NULL for run(s) " + ", ".join(missing)
+                + "; a missing measurement is not a zero, so no delta is "
+                "reported")
+            not_comparable.append(
+                "primary score not measured for run(s) " + ", ".join(missing))
+        elif not same_benchmark:
+            score_delta = None
+            score_delta_reason = (
+                "not comparable across different benchmarks: "
+                f"{stored_a['benchmark']!r} vs {stored_b['benchmark']!r}")
+        elif not same_metric:
+            score_delta = None
+            score_delta_reason = (
+                "different primary metrics "
+                f"({metrics[0]!r} vs {metrics[1]!r}); subtracting them would "
+                "be a meaningless number")
+        else:
+            # Both scores are real numbers, so this subtraction is a measured
+            # change rather than a substitute for one.
+            score_delta = float(scores[1]) - float(scores[0])
+            score_delta_reason = None
+
+        fingerprints = (
+            stored_a["weights_fingerprint"], stored_b["weights_fingerprint"])
+        if fingerprints[0] is None or fingerprints[1] is None:
+            weights_fingerprint_match: bool | None = None
+        else:
+            weights_fingerprint_match = fingerprints[0] == fingerprints[1]
+
+        traces_delta = _traces_delta(
+            stored_a["traces"], stored_b["traces"], not_comparable)
+
+        return {
+            "run_a": stored_a,
+            "run_b": stored_b,
+            "same_benchmark": same_benchmark,
+            "primary_metric": primary_metric,
+            "score_delta": score_delta,
+            "score_delta_reason": score_delta_reason,
+            "traces_delta": traces_delta,
+            "not_comparable": not_comparable,
+            "weights_fingerprint_match": weights_fingerprint_match,
+        }
+
+    def delete_run(self, run_id: str) -> bool:
+        """Delete one run; True when a row was actually removed."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM benchmark_runs WHERE run_id = ?", (run_id,)
+            )
+        return cursor.rowcount > 0
+
+    def _get_run(self, run_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM benchmark_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        if row is None:
+            raise StorageError(f"no such benchmark run: {run_id}")
+        return self._run_from_row(row)
+
+    @staticmethod
+    def _run_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "run_id": row["run_id"],
+            "benchmark": row["benchmark"],
+            "primary_metric": row["primary_metric"],
+            "primary_score": row["primary_score"],
+            "status": row["status"],
+            "provenance": row["provenance"],
+            "model_id": row["model_id"],
+            "weights_fingerprint": row["weights_fingerprint"],
+            "git_commit": row["git_commit"],
+            "created_at": row["created_at"],
+            "traces": _loads_or(row["traces"], []),
+            "detail": _loads_or(row["detail"], None),
+        }
+
     @staticmethod
     def _require_path(value: str, label: str) -> str:
         if not isinstance(value, str) or not value.strip():
@@ -629,3 +1019,24 @@ def checkpoint_wal(db_path: Path | str | None = None) -> tuple[int, int, int]:
     tolerate rather than crash on.
     """
     return DesktopStorage(db_path or get_default_db_path()).checkpoint_wal()
+
+
+def record_run(**kwargs: Any) -> dict[str, Any]:
+    """Record a benchmark run in the default database (module-level form)."""
+    storage = DesktopStorage(get_default_db_path())
+    storage.initialize()
+    return storage.record_run(**kwargs)
+
+
+def history(benchmark: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    """Benchmark-run history from the default database."""
+    storage = DesktopStorage(get_default_db_path())
+    storage.initialize()
+    return storage.history(benchmark=benchmark, limit=limit)
+
+
+def compare(run_a: str, run_b: str) -> dict[str, Any]:
+    """Compare two runs in the default database."""
+    storage = DesktopStorage(get_default_db_path())
+    storage.initialize()
+    return storage.compare(run_a, run_b)

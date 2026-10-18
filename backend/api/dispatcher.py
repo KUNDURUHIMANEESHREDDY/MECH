@@ -70,20 +70,61 @@ def api_status() -> Dict[str, Any]:
 def list_models() -> Dict[str, Any]:
     from backend.agents.evidence_policy import field_map
 
-    return {
+    # The small-model catalogue is reported separately and also marked
+    # `reference`: it describes published checkpoints and no model was executed
+    # to produce it. `load_state`/`loadable_now` say whether the weights are
+    # cached locally, which is not the same claim as "this name loads".
+    try:
+        from backend.science.models.model_load_service import catalog_entries
+
+        small_models = catalog_entries()
+    except Exception as exc:  # pragma: no cover - reported, never hidden
+        small_models = []
+        small_models_error = str(exc)[:200]
+    else:
+        small_models_error = None
+
+    payload: Dict[str, Any] = {
         "models": [
             "gpt2-small", "gpt2-medium", "gemma-2b",
             "llama-3-8b", "qwen-7b", "pythia-1b",
             "mistral-7b", "distilgpt2"
         ],
+        "small_models": small_models,
         "provenance": "reference",
-        "field_provenance": field_map(("models",), "reference"),
+        "field_provenance": field_map(
+            ("models", "small_models"), "reference"),
     }
+    if small_models_error is not None:
+        payload["small_models_error"] = small_models_error
+    return payload
 
 
 @router.post("/models/load")
 def load_model(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Load a named model: a registered small model, or the GPT-2 engine.
+
+    A name in the small-model registry is served by
+    ``backend.science.models.model_load_service``, which returns the loaded
+    checkpoint's own architecture numbers or an honest refusal from the loader.
+    Any other name falls through to the GPT-2 engine path unchanged, and a name
+    that is neither is refused -- never substituted by something that looks
+    like an answer.
+    """
     name = payload.get("model_name", "gpt2-small")
+    try:
+        from backend.science.models.model_load_service import (
+            is_small_model,
+            load_model_request,
+        )
+
+        if is_small_model(name):
+            return load_model_request(payload)
+    except ImportError:
+        # The small-model seam is optional for a runtime that does not ship it;
+        # GPT-2 loading must not become unavailable because of it.
+        pass
+
     engine = get_engine()
     if engine and engine.is_available():
         return _mark(engine.load(), "live")
@@ -195,27 +236,105 @@ def research_catalog(item_type: str = "all") -> Dict[str, Any]:
     return {"catalog": get_registry().list_catalog(item_type=item_type)}
 
 
+# --- P5: caller-sized benchmark panels + aggregate read-models -------------
+#
+# `n_prompts` defaults to 100 (the panel size the IOI pipelines were built
+# around) and is validated into a 400 rather than a 500. The response always
+# echoes the panel actually used plus the pipeline's own adequacy ladder.
+
+_BENCHMARK_MIN_PROMPTS = 1
+_BENCHMARK_MAX_PROMPTS = 1000
+_BENCHMARK_DEFAULT_PROMPTS = 100
+
+#: Panel/adequacy fields echoed on every benchmarks/run response.
+_PANEL_FIELDS = ("n_prompts", "requested_n_prompts", "n_prompts_honoured",
+                 "validation_eligible", "publication_eligible",
+                 "ineligible_because", "adequacy_reported_by_executor")
+
+
+def _benchmark_n_prompts(payload: Dict[str, Any]) -> int:
+    """Validate the requested panel size, or raise HTTPException(400)."""
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400,
+                            detail="request body must be an object")
+    raw = payload.get("n_prompts")
+    if raw is None:
+        return _BENCHMARK_DEFAULT_PROMPTS
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise HTTPException(
+            status_code=400,
+            detail="n_prompts must be an integer between "
+                   f"{_BENCHMARK_MIN_PROMPTS} and {_BENCHMARK_MAX_PROMPTS}")
+    if raw < _BENCHMARK_MIN_PROMPTS or raw > _BENCHMARK_MAX_PROMPTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"n_prompts must be between {_BENCHMARK_MIN_PROMPTS} and "
+                   f"{_BENCHMARK_MAX_PROMPTS}, got {raw}")
+    return raw
+
+
+def _panel_fields(res: Dict[str, Any], requested: int) -> Dict[str, Any]:
+    """Echo the panel actually used, plus the executor's adequacy ladder.
+
+    Nothing is asserted: `validation_eligible`, `publication_eligible` and
+    `ineligible_because` are propagated when the executor reports them and left
+    `None` -- with `adequacy_reported_by_executor: False` -- when it does not.
+    Defaulting them to True would claim the run was adequate to publish.
+    """
+    used = res.get("n_prompts", res.get("eval_samples")) if isinstance(res, dict) else None
+    honest = requested
+    if isinstance(used, int) and not isinstance(used, bool) and used > 0:
+        honest = used
+    reported = bool(isinstance(res, dict) and (
+        "validation_eligible" in res or "publication_eligible" in res))
+    return {
+        "n_prompts": honest,
+        "requested_n_prompts": requested,
+        "n_prompts_honoured": honest == requested,
+        "validation_eligible": res.get("validation_eligible") if isinstance(res, dict) else None,
+        "publication_eligible": res.get("publication_eligible") if isinstance(res, dict) else None,
+        "ineligible_because": res.get("ineligible_because") if isinstance(res, dict) else None,
+        "adequacy_reported_by_executor": reported,
+    }
+
+
 @router.post("/benchmarks/run")
 def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Run a benchmark over a caller-sized prompt panel."""
     from backend.agents.evidence_policy import field_map
 
+    n_prompts = _benchmark_n_prompts(payload)
     name = str(payload.get("benchmark_name", "IOI"))
+    base_fields = ("status", "benchmark_name", "score", "pass_rate",
+                   "eval_samples")
+    echo_fields = base_fields + _PANEL_FIELDS
     try:
         from backend.validation.benchmark_runner import (
             MechanisticBenchmarkRunner,
         )
-        res = MechanisticBenchmarkRunner().run_benchmark(f"bench_{name}")
+        runner = MechanisticBenchmarkRunner()
+        try:
+            res = runner.run_benchmark(f"bench_{name}", n_prompts=n_prompts)
+        except TypeError:
+            # This runner fixes its own panel size. Run it and let the payload
+            # say the requested size was not honoured -- never imply it was.
+            res = runner.run_benchmark(f"bench_{name}")
+        if not isinstance(res, dict):
+            res = {"status": "error",
+                   "error": "the benchmark runner returned a non-dict result"}
+        panel = _panel_fields(res, n_prompts)
         status = str(res.get("status", "unavailable")).lower()
         provenance = str(res.get("provenance", "unavailable")).lower()
         if status not in {"completed", "passed"} or provenance != "live":
+            label = (provenance if provenance in {"unavailable", "seeded",
+                                                  "reference"}
+                     else "unavailable")
             return {
                 "status": status if status in {"unavailable", "error"} else "unavailable",
                 "benchmark_name": name,
-                "provenance": provenance if provenance in {"unavailable", "seeded", "reference"} else "unavailable",
-                "field_provenance": field_map(
-                    ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
-                    provenance if provenance in {"unavailable", "seeded", "reference"} else "unavailable",
-                ),
+                "provenance": label,
+                "field_provenance": field_map(echo_fields, label),
+                **panel,
                 "reason": str(res.get("reason") or "Live benchmark execution is unavailable."),
             }
 
@@ -227,39 +346,130 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "unavailable",
                 "benchmark_name": name,
                 "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
-                    "unavailable",
-                ),
+                "field_provenance": field_map(echo_fields, "unavailable"),
+                **panel,
                 "reason": "The live executor did not return numeric score fields.",
             }
 
-        return {
+        body = {
             "status": "completed",
             "benchmark_name": name,
             "provenance": "live",
             # Propagated from the runner's own measurement, never asserted:
             # this route narrows the record to scores, it does not measure.
             "attested": res.get("attested", False),
-            "field_provenance": field_map(
-                ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
-                "live",
-            ),
+            "field_provenance": field_map(echo_fields, "live"),
             "score": round(score, 4),
             "pass_rate": round(pass_rate, 4),
-            "eval_samples": res.get("eval_samples"),
+            **panel,
         }
+        # Persist the completed live run and hand back the stored id.
+        # `record_benchmark_run` returns None for anything that is not a
+        # completed live run carrying a real finite score, so a run storage
+        # declined to keep leaves `run_id` None rather than inventing one.
+        #
+        # The call is isolated deliberately. This handler's outer
+        # ``except Exception`` would otherwise convert a storage failure into a
+        # 200 ``status: "error"``, discarding a measurement that did in fact
+        # happen and relabelling it as a failed run. Isolating it keeps the
+        # measurement, reports the storage failure in ``recording_error``, and
+        # never claims the run was stored.
+        try:
+            from backend.benchmarking.run_history import record_benchmark_run
+
+            stored = record_benchmark_run(benchmark_name=name, result=body)
+        except Exception as recording_exc:
+            stored = None
+            body["recording_error"] = str(recording_exc)[:300]
+        if stored is None:
+            body.setdefault(
+                "recording_error",
+                "run history did not record this run: it is not a completed "
+                "live run carrying a finite score",
+            )
+        body["run_id"] = stored["run_id"] if stored else None
+        body["recorded"] = stored is not None
+        body["field_provenance"] = {
+            **body["field_provenance"],
+            # A stored id is a real fact about the history table when it
+            # exists, and absent when it does not -- never a placeholder.
+            "run_id": "live" if stored else "unavailable",
+            "recorded": "live",
+        }
+        return body
     except Exception as exc:
         return {
             "status": "error",
             "benchmark_name": name,
             "provenance": "unavailable",
-            "field_provenance": field_map(
-                ("status", "benchmark_name", "score", "pass_rate", "eval_samples"),
-                "unavailable",
-            ),
+            "field_provenance": field_map(echo_fields, "unavailable"),
+            **_panel_fields({}, n_prompts),
             "error": str(exc)[:300],
         }
+
+
+@router.get("/benchmarks/history")
+def benchmark_history(
+    benchmark: Optional[str] = None, limit: int = 20
+) -> Dict[str, Any]:
+    """Persisted benchmark runs, newest first: the rows storage returned.
+
+    ``limit`` is clamped to 1..500 by the store. A non-integer limit is a
+    client error, not an empty history, so it is refused rather than answered.
+    """
+    from backend.benchmarking.run_history import RunHistoryError, history_payload
+
+    try:
+        return history_payload(benchmark=benchmark, limit=limit)
+    except RunHistoryError as exc:
+        raise HTTPException(
+            status_code=getattr(exc, "status_code", 400) or 400,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/benchmarks/compare")
+def benchmark_compare(run_a: str, run_b: str) -> Dict[str, Any]:
+    """Compare two stored runs.
+
+    An unknown run id is a 404, never a 500 and never a delta. When the two
+    runs are not comparable the reasons are carried through verbatim and the
+    delta stays None -- a zero would read as "no change", which is a claim the
+    stored rows do not support.
+    """
+    from backend.benchmarking.run_history import RunHistoryError, compare_payload
+
+    try:
+        return compare_payload(run_a, run_b)
+    except RunHistoryError as exc:
+        raise HTTPException(
+            status_code=getattr(exc, "status_code", 400) or 400,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/scientific_health")
+def scientific_health() -> Dict[str, Any]:
+    """One payload: subsystem probes, run ledger, attestation, validation.
+
+    Deliberately carries no health score -- see `backend/core/aggregates.py`.
+    Sources that could not be read are named in `unavailable`.
+    """
+    from backend.core import aggregates
+
+    return aggregates.scientific_health()
+
+
+@router.get("/analytics")
+def analytics() -> Dict[str, Any]:
+    """Descriptive inventory: run/experiment/session counts and durations.
+
+    No quality or productivity metric is computed, because nothing here
+    measures one.
+    """
+    from backend.core import aggregates
+
+    return aggregates.aggregate_analytics()
 
 
 @router.get("/experiments")

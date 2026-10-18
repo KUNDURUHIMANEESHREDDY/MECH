@@ -17,7 +17,27 @@ from backend.agents.evidence_policy import field_map
 class MechanisticBenchmarkRunner:
     """Run live benchmarks when the model is connected, else fail closed."""
 
-    def run_benchmark(self, benchmark_id: str = "bench_default") -> Dict[str, Any]:
+    def run_benchmark(self, benchmark_id: str = "bench_default",
+                      n_prompts: int = 6) -> Dict[str, Any]:
+        """Run the IOI panel over ``n_prompts`` prompts.
+
+        The panel size used to be fixed at 6 inside this method, so a caller
+        could not ask for the 100-prompt panel the IOI pipelines are built
+        around, and could not tell a 6-prompt run from a 100-prompt one. It is
+        a parameter now, and it is echoed back as ``n_prompts``.
+        """
+        if isinstance(n_prompts, bool) or not isinstance(n_prompts, int) \
+                or n_prompts < 1:
+            return {
+                "benchmark_id": benchmark_id,
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "field_provenance": field_map(
+                    ("benchmark_id", "status", "reason"), "unavailable"
+                ),
+                "reason": (f"n_prompts must be a positive integer, got "
+                           f"{n_prompts!r}"),
+            }
         name = str(benchmark_id or "")
         short = name[6:] if name.startswith("bench_") else name
         if short.lower() != "ioi":
@@ -54,7 +74,7 @@ class MechanisticBenchmarkRunner:
                 raise lm.LiveUnavailable(
                     "IOI comparison tokens are not single vocabulary items: "
                     + ", ".join(sorted(missing)))
-            pairs = prompt_panel(6)
+            pairs = prompt_panel(n_prompts)
             clean_hits = 0
             corr_hits = 0
             per_prompt = []
@@ -91,7 +111,8 @@ class MechanisticBenchmarkRunner:
                     "status": "completed",
                     "field_provenance": field_map(
                         ("benchmark_id", "status", "accuracy",
-                         "robustness_score", "eval_samples", "per_prompt"),
+                         "robustness_score", "eval_samples", "n_prompts",
+                         "per_prompt"),
                         "live",
                     ),
                     "method": ("clean top-1 agreement plus corrupted-variant "
@@ -100,6 +121,7 @@ class MechanisticBenchmarkRunner:
                     "accuracy": round(accuracy, 4),
                     "robustness_score": round(robustness, 4),
                     "eval_samples": len(pairs),
+                    "n_prompts": len(pairs),
                     "per_prompt": per_prompt,
                 },
                 model_loaded="gpt2-small",

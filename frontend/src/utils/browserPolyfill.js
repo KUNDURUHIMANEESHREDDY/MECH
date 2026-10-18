@@ -1,16 +1,36 @@
 /**
  * Browser Polyfill for window.appApi & window.electronAPI
  * Runs immediately on module import to bridge web frontend with Python Backend HTTP API Server on port 8000.
+ *
+ * Every request carries the bearer token when one is available: the backend
+ * protects all of /api/* (backend/core/auth.py:207-208), so an unauthenticated
+ * polyfill call would return 401 rather than data.
  */
 
 if (typeof window !== 'undefined') {
   const BACKEND_URL = 'http://localhost:8000';
 
+  const resolveToken = () => {
+    try {
+      const fromGlobal = window.__MECH_API_TOKEN__;
+      if (fromGlobal) return String(fromGlobal).trim();
+      const fromStorage = window.localStorage?.getItem('mech_api_token');
+      if (fromStorage) return String(fromStorage).trim();
+    } catch {
+      /* storage unavailable — no token */
+    }
+    return '';
+  };
+
   const makeBackendCall = async (method, payload = {}) => {
     try {
+      const token = resolveToken();
       const res = await fetch(`${BACKEND_URL}/api/v1/${method}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ method, payload }),
       });
       const json = await res.json();
@@ -23,6 +43,7 @@ if (typeof window !== 'undefined') {
 
   if (!window.appApi) {
     window.appApi = {
+      getApiToken: () => resolveToken(),
       getSettings: async () => ({ theme: 'dark' }),
       setSettings: async (s) => s,
       pythonPing: async () => makeBackendCall('ping', {}),

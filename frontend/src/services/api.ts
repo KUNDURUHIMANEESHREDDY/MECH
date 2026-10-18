@@ -30,6 +30,10 @@ const REQUEST_TIMEOUT_MS = 30_000;
 export function apiToken(): string | null {
   const fromGlobal = runtime.__MECH_API_TOKEN__?.trim();
   if (fromGlobal) return fromGlobal;
+  const fromBridge = typeof runtime.appApi?.getApiToken === 'function'
+    ? (runtime.appApi.getApiToken() as string | undefined)?.trim()
+    : null;
+  if (fromBridge) return fromBridge;
   try {
     const fromStorage = typeof localStorage !== 'undefined'
       ? localStorage.getItem('mech_api_token')?.trim()
@@ -41,13 +45,23 @@ export function apiToken(): string | null {
   // No Vite env fallback — VITE_MECH_API_TOKEN would bundle a secret into the build.
   // The token must come from secure runtime sources only:
   // - runtime.__MECH_API_TOKEN__ (set by Electron at startup)
+  // - runtime.appApi.getApiToken() (provided by Electron preload)
   // - localStorage.getItem('mech_api_token') (set at runtime after login)
   return null;
 }
 
-export function authHeaders(): Record<string, string> {
+export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const token = apiToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const base: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  return { ...base, ...extra };
+}
+
+export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = {
+    ...authHeaders(),
+    ...(init.headers as Record<string, string> | undefined),
+  };
+  return fetch(input, { ...init, headers });
 }
 
 function localBridge(): LocalBridge | null {
@@ -188,6 +202,21 @@ export const api = {
     return Array.isArray(res) ? res : Array.isArray(res?.benchmarks) ? res.benchmarks : [];
   },
   runBenchmark: (name: string) => post<unknown>('/api/benchmarks/run', { benchmark_name: name }),
+  // Persisted run history. `benchmark` and `limit` are omitted entirely when
+  // not supplied so the route's own defaults apply rather than a guessed one.
+  benchmarkHistory: (name?: string, limit?: number) => {
+    const query = new URLSearchParams();
+    if (name) query.set('benchmark', name);
+    if (typeof limit === 'number') query.set('limit', String(limit));
+    const suffix = query.toString();
+    return get<Record<string, unknown>>(
+      `/api/benchmarks/history${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+  compareBenchmarkRuns: (runA: string, runB: string) =>
+    get<Record<string, unknown>>(
+      `/api/benchmarks/compare?${new URLSearchParams({ run_a: runA, run_b: runB }).toString()}`,
+    ),
 
   getAppLogs: () => localCall<unknown[]>('getAppLogs'),
   getBuildLogs: () => localCall<unknown[]>('getBuildLogs'),

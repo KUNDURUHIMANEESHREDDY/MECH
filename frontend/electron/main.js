@@ -18,6 +18,26 @@ const BACKEND_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 let mainWindow = null;
 let pythonBackend = null;
 
+function resolveApiToken() {
+  if (process.env.MECH_API_TOKEN) return process.env.MECH_API_TOKEN.trim();
+  const repoRoot = path.join(__dirname, '..', '..');
+  const resourcesPath = process.resourcesPath || path.join(__dirname, '..');
+  const candidates = [
+    path.join(repoRoot, 'backend', 'storage', '.mech_api_token'),
+    path.join(resourcesPath, 'backend', 'storage', '.mech_api_token'),
+    path.join(process.cwd(), 'backend', 'storage', '.mech_api_token'),
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) {
+        const val = fs.readFileSync(c, 'utf8').trim();
+        if (val) return val;
+      }
+    } catch {}
+  }
+  return '';
+}
+
 function createMainWindow() {
   const logger = getLogger();
 
@@ -35,6 +55,17 @@ function createMainWindow() {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false
+    }
+  });
+
+  win.webContents.on('dom-ready', () => {
+    const token = resolveApiToken();
+    if (token) {
+      win.webContents.executeJavaScript(`
+        window.__MECH_API_TOKEN__ = ${JSON.stringify(token)};
+        window.__MECH_API_BASE__ = window.__MECH_API_BASE__ || 'http://127.0.0.1:8000';
+        try { localStorage.setItem('mech_api_token', ${JSON.stringify(token)}); } catch(e) {}
+      `).catch(() => undefined);
     }
   });
 

@@ -181,6 +181,8 @@ async def _auth_middleware(request: Request, call_next):
         return await call_next(request)
     token = auth_mod.extract_bearer(request.headers.get("authorization"))
     if token is None:
+        token = request.query_params.get("token") or request.query_params.get("bearer_token")
+    if token is None:
         return JSONResponse(
             status_code=401,
             content={"detail": "missing credentials"},

@@ -428,7 +428,12 @@ def test_arithmetic_pipeline_refuses_rather_than_fabricating():
     pipeline = ArithmeticPipeline(model_manager=None)
     with pytest.raises(LiveUnavailable) as excinfo:
         pipeline.run(model_id="gpt2-small")
-    assert "not implemented" in str(excinfo.value).lower()
+    # The pipeline is implemented now, so it must no longer claim otherwise.
+    # What has to stay true is the property this assertion was protecting: with
+    # no route to weights it refuses, and it names the missing weights rather
+    # than returning a number.
+    assert "weights" in str(excinfo.value).lower()
+    assert "not implemented" not in str(excinfo.value).lower()
 
 
 from _weight_guard import skip_reason, weights_available
@@ -455,7 +460,10 @@ def test_copy_and_factual_recall_refuse_rather_than_fabricate():
                      FactualRecallPipeline(model_manager=None)):
         with pytest.raises(LiveUnavailable) as excinfo:
             pipeline.run(model_id="gpt2-small")
-        assert "not implemented" in str(excinfo.value).lower()
+        # Both now measure. The refusal that must survive is the one that
+        # matters: no route to weights means no number, and the reason says so.
+        assert "weights" in str(excinfo.value).lower()
+        assert "not implemented" not in str(excinfo.value).lower()
 
 
 def test_benchmark_runner_does_not_fabricate_vram_or_manifest():

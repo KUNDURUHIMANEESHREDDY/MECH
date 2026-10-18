@@ -298,7 +298,8 @@ class IOIReproductionPipeline:
         return self._faithfulness_of(prompts, reference, lm, token_ids)
 
     def _run_live(self, prompts: List[Dict[str, str]], manifest: Any,
-                  seed: int) -> Dict[str, Any]:
+                  seed: int, n_prompts_requested: Optional[int] = None,
+                  ) -> Dict[str, Any]:
         """Measure the IOI circuit on live weights (no reference coordinates).
 
         Baseline accuracy, causal head discovery, injection recovery, and
@@ -329,6 +330,12 @@ class IOIReproductionPipeline:
                 "mock_mode": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
+                "n_prompts_requested": n_prompts_requested,
+                "n_prompts_used": 0,
+                "adequacy": None,
+                "ineligible_because": [
+                    "no prompt was usable: " + ", ".join(missing)
+                    + " are not single vocabulary items"],
                 "reason": (
                     "Required IOI comparison tokens are not single "
                     "vocabulary items: " + ", ".join(missing)
@@ -380,10 +387,31 @@ class IOIReproductionPipeline:
                 "mock_mode": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
+                "n_prompts_requested": n_prompts_requested,
+                "n_prompts_used": len(prompts),
+                "adequacy": None,
+                "ineligible_because": [
+                    "live causal discovery returned no measured circuit, so no "
+                    "adequacy ladder was computed"],
                 "reason": ("Live causal discovery returned no measured "
                            "circuit; reference heads were not substituted."),
                 "raw_traces": raw_traces,
             }
+        # The eligibility ladder, carried through from the discovery stage
+        # rather than re-derived. `live_discovery._adequacy` computes it from the
+        # prompt counts and the measured faithfulness that the discovery stage
+        # actually used, and it is the only place that knows how many prompts sat
+        # behind the pairwise edges. Re-deriving "enough prompts" here would be a
+        # second, silently different threshold.
+        adequacy = {
+            key: discovery.get(key) for key in (
+                "live", "measured", "statistically_adequate",
+                "interaction_adequate", "replicated", "replicated_reason",
+                "validation_eligible", "publication_eligible",
+                "min_prompts_for_validation", "min_prompts_for_interaction",
+                "n_prompts", "n_interaction_prompts", "ineligible_because",
+            )
+        }
         circuit = set(heads)
 
         faithfulness_scores: List[float] = []
@@ -708,6 +736,9 @@ class IOIReproductionPipeline:
                 "mock_mode": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
+                "n_prompts_requested": n_prompts,
+                "n_prompts_used": 0,
+                "adequacy": None,
                 "reason": ("The live IOI executor supports gpt2-small only; "
                            f"'{model_variant}' was requested."),
             }
@@ -726,7 +757,8 @@ class IOIReproductionPipeline:
         if not self.adapter.spec.mock_mode:
             # Live weights: measure everything; never substitute the
             # reference-only head/edge fixtures for a discovery.
-            return self._run_live(prompts, manifest, seed)
+            return self._run_live(prompts, manifest, seed,
+                                  n_prompts_requested=n_prompts)
         raw_traces: List[Dict[str, Any]] = []
         faithfulness_scores = []
         patch_success_count = 0
@@ -897,6 +929,8 @@ class IOIReproductionPipeline:
             "circuit_faithfulness": round(avg_faithfulness, 4),
             "patch_success_rate": round(patch_success_rate, 2),
             "n_samples": n_prompts,
+            "n_prompts_requested": n_prompts,
+            "n_prompts_used": len(prompts),
             "functional_recovery": round(functional_recovery, 4),
             "full_logit_diff": full_logit,
             "ablated_logit_diff": ablated_logit,
@@ -950,8 +984,25 @@ class IOIReproductionPipeline:
                 if self.adapter.spec.mock_mode else
                 "Observed from the connected model run."
             ),
-            "validation_eligible": not self.adapter.spec.mock_mode,
-            "publication_eligible": not self.adapter.spec.mock_mode,
+            # From the ladder, not from "weights were loaded". Loading weights
+            # makes a run measurable; it says nothing about whether the prompt
+            # count supports the claim. The previous `not mock_mode` claimed
+            # publication readiness for any prompt count, including six.
+            "validation_eligible": bool(adequacy.get("validation_eligible"))
+            and not self.adapter.spec.mock_mode,
+            "publication_eligible": bool(adequacy.get("publication_eligible"))
+            and not self.adapter.spec.mock_mode,
+            "ineligible_because": (
+                None
+                if (adequacy.get("validation_eligible")
+                    and not self.adapter.spec.mock_mode)
+                else (adequacy.get("ineligible_because")
+                      or (["mock mode: reference fixtures are not measurements"]
+                          if self.adapter.spec.mock_mode else
+                          ["the discovery stage returned no adequacy ladder"]))),
+            "n_prompts_requested": n_prompts_requested,
+            "n_prompts_used": len(prompts),
+            "adequacy": adequacy,
             "mock_mode": self.adapter.spec.mock_mode,
             "discovery_provenance": discovery_provenance,
             "synthetic_fields": synthetic_fields,

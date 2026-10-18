@@ -152,9 +152,14 @@ def test_the_authority_owns_exactly_the_known_tables(tmp_path):
         names = {row[0] for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
     names -= {n for n in names if n.startswith("sqlite_")}
+    # Listed explicitly rather than checked as a subset: the point of this test
+    # is that the authority owns a *known* set, so a new table has to be
+    # declared here on purpose. `benchmark_runs` was added deliberately, to
+    # persist each benchmark run (score, provenance, weights fingerprint,
+    # per-sample traces) for longitudinal comparison.
     assert names == {
         "settings", "recent_projects", "recent_files",
-        "experiments", "sessions", "plugins",
+        "experiments", "sessions", "plugins", "benchmark_runs",
     }
 
 
