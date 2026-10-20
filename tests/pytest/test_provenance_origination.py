@@ -269,9 +269,16 @@ MEASUREMENT_LAYERS: Dict[str, str] = {
         "faithfulness, minimality and recovery itself",
     "backend/science/reproducibility/logit_lens_pipeline.py":
         "computes the logit lens over real hidden states at each layer",
-    "backend/science/reproducibility/greater_than_pipeline.py":
-        "computes per-layer importances for the greater-than task by ablating "
-        "layers and re-measuring",
+    # `backend/science/reproducibility/greater_than_pipeline.py` left this table
+    # on 2026-10-20. It still measures -- `measure()` runs the forward passes
+    # and `run()` runs the per-layer MLP patches, and it raises
+    # `LiveUnavailable` with the measured evidence attached when the model does
+    # not perform the task. What moved is the stamping, not the measurement:
+    # the pipeline no longer writes `live` itself, it returns the shared
+    # envelope, and `pipeline_contract.completed()` (listed below) issues the
+    # label through `attest_measurement`. An entry left behind by that move
+    # claims cover for a module that no longer stamps live, which is the
+    # fiction this table exists to prevent.
     "backend/interpretability/sae/loader.py":
         "loads a real SAE checkpoint and computes feature activations from it",
     "backend/interpretability/discovery/live_discovery.py":
@@ -304,6 +311,34 @@ MEASUREMENT_LAYERS: Dict[str, str] = {
         "loads GPT-2 Small, runs forward pass, captures attention/neuron "
         "activations, and calls attest_measurement with the actual model "
         "identity; the numbers it labels are the ones it just produced",
+    "backend/interpretability/nnsight_adapter.py":
+        "runs the requested NNsight trace and returns only the tensors that "
+        "trace actually saved, with the applied-intervention list it verified "
+        "site by site. The stamp sits on the success return only: absent "
+        "package, invalid request, failed hook and incomplete trace all return "
+        "NOT_EXECUTED/FAILED before it, so 'live' covers a trace that ran",
+    "backend/science/models/model_load_service.py":
+        "issues the success-path label through attest_measurement, the "
+        "repository's single issuer, after it has loaded the weights and "
+        "summed n_parameters and weight_bytes from that model's own "
+        "parameters; the record it labels describes the load it just "
+        "performed, and the refusal path never reaches the call",
+    "backend/science/reproducibility/pipeline_contract.py":
+        "the one place the reproducibility pipelines' envelope is labelled. It "
+        "calls attest_measurement with the model id after the pipeline has "
+        "produced the observed metrics and raw traces the envelope carries, "
+        "so 'live' covers an envelope whose numbers were measured; the "
+        "unavailable envelope never reaches that call",
+    "backend/interpretability/discovery/auto_hypothesis_tester.py":
+        "its evidence stamps label a forward pass it ran on the loaded model "
+        "and the top-token probability it read from that pass, and they sit "
+        "on the success return only. The skeptic-critique stamp in the same "
+        "module is a different kind of claim: it takes the LLM engine's own "
+        "provenance when the engine supplies one and otherwise 'reference', "
+        "because a critique is a semantic judgement that nobody measured -- it "
+        "used to assert 'live' there. The scanner cannot see that site -- the "
+        "value is a call, not a constant -- so the reason is what keeps it "
+        "honest",
 }
 
 #: Wrappers that stamp `live` only after verifying an inner claim of liveness.
@@ -354,6 +389,33 @@ LIVE_BY_CONSTRUCTION: Dict[str, str] = {
         "same `_ok()` shape as the MCP server module above, on allowlisted "
         "test/build execution results. Reports what the spawned command "
         "returned; sets no eligibility flag anywhere",
+    "backend/api/events.py":
+        "the versioned job event stream. Every stamp labels envelopes and "
+        "snapshots derived from observed backend.api.runtime_api.QUEUE state "
+        "on this call -- the same restart-surviving job records /jobs "
+        "returns -- and /events/schema reports the event hub's own "
+        "retained capacity and latest sequence, which is the same running "
+        "state rather than a fixture. It relays job status rather than "
+        "measuring a model, sets no eligibility flag, and no path from it "
+        "reaches validation or publication",
+    "backend/api/runtime_api.py":
+        "the job-queue surface. /jobs, /jobs/{id} and the cancel route stamp "
+        "the envelope of a job record read from or written to the running "
+        "QUEUE on this call. The label marks the envelope as coming from the "
+        "running system, not a measurement: the job's own result carries its "
+        "own provenance, and the eligibility flags in a job record are "
+        "relayed verbatim from that result (the benchmark sweep copies "
+        "validation_eligible and publication_eligible out of each item) "
+        "rather than decided here. That relay is the thing to watch, because "
+        "the guard test_operational_reads_cannot_opt_into_science can only "
+        "see a flag set to True in a dict literal and a relayed flag is "
+        "invisible to it",
+    "backend/science/models/small_models.py":
+        "describe() reports the model object that is loaded right now: its "
+        "class, device and precision come from the live instance, and the "
+        "same dict carries simulated=False and mock_mode=False to separate it "
+        "from the fixture path. It reads the running system rather than "
+        "measuring anything, and it sets no eligibility flag",
 }
 
 #: Modules whose stamp is a claim the code cannot actually support. Kept as its
@@ -371,6 +433,15 @@ KNOWN_OVERCLAIM: Dict[str, str] = {
         "'computed', which does not exist in the vocabulary yet; inventing one "
         "has blast radius across evidence_policy, the API and the UI, so it is "
         "tracked as a backlog item rather than decided here",
+    # `backend/science/publications/supplementary.py` left this table on
+    # 2026-10-20, and it was FIXED rather than quietly deleted.
+    # `_raw_data_summary` used to assert `measured: True, provenance: live`
+    # over whatever traces it was handed -- a reference run, a seeded fixture
+    # and an empty list all came out live -- and it now derives the label
+    # from the traces instead: live only when every trace says it is live,
+    # the weakest label found otherwise, and `unavailable` when the origin
+    # cannot be established. The module no longer contains a live stamp, so
+    # the scan does not report it at all now.
 }
 
 #: Excluded from the scan entirely, with the reason. Exemption is the strongest

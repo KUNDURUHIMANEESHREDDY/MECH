@@ -596,9 +596,14 @@ trace the caller supplies: no trace, or a trace that does not clear
 - [x] `report()` takes the trace and derives the label; there is no longer a way to
       state your own provenance.
 
-### 2.6 Single EvidenceBoundary ✅ done
+### 2.6 Single EvidenceBoundary — deleted in `624bd3f` ⚠️
 
-`backend/core/evidence_boundary.py` is the one place a measurement becomes a result.
+`backend/core/evidence_boundary.py` and `tests/pytest/test_evidence_boundary.py`
+were deleted in `624bd3f`: the module duplicated `load_run_record` **without** the
+quarantine/stamp checks, so a caller routing through it bypassed `HISTORICAL_ORIGIN`
+enforcement. `backend/core/evidence_graph.py` is the one load/save path today (see
+`docs/audit/release-gate-539ac7c.md`). The bullets below are the record of what was
+removed, not a description of live behaviour.
 
 - `EvidenceResult` is a frozen dataclass, not a dict. An algorithm returns a
   measurement; only the boundary can hand a caller something that looks like a finding.
@@ -610,14 +615,19 @@ trace the caller supplies: no trace, or a trace that does not clear
   `reference`, or `unavailable` claim stays that way; nothing is promoted except by a
   verifying attestation. `live` without an attestation is rejected as "a claim is not a
   proof", and an attested run that produced no measurement is "not a finding".
-- `tests/pytest/test_evidence_boundary.py` (11 tests) covers each of these, plus a guard
-  that eligibility is computed in exactly one place.
+- The 11-test `test_evidence_boundary.py` spec went with the module. An untracked
+  `test_evidence_boundary_run_context.py` still imported it and broke collection
+  (`ModuleNotFoundError: No module named 'backend.core.evidence_boundary'`); it was
+  deleted rather than repointed, because there is no live API that binds a dataset
+  or code revision.
 
-- [ ] Still to do: route the remaining call sites through it. `evidence_graph.from_run`
-      and the dispatcher `_mark()` are now wired (see 2.7), but the Society agents
-      (`Scribe`, `Critic`, `Discoverer`) still construct their own envelopes.
+- [ ] Still to do: one admission gate for the remaining call sites.
+      `evidence_graph.from_run` and the dispatcher `_mark()` are wired to the graph
+      (see 2.7), but the Society agents (`Scribe`, `Critic`, `Discoverer`) still
+      construct their own envelopes.
 - [ ] Full attestation binding: a result should carry `dataset_sha256` and
-      `code_revision` derived from the run, not merely required to be non-empty.
+      `code_revision` derived from the run and verify them at admission. Neither
+      exists today; the deleted module only *required* non-empty hex strings.
 
 ### 2.7 Evidence graph and dispatcher wired to the boundary ✅ done
 

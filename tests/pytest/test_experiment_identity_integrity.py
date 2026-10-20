@@ -252,7 +252,7 @@ def test_capturing_under_one_model_and_patching_under_another_is_refused(
                 f"The two checkpoints have identical shapes, so every check "
                 f"the adapter performs was satisfied. Found no objection."
             )
-        raise AssertionError(f"unreachable: {excinfo!r}")
+            raise AssertionError(f"unreachable: {excinfo!r}")
 
 
 # â”€â”€ 4. interleaved experiments must not contaminate each other â”€â”€â”€â”€

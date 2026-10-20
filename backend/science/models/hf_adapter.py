@@ -352,6 +352,7 @@ class HFAdapterMixin:
             top_token_before=clean_top,
             top_token_after=self._decode(int(patched_logits.argmax())),
             layer=layer, neuron_index=neuron_index, patch_value=patch_value,
+            model_fingerprint=self.model_fingerprint(),
             provenance=LIVE,
         )
 

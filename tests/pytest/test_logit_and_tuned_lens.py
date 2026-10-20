@@ -27,10 +27,12 @@ pattern, in the one algorithm the README listed as implemented.
 
 The tuned lens added `+0.12` to every confidence
 ------------------------------------------------
-Now trained for real, but as a **diagonal** affine map, not the full affine map
-the tuned-lens paper uses. That is a genuine restriction and every payload says
-so via `translator_kind`, because reporting a diagonal result as "the tuned lens"
-would overstate it.
+Now trained for real. The default translator is the **full affine** map the
+tuned-lens paper uses -- a per-layer `d x d` weight plus a bias -- so the
+fitted lens is not a restricted stand-in for it. The cheaper `diagonal_affine`
+family is still fittable (`kind=`), and every payload names the family that
+produced it via `translator_kind`, because reporting a restricted result as
+"the tuned lens" would overstate it.
 
 These tests use a stub engine so the real code paths run without a GPU. The
 arithmetic-vs-measurement distinction is asserted by construction: a linear
@@ -50,6 +52,9 @@ import pytest
 
 from backend.interpretability.algorithms.logit_lens import LogitLens
 from backend.interpretability.algorithms.tuned_lens import (
+    DEFAULT_TRANSLATOR_KIND,
+    DIAGONAL_AFFINE,
+    FULL_AFFINE,
     TRANSLATOR_KIND,
     TunedLens,
 )
@@ -353,20 +358,68 @@ def test_there_is_no_bundled_translator_weight_file():
 
 
 def test_the_translator_kind_is_declared_everywhere():
-    """A diagonal map reported as 'the tuned lens' would overstate it."""
+    """The family must be named wherever a lens is reported.
+
+    The default is the published full affine map, so a payload that failed to
+    name it would let a reader assume a cheaper map than the one that was
+    fitted -- and a payload naming the *wrong* family would be worse than
+    silence. `translator_kind` travels with the class.
+    """
     lens = TunedLens(engine=_StubEngine(n_layers=3))
 
-    assert TRANSLATOR_KIND == "diagonal_affine"
+    assert TRANSLATOR_KIND == "full_affine", (
+        "the default translator is no longer the published full affine map; "
+        "the constant and every place that names it must change together"
+    )
+    assert DEFAULT_TRANSLATOR_KIND == TRANSLATOR_KIND, (
+        "the backwards-compatible alias no longer points at the default"
+    )
+    assert TRANSLATOR_KIND in (FULL_AFFINE, DIAGONAL_AFFINE)
+
     untrained = lens.project("x", 1)
     assert untrained["translator_kind"] == TRANSLATOR_KIND
 
 
-def test_training_reports_the_variant_it_actually_fitted():
-    """A report must not let `diagonal_affine` be read as the tuned lens.
+def test_the_projection_names_the_family_it_actually_applied():
+    """A payload must not describe a map that was never applied.
 
-    The full affine translator has ~590k parameters per layer for d=768; this
-    one has 1536. Anyone quoting these numbers as a tuned-lens result would be
-    wrong by two orders of magnitude in capacity, so the report says so.
+    The projection's reason hard-coded 'diagonal-affine' while the default
+    family is the full affine one, so every payload described a translator
+    that was not the one fitted. The name has to come from the fitted
+    report, for every family.
+    """
+    import torch
+
+    cache = _StubHiddenCache(3)
+    engine = _TrainedStubEngine(_StubEngine(n_layers=3), cache, prompt="hi")
+    lens = TunedLens(engine=engine)
+
+    families = (
+        (FULL_AFFINE, {"kind": FULL_AFFINE, "weight": torch.eye(2),
+                        "bias": torch.zeros(2)}),
+        (DIAGONAL_AFFINE, {"kind": DIAGONAL_AFFINE, "scale": torch.ones(2),
+                            "shift": torch.zeros(2)}),
+    )
+    for kind, entry in families:
+        lens.translators = {1: entry}
+        lens.training_report = {"status": "completed", "provenance": LIVE,
+                                "translator_kind": kind}
+
+        out = lens.project("hi", 1)
+
+        assert out.get("affine_translation_applied") is True, out
+        assert out["translator_kind"] == kind, out
+        assert kind in str(out.get("reason", "")), (
+            f"the projection does not name the family it applied: {out!r}")
+
+
+def test_training_reports_the_variant_it_actually_fitted():
+    """A report must name the family it fitted, and never claim more.
+
+    The full affine translator has ~590k parameters per layer for d=768; the
+    restricted one has 1536. Anyone quoting the wrong family as a tuned-lens
+    result would be wrong by two orders of magnitude in capacity, so the
+    report names the family it used.
     """
     lens = TunedLens(engine=_StubEngine(n_layers=3))
     report = lens.train(["calibration text"])
@@ -374,8 +427,10 @@ def test_training_reports_the_variant_it_actually_fitted():
     # No weights behind the stub, so this is the unavailable path -- but the
     # variant is still declared, because the declaration travels with the class.
     assert report["translator_kind"] == TRANSLATOR_KIND
-    assert "diagonal" in str(report.get("reason", "")).lower() or \
-        report["status"] == UNAVAILABLE
+    assert report["translator_kind"] in (FULL_AFFINE, DIAGONAL_AFFINE)
+    assert report["status"] == UNAVAILABLE
+    assert report["provenance"] == UNAVAILABLE
+    assert report["publication_eligible"] is False
 
 
 # ── The translator arithmetic, testable without a forward pass ──────────
@@ -384,7 +439,8 @@ def test_apply_translator_scales_and_shifts():
     import torch
 
     lens = TunedLens(engine=_StubEngine(n_layers=3))
-    lens.translators = {2: {"scale": torch.tensor([2.0, 0.5]),
+    lens.translators = {2: {"kind": DIAGONAL_AFFINE,
+                            "scale": torch.tensor([2.0, 0.5]),
                             "shift": torch.tensor([1.0, -1.0])}}
 
     hidden = torch.tensor([[3.0, 4.0]])
@@ -420,9 +476,12 @@ def test_the_mean_kl_of_a_perfect_projection_is_zero():
     target = torch.log_softmax(
         torch.nn.functional.layer_norm(hidden, (8,)) @ unembed.T, dim=-1)
 
-    kl = TunedLens._mean_kl(torch, hidden, target, unembed, None, None)
+    # The translator is applied by the caller now, so the untranslated
+    # objective is the four-argument form.
+    kl = TunedLens._mean_kl(torch, hidden, target, unembed)
 
-    assert kl == pytest.approx(0.0, abs=1e-5)
+    assert isinstance(kl, torch.Tensor)
+    assert float(kl) == pytest.approx(0.0, abs=1e-5)
 
 
 def test_the_mean_kl_is_positive_for_a_wrong_projection():
@@ -430,7 +489,7 @@ def test_the_mean_kl_is_positive_for_a_wrong_projection():
 
     target = torch.log_softmax(torch.randn(5, 11), dim=-1)
     kl = TunedLens._mean_kl(torch, torch.zeros(5, 11), target,
-                            torch.eye(11), None, None).item()
+                            torch.eye(11)).item()
 
     assert kl > 0.0
     assert not math.isnan(kl)
@@ -442,6 +501,10 @@ def test_mean_kl_stays_differentiable():
     Returning a Python float severs the autograd graph, and `train()` then raises
     `AttributeError: 'float' object has no attribute 'backward'` on the first
     step -- which is exactly what happened before this was a tensor.
+
+    The translator is applied by the caller now, so the graph has to survive
+    that composition too: the gradient must reach the fitted scale and shift,
+    not just the objective that consumes them.
     """
     import torch
 
@@ -450,7 +513,8 @@ def test_mean_kl_stays_differentiable():
     shift = torch.zeros(6, requires_grad=True)
     target = torch.log_softmax(torch.randn(4, 6), dim=-1)
 
-    kl = TunedLens._mean_kl(torch, hidden, target, torch.eye(6), scale, shift)
+    kl = TunedLens._mean_kl(torch, hidden, target, torch.eye(6),
+                            translated=hidden * scale + shift)
 
     assert isinstance(kl, torch.Tensor), (
         f"_mean_kl returned {type(kl).__name__}; the training loop needs a "
@@ -464,22 +528,38 @@ def test_mean_kl_accepts_a_scale_without_a_shift():
     """Independent application, not both-or-neither.
 
     `h * scale + shift` raised `TypeError: Tensor + NoneType` on a legitimate
-    scale-only call.
+    scale-only call. The refactored signature takes the already-translated
+    state, so that composition moved to the caller -- but the scale-only call
+    is still a legitimate one, and the state handed in has to be the state
+    that gets scored.
     """
     import torch
 
+    torch.manual_seed(0)
     hidden = torch.randn(3, 5)
     target = torch.log_softmax(torch.randn(3, 5), dim=-1)
+    unembed = torch.eye(5)
 
-    scaled = TunedLens._mean_kl(torch, hidden, target, torch.eye(5),
-                                torch.full((5,), 2.0), None)
-    shifted = TunedLens._mean_kl(torch, hidden, target, torch.eye(5),
-                                 None, torch.full((5,), 2.0))
+    scale = torch.full((5,), 2.0)
+    shift = torch.full((5,), 2.0)
 
-    assert isinstance(scaled, torch.Tensor)
-    assert isinstance(shifted, torch.Tensor)
-    assert not math.isnan(float(scaled))
-    assert not math.isnan(float(shifted))
+    scaled = TunedLens._mean_kl(torch, hidden, target, unembed,
+                                translated=hidden * scale)
+    shifted = TunedLens._mean_kl(torch, hidden, target, unembed,
+                                 translated=hidden + shift)
+    both = TunedLens._mean_kl(torch, hidden, target, unembed,
+                              translated=hidden * scale + shift)
+
+    for value in (scaled, shifted, both):
+        assert isinstance(value, torch.Tensor)
+        assert not math.isnan(float(value))
+
+    # A shift and a scale are not the same translation, so the two calls
+    # must not agree: the state handed in is the state that is scored.
+    assert abs(float(shifted) - float(both)) > 1e-6, (
+        "a shift-only translation and a scale-and-shift translation scored "
+        "identically, so the translated state is being ignored"
+    )
 
 
 # ── The held-out split, which is what makes the improvement meaningful ──
@@ -599,9 +679,11 @@ def test_the_readme_quotes_the_measured_tuned_lens_result():
     assert params in flat or f"{int(params):,}" in flat, (
         "README does not state the parameter count, so the diagonal variant is "
         "not visible next to the improvement it produced")
-    assert TRANSLATOR_KIND in flat or "diagonal" in flat.lower(), (
+    # The README must name the family the artifact records, not whichever
+    # family the module happens to default to today.
+    assert report["translator_kind"] in flat, (
         "the README publishes a tuned-lens improvement without naming the "
-        "translator family")
+        "translator family the artifact records")
     assert str(report["layers_holdout_improved"]) in flat, (
         "README does not state how many layers improved out of sample")
 
@@ -724,6 +806,23 @@ class _CacheBackedEngine(_StubEngine):
 
     def _decode(self, id_: int) -> str:
         return f"decoded{id_}"
+
+
+class _TrainedStubEngine(_CacheBackedEngine):
+    """A stub that also answers the snapshot the trained path reads.
+
+    `TunedLens.project` applies the translator to the residual stream the
+    engine already cached, so a stub that wants to exercise that path has to
+    hand the snapshot back.
+    """
+
+    def __init__(self, stub: _StubEngine, cache: _StubHiddenCache,
+                 prompt: str = "hello") -> None:
+        super().__init__(stub, cache)
+        self._prompt = prompt
+
+    def _snapshot(self):
+        return {"prompt": self._prompt, "hidden": self._cache["hidden"]}
 
 
 class _StubModel:

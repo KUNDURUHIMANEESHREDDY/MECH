@@ -13,6 +13,29 @@ A real implementation: for each layer, zero the clean residual stream, restore
 the corrupted one, and measure the change in the (Paris - Rome) logit
 difference. The live dispatcher route (`interpretability/causal/trace`) already
 does exactly this when GPT-2 is loaded.
+
+The closed form
+---------------
+
+``layer_effects`` is drawn from four constants. Nothing is measured:
+
+    pair    = json.dumps({"clean": clean, "corrupt": corrupt}, sort_keys=True)
+    digest  = int(sha256(pair).hexdigest(), 16)
+    byte    = (digest >> (8 * layer)) & 0xFF       # one byte per layer
+    indirect_effect = 0.90                        for layers 8 and 9
+                     = 0.12 + 0.05 * (byte % 3)   for every other layer
+
+so every value is one of 0.12, 0.17, 0.22 or 0.90. The curve is a function of
+the prompt pair and of nothing else -- no model is loaded, no tensor is read.
+
+This is documented rather than left implicit because the shape of the curve
+is a *pin*: `tests/pytest/test_causal_tracing_refusal.py` asserts that the
+returned values equal the expression above and lie on the four-value grid. A
+real ablation sweep measures twelve layers and returns twelve arbitrary
+numbers, so it cannot satisfy either assertion -- which is the point. The
+test fails the day the module becomes real, and the person who implements it
+has to replace the test deliberately rather than discover that a synthetic
+curve had quietly become a measurement.
 """
 
 from __future__ import annotations

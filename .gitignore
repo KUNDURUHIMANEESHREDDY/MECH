@@ -10,7 +10,7 @@ frontend/release/
 frontend/*.tsbuildinfo
 
 # Test / cache artifacts
-.pytest-tmp/
+.pytest-tmp*/
 .pytest_cache/
 frontend/node_modules/.vitest/
 frontend/test-results/

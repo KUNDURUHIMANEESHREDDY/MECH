@@ -32,7 +32,9 @@ wrong test -- the honest refusal is the correct behaviour today.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json as _json
 
 import pytest
 
@@ -40,6 +42,34 @@ from backend.interpretability.causal.causal_tracing import CausalTracingEngine
 
 CLEAN = "The capital of France is"
 CORRUPTED = "The capital of Rome is"
+
+#: The four values the stub's closed form can return. A closed form picks one
+#: of a handful of constants; an ablation sweep measures twelve layers and
+#: returns twelve arbitrary numbers. That difference is what makes "this is
+#: a synthesised curve" a checkable statement rather than a label.
+SYNTHETIC_GRID = (0.12, 0.17, 0.22, 0.90)
+
+
+def _documented_curve(clean: str, corrupted: str):
+    """The closed form documented in `causal_tracing.py`, re-derived here.
+
+    Re-implemented rather than imported on purpose. This file exists to pin
+    the *shape* of the synthetic curve, so if the module's curve changes the
+    test has to fail until somebody decides the change was intended.
+    Importing the module's own helper would make the test agree with
+    whatever the module does, which is the opposite of a pin.
+    """
+    pair = _json.dumps({"clean": clean, "corrupt": corrupted}, sort_keys=True)
+    digest = int(hashlib.sha256(pair.encode()).hexdigest(), 16)
+    curve = []
+    for layer in range(12):
+        byte = (digest >> (layer * 8)) & 0xFF
+        if layer in (8, 9):
+            value = round(0.12 + 0.78, 3)
+        else:
+            value = round(0.12 + 0.05 * (byte % 3), 3)
+        curve.append((layer, value))
+    return curve
 
 
 def _engine_is_unimplemented() -> bool:
@@ -120,20 +150,80 @@ def test_the_response_does_not_claim_to_have_run_the_supplied_prompts(trace):
 def test_the_synthesised_curve_is_not_an_ablation_sweep(trace):
     """The layer effects must match the documented closed form, not the model.
 
-    Asserted against the expression in the docstring
-    (`0.12 + 0.78` for layers 8-9, else `0.05 * (l % 3)`) precisely so that a
+    Asserted against the expression in the module's own docstring so that a
     future implementation replacing it with a real sweep *fails this test*.
     That is the intent: the test should have to be deleted deliberately when
     the module becomes real, not quietly outgrown.
+
+    It failed once for a reason that had nothing to do with sweeps. The pin
+    said `0.05 * (layer % 3)`; the module had moved to a prompt-hash-derived
+    `0.05 * (byte % 3)`. Both are synthetic -- neither consults a model --
+    but they are not the same curve, so the test reported a defect that did
+    not exist while saying nothing about the defects that did. A stale pin is
+    not a lenient test, it is a broken one.
+
+    So the pin is now the expression the module actually documents, and the
+    property that matters -- *this is a closed form, not a measurement* -- is
+    asserted separately and structurally, as the four-value grid.
     """
-    for entry in trace["layer_effects"]:
-        layer = entry["layer"]
-        expected = round(0.12 + (0.78 if layer in (8, 9) else 0.05 * (layer % 3)), 3)
-        assert entry["indirect_effect"] == expected, (
+    expected = _documented_curve(CLEAN, CORRUPTED)
+    effects = trace["layer_effects"]
+    assert len(effects) == len(expected), (
+        f"the curve has {len(effects)} layers; the documented closed form has "
+        f"{len(expected)}"
+    )
+
+    for entry, (layer, value) in zip(effects, expected):
+        assert entry["layer"] == layer, (
+            f"the curve reports layer {entry['layer']} where the closed form "
+            f"has {layer}"
+        )
+        assert entry["indirect_effect"] == value, (
             f"layer {layer} reports {entry['indirect_effect']}, expected the "
-            f"documented closed form {expected}. If this module has become a "
+            f"documented closed form {value}. If this module has become a "
             f"real ablation sweep, this test should be replaced, not relaxed."
         )
+
+    off_grid = [e["indirect_effect"] for e in effects
+                if e["indirect_effect"] not in SYNTHETIC_GRID]
+    assert not off_grid, (
+        f"layers report values outside the synthetic grid {SYNTHETIC_GRID}: "
+        f"{off_grid}. A closed form returns one of four constants; a "
+        f"measurement returns whatever the model happened to produce."
+    )
+
+
+@requires_unimplemented
+def test_the_synthesised_curve_is_a_function_of_the_prompt_pair(trace):
+    """The curve varies with the prompts, and with nothing else.
+
+    Two halves, both of which a measurement could not satisfy:
+
+    * the same prompt pair always gives the same curve -- no hidden state,
+      no model, no clock between calls;
+    * a different prompt pair gives a different curve -- the module's
+      documented reason for deriving the values from the pair at all.
+
+    Stated as a property rather than pinned to a value, so it survives a
+    change of formula: what must not change is *what the curve depends on*.
+    """
+    again = CausalTracingEngine().trace_causal_effect(CLEAN, CORRUPTED)
+    assert [e["indirect_effect"] for e in again["layer_effects"]] == [
+        e["indirect_effect"] for e in trace["layer_effects"]
+    ], (
+        "the same prompt pair produced two different curves; the synthetic "
+        "curve is supposed to be a pure function of the pair"
+    )
+
+    other = CausalTracingEngine().trace_causal_effect(
+        "The capital of Spain is", "The capital of Rome is")
+    assert [e["indirect_effect"] for e in other["layer_effects"]] != [
+        e["indirect_effect"] for e in trace["layer_effects"]
+    ], (
+        "two different prompt pairs produced the same curve; the values are "
+        "supposed to be derived from the pair, which is what stops the "
+        "response from being a constant dressed up as a result"
+    )
 
 
 # â”€â”€ the actual defect: unmarked fabricated numbers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -263,16 +353,15 @@ def test_implemented_causal_effect_is_a_real_ablation_sweep(trace):
         f"place would make real measurements look synthetic"
     )
 
-    # The stub's closed form is a fixed expression; a real sweep is not.
+    # The stub's closed form returns one of four constants; a real sweep is
+    # not a constant and does not sit on that grid.
     stub_shape = sum(
         1 for e in effects
-        if abs(float(e["indirect_effect"]) - round(
-            0.12 + (0.78 if e["layer"] in (8, 9) else 0.05 * (e["layer"] % 3)), 3
-        )) < 1e-9
+        if round(float(e["indirect_effect"]), 3) in SYNTHETIC_GRID
     )
     assert stub_shape < len(effects), (
         f"{stub_shape} of {len(effects)} layers still match the stub's "
-        f"closed-form expression; this looks like the synthetic curve with a "
+        f"synthetic grid; this looks like the synthetic curve with a "
         f"new label on it"
     )
 

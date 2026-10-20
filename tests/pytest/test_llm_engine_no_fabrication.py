@@ -183,6 +183,55 @@ def test_hypothesis_tester_does_not_confirm_from_hardcoded_hypotheses(monkeypatc
     assert candidates == [], candidates
 
 
+def test_skeptic_critique_is_not_labelled_live_when_nothing_measured_it():
+    """A critique is a judgement, not a measurement, so it is not `live`.
+
+    The trace entry used to default the provenance to 'live' whenever the
+    LLM engine answered without a provenance of its own -- an answer nobody
+    measured, labelled as though it were.
+    """
+    from backend.interpretability.discovery import auto_hypothesis_tester as aht
+
+    class _Engine:
+        model = "stub"
+
+        def generate_critique(self, hypothesis):
+            return {"critique": "the claim may be vacuous",
+                    "alternative_explanation": "none"}
+
+    tester = aht.AutoHypothesisTester(engine=_Engine())
+    trace = aht.ReasoningTrace(observation_id="Feature_1", llm_model="stub",
+                                timestamp=0.0)
+    hypothesis = aht.Hypothesis(id="H_1", target="Feature_1", description="d")
+    tester.critique(hypothesis, trace)
+
+    entry = trace.experiments[-1]
+    assert entry["type"] == "skeptic_critique"
+    assert entry["provenance"] != "live", entry
+    assert entry["provenance"] == "reference", entry
+
+
+def test_skeptic_critique_keeps_the_provenance_the_engine_supplied():
+    """A label the engine did supply is the engine's to give."""
+    from backend.interpretability.discovery import auto_hypothesis_tester as aht
+
+    class _Engine:
+        model = "stub"
+
+        def generate_critique(self, hypothesis):
+            return {"critique": "", "status": "unavailable",
+                    "provenance": "unavailable",
+                    "reason": "no LLM configured"}
+
+    tester = aht.AutoHypothesisTester(engine=_Engine())
+    trace = aht.ReasoningTrace(observation_id="Feature_1", llm_model="stub",
+                                timestamp=0.0)
+    hypothesis = aht.Hypothesis(id="H_1", target="Feature_1", description="d")
+    tester.critique(hypothesis, trace)
+
+    assert trace.experiments[-1]["provenance"] == "unavailable"
+
+
 @needs_weights
 def test_hypothesis_verdict_is_measured_against_a_real_forward_pass():
     """With weights present the verdict carries live provenance and evidence.

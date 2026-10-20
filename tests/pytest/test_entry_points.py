@@ -57,12 +57,12 @@ the fix landed:
     `.benchmark_tasks`.
   * `frontend/scripts/reproduce_everything.py` -> `backend.benchmarks.*`. Same
     rename, from the other direction.
-  * `backend/main.py` -> `backend.api.runtime_api`. This one is *not* a defect and
-    stays on a separate list: `/api/v2` is an absent capability, and `main.py`
-    checks `importlib.util.find_spec` before importing it, logging "capability
-    absent, not degraded" and skipping the mount. A guarded optional import is the
-    correct pattern for a feature that is not there; the test below pins the
-    guard so the import cannot lose it.
+  * `backend/main.py` -> `backend.api.runtime_api` was tolerated as a *guarded*
+    optional import while the module did not exist. It does now:
+    `backend/api/runtime_api.py` holds the v2 job/cancel surface and is mounted
+    at /api/v1 and /api/v2. The tolerance is therefore gone. The `find_spec`
+    guard is still pinned, because a tree without the module must degrade to a
+    logged 404 rather than an app that cannot start.
 """
 
 from __future__ import annotations
@@ -82,7 +82,23 @@ SKIP_DIRS = {
     "node_modules", "__pycache__", ".git", ".claude", "release",
     "site-packages", ".venv", ".pytest-tmp", ".agents",
     "MECH-standalone",  # duplicate/standalone copy, not part of shipped package
+    "_team",            # scratch verification scripts, never imported by the app
 }
+
+
+def _pruned(relative: Path) -> bool:
+    """True for paths this scan must ignore.
+
+    `SKIP_DIRS` matches whole directory names, but `addopts` sets `.pytest-tmp`
+    and any `--basetemp` override invents a sibling (`.pytest-tmp-lead`,
+    `.pytest-tmp-full`, ...). Copied trees under those hold `research_datasets`
+    packages whose relative imports cannot resolve from there, so without the
+    prefix check a finished test run poisons the next one's scan -- observed as
+    seven phantom offenders in `.pytest-tmp-full/session-*`.
+    """
+    return bool(SKIP_DIRS & set(relative.parts)) or any(
+        part.startswith(".pytest-tmp") for part in relative.parts
+    )
 
 #: Top-level names that are this project's own, so their absence is a real defect
 #: rather than an optional third-party import.
@@ -105,16 +121,12 @@ LOCAL_TOP = {
 #:     `backend.benchmarking.*`, not `backend.benchmarks.*`.
 EXPECTED_UNRESOLVED: dict[str, str] = {}
 
-#: A module imported on purpose, behind a `find_spec` guard, for a capability that
-#: is absent. Not a defect: an optional route that is not mounted must not stop
-#: the app from starting. `test_runtime_api_import_stays_guarded` asserts the
-#: guard is present, so this entry cannot quietly become an unguarded crash.
-EXPECTED_GUARDED_OPTIONAL: dict[str, str] = {
-    "backend/main.py": (
-        "backend.api.runtime_api does not exist; /api/v2 is an unmounted "
-        "optional capability and main.py checks find_spec before importing it"
-    ),
-}
+#: A guarded import of a module that does not exist is not a defect: an optional
+#: route that is not mounted must not stop the app from starting. Empty since
+#: `backend/api/runtime_api.py` landed. main.py's `find_spec` guard is still
+#: asserted, by `test_runtime_api_is_mounted_behind_its_guard` -- it just is not
+#: a tolerated *unresolved* import any more.
+EXPECTED_GUARDED_OPTIONAL: dict[str, str] = {}
 
 
 def _module_exists(dotted: str) -> bool:
@@ -152,7 +164,7 @@ def _unresolved_imports() -> List[Tuple[str, int, str]]:
 
     for path in sorted(ROOT.rglob("*.py")):
         relative = path.relative_to(ROOT)
-        if SKIP_DIRS & set(relative.parts):
+        if _pruned(relative):
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -247,32 +259,63 @@ def test_the_reproductions_package_really_is_gone():
     )
 
 
-def test_runtime_api_import_stays_guarded():
-    """`backend/main.py` imports a module that does not exist -- on purpose.
+def test_runtime_api_is_mounted_behind_its_guard():
+    """`backend/main.py` mounts /api/v2, and keeps the find_spec guard.
 
-    `/api/v2` is an absent capability, and the honest way to say so is to check
-    with `importlib.util.find_spec`, log "capability absent, not degraded", and
-    skip the mount. An unguarded import would make the whole app fail to start
-    over a route that was never there.
+    This test used to assert the opposite: that `backend/api/runtime_api.py` did
+    not exist, so its import could never resolve and `/api/v2` was an absent
+    capability. The module landed -- it holds the v2 job/cancel surface -- which
+    makes the capability-absent warning the *fallback* branch rather than the
+    live one. Asserting non-existence pinned a snapshot, and it went red the
+    moment the snapshot moved.
+
+    What stays invariant: the guard precedes the import, the import precedes the
+    mount, and the router is actually reachable on the app. A tree that lacks
+    the module must degrade to a logged 404 instead of an app that cannot start.
     """
     import importlib.util
 
-    assert not (ROOT / "backend" / "api" / "runtime_api.py").exists(), (
-        "backend/api/runtime_api.py now exists, so main.py's find_spec guard and "
-        "its 'capability absent' warning are stale -- the router should be "
-        "mounted unconditionally."
+    module_path = ROOT / "backend" / "api" / "runtime_api.py"
+    assert module_path.exists(), (
+        "backend/api/runtime_api.py is gone. If that is deliberate, /api/v2 is "
+        "an absent capability again and the find_spec fallback is the live path."
+    )
+    assert importlib.util.find_spec("backend.api.runtime_api") is not None
+
+    from backend.api import runtime_api
+
+    assert runtime_api.router.routes, (
+        "the runtime router exists but exposes no routes, so mounting it would "
+        "serve nothing"
     )
 
     source = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
-    assert 'find_spec("backend.api.runtime_api")' in source, (
-        "the optional /api/v2 import must be guarded by find_spec")
-    assert importlib.util.find_spec("backend.api.runtime_api") is None
-
-    # The import must sit in the `else` of that check, not before it.
     guard = source.index('find_spec("backend.api.runtime_api")')
     guarded_import = source.index("from backend.api.runtime_api import router")
-    assert guarded_import > guard, (
-        "the runtime_api import must come after the find_spec check")
+    mount = source.index("app.include_router(runtime_router", guarded_import)
+    assert guard < guarded_import < mount, (
+        "main.py must find_spec-check, then import, then mount the runtime router"
+    )
+    block = source[guarded_import:source.index("except Exception:", guarded_import)]
+    assert 'prefix="/api/v2"' in block, (
+        "the runtime router is imported but not mounted at /api/v2"
+    )
+
+    from backend.main import app
+
+    # `app.routes` keeps included routers as opaque `_IncludedRouter` entries in
+    # this FastAPI version, so the served surface is read from the OpenAPI schema,
+    # which flattens them. That is also what a client sees.
+    served = app.openapi().get("paths", {})
+    v2 = [path for path in served if path.startswith("/api/v2")]
+    assert v2, (
+        "backend.main.app serves no /api/v2 path even though the router exists; "
+        "the module being present is not the same as the capability being served"
+    )
+    assert any(path.endswith("/cancel") for path in v2), (
+        "the v2 cancel endpoint is not exposed, though it is the reason the "
+        "module exists and exactly what a stale 'does not exist' note hides"
+    )
 
 
 # ── backend.science ────────────────────────────────────────────────────────
@@ -293,7 +336,7 @@ def test_the_deleted_orchestrator_is_not_referenced_anywhere():
     offenders = []
     for path in ROOT.rglob("*.py"):
         relative = path.relative_to(ROOT)
-        if SKIP_DIRS & set(relative.parts):
+        if _pruned(relative):
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))

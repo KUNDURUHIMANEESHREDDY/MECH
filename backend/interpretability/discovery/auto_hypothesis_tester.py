@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from backend.core.identifiers import content_id
+
 
 @dataclass
 class Evidence:
@@ -181,7 +183,13 @@ class AutoHypothesisTester:
             "type": "skeptic_critique",
             "critique": critique_text,
             "alternative": critique_res.get("alternative_explanation", ""),
-            "provenance": critique_res.get("provenance", "unavailable" if critique_res.get("status") == "unavailable" else "live"),
+            # A critique is a semantic judgement, not a measurement of the
+            # model, so it is never `live` on the strength of the engine
+            # having answered. The engine's own label is used when it gives
+            # one; otherwise the answer is a reference, not a measurement.
+            "provenance": critique_res.get("provenance") or (
+                "unavailable" if critique_res.get("status") == "unavailable"
+                else "reference"),
         })
         return critique_text
 
@@ -335,11 +343,16 @@ class AutoHypothesisTester:
         """Runs the falsification test for a hypothesis statement against real model forward passes."""
         from backend.services import gpt2_engine
 
+        # The id names the hypothesis statement, so this is content identity:
+        # the same statement must get the name it has in every process, or a
+        # citation written today stops resolving tomorrow. `hash()` is salted
+        # per interpreter, so it could never do that.
+        hypothesis_id = content_id(hypothesis_statement, prefix="hyp_")
         if not gpt2_engine.is_available():
             return {
                 "passed": False,
                 "outcome_state": "Unavailable",
-                "hypothesis_id": f"hyp_{abs(hash(hypothesis_statement)) % 1000000}",
+                "hypothesis_id": hypothesis_id,
                 "target": "gpt2",
                 "description": hypothesis_statement,
                 "confidence": None,
@@ -354,7 +367,7 @@ class AutoHypothesisTester:
             return {
                 "passed": False,
                 "outcome_state": "Unavailable",
-                "hypothesis_id": f"hyp_{abs(hash(hypothesis_statement)) % 1000000}",
+                "hypothesis_id": hypothesis_id,
                 "target": "gpt2",
                 "description": hypothesis_statement,
                 "confidence": None,
@@ -388,7 +401,7 @@ class AutoHypothesisTester:
             return {
                 "passed": False,
                 "outcome_state": "Inconclusive",
-                "hypothesis_id": f"hyp_{abs(hash(hypothesis_statement)) % 1000000}",
+                "hypothesis_id": hypothesis_id,
                 "target": "gpt2",
                 "description": hypothesis_statement,
                 "confidence": None,
@@ -402,7 +415,7 @@ class AutoHypothesisTester:
             return {
                 "passed": False,
                 "outcome_state": "Inconclusive",
-                "hypothesis_id": f"hyp_{abs(hash(hypothesis_statement)) % 1000000}",
+                "hypothesis_id": hypothesis_id,
                 "target": "gpt2",
                 "description": hypothesis_statement,
                 "confidence": None,
@@ -452,7 +465,7 @@ class AutoHypothesisTester:
         return {
             "passed": passed,
             "outcome_state": outcome,
-            "hypothesis_id": f"hyp_{abs(hash(hypothesis_statement)) % 1000000}",
+            "hypothesis_id": hypothesis_id,
             "target": "gpt2",
             "description": hypothesis_statement,
             "confidence": conf,

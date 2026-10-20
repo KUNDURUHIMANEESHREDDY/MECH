@@ -52,6 +52,23 @@ def _parse_head_label(label: str, n_layers: int, n_heads: int):
     return (layer, head)
 
 
+class CapturedVector(list):
+    """A captured head-output vector that carries the identity of its model.
+
+    A plain list of floats is a well-typed input to a patch under any
+    checkpoint of the same family, so the vector remembers the fingerprint
+    of the checkpoint that produced it, and `patch_head_output` refuses a
+    mismatch. `list(vector)` drops the attribute -- the attribute is a
+    convenience, not the guarantee; the adapter also remembers the identity
+    of its own last capture.
+    """
+
+    def __init__(self, values, model_fingerprint: Optional[str] = None) -> None:
+        super().__init__(values)
+        self.model_fingerprint = model_fingerprint
+
+
+
 class GPT2Adapter(ModelAdapter):
     """Adapter for GPT-2 model family with real HuggingFace integration."""
 
@@ -78,7 +95,11 @@ class GPT2Adapter(ModelAdapter):
         super().__init__(_gpt2_spec(variant, mock_mode))
         self._hooks: List[Any] = []
         self._hook_outputs: Dict[int, Any] = {}
-        self._fingerprint: Optional[str] = None
+        #: Identity of the model the last capture was made under. A patch
+        #: consumes captured vectors, so a patch made under different weights
+        #: is a cross-checkpoint mix -- and the vector itself cannot say so,
+        #: because two checkpoints of one family have identical shapes.
+        self._capture_fingerprint: Optional[str] = None
 
     # ------------------------------------------------------------------ #
     #  Model identity                                                      #
@@ -87,13 +108,13 @@ class GPT2Adapter(ModelAdapter):
     def model_fingerprint(self) -> Optional[str]:
         """A content hash of the weights currently loaded, or `None`.
 
-        Derived from tensor values, not from `self.spec.model_id`. A label is
-        an assertion about provenance; a hash is evidence of it. The distinction
-        is the whole point: a swapped checkpoint keeps its model id, keeps its
-        shapes, and passes every tensor-level check, while the fingerprint
-        changes. That is precisely the case this exists to catch -- activations
-        captured under one checkpoint and patched under another are shape-
-        compatible, so nothing downstream notices.
+        Derived from tensor values, not from `self.spec.model_id`. A label
+        is an assertion about provenance; a hash is evidence of it. The
+        distinction is the whole point: a swapped checkpoint keeps its model
+        id, keeps its shapes, and passes every tensor-level check, while the
+        fingerprint changes. That is precisely the case this exists to
+        catch -- activations captured under one checkpoint and patched under
+        another are shape-compatible, so nothing downstream notices.
 
         Cached after the first call: the weights are fixed for the life of the
         adapter, and rehashing ~124M parameters on every result would be a
@@ -104,6 +125,12 @@ class GPT2Adapter(ModelAdapter):
         `None` in mock mode, where there are no weights to describe. Returning
         a string derived from the mock's construction would be worse than
         returning nothing: it would fingerprint a fiction.
+
+        This repeats `ModelAdapter.model_fingerprint` on purpose.
+        `tests/pytest/test_mutation_detection.py` mutates *this* routine to
+        prove that the fingerprint test can fail, so the code that control
+        points at has to stay here. The digest is the one the base class
+        computes, and the two must keep producing the same canonical form.
         """
         if self._model is None:
             return None
@@ -539,6 +566,13 @@ class GPT2Adapter(ModelAdapter):
         `test_activation_patch_placement.py` pins the distinction so it cannot
         quietly regress.
 
+        The write is returned, not applied in place: the hook clones the module
+        output and writes into the clone. A forward hook registered before the
+        patch therefore keeps holding the *pre-patch* tensor, and reading that
+        reference after this call measures the untouched MLP output. To observe
+        the write, look downstream of the hook -- at the residual stream that
+        consumes the MLP output, or at the logits -- and not at that reference.
+
         An out-of-range index raises rather than returning an unchanged
         result. The previous guard skipped the write and returned a well-formed
         `PatchResult` with `delta == 0.0`, which is indistinguishable from an
@@ -581,8 +615,13 @@ class GPT2Adapter(ModelAdapter):
 
             def patch_hook(module, input, output):
                 # Copy rather than mutate in place: the returned tensor may be
-                # referenced elsewhere, and an in-place write from a forward
-                # hook is invisible to anything holding that reference.
+                # referenced elsewhere, and overwriting it would silently
+                # rewrite the tensor that reference points at. Returning a copy
+                # leaves a holder of the original with the *pre-patch* values,
+                # so the write is only observable downstream of this module.
+                # (This comment previously claimed the reverse -- that an
+                # in-place write is what a reference-holder cannot see -- and a
+                # test written against that reading failed on real weights.)
                 patched = output.clone()
                 patched[0, -1, neuron_index] = patch_value
                 return patched
@@ -613,6 +652,7 @@ class GPT2Adapter(ModelAdapter):
                     layer=layer,
                     neuron_index=neuron_index,
                     patch_value=patch_value,
+                    model_fingerprint=self.model_fingerprint(),
                     provenance="live",
                 )
             finally:
@@ -624,8 +664,48 @@ class GPT2Adapter(ModelAdapter):
             original_logit=original, patched_logit=patch_value, delta=round(patch_value - original, 4),
             top_token_before=" Paris", top_token_after=" France" if abs(patch_value - original) > 1.0 else " Paris",
             layer=layer, neuron_index=neuron_index, patch_value=patch_value,
+            model_fingerprint=self.model_fingerprint(),
             provenance="seeded",
         )
+
+    def _refuse_cross_checkpoint_patch(self, patch_vector: Any) -> None:
+        """Refuse a patch that would mix two checkpoints.
+
+        Two checkpoints of one family have identical shapes, so a vector
+        captured under one of them is a well-typed, plausible-looking input
+        to a patch under the other. Nothing about the tensor can object: the
+        length is right, the shape is right, and the numbers look like a
+        head output. Only the identity of the model that produced them can,
+        and that is what is checked here.
+
+        Two sources, because either one can be lost: the vector carries the
+        fingerprint of the checkpoint that produced it, and the adapter
+        remembers the identity of its own last capture (`list(vector)`
+        drops the attribute, and a vector may have been captured by a
+        different adapter altogether).
+        """
+        current = self.model_fingerprint()
+        carried = getattr(patch_vector, "model_fingerprint", None)
+        if carried is not None and carried != current:
+            raise ValueError(
+                f"refusing to patch with a vector captured under a different "
+                f"checkpoint: the vector was captured under {carried}, and the "
+                f"weights now loaded are {current}. The two are "
+                f"shape-compatible, so nothing but the fingerprint can tell "
+                f"them apart, and the delta this would report belongs to no "
+                f"model."
+            )
+        captured = self._capture_fingerprint
+        if captured is not None and captured != current:
+            raise ValueError(
+                f"refusing to patch: the last capture on this adapter was made "
+                f"under {captured}, and the weights now loaded are {current}. "
+                f"A vector captured under one checkpoint and written into "
+                f"another is a well-typed operation that no shape check can "
+                f"object to, and the delta it produced would belong to no "
+                f"model."
+            )
+
 
     def capture_head_outputs(self, prompt: str) -> Dict[int, Dict[int, List[float]]]:
         """Capture every attention head's output vector in one forward pass.
@@ -686,11 +766,20 @@ class GPT2Adapter(ModelAdapter):
                 handle.remove()
 
         d_head = self.spec.d_model // self.spec.num_heads
+        fingerprint = self.model_fingerprint()
+        # The identity of the model that produced these vectors, kept on the
+        # adapter as well as on the vectors themselves: `list(vector)` drops
+        # the attribute, and a patch still has to know which checkpoint the
+        # values came from.
+        self._capture_fingerprint = fingerprint
         out: Dict[int, Dict[int, List[float]]] = {}
         for layer, merged in captured.items():
             last = merged[0, -1, :]
             out[layer] = {
-                head: [round(float(v), 6) for v in last[head * d_head:(head + 1) * d_head]]
+                head: CapturedVector(
+                    [round(float(v), 6) for v in last[head * d_head:(head + 1) * d_head]],
+                    model_fingerprint=fingerprint,
+                )
                 for head in range(self.spec.num_heads)
             }
         return out
@@ -866,7 +955,15 @@ class GPT2Adapter(ModelAdapter):
         happened to a token the unpatched run was not predicting. Path-patching
         a head into a corrupted run needs the target token's score, so ACDC
         passes it.
+
+        Model identity
+        --------------
+        A patch writes values that were measured somewhere else into the
+        model that is loaded now. When the two are different checkpoints of
+        one family, every shape check passes and the result is a number that
+        belongs to neither. The patch is refused instead.
         """
+        self._refuse_cross_checkpoint_patch(patch_vector)
         if not self.spec.mock_mode and self._model is not None:
             import torch
             inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
@@ -995,6 +1092,7 @@ class GPT2Adapter(ModelAdapter):
                         layer=layer,
                         neuron_index=head_index, # overloaded as head index
                         patch_value=0.0, # overloaded as zero ablation
+                        model_fingerprint=self.model_fingerprint(),
                         provenance="live",
                     )
                 finally:
@@ -1011,6 +1109,7 @@ class GPT2Adapter(ModelAdapter):
             original_logit=0.82, patched_logit=0.45, delta=-0.37,
             top_token_before=" Paris", top_token_after=" France",
             layer=layer, neuron_index=head_index, patch_value=0.0,
+            model_fingerprint=self.model_fingerprint(),
             provenance="seeded",
         )
 

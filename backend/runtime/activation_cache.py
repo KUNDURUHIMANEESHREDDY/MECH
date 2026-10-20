@@ -21,7 +21,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 
@@ -41,6 +41,43 @@ from .errors import CacheError
 HEADLESS = object()
 
 
+#: Sources for the identity of the model the process is working with.
+#:
+#: The cache cannot answer "is this entry still current?" from the entry
+#: alone: two checkpoints of one family have identical shapes, so every
+#: field an entry records -- session, prompt, layer, head, component,
+#: shape -- still matches after a swap. The answer has to come from the
+#: model that is loaded *now*, which is process state, so the adapter
+#: holding the weights publishes it here.
+_IDENTITY_PROVIDERS: list = []
+
+
+def register_model_identity_provider(
+    provider: Callable[[], Optional[dict]],
+) -> None:
+    """Publish a source for the identity of the model in use.
+
+    Newest first, and a source that cannot answer is skipped rather than
+    allowed to hide one that can: an adapter that loaded weights and then
+    dropped them must not make the platform forget which model it is
+    measuring.
+    """
+    _IDENTITY_PROVIDERS.insert(0, provider)
+    del _IDENTITY_PROVIDERS[8:]
+
+
+def current_model_identity() -> Optional[dict]:
+    """The identity of the model in use right now, or None if there is none."""
+    for provider in list(_IDENTITY_PROVIDERS):
+        try:
+            identity = provider()
+        except Exception:
+            continue
+        if identity:
+            return dict(identity)
+    return None
+
+
 @dataclass
 class CachedActivation:
     activation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -53,6 +90,24 @@ class CachedActivation:
     tensor: Optional[torch.Tensor] = None
     timestamp: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+    def __post_init__(self) -> None:
+        """Record which model produced this activation.
+
+        The identity is taken from the model that is loaded now, because
+        that is the model that produced the activation. It is written into
+        `metadata` so that everything downstream of the cache -- a search,
+        a report, a serialisation -- carries it.
+        """
+        identity = current_model_identity()
+        if not identity:
+            return
+        stamped = dict(self.metadata)
+        for key, value in identity.items():
+            if value is not None:
+                stamped.setdefault(key, value)
+        self.metadata = stamped
 
 
 class ActivationCache:
@@ -223,16 +278,20 @@ class ActivationCache:
         stored = replace(activation)
         if stored.tensor is not None:
             stored.tensor = stored.tensor.detach().clone()
-        if stored.metadata:
-            # `metadata` is documented as a dict but a caller can put anything
-            # there, and `dict("not a dict")` raises ValueError from inside
-            # `put` -- turning a malformed field into a refused measurement
-            # with a message about dictionary unpacking.
-            try:
-                stored.metadata = dict(stored.metadata)
-            except (TypeError, ValueError):
-                stored.metadata = {} if not isinstance(
-                    stored.metadata, dict) else stored.metadata
+        # The caller's own record of the entry, not the copy's: `replace`
+        # runs `__post_init__` again, and an entry that was captured
+        # without a model in view must not acquire the identity of whatever
+        # model happens to be loaded now. That would be a fabrication.
+        #
+        # `metadata` is documented as a dict but a caller can put anything
+        # there, and `dict("not a dict")` raises ValueError from inside
+        # `put` -- turning a malformed field into a refused measurement
+        # with a message about dictionary unpacking.
+        try:
+            stored.metadata = dict(activation.metadata)
+        except (TypeError, ValueError):
+            stored.metadata = {} if not isinstance(
+                activation.metadata, dict) else activation.metadata
         stored_bytes = self._tensor_bytes(stored.tensor)
 
         with self._lock:
@@ -254,10 +313,46 @@ class ActivationCache:
         return stored.activation_id
 
     def get(self, activation_id: str) -> Optional[CachedActivation]:
-        """Return a copy, so the caller cannot reach the cached value."""
+        """Return a copy, so the caller cannot reach the cached value.
+
+        An entry captured under a different model is not returned at all.
+        The shape of the data says nothing about which checkpoint produced
+        it -- two checkpoints of one family have identical shapes -- so
+        serving it would be serving a stale measurement as a current one.
+        """
         with self._lock:
             entry = self._entries.get(activation_id)
-        return None if entry is None else self._copy(entry)
+        if entry is None:
+            return None
+        if not self._is_current(entry):
+            return None
+        return self._copy(entry)
+
+    @staticmethod
+    def _is_current(entry: CachedActivation) -> bool:
+        """Whether an entry was produced by the model that is loaded now.
+
+        An entry that records no identity at all is refused too: a
+        measurement whose provenance is unknown cannot be presented as a
+        current one, and the cache is the last place that can say so.
+        """
+        current = current_model_identity()
+        if not current:
+            # No model in view: there is nothing for the entry to be stale
+            # against.
+            return True
+        recorded = {
+            key: entry.metadata.get(key)
+            for key in current
+            if entry.metadata.get(key) is not None
+        }
+        if not recorded:
+            return False
+        return all(
+            recorded.get(key) == value
+            for key, value in current.items()
+            if value is not None
+        )
 
     def delete(self, activation_id: str) -> bool:
         with self._lock:
@@ -286,8 +381,14 @@ class ActivationCache:
         clone = replace(entry)
         if clone.tensor is not None:
             clone.tensor = clone.tensor.detach().clone()
-        if clone.metadata:
-            clone.metadata = dict(clone.metadata)
+        # The stored entry's own metadata, not the copy's: `replace` runs
+        # `__post_init__` again, and a copy must not acquire an identity the
+        # entry never had.
+        try:
+            clone.metadata = dict(entry.metadata)
+        except (TypeError, ValueError):
+            clone.metadata = {} if not isinstance(
+                entry.metadata, dict) else entry.metadata
         return clone
 
     # ── Search ───────────────────────────────────────────────────
@@ -318,7 +419,7 @@ class ActivationCache:
         if prompt_id is not None:
             results = [a for a in results if a.prompt_id == prompt_id]
 
-        return [self._copy(a) for a in results]
+        return [self._copy(a) for a in results if self._is_current(a)]
 
     def count(self) -> int:
         with self._lock:

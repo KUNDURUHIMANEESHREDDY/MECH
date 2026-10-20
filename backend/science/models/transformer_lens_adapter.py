@@ -150,7 +150,8 @@ class TransformerLensAdapter(ModelAdapter):
             top_token_after=top_token_after,
             layer=layer,
             neuron_index=neuron_index,
-            patch_value=patch_value
+            model_fingerprint=self.model_fingerprint(),
+            patch_value=patch_value,
         )
 
     def patch_head_output(
@@ -195,7 +196,8 @@ class TransformerLensAdapter(ModelAdapter):
             top_token_after=top_token_after,
             layer=layer,
             neuron_index=head_index,
-            patch_value=0.0
+            model_fingerprint=self.model_fingerprint(),
+            patch_value=0.0,
         )
 
     def get_residual_stream(self, prompt: str) -> List[Dict[str, Any]]:

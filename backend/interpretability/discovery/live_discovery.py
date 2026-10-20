@@ -1,9 +1,16 @@
 """Live causal discovery executor for the IOI circuit in GPT-2 Small.
 
 Method (all quantities measured from the loaded model, nothing hardcoded):
-  1. Baseline clean/corrupted logit differences over a fixed prompt panel.
+  1. Baseline clean/corrupted logit differences over a prompt panel. The
+     panel is a sample of the name pool; a seed selects the sample, so a
+     run is reproducible from its seed and a different seed is a different
+     sample rather than a rerun of the same one.
   2. Full 144-head zero-ablation screen on one prompt, then causal
-     verification of the top candidates on every panel prompt.
+     verification of the top candidates on every panel prompt. Heads are
+     ranked by the difference-in-differences between their clean-prompt and
+     ABB corrupted-prompt ablation effects, so a generic name-token effect
+     -- present in both conditions -- cancels, and only an IOI-specific
+     effect counts towards the circuit.
   3. Circuit = verified heads with consistent sign and mean |effect| floor.
   4. Edges = pairwise zero-ablation interactions
      (|ΔAB − (ΔA + ΔB)| >= edge floor), directed earlier-layer → later-layer.
@@ -22,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from statistics import mean
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,6 +42,91 @@ NAMES = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank"]
 PAIR_POOL: List[Tuple[str, str]] = [
     (a, b) for a in NAMES for b in NAMES if a != b
 ]
+
+# Surface forms rotate independently of the name-pair sample. These follow the
+# same ABB structure as the high-fidelity reproduction pipeline: the subject is
+# the giver in the clean prompt and the indirect object is the giver in the
+# corrupted control.
+_IOI_PROMPT_FRAMES = (
+    {"lead": "When ", "place": "store", "verb": "gave", "item": "bottle"},
+    {"lead": "Then ", "place": "park", "verb": "gave", "item": "ball"},
+    {"lead": "After that, ", "place": "library", "verb": "offered", "item": "book"},
+    {"lead": "While ", "place": "kitchen", "verb": "passed", "item": "towel"},
+    {"lead": "Yesterday ", "place": "market", "verb": "bought", "item": "apple"},
+    {"lead": "Later, ", "place": "garden", "verb": "sent", "item": "letter"},
+    {"lead": "One day ", "place": "school", "verb": "showed", "item": "photo"},
+    {"lead": "Finally, ", "place": "beach", "verb": "handed", "item": "shell"},
+)
+MIN_USABLE_PROMPTS_PER_TEMPLATE = 3
+CROSS_TEMPLATE_AGREEMENT_TOLERANCE = 0.25
+
+
+def render_prompt_pair(subject: str, io_name: str,
+                       frame_id: int = 0) -> Tuple[str, str]:
+    """Render a clean/corrupted ABB pair for one surface-form frame."""
+    if not isinstance(frame_id, int) or isinstance(frame_id, bool):
+        raise ValueError("frame_id must be an integer")
+    if not 0 <= frame_id < len(_IOI_PROMPT_FRAMES):
+        raise ValueError(f"frame_id must be in [0, {len(_IOI_PROMPT_FRAMES) - 1}]")
+    frame = _IOI_PROMPT_FRAMES[frame_id]
+
+    def render(giver: str) -> str:
+        return (f"{frame['lead']}{subject} and {io_name} went to the "
+                f"{frame['place']}, {giver} {frame['verb']} a "
+                f"{frame['item']} to")
+
+    return render(subject), render(io_name)
+
+
+def _ioi_specific_effect(clean_before: float, clean_after: float,
+                         corrupted_before: float,
+                         corrupted_after: float) -> float:
+    """Difference-in-differences for a head's clean-vs-ABB-ablation effect.
+
+    A generic name-token effect present in both clean and corrupted prompts
+    cancels. The remainder is the additional logit-difference loss caused by
+    ablation in the IOI-consistent condition.
+    """
+    clean_drop = float(clean_before) - float(clean_after)
+    corrupted_drop = float(corrupted_before) - float(corrupted_after)
+    return clean_drop - corrupted_drop
+
+
+def _panel_with_prompts(panel: List[Dict[str, Any]],
+                        frame_id: int = 0) -> List[Dict[str, Any]]:
+    """Attach the canonical ABB template prompts to name pairs.
+
+    Every entry of the panel is rendered with the same surface form, so a
+    discovery and the held-out validation that follows it are measured on
+    the same kind of prompt. `backend/validation/live_validation.py`
+    re-renders held-out prompts with `live_measure.clean_prompt`, which is
+    frame 0; a discovery measured on another frame would be validated on a
+    different experiment than the one it reported. The remaining frames
+    stay reachable through `render_prompt_pair` for callers that want a
+    different surface form.
+    """
+    if not isinstance(frame_id, int) or isinstance(frame_id, bool):
+        raise ValueError("frame_id must be an integer")
+    if not 0 <= frame_id < len(_IOI_PROMPT_FRAMES):
+        raise ValueError(
+            f"frame_id must be in [0, {len(_IOI_PROMPT_FRAMES) - 1}]")
+    frame = _IOI_PROMPT_FRAMES[frame_id]
+    result = []
+    for entry in panel:
+        clean, corrupted = render_prompt_pair(
+            entry["subject"], entry["io"], frame_id)
+        result.append({
+            **entry,
+            "frame_id": frame_id,
+            "template": frame["lead"].strip().rstrip(","),
+            "place": frame["place"],
+            "verb": frame["verb"],
+            "item": frame["item"],
+            "clean": clean,
+            "corrupted": corrupted,
+        })
+    return result
+
 
 EFFECT_FLOOR = 0.15
 EDGE_FLOOR = 0.15
@@ -175,21 +268,35 @@ def recall(discovery_id: str) -> Optional[Dict[str, Any]]:
     return dict(result) if isinstance(result, dict) else None
 
 
-def prompt_panel(n_prompts: int, offset: int = 0) -> List[Dict[str, Any]]:
-    """Deterministic ordered subject/IO name pairs with their pool indices.
+def prompt_panel(n_prompts: int, offset: int = 0,
+                 seed: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Deterministic subject/IO name pairs with their pool indices.
 
     Returns a list of dicts with keys: "subject", "io", "pool_index".
     This makes panel composition auditable and enables disjointness checks.
+
+    `seed` selects the sample. With a seed the panel is drawn from
+    `random.Random(seed)`: the same seed always yields the same panel, a
+    different seed a different one, and the drawn entries are distinct
+    while the pool has room for them. Without a seed the panel is the
+    ordered walk of the pool from `offset`, which is what the disjoint
+    panel allocators below assume.
     """
     if n_prompts <= 0:
         return []
-    panel = []
     pool_size = len(PAIR_POOL)
-    for i in range(n_prompts):
-        pool_index = (offset + i) % pool_size
-        subj, io = PAIR_POOL[pool_index]
-        panel.append({"subject": subj, "io": io, "pool_index": pool_index})
-    return panel
+    if seed is None:
+        indices = [(offset + i) % pool_size for i in range(n_prompts)]
+    else:
+        rng = random.Random(int(seed))
+        drawn = rng.sample(range(pool_size), min(n_prompts, pool_size))
+        indices = [(i + offset) % pool_size for i in drawn]
+        if n_prompts > pool_size:
+            # More prompts than the pool holds: repeat the draw rather than
+            # invent names, so the panel stays a function of the seed.
+            indices = [indices[i % len(indices)] for i in range(n_prompts)]
+    return [{"subject": PAIR_POOL[i][0], "io": PAIR_POOL[i][1],
+             "pool_index": i} for i in indices]
 
 
 def _allocate_panel(used_indices: object, n: int) -> Optional[List[Dict[str, Any]]]:
@@ -293,8 +400,16 @@ class LiveIOIDiscovery:
 
     def run(self, hypothesis_statement: str = "", n_prompts: int = 4,
             max_heads: int = MAX_HEADS,
-            n_interaction_prompts: int = 2) -> Dict[str, Any]:
+            n_interaction_prompts: int = 2,
+            seed: Optional[int] = None) -> Dict[str, Any]:
         """Discover the IOI circuit from live weights.
+
+        `seed` selects the prompt sample the discovery is measured on. The
+        same seed reproduces the same sample, a different seed draws a
+        different one, and the seed is recorded in the result so a
+        discovery can be traced back to the sample behind it. `None` keeps
+        the ordered pool walk, which is what the disjoint panel allocators
+        assume.
 
         `n_interaction_prompts` is the number of prompts the pairwise
         interaction stage is averaged over. It defaults to 2 -- that stage is
@@ -311,7 +426,7 @@ class LiveIOIDiscovery:
         """
         try:
             return self._run(hypothesis_statement, n_prompts, max_heads,
-                             n_interaction_prompts)
+                             n_interaction_prompts, seed)
         except lm.LiveUnavailable as exc:
             return {
                 "status": "unavailable",
@@ -326,7 +441,8 @@ class LiveIOIDiscovery:
             }
 
     def _run(self, hypothesis_statement: str, n_prompts: int,
-             max_heads: int, n_interaction_prompts: int = 2) -> Dict[str, Any]:
+             max_heads: int, n_interaction_prompts: int = 2,
+             seed: Optional[int] = None) -> Dict[str, Any]:
         token_ids = lm.single_token_names(NAMES)
         missing = sorted(name for name, tid in token_ids.items() if tid is None)
         if missing:
@@ -335,17 +451,25 @@ class LiveIOIDiscovery:
                 + ", ".join(missing))
         n_layers, n_heads, _ = lm.dims()
 
-        # Discovery panel: starts at offset 0, uses n_prompts entries
-        discovery_panel = prompt_panel(max(1, n_prompts), offset=0)
+        # Discovery panel: the seed selects the sample of name pairs (None
+        # keeps the ordered pool walk), and every entry carries the
+        # canonical ABB surface form.
+        discovery_panel = _panel_with_prompts(
+            prompt_panel(max(1, n_prompts), offset=0, seed=seed))
 
         def _measure_baselines(panel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            """Clean/corrupted baselines for a panel's entries."""
+            """Clean/corrupted baselines for a panel's entries.
+
+            The prompts come from the panel itself: a panel entry carries
+            the rendered clean/corrupted pair, so the baseline is measured
+            on exactly the text the ablation stages go on to use.
+            """
             measured = []
             for panel_entry in panel:
                 subj = panel_entry["subject"]
                 io_name = panel_entry["io"]
-                clean = lm.clean_prompt(subj, io_name)
-                corr = lm.corrupted_prompt(subj, io_name)
+                clean = panel_entry["clean"]
+                corr = panel_entry["corrupted"]
                 io_id = token_ids[io_name]
                 subj_id = token_ids[subj]
                 assert io_id is not None and subj_id is not None
@@ -379,6 +503,7 @@ class LiveIOIDiscovery:
         interaction_panel = _allocate_panel(
             _used_for_interaction, max(1, n_interaction_prompts))
         if interaction_panel is not None:
+            interaction_panel = _panel_with_prompts(interaction_panel)
             pair_source = _measure_baselines(interaction_panel)
         else:
             # No disjoint tuning panel fits: fall back to the discovery
@@ -388,54 +513,94 @@ class LiveIOIDiscovery:
                                               len(prompts)))]
             interaction_panel = [
                 {"subject": p["subject"], "io": p["io"],
-                 "pool_index": p["pool_index"]}
+                 "pool_index": p["pool_index"],
+                 "clean": p["clean"], "corrupted": p["corrupted"]}
                 for p in pair_source
             ]
 
         # Stage A: full-head screen on the first prompt.
+        #
+        # The screen ranks by the IOI-specific effect, not by the raw
+        # clean-prompt ablation. A head that moves the logits in both
+        # conditions has not been shown to do anything for indirect object
+        # identification, and ranking it above a head that only matters in
+        # the IOI-consistent condition would screen the wrong candidates
+        # in. So the screen ablates the clean and the corrupted prompt of
+        # every head.
         screen = prompts[0]
         screen_effects: Dict[Tuple[int, int], float] = {}
         for layer in range(n_layers):
             for head in range(n_heads):
-                patched = lm.ablate(screen["clean"], screen["io_id"],
-                                    screen["subj_id"], {(layer, head)})
-                screen_effects[(layer, head)] = patched - screen["clean_diff"]
+                cand = (layer, head)
+                clean_after = lm.ablate(screen["clean"], screen["io_id"],
+                                        screen["subj_id"], {cand})
+                corrupted_after = lm.ablate(screen["corrupted"],
+                                           screen["io_id"], screen["subj_id"],
+                                           {cand})
+                screen_effects[cand] = _ioi_specific_effect(
+                    screen["clean_diff"], clean_after,
+                    screen["corrupted_diff"], corrupted_after)
         ranked = sorted(screen_effects, key=lambda k: -abs(screen_effects[k]))
         candidates = ranked[:SCREEN_CANDIDATES]
 
         # Stage B: verify candidates on every panel prompt.
+        #
+        # Two numbers per candidate per prompt: the raw clean-prompt
+        # ablation delta -- what the held-out validator replicates -- and
+        # the IOI-specific difference-in-differences, which is what the
+        # circuit is selected on.
         verified: Dict[Tuple[int, int], List[float]] = {c: [] for c in candidates}
+        verified_ioi: Dict[Tuple[int, int], List[float]] = {c: [] for c in candidates}
         for prompt in prompts:
             for cand in candidates:
                 patched = lm.ablate(prompt["clean"], prompt["io_id"],
                                     prompt["subj_id"], {cand})
+                patched_corr = lm.ablate(prompt["corrupted"], prompt["io_id"],
+                                         prompt["subj_id"], {cand})
                 verified[cand].append(patched - prompt["clean_diff"])
+                verified_ioi[cand].append(_ioi_specific_effect(
+                    prompt["clean_diff"], patched,
+                    prompt["corrupted_diff"], patched_corr))
 
         # Stage C: select the circuit.
+        #
+        # The floor applies to the IOI-specific effect. A head whose effect
+        # is the same in the clean and in the corrupted condition has not
+        # been shown to do anything for indirect object identification,
+        # whatever its raw effect size.
         required_signs = max(2, int(0.75 * len(prompts)))
         scored = []
         for cand, deltas in verified.items():
-            signs = [1 if d > 0 else -1 for d in deltas]
+            ioi_deltas = verified_ioi[cand]
+            signs = [1 if d > 0 else -1 for d in ioi_deltas]
             consistent = (max(signs.count(1), signs.count(-1))
                           >= required_signs)
-            magnitude = mean(abs(d) for d in deltas)
-            if consistent and magnitude >= EFFECT_FLOOR:
-                scored.append((cand, mean(deltas), magnitude))
-        scored.sort(key=lambda item: -item[2])
-        circuit = [cand for cand, _, _ in scored[:max(1, max_heads)]]
+            ioi_magnitude = mean(abs(d) for d in ioi_deltas)
+            if consistent and ioi_magnitude >= EFFECT_FLOOR:
+                scored.append((cand, mean(deltas),
+                               mean(abs(d) for d in deltas),
+                               mean(ioi_deltas), ioi_magnitude))
+        scored.sort(key=lambda item: -item[4])
+        circuit = [cand for cand, _, _, _, _ in scored[:max(1, max_heads)]]
         head_effects = [
             {"head": lm.head_label(layer, head),
              "mean_delta": round(mean_delta, 4),
-             "mean_abs_delta": round(magnitude, 4),
-             "per_prompt_delta": [round(d, 4) for d in verified[(layer, head)]]}
-            for (layer, head), mean_delta, magnitude in scored[:max(1, max_heads)]
+             "mean_abs_delta": round(raw_magnitude, 4),
+             "mean_ioi_specific_delta": round(ioi_mean, 4),
+             "mean_abs_ioi_specific_delta": round(ioi_magnitude, 4),
+             "effect_kind": "ioi_specific_ablation_difference",
+             "per_prompt_delta": [round(d, 4) for d in verified[(layer, head)]],
+             "per_prompt_ioi_specific_delta": [
+                 round(d, 4) for d in verified_ioi[(layer, head)]]}
+            for (layer, head), mean_delta, raw_magnitude, ioi_mean, ioi_magnitude
+            in scored[:max(1, max_heads)]
         ]
 
         # Stage D: pairwise interaction edges (earlier layer -> later layer).
         # Measured on the interaction panel (`pair_source`), not on the
         # discovery prompts: reusing discovery deltas here would estimate
         # interactions on the same examples that selected the heads.
-        edge_pool = [cand for cand, _, _ in scored[:EDGE_PAIR_HEADS]]
+        edge_pool = [cand for cand, _, _, _, _ in scored[:EDGE_PAIR_HEADS]]
         pair_prompts = pair_source
         singles: Dict[Tuple[int, int], List[float]] = {}
         for cand in edge_pool:
@@ -528,7 +693,8 @@ class LiveIOIDiscovery:
             # someone else's numbers. Wrappers must propagate this, never
             # invent it. attest_measurement will set provenance and attested.
             "field_provenance": field_map(
-                ("status", "discovery_id", "method", "model_id",
+                ("status", "discovery_id", "method", "methodology",
+                 "model_id", "seed",
                  "n_prompts", "heads", "head_effects", "edges",
                  "unresolved_interactions", "faithfulness", "completeness",
                  "baselines", "discovery_panel", "validation_panel",
@@ -537,7 +703,18 @@ class LiveIOIDiscovery:
             ),
             **adequacy,
             "method": self.method,
+            "methodology": (
+                "Zero-ablation head screen over a prompt panel, with each "
+                "candidate head scored by the difference-in-differences "
+                "between its clean-prompt and its ABB corrupted_prompt "
+                "ablation effect, so a generic name-token effect cancels "
+                "and only an IOI-specific effect counts. Edges are pairwise "
+                "ablation interactions on the clean prompt; recovery is "
+                "clean-to-corrupted activation injection of the selected "
+                "circuit."
+            ),
             "model_id": self.model_id,
+            "seed": seed,
             "n_prompts": len(prompts),
             "heads": [lm.head_label(layer, head) for layer, head in circuit],
             "head_effects": head_effects,
@@ -585,11 +762,11 @@ class LiveIOIDiscovery:
             model_loaded=self.model_id,
             model_requested=self.model_id,
             model_content_hash=_engine.weights_fingerprint(),
-            input_fields=["baselines", "discovery_panel",
+            input_fields=["seed", "baselines", "discovery_panel",
                           "validation_panel", "interaction_panel"],
             output_fields=["heads", "head_effects", "edges",
                            "unresolved_interactions", "faithfulness",
-                           "completeness"],
+                           "completeness", "methodology"],
         )
         remember(result)
         return result

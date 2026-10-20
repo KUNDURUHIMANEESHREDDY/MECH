@@ -189,7 +189,10 @@ def test_supplementary_raw_data_is_not_a_fabricated_sample_count(tmp_path, monke
     from backend.science.publications.supplementary import SupplementaryMaterialPackager
 
     monkeypatch.chdir(tmp_path)
-    results = _validated(raw_traces=[{"metric": "logit_diff"}] * 3)
+    # The traces carry the provenance that supports the summary: the packager
+    # derives the label from them, so traces that say nothing about
+    # themselves are reported as unestablished rather than as live data.
+    results = _validated(raw_traces=[{"metric": "logit_diff", "provenance": "live"}] * 3)
     path = SupplementaryMaterialPackager("exp_sup", results).create_bundle()
     payload = json.load(open(os.path.join(path, "raw_data",
                                           "activation_samples_summary.json")))
@@ -210,6 +213,93 @@ def test_supplementary_raw_data_reports_absence_when_nothing_was_supplied(tmp_pa
     assert payload["provenance"] == "unavailable"
     assert payload["reason"]
     assert "samples" not in payload, "a sample count was invented"
+
+
+def test_supplementary_raw_data_is_not_labelled_live_for_reference_traces(tmp_path, monkeypatch):
+    """A reference run must not come out of the packager labelled live.
+
+    The packager used to assert `provenance: "live"` over whatever traces it
+    was handed, so a bundle built from reference data claimed a live
+    measurement that had not been made.
+    """
+    import json
+    from backend.science.publications.supplementary import SupplementaryMaterialPackager
+
+    monkeypatch.chdir(tmp_path)
+    results = _validated(raw_traces=[{"metric": "logit_diff",
+                                      "provenance": "reference"}] * 3)
+    path = SupplementaryMaterialPackager("exp_ref", results).create_bundle()
+    payload = json.load(open(os.path.join(path, "raw_data",
+                                          "activation_samples_summary.json")))
+    assert payload["provenance"] != "live", payload
+    assert payload["provenance"] == "reference", payload
+    assert payload["measured"] is True, payload
+    assert payload["samples"] == 3, payload
+    assert "reference" in payload["reason"], payload
+
+
+def test_supplementary_raw_data_is_not_labelled_live_for_an_empty_trace_list(tmp_path, monkeypatch):
+    """Zero samples is not a measurement of zero samples.
+
+    The empty list used to take the live branch and report
+    `measured: True, provenance: live, samples: 0`.
+    """
+    import json
+    from backend.science.publications.supplementary import SupplementaryMaterialPackager
+
+    monkeypatch.chdir(tmp_path)
+    path = SupplementaryMaterialPackager("exp_empty",
+                                         _validated(raw_traces=[])).create_bundle()
+    payload = json.load(open(os.path.join(path, "raw_data",
+                                          "activation_samples_summary.json")))
+    assert payload["provenance"] != "live", payload
+    assert payload["provenance"] == "unavailable", payload
+    assert payload["measured"] is False, payload
+    assert "samples" not in payload, payload
+    assert payload["reason"], payload
+
+
+def test_supplementary_raw_data_refuses_traces_whose_origin_is_unknown(tmp_path, monkeypatch):
+    """Traces that say nothing about themselves cannot be reported as measured.
+
+    Neither the traces nor the envelope that carries them is labelled, so the
+    origin of the data cannot be established and the count is not reported.
+    """
+    import json
+    from backend.science.publications.supplementary import SupplementaryMaterialPackager
+
+    monkeypatch.chdir(tmp_path)
+    results = _validated(raw_traces=[{"metric": "logit_diff"}] * 3)
+    path = SupplementaryMaterialPackager("exp_unknown", results).create_bundle()
+    payload = json.load(open(os.path.join(path, "raw_data",
+                                          "activation_samples_summary.json")))
+    assert payload["provenance"] != "live", payload
+    assert payload["provenance"] == "unavailable", payload
+    assert payload["measured"] is False, payload
+    assert "samples" not in payload, payload
+    assert "origin" in payload["reason"], payload
+
+
+def test_supplementary_raw_data_inherits_the_label_of_an_attested_envelope(tmp_path, monkeypatch):
+    """The envelope's label covers the traces it carries.
+
+    A pipeline envelope is attested as a whole -- `attest_measurement` marks
+    its `raw_traces` live along with everything else -- so a trace that
+    carries no label of its own inherits the envelope's, rather than being
+    reported as unestablished.
+    """
+    import json
+    from backend.science.publications.supplementary import SupplementaryMaterialPackager
+
+    monkeypatch.chdir(tmp_path)
+    results = _validated(provenance="live",
+                         raw_traces=[{"metric": "logit_diff"}] * 3)
+    path = SupplementaryMaterialPackager("exp_attested", results).create_bundle()
+    payload = json.load(open(os.path.join(path, "raw_data",
+                                          "activation_samples_summary.json")))
+    assert payload["provenance"] == "live", payload
+    assert payload["measured"] is True, payload
+    assert payload["samples"] == 3, payload
 
 
 # ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ source guards ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬

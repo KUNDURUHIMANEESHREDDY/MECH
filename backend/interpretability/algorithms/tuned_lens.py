@@ -440,6 +440,9 @@ class TunedLens(ProjectionModel):
             return base
 
         trained = self.training_report or {}
+        # The family that produced this lens, named rather than assumed: the
+        # payload must never describe a map that was not the one applied.
+        kind = trained.get("translator_kind") or TRANSLATOR_KIND
         layer_trained = layer in self.translators
 
         translated = self._project_translated(prompt, layer, top_k)
@@ -452,8 +455,7 @@ class TunedLens(ProjectionModel):
                 "tuned_lens_available": True,
                 "trained": True,
                 "layer_trained": layer_trained,
-                "translator_kind": trained.get("translator_kind",
-                                                TRANSLATOR_KIND),
+                "translator_kind": kind,
                 "provenance": UNAVAILABLE,
                 "validation_eligible": False,
                 "publication_eligible": False,
@@ -477,13 +479,13 @@ class TunedLens(ProjectionModel):
             "tuned_lens_available": True,
             "trained": True,
             "layer_trained": layer_trained,
-            "translator_kind": trained.get("translator_kind", TRANSLATOR_KIND),
+            "translator_kind": kind,
             "provenance": LIVE,
             "training": trained,
             "validation_eligible": False,
             "publication_eligible": False,
             "reason": (
-                "The layer's trained diagonal-affine translator was applied to "
+                f"The layer's trained {kind} translator was applied to "
                 "the residual stream before the unembedding. Note this is one "
                 "prompt's projection; it is not by itself evidence of a "
                 "mechanism."
@@ -566,8 +568,9 @@ class TunedLens(ProjectionModel):
         """Apply a layer's learned affine map to a hidden-state tensor.
 
         Separate from `project()` so the arithmetic is testable without a
-        forward pass, and so it is explicit that `project()` does *not* apply
-        it -- the engine's cached projection is returned as-is.
+        forward pass. `project()` applies the translator itself, to the
+        residual stream the engine already cached, so it never needs a second
+        forward pass.
         """
         if layer not in self.translators:
             raise KeyError(

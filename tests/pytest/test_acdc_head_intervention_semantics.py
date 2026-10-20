@@ -139,11 +139,27 @@ def test_patch_activation_writes_the_mlp_neuron_indexed_by_its_parameter():
     final position. That is the behaviour ACDC was relying on when it handed this
     function a *head* index.
 
-    The observation hook stores a reference rather than a clone, and is read
-    after the call: PyTorch runs hooks in registration order, so a hook
-    registered before `patch_activation` fires first and would capture the
-    *unpatched* value. `patch_activation` mutates the tensor in place, so a
-    stored reference reflects the final write.
+    Where to observe that write, and why not at the module's output.
+    `patch_hook` returns a *clone* carrying the write rather than mutating the
+    module output in place; the sibling file pins that on purpose
+    (`test_activation_patch_placement.py::test_patch_activation_does_not_write_in_place`).
+    A forward hook registered before the patch therefore receives the pre-patch
+    tensor, and keeping a reference to it measures the *untouched* MLP output --
+    0.688 at this coordinate, measured -- however much of the sentinel landed.
+    An earlier version of this test did exactly that and failed against a
+    working primitive.
+
+    So observe downstream instead. The block computes `residual + mlp_output`,
+    and this pass's residual is measurable because it is `ln_2`'s input. A write
+    that lands makes `block_out[n] == residual[n] + sentinel`; no write leaves
+    `block_out[n] == residual[n] + mlp_out[n]`. Every comparison below draws all
+    of its terms from a single forward pass, so nothing is differenced across
+    runs and nothing depends on which pass the method patches.
+
+    The model runs in float16 (measured: `model.dtype == torch.float16`), so the
+    residual add rounds: `0.076171875 + 99.0` is 99.076171875 exactly and
+    99.0625 as stored. Tolerances here are that rounding, not slack -- a missing
+    write is 98 away from the value being asserted.
     """
     import torch
 
@@ -151,30 +167,104 @@ def test_patch_activation_writes_the_mlp_neuron_indexed_by_its_parameter():
 
     adapter = GPT2Adapter(variant="small", mock_mode=False)
     layer, neuron, sentinel = 9, 9, 99.0
+    block = adapter._model.transformer.h[layer]
 
-    seen = {}
-    handle = adapter._model.transformer.h[layer].mlp.register_forward_hook(
-        lambda m, i, o: seen.__setitem__("mlp", o)
-    )
+    def _hidden(out):
+        """GPT2Block returns a tuple; the hidden state is element 0."""
+        return out[0] if isinstance(out, tuple) else out
+
+    # One record per forward pass. A pre-hook on the block opens it, so the
+    # children below always have somewhere to write.
+    passes: list = []
+    handles = [
+        block.register_forward_pre_hook(lambda m, i: passes.append({})),
+        block.ln_2.register_forward_pre_hook(
+            lambda m, i: passes[-1].__setitem__("residual", i[0].detach().clone())
+        ),
+        block.mlp.register_forward_hook(
+            lambda m, i, o: passes[-1].update(mlp_out=o.detach().clone(), mlp_ref=o)
+        ),
+        block.register_forward_hook(
+            lambda m, i, o: passes[-1].__setitem__("block", _hidden(o).detach().clone())
+        ),
+    ]
     try:
         adapter.patch_activation(
             PROMPT, layer=layer, neuron_index=neuron, patch_value=sentinel
         )
     finally:
-        handle.remove()
+        for handle in handles:
+            handle.remove()
 
-    assert "mlp" in seen, "the mlp hook did not fire"
-    assert float(seen["mlp"][0, -1, neuron]) == pytest.approx(sentinel), (
-        "patch_activation did not write the MLP neuron it claims to patch"
+    assert passes, "no forward pass reached the patched block"
+
+    def residual_at(record, index):
+        return float(record["residual"][0, -1, index])
+
+    def block_at(record, index):
+        return float(record["block"][0, -1, index])
+
+    # float16 spacing at the sentinel's magnitude -- the residual add rounds.
+    one_ulp = float(
+        torch.nextafter(
+            torch.tensor(sentinel, dtype=torch.float16),
+            torch.tensor(sentinel + 1.0, dtype=torch.float16),
+        )
+    ) - sentinel
+
+    # The write is the pass whose block output is `residual + sentinel`.
+    witnesses = [
+        p for p in passes
+        if abs(block_at(p, neuron) - (residual_at(p, neuron) + sentinel)) <= one_ulp
+    ]
+    assert len(witnesses) == 1, (
+        "the sentinel never reached the residual stream at coordinate "
+        f"{neuron}: the block's outputs there were "
+        f"{[round(block_at(p, neuron), 4) for p in passes]}, while a write of "
+        f"{sentinel} into the MLP output would put the patched pass at "
+        f"{sentinel} + its residual"
     )
-    # A neighbouring neuron is untouched, so the write is index-specific.
-    assert float(seen["mlp"][0, -1, neuron + 1]) != pytest.approx(sentinel)
+    witness = witnesses[0]
+
+    # And it is the only coordinate that moved. `residual + mlp_out` is exactly
+    # what this block computes when the hook returns the module output untouched
+    # (same tensors, same fp16 add), so any deviation is the patch itself.
+    moved = (witness["block"] - (witness["residual"] + witness["mlp_out"])).abs()
+    assert float(moved.max()) > 1.0, (
+        "the residual stream is identical to residual + mlp_out, yet the "
+        "sentinel was measured downstream"
+    )
+    moved[0, -1, neuron] = 0.0
+    assert float(moved.max()) == 0.0, (
+        f"patch_activation altered coordinates other than neuron_index={neuron} "
+        f"(largest other change {float(moved.max()):.6f})"
+    )
+
+    # Every other pass passed the MLP output through untouched.
+    for other in passes:
+        if other is witness:
+            continue
+        diff = (other["block"] - (other["residual"] + other["mlp_out"])).abs()
+        assert float(diff.max()) == 0.0, (
+            f"an unpatched pass moved the residual stream by {float(diff.max()):.6f}"
+        )
+
+    # The *reference* a pre-registered hook holds -- not a copy of it -- keeps
+    # the pre-patch values. That is the no-in-place guarantee seen from the
+    # caller's side, and it is why the earlier version of this test measured the
+    # untouched 0.688. Under an in-place write that reference would carry the
+    # sentinel by the time the call returned.
+    assert float(witness["mlp_ref"][0, -1, neuron]) != pytest.approx(
+        sentinel, abs=1.0
+    ), (
+        "the patch wrote through the module's output tensor instead of a copy; "
+        "the no-in-place guarantee is broken"
+    )
 
     # This is the dimension mismatch that made the original bug survivable: the
     # MLP is 3072 wide, so index 9 is perfectly valid and the patch silently
     # succeeded while the caller believed it had addressed a head.
     assert adapter.spec.d_model * 4 == 3072, "expected a 3072-wide GPT-2 MLP"
-    assert torch.is_tensor(seen["mlp"])
 
 
 @needs_weights

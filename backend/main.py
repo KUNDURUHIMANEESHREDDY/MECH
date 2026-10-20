@@ -317,10 +317,11 @@ except Exception:
                      "/api or /api/v1. Refusing to start.")
     raise
 
-# Optional v2 runtime API. `backend.api.runtime_api` does not currently exist,
-# so its absence is an expected condition and gets a warning. A *present but
+# Optional v2 runtime API. `backend.api.runtime_api` exists today and is mounted
+# at /api/v1 and /api/v2, but the find_spec guard stays for trees that lack it:
+# absence is an expected condition and gets a warning, while a *present but
 # broken* module is an infrastructure failure and is logged with a traceback.
-# Either way /api/v2 is never mounted silently.
+# Either way /api/v2 is never absent silently.
 try:
     if importlib.util.find_spec("backend.api.runtime_api") is None:
         logger.warning(
@@ -331,11 +332,45 @@ try:
     else:
         from backend.api.runtime_api import router as runtime_router
 
+        # One router, two prefixes. The spec documents jobs at /api/v1/jobs while
+        # /api/v2 is where they were first exposed; mounting the single
+        # implementation again is safer than copying it, because there is still
+        # exactly one QUEUE behind both paths.
+        app.include_router(runtime_router, prefix="/api/v1")
         app.include_router(runtime_router, prefix="/api/v2")
-        logger.info("Runtime v2 API loaded at /api/v2.")
+        logger.info("Runtime v2 API loaded at /api/v1 and /api/v2.")
 except Exception:
     logger.exception("Runtime v2 API module exists but failed to load; "
                      "/api/v2 is absent.")
+
+
+# Contract routers (spec 21.1 endpoint families, 21.2 event stream). Each lives
+# in its own module and each failure is isolated: a broken contract router must
+# not remove the dispatcher the whole frontend depends on. Absence is a logged
+# capability gap; a present-but-broken module is an infrastructure failure and
+# is logged with a traceback. Neither is ever mounted silently.
+for _module_name, _label in (
+    ("backend.api.v1_contracts", "v1 contract API (21.1)"),
+    ("backend.api.events", "job event stream (21.2)"),
+    ("backend.api.export_contracts", "project export archive (19.3)"),
+):
+    try:
+        if importlib.util.find_spec(_module_name) is None:
+            logger.warning(
+                "%s not mounted: %s does not exist. A client calling it gets a "
+                "404 -- capability absent, not degraded.", _label, _module_name,
+            )
+            continue
+        _contract_module = importlib.import_module(_module_name)
+        # Dual mount, same convention as the dispatcher: the frontend calls
+        # /api/*, the spec documents /api/v1/*, and both resolve to one router.
+        app.include_router(_contract_module.router, prefix="/api")
+        app.include_router(_contract_module.router, prefix="/api/v1")
+        logger.info("%s loaded at /api and /api/v1 from %s.",
+                    _label, _module_name)
+    except Exception:
+        logger.exception("%s exists but failed to load; it is absent from "
+                         "/api and /api/v1.", _label)
 
 
 # MCP control plane: same Core API the UI calls, exposed as tools so external

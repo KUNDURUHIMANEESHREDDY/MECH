@@ -111,17 +111,33 @@ def test_the_tuned_lens_trains_against_real_weights(trained_lens):
     """
     import torch
 
+    from backend.interpretability.algorithms.tuned_lens import FULL_AFFINE
+
     lens = trained_lens
     assert trained_lens.translators, "no translators were stored"
     for layer, entry in trained_lens.translators.items():
-        scale, shift = entry["scale"], entry["shift"]
-        identity = (
-            torch.allclose(scale, torch.ones_like(scale))
-            and torch.allclose(shift, torch.zeros_like(shift))
-        )
+        # Both families start at the identity map, so "training fitted
+        # something" means the map moved away from it -- a d x d weight and
+        # a bias for the full affine family, a scale and a shift for the
+        # restricted one.
+        kind = entry.get("kind")
+        if kind == FULL_AFFINE:
+            weight, bias = entry["weight"], entry["bias"]
+            identity_weight = torch.eye(weight.shape[0], dtype=weight.dtype,
+                                        device=weight.device)
+            identity = (
+                torch.allclose(weight, identity_weight)
+                and torch.allclose(bias, torch.zeros_like(bias))
+            )
+        else:
+            scale, shift = entry["scale"], entry["shift"]
+            identity = (
+                torch.allclose(scale, torch.ones_like(scale))
+                and torch.allclose(shift, torch.zeros_like(shift))
+            )
         assert not identity, (
-            f"layer {layer}'s translator is the identity map; training "
-            f"reported success but fitted nothing"
+            f"layer {layer}'s {kind} translator is still the identity map; "
+            f"training reported success but fitted nothing"
         )
 
 
@@ -159,17 +175,54 @@ def test_training_discloses_its_own_limits(training_report):
 
     Checked because the alternative failure is silence: a lens that trains,
     improves held-out, and reports `publication_eligible: True` would let a
-    15-prompt diagonal calibration stand in for a published tuned lens. The
+    15-prompt calibration stand in for a published tuned lens. The
     report's own `reason` names both restrictions.
     """
+    from backend.interpretability.algorithms.tuned_lens import (
+        DIAGONAL_AFFINE,
+        FULL_AFFINE,
+    )
+
     report = training_report
 
     assert report.get("publication_eligible") is False, (
-        "a 15-prompt diagonal calibration reported itself publication-eligible"
+        "a 15-prompt calibration reported itself publication-eligible"
+    )
+    kind = report.get("translator_kind")
+    assert kind in (FULL_AFFINE, DIAGONAL_AFFINE), (
+        f"the report does not name a known translator family: {kind!r}"
     )
     reason = str(report.get("reason", ""))
-    assert "diagonal_affine" in reason, (
-        f"the report does not disclose the translator variant: {reason!r}"
+    assert kind in reason, (
+        f"the report does not disclose the translator variant it used: "
+        f"{reason!r}"
+    )
+    assert "calibration" in reason.lower(), (
+        f"the report does not disclose the size of the calibration set: "
+        f"{reason!r}"
+    )
+
+
+@needs_weights
+def test_the_projection_names_the_family_it_actually_applied(trained_lens):
+    """The payload must describe the map that was applied, not another one.
+
+    The projection's reason used to hard-code 'diagonal-affine' while the
+    default family is the full affine one, so every payload described a
+    translator that was never fitted.
+    """
+    from backend.interpretability.algorithms.tuned_lens import (
+        DIAGONAL_AFFINE,
+        FULL_AFFINE,
+    )
+
+    out = trained_lens.project(PROMPT, layer=6, top_k=3)
+
+    assert out.get("affine_translation_applied") is True, out
+    kind = out.get("translator_kind")
+    assert kind in (FULL_AFFINE, DIAGONAL_AFFINE), out
+    assert kind in str(out.get("reason", "")), (
+        f"the projection does not name the family it applied: {out!r}"
     )
 
 

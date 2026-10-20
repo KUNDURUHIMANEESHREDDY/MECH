@@ -2158,8 +2158,9 @@ def figure_attention(prompt: str = "The capital of France is",
 #   POST /api/society/run              {goal, model_name?} -> {runId, status}
 #   GET  /api/society/stream?runId=... -> text/event-stream (live trace)
 #   GET  /api/society/runs/{runId}     -> polling fallback (status + result)
-# NOTE: docs/API_v1.md sketches /api/v1/... but no runtime_api module exists
-# live — Society ships on this active dispatcher, not the frozen doc.
+# NOTE: docs/API_v1.md sketches /api/v1/... and backend/api/runtime_api.py now
+# exists, but Society still ships on this active dispatcher: the v2 module
+# exposes the job/cancel surface, not these routes.
 # Long GPU work runs in a daemon thread; the event loop is never blocked.
 # ---------------------------------------------------------------------------
 

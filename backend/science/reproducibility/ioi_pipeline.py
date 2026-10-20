@@ -119,6 +119,53 @@ def _field_map(fields, provenance: str):
     return {str(field): provenance for field in fields}
 
 
+def _seed_metric(result: Any, metric: str) -> Any:
+    """One metric of a seed's run, or None when the run reported none.
+
+    A run that measured nothing has no value for any metric, and a metric
+    that was not measured is absent rather than zero.
+    """
+    if not isinstance(result, dict):
+        return None
+    metrics = result.get("observed_metrics")
+    if not isinstance(metrics, dict):
+        return None
+    return metrics.get(metric)
+
+
+def _discovered_head_labels(result: Any) -> Optional[List[str]]:
+    """The head labels a seed's run discovered, or None if it reported none.
+
+    "This seed reported no head set" and "this seed reported an empty head
+    set" are different facts, so they are kept apart: None means the run
+    did not report a head set at all.
+    """
+    if not isinstance(result, dict):
+        return None
+    metrics = result.get("observed_metrics")
+    if not isinstance(metrics, dict):
+        return None
+    nodes = metrics.get("discovered_nodes")
+    if isinstance(nodes, dict):
+        nodes = nodes.get("heads")
+    if not isinstance(nodes, (list, tuple, set, frozenset)):
+        return None
+    return sorted(str(node) for node in nodes)
+
+
+def _jaccard(first: set, second: set) -> Optional[float]:
+    """Jaccard overlap of two head sets, or None where it is undefined.
+
+    Two empty sets have no overlap to measure: the quotient would be 0/0,
+    and reporting it as 0 would say "these two seeds agree on nothing"
+    about two seeds that never reported anything.
+    """
+    union = first | second
+    if not union:
+        return None
+    return len(first & second) / len(union)
+
+
 # IOI prompt frames. A single template measures one syntactic pattern, so any
 # result from it is really a statement about that frame and not about
 # indirect-object identification generally. The pipeline cycles through these so
@@ -297,6 +344,39 @@ class IOIReproductionPipeline:
             return None
         return self._faithfulness_of(prompts, reference, lm, token_ids)
 
+    #: Prompts behind the pairwise-interaction stage of a live discovery
+    #: run. Matches `live_discovery.MIN_PROMPTS_FOR_INTERACTION`: below
+    #: this the interaction stage is measured but cannot support a claim
+    #: about it, so the default asks for enough to be quotable.
+    MIN_DISCOVERY_INTERACTION_PROMPTS = 5
+
+    def _discover_live_circuit(self, n_prompts: int = 100, seed: int = 42,
+                               n_interaction_prompts: int = MIN_DISCOVERY_INTERACTION_PROMPTS,
+                               hypothesis: str = "IOIReproductionPipeline-HighFidelity",
+                               ) -> Dict[str, Any]:
+        """Run the live causal discovery executor over a seeded sample.
+
+        This is the pipeline's discovery entry point. The executor
+        (`LiveIOIDiscovery`) does the measuring; this method hands it the
+        prompt budget and the seed, so the prompt sample the circuit is
+        discovered on is a function of the seed rather than of the wall
+        clock and a run can be repeated from the seed it reports.
+
+        The result is the executor's own: its heads, its edges and its
+        adequacy ladder. Nothing here reinterprets it, and a refusal from
+        the executor is returned as the refusal it is.
+        """
+        from backend.interpretability.discovery.live_discovery import (
+            LiveIOIDiscovery,
+        )
+
+        return LiveIOIDiscovery().run(
+            hypothesis,
+            n_prompts=max(1, int(n_prompts)),
+            n_interaction_prompts=max(1, int(n_interaction_prompts)),
+            seed=seed,
+        )
+
     def _run_live(self, prompts: List[Dict[str, str]], manifest: Any,
                   seed: int, n_prompts_requested: Optional[int] = None,
                   ) -> Dict[str, Any]:
@@ -309,9 +389,6 @@ class IOIReproductionPipeline:
         from statistics import mean
 
         from backend.interpretability.discovery import live_measure as lm
-        from backend.interpretability.discovery.live_discovery import (
-            LiveIOIDiscovery,
-        )
 
         names = sorted({p["subject"] for p in prompts}
                        | {p["indirect_object"] for p in prompts})
@@ -366,9 +443,8 @@ class IOIReproductionPipeline:
                 "synthetic_fields": [],
             })
 
-        discovery = LiveIOIDiscovery().run(
-            "IOIReproductionPipeline-HighFidelity",
-            n_prompts=min(len(prompts), 4))
+        discovery = self._discover_live_circuit(
+            n_prompts=min(len(prompts), 4), seed=seed)
         heads = [lm.parse_head(label) for label in discovery.get("heads", [])]
         heads = [h for h in heads if h is not None]
         if (not isinstance(discovery, dict)
@@ -1085,6 +1161,36 @@ class IOIReproductionPipeline:
                        if not (isinstance(r, dict)
                                and r.get("provenance") == "live")]
 
+        # Head selection stability: which heads each seed selected, and how
+        # much the seeds agree on them. A metric that pools tightly while
+        # the selected heads move from seed to seed is a metric measured on
+        # a different circuit each time, and the pooled number alone does
+        # not say so -- so the overlap is reported next to the pooling, not
+        # instead of it.
+        from statistics import mean
+
+        head_sets: Dict[Any, set] = {}
+        for r in results:
+            labels = _discovered_head_labels(r)
+            if labels is not None:
+                head_sets[r.get("seed")] = set(labels)
+        pairwise: List[float] = []
+        drawn_seeds = list(head_sets)
+        for i in range(len(drawn_seeds)):
+            for j in range(i + 1, len(drawn_seeds)):
+                score = _jaccard(head_sets[drawn_seeds[i]],
+                                 head_sets[drawn_seeds[j]])
+                if score is not None:
+                    pairwise.append(score)
+        head_selection_stability = {
+            "measured": bool(pairwise),
+            "n_seed_sets": len(head_sets),
+            "n_pairs": len(pairwise),
+            "mean_pairwise_jaccard": (mean(pairwise) if pairwise else None),
+            "head_sets": {str(seed): sorted(labels)
+                          for seed, labels in head_sets.items()},
+        }
+
         return {
             "status": "completed" if live else "unavailable",
             "provenance": "live" if live else "unavailable",
@@ -1094,7 +1200,7 @@ class IOIReproductionPipeline:
             "attested": bool(live),
             "field_provenance": _field_map(
                 ("status", "n_seeds_requested", "n_seeds_used", "pooled",
-                 "per_seed", "reason"),
+                 "per_seed", "head_selection_stability", "reason"),
                 "live" if live else "unavailable",
             ),
             "validation_eligible": bool(live),
@@ -1111,11 +1217,18 @@ class IOIReproductionPipeline:
                     "seed": r.get("seed"),
                     "status": r.get("status"),
                     "provenance": r.get("provenance"),
-                    "value": (r.get("observed_metrics") or {}).get(metric)
-                             if isinstance(r, dict) else None,
+                    "value": _seed_metric(r, metric),
+                    # Whether this seed had enough comparable surface forms
+                    # to test cross-template agreement at all. Reported per
+                    # seed because a pooled verdict cannot say which draw
+                    # carried the evidence.
+                    "cross_template_consistency_measured": _seed_metric(
+                        r, "cross_template_consistency_measured"),
+                    "heads": _discovered_head_labels(r),
                 }
                 for r in results
             ],
+            "head_selection_stability": head_selection_stability,
             "reason": (
                 None if pool.derived and not unavailable else
                 "Pooling is incomplete. See `pooled.reason` and `per_seed`: "

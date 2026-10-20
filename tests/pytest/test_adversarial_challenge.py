@@ -9,6 +9,7 @@ Tests:
 
 import importlib
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -113,21 +114,67 @@ class TestRouteFunctionality:
 
     @pytest.fixture(scope="class")
     def api_paths(self):
+        """The app's route table, partitioned by API namespace.
+
+        The app serves three namespaces: the unversioned ``/api`` (what the
+        frontend calls), the versioned ``/api/v1`` (what the spec documents)
+        and ``/api/v2`` (the runtime job family, see docs/experiments.md).
+        A path under a version namespace belongs to that namespace, not to
+        the unversioned one.
+
+        The previous partition put every ``/api/...`` path that was not
+        ``/api/v1/...`` into the unversioned bucket, so the whole
+        ``/api/v2`` tree was compared against the ``/api/v1`` tree -- two
+        different things, and a comparison that could not mean anything.
+        """
         all_routes = extract_all_routes(backend.main.app)
         all_paths = [r[0] for r in all_routes]
-        api_paths = {
-            p[len("/api"):] for p in all_paths
-            if p.startswith("/api/") and not p.startswith("/api/v1/")
-        }
-        api_v1_paths = {
-            p[len("/api/v1"):] for p in all_paths if p.startswith("/api/v1/")
-        }
-        return api_paths, api_v1_paths
+        unversioned = set()
+        versioned: Dict[int, set] = {}
+        for path in all_paths:
+            if not path.startswith("/api/"):
+                continue
+            match = re.match(r"^/api/v(\d+)(/.*)$", path)
+            if match:
+                versioned.setdefault(
+                    int(match.group(1)), set()).add(match.group(2))
+            else:
+                unversioned.add(path[len("/api"):])
+        return unversioned, versioned
 
     def test_route_path_symmetry(self, api_paths):
-        """Subpaths under /api and /api/v1 must match 1:1."""
-        api_paths_set, api_v1_paths_set = api_paths
-        assert api_paths_set == api_v1_paths_set and len(api_paths_set) > 0
+        """Every /api path must have an /api/v1 twin, and vice versa.
+
+        One router is mounted at both ``/api`` and ``/api/v1`` (the
+        frontend calls ``/api/*``, the spec documents ``/api/v1/*``), and
+        the runtime job router is mounted at ``/api/v1`` and ``/api/v2``
+        (one queue behind both paths, backend/main.py). So:
+
+        * every unversioned ``/api`` path is also served at ``/api/v1``;
+        * every path a version namespace serves that the unversioned one
+          does not -- the version-only families -- is also served at
+          ``/api/v1``, so no version namespace serves a family that the
+          documented one does not.
+        """
+        unversioned, versioned = api_paths
+        assert unversioned, "the app serves no unversioned /api path"
+        assert 1 in versioned, "the app serves no /api/v1 path"
+
+        v1 = versioned[1]
+        missing_twin = unversioned - v1
+        assert not missing_twin, (
+            "these /api paths have no /api/v1 twin: "
+            f"{sorted(missing_twin)}"
+        )
+
+        version_only = {n: paths - unversioned
+                        for n, paths in versioned.items()}
+        for namespace, paths in sorted(version_only.items()):
+            orphaned = paths - version_only[1]
+            assert not orphaned, (
+                f"/api/v{namespace} serves paths that /api/v1 does not: "
+                f"{sorted(orphaned)}"
+            )
 
     @pytest.mark.parametrize("subpath", [
         "/status", "/models", "/research_catalog", "/experiments",

@@ -7,7 +7,7 @@
 [![provenance](https://img.shields.io/badge/results-measured%20from%20live%20weights-2563eb?style=flat-square)](#results)
 [![backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20torch-13795f?style=flat-square)](#architecture)
 [![frontend](https://img.shields.io/badge/frontend-Vue%203%20%2B%20Vite-42b883?style=flat-square)](#architecture)
-[![status](https://img.shields.io/badge/tests-533%20passed%20%C2%B7%204%20skipped%20%C2%B7%200%20failed-2563eb?style=flat-square)](#testing-status)
+[![status](https://img.shields.io/badge/tests-2764%20collected-2563eb?style=flat-square)](#testing-status)
 
 </div>
 
@@ -568,7 +568,9 @@ document recorded the latter, which was itself drift.
 
 ### 2. Get CI green ✅ Python done
 
-**Python: 533 passed, 4 skipped, 0 failed.** The suite was red at 186 passed / 27 failed /
+**Python, at that checkpoint: 533 passed, 4 skipped, 0 failed.** The suite has grown
+since — 2764 tests were collected on 2026-10-20 — so that tally is a dated record, not a
+standing claim. See [Testing status](#testing-status) for the current measurement. The suite was red at 186 passed / 27 failed /
 2 collection errors. Almost every failure shared one root cause: the code had been hardened to
 **fail closed** while the tests still asserted the old synthetic-success contract.
 
@@ -596,7 +598,7 @@ came from predates other fixes. Two were already resolved; two were real and are
 |------|--------|------------|
 | `backend/benchmarking/benchmark_tasks.py` | `logger.warning(...)` called without importing `logging` → `NameError` on the fallback path. | **Already gone.** The last `logger` call was in `_run_real`, removed when the reference-derived fallback was deleted. The module contains no `logger` token at all, so there was no unused import to add either. |
 | `backend/reasoning/__init__.py:3` | Imports `journey_tracer` and `neuron_debugger`; neither module exists, so `import backend.reasoning` raised `ModuleNotFoundError`. | **Fixed.** The package now imports cleanly and resolves the five names lazily, raising `ImportError` with a named reason only if something actually uses one. Nothing referenced these symbols. |
-| `backend/main.py:93` | `backend.api.runtime_api` does not exist and a bare `except: pass` let `/api/v2` vanish silently. | **Already fixed.** A `find_spec` check now logs a WARNING stating the 404 means *capability absent, not degraded*, and a module that exists but fails to import is logged with a traceback. The module still does not exist, so `/api/v2` is genuinely absent — now explicitly, not silently. |
+| `backend/main.py` (v2 mount) | `backend.api.runtime_api` does not exist and a bare `except: pass` let `/api/v2` vanish silently. | **Already fixed.** A `find_spec` check now logs a WARNING stating the 404 means *capability absent, not degraded*, and a module that exists but fails to import is logged with a traceback. The premise has since inverted: `backend/api/runtime_api.py` landed (job queue plus cancel endpoint) and is mounted at `/api/v1` and `/api/v2`. The guard stays for trees that lack it, and `test_runtime_api_is_mounted_behind_its_guard` now asserts the real mount instead of the module's absence. |
 | `backend/interpretability/algorithms/registry.py:23` | Used `List` without importing it. | **Fixed** to `list[str]`. This one was *latent*, not immediate: the module has `from __future__ import annotations`, so the annotation was never evaluated at import and the module loaded fine. It would only have raised under `typing.get_type_hints()`. The sibling registry already used PEP 585 lowercase; this file had been missed by that migration. |
 
 #### 3a. The same defect class, four more times ✅
@@ -812,6 +814,13 @@ Four caveats, stated rather than buried:
   parameters per layer for d=768, roughly 32× the capacity. Every payload carries
   `translator_kind: "diagonal_affine"` precisely so these figures cannot be quoted as "the
   tuned lens".
+- **The module's default has since moved to the full affine family.** The figures above come
+  from the published artifact (`docs/results/tuned_lens_training.json`), which records
+  `translator_kind: "diagonal_affine"`. `backend/interpretability/algorithms/tuned_lens.py`
+  now defaults to `full_affine` (the published modified architecture) and no longer assumes
+  the diagonal form, so re-running the training script fits a *different* map (7,087,104
+  parameters) and produces different numbers. The published artifact was not regenerated
+  and nothing above was recomputed.
 - **The calibration set is tiny.** 81 tokens. A published tuned lens uses millions. The
   held-out split exists precisely because an in-sample reduction on 81 tokens is close to
   unfalsifiable — a diagonal map can drive it toward zero by memorising. The 62.22% held out
@@ -1387,10 +1396,32 @@ Verified: `npm run build:renderer` succeeds, `npm run test:js` is 11 passed / 6 
 
 | Suite | Command | Status |
 |-------|---------|--------|
-| Python | `pytest tests/pytest -q` | **533 passed, 4 skipped, 0 failed** |
+| Python | `pytest tests/pytest -q` | 2764 collected (2026-10-20). Cold full run took 63 min here, dominated by real-weight tests. `-m "not slow"` deselects the 7 marked slow tests. |
 | Frontend unit | `npm run test:js` | **11 passed, 6 skipped, 0 failed** |
 | Playwright (offline) | `npx playwright test` | 4 specs, run in CI |
 | Playwright (live backend) | `trust-online.spec.js` | Not in CI |
+
+**No standing tally.** A tally is only meaningful on a still tree *and* an idle machine.
+`tests/pytest/conftest.py` reports a run whose sources changed mid-run as *not
+trustworthy* rather than as a pass, and `tests/pytest/test_audit_all_features.py`
+asserts a 10 s per-route latency budget that a cold first GPT-2 load (27.5 s measured
+here; a second load in the same process is 0.00 s) blows on a loaded box.
+
+What is verified, by command:
+
+- `python -m pytest tests/pytest --collect-only -q` -> 2764 collected, 0 collection errors.
+- Every area touched in the 2026-10-20 triage is green: a 16-file run over the routing,
+  marker, patch-activation, tuned-lens, model-identity, discovery, specificity, provenance
+  and publication paths reports **253 passed, 5 skipped**, with the source-stability
+  attestation passing.
+- The 19 collection-time errors seen in the first full run were an artifact of a confined
+  run -- the plugin workers spawn subprocesses and cannot open pipes under it. On an
+  unrestricted run those two files report **53 passed, 1 skipped**.
+- A full-suite run on 2026-10-20 reported 2686 passed, 49 failed, 9 skipped and 19 errors
+  while another process was rewriting ~300 files underneath it. All 49 have since been
+  triaged: 12 were green on a settled tree, 27 were fixed, and the 19 errors were the
+  confinement artifact above. Re-run on a quiet tree for the current number; do not quote
+  the old one as a status.
 
 The 4 skips are all platform-gated, not weights-gated: `os.fork` is unavailable on Windows, and two
 tests need POSIX `fcntl` pipe/rlimit behaviour. Nothing skips because weights are missing — the
