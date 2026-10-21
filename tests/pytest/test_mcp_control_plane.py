@@ -307,9 +307,16 @@ def test_project_open_junction_escape_rejected(monkeypatch, tmp_path):
                 link.unlink()
         except OSError:
             pass
-        proc = subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(link), outside],
-            capture_output=True, text=True, timeout=60)
+        try:
+            proc = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), outside],
+                capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as exc:
+            # A junction is a Windows construct, so on any other host there is
+            # no `cmd` to ask and nothing for this control to run against. The
+            # escape is still refused there by the symlink control above, which
+            # creates a link the same way on every platform.
+            pytest.skip(f"cannot create junctions here: {exc}")
         if proc.returncode != 0 or not link.exists():
             pytest.skip(f"cannot create junctions here: {proc.stderr[:200]}")
         with pytest.raises(ValueError, match="outside the allowed workspace roots"):

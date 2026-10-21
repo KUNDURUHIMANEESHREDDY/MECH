@@ -65,6 +65,38 @@ def _d_head(adapter) -> int:
     return adapter.spec.d_model // adapter.spec.num_heads
 
 
+def _exact_head_output(adapter, prompt: str, layer: int, head: int):
+    """The head's own output vector, captured exactly.
+
+    `capture_head_outputs` rounds to six decimals, so writing the captured
+    vector back is not a bit-exact identity: the write perturbs the
+    activation by up to 5e-7 per component and the output tensor moves by
+    about a float32 step (measured: 4.6e-5 on Linux). This test is about the
+    *write path* -- whether an identity patch leaves every element of the
+    output alone -- so it is given an exact vector to write back, the same
+    way `test_intervention_specificity.py` does for its null control.
+    """
+    model = adapter._model
+    captured: dict = {}
+    config = model.config
+    previous = getattr(config, "_attn_implementation", None)
+    if previous != "eager":
+        config._attn_implementation = "eager"
+    handle = model.transformer.h[layer].attn.c_proj.register_forward_pre_hook(
+        lambda _m, inp: captured.__setitem__("x", inp[0].detach().clone()))
+    try:
+        inputs = adapter._tokenizer(prompt, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            model(**inputs)
+    finally:
+        handle.remove()
+        if previous is not None:
+            config._attn_implementation = previous
+    d_head = _d_head(adapter)
+    vector = captured["x"][0, -1, head * d_head:(head + 1) * d_head]
+    return [float(v) for v in vector]
+
+
 def _logits(adapter, prompt: str = PROMPT) -> torch.Tensor:
     """The model's full output for `prompt`, under the kernel patch uses."""
     inputs = adapter._tokenizer(prompt, return_tensors="pt").to(
@@ -92,8 +124,7 @@ def test_an_identity_patch_leaves_the_whole_logit_tensor_unchanged(adapter):
     different vocabulary entry, would be invisible to them.
     """
     layer, head = 5, 3
-    per_layer = adapter.capture_head_outputs(PROMPT)
-    captured = per_layer[layer][head]
+    captured = _exact_head_output(adapter, PROMPT, layer, head)
     assert len(captured) == _d_head(adapter), (
         f"captured a length-{len(captured)} vector; a head is "
         f"{_d_head(adapter)} components")
@@ -101,7 +132,8 @@ def test_an_identity_patch_leaves_the_whole_logit_tensor_unchanged(adapter):
     baseline = _logits(adapter)
 
     # Patch with the very vector captured from that head, and compare every
-    # element of the output tensor.
+    # element of the output tensor. The vector is the exact slice, so the
+    # write is an identity in the strict sense and the output must be equal.
     inputs = adapter._tokenizer(PROMPT, return_tensors="pt").to(
         adapter._model.device)
     config = adapter._model.config

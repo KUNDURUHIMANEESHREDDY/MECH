@@ -311,6 +311,16 @@ def test_reported_lens_probabilities_match_the_models_own_distribution(engine):
     This is the check that caught the double-normalisation in `logit_lens`:
     the argmax was unchanged, so a top-token comparison passed while
     p(' the') was 0.038 against the model's 0.085.
+    
+    The comparison is at float32 resolution, not exact. The lens projects the
+    cached hidden state through the unembedding matrix; the expected value is a
+    float64 softmax of the model's own float32 logits. Two different matmul
+    shapes over the same weights do not sum in the same order, so the two
+    results differ by about a float32 step -- measured at 1.4e-6 on p(' the')
+    on Linux, where the reduction order differs from Windows'. The tolerance is
+    a thousandth of the difference this test exists to catch: the
+    double-normalisation put p(' the') at 0.038 against the model's 0.085, a
+    relative error of 0.55.
     """
     import numpy as np
 
@@ -330,7 +340,8 @@ def test_reported_lens_probabilities_match_the_models_own_distribution(engine):
         ids = tokenizer.encode(entry["token"])
         assert ids, f"undecodable token {entry['token']!r}"
         expected = float(probs[ids[0]])
-        assert float(entry["prob"]) == pytest.approx(expected, abs=1e-6), (
+        assert float(entry["prob"]) == pytest.approx(
+            expected, rel=1e-3, abs=1e-6), (
             f"lens reports p({entry['token']!r})={float(entry['prob']):.8f}, "
             f"the model's own softmax gives {expected:.8f}"
         )

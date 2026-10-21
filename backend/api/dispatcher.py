@@ -1640,6 +1640,25 @@ def _sae_checkpoint_dir() -> Path:
     return target.resolve()
 
 
+def _is_foreign_path(name: str) -> bool:
+    r"""True for a path that is absolute on a platform other than this one.
+
+    `os.path.basename` splits on the *host's* separator, so on POSIX a
+    Windows path is indistinguishable from a bare filename:
+    `C:\Windows\sae.pt` and `\\server\share\sae.pt` both pass the basename
+    check and are then resolved as relative names inside the checkpoint
+    directory. The same request is refused on Windows and accepted on
+    POSIX, so one identifier behaves differently depending on where the
+    server runs -- and a Windows path is not a valid identifier on any
+    host.
+    """
+    if "\\" in name:
+        return True
+    if len(name) >= 2 and name[0].isalpha() and name[1] == ":":
+        return len(name) == 2 or name[2] in "\\/"
+    return False
+
+
 def _resolve_local_checkpoint(identifier: str, checkpoint_dir: Path) -> Optional[str]:
     """Confine a user-supplied local identifier to the checkpoint directory.
 
@@ -1658,7 +1677,7 @@ def _resolve_local_checkpoint(identifier: str, checkpoint_dir: Path) -> Optional
             400, detail="The 'env:' checkpoint indirection is server "
                        "configuration and is not accepted in requests.")
     if (not name or name in (".", "..") or os.path.basename(name) != name
-            or name.startswith(".")):
+            or name.startswith(".") or _is_foreign_path(name)):
         raise HTTPException(
             400, detail="Local checkpoint identifiers must be bare filenames "
                        "inside the configured checkpoint directory.")

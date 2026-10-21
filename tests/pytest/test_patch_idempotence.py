@@ -8,7 +8,16 @@ per-head outputs -- and `patch_head_output` writes a vector back into head
 `h`'s slice of that same tensor. So feeding the capture back in at the same
 layer, head and prompt asks the patch machinery to reproduce a value it was
 just handed. If the write is faithful and everything downstream is
-untouched, the model's logits must be **bit-identical**.
+untouched, the model's logits must not move.
+
+"Must not move" to float32 resolution, not bit-identically. The capture keeps
+six decimals, so the vector written back differs from the true one by up to
+5e-7 per component. That is below the float32 step of the scored logit (one
+step at |logit| ~ 100 is 7.6e-6) but not below it everywhere, so a logit that
+sits on a rounding boundary moves by a step or two. Measured on Linux: 7.6e-6
+for one head, 1.5e-5 for another. The budget below is 16 steps; the attention
+kernel mismatch this file also documents moved a logit by 0.0625, five hundred
+times the budget, so a real defect is nowhere near it.
 
 This is the strongest available check on the patching path, which is why the
 checklist puts it first:
@@ -24,9 +33,11 @@ checklist puts it first:
 That last point is why these tests also assert the mechanism fired. A test
 that only compared deltas would pass against a completely broken patch.
 
-Checked at float32 precision, not approximately: the capture is rounded to six
-decimals, and the round-trip still came back exactly 0.0, so a tolerance would
-only hide a regression.
+Checked at float32 precision, not approximately: the capture's six-decimal
+rounding is two orders of magnitude below the float32 step of the scored
+logit, so the budget is a rounding budget and not a licence. A patch that
+actually perturbs the model moves the logit by orders of magnitude more -- see
+the kernel mismatch below, at 0.0625.
 """
 
 from __future__ import annotations
@@ -40,6 +51,23 @@ needs_weights = pytest.mark.skipif(
 )
 
 PROMPT = "The capital of France is"
+
+#: How many float32 steps the scored logit may move by when a head is patched
+#: with its own captured output. One float32 step at |logit| ~ 100 is 7.6e-6.
+#: The capture's six-decimal rounding perturbs the activation by up to 5e-7,
+#: which reaches the logit as a step or two where the logit sits on a
+#: rounding boundary. The kernel mismatch this file documents moved a logit
+#: by 0.0625 -- five hundred times this budget.
+LOGIT_STEPS = 16
+
+
+def _logit_budget(logit: float) -> float:
+    """The float32 resolution of ``logit``, times LOGIT_STEPS."""
+    import torch
+
+    v = torch.tensor(logit, dtype=torch.float32)
+    step = float(abs(torch.nextafter(v, v + 1) - v))
+    return step * LOGIT_STEPS
 
 
 @pytest.fixture(scope="module")
@@ -75,13 +103,15 @@ def test_patching_with_the_captured_vector_changes_nothing(adapter, layer, head)
         PROMPT, layer=layer, head_index=head, patch_vector=vector, position=-1
     )
 
-    assert result.original_logit == result.patched_logit, (
+    budget = _logit_budget(result.original_logit)
+    assert abs(result.patched_logit - result.original_logit) <= budget, (
         f"patching layer {layer} head {head} with its own captured output "
         f"changed the scored logit by {result.patched_logit - result.original_logit}. "
-        f"A faithful write-back must reproduce the unpatched computation."
+        f"A faithful write-back must reproduce the unpatched computation to "
+        f"within {budget:.3e}."
     )
-    assert result.delta == 0.0, (
-        f"delta is {result.delta}, expected exactly 0.0"
+    assert abs(result.delta) <= budget, (
+        f"delta is {result.delta}, expected 0 within {budget:.3e}"
     )
     assert result.top_token_before == result.top_token_after
 
@@ -150,7 +180,9 @@ def test_the_captured_slice_is_the_one_written_back(adapter):
         patch_vector=captured[layer][other],
     )
 
-    assert own.delta == 0.0, "setup: own-vector patch was not a no-op"
+    assert abs(own.delta) <= _logit_budget(own.original_logit), (
+        f"setup: own-vector patch was not a no-op: delta {own.delta}"
+    )
     assert crossed.delta != 0.0, (
         f"patching head {head} with head {other}'s captured vector left the "
         f"logit unchanged. Either the patch did not apply, or both heads read "
@@ -181,7 +213,8 @@ def test_idempotence_holds_for_every_head_of_one_layer(adapter):
             PROMPT, layer=layer, head_index=head,
             patch_vector=captured[layer][head], position=-1,
         )
-        if result.delta != 0.0:
+        budget = _logit_budget(result.original_logit)
+        if abs(result.delta) > budget:
             offenders.append((head, result.delta))
 
     assert not offenders, (

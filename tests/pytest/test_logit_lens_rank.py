@@ -54,7 +54,17 @@ def test_every_returned_token_carries_rank_logit_and_prob(lens):
 
 
 def test_rank_equals_position_in_the_full_distribution(engine, lens, final_layer):
-    """Recompute the distribution; the reported rank must match it exactly."""
+    """Recompute the distribution; the reported rank must match it exactly.
+
+    The rank is an integer position, so it is compared exactly. The
+    probability is not: the lens reports a float32 softmax of the unembedding
+    applied to the cached hidden state, and this test recomputes a softmax of
+    a separate forward pass's logits. Two float32 passes over the same weights
+    do not agree to the last bit -- measured at 1.8e-6 on p(' the') on Linux --
+    so the probability is compared at float32 resolution. A real error in the
+    lens is not a rounding difference: the double-normalisation this pair of
+    tests was written for put p(' the') at 0.038 against the model's 0.085.
+    """
     from backend.services import gpt2_engine as eng
 
     batch = eng._tokenizer(PROMPT, return_tensors="pt")
@@ -93,7 +103,7 @@ def test_rank_equals_position_in_the_full_distribution(engine, lens, final_layer
             f"distribution says {true_rank}"
         )
         assert entry["prob"] == pytest.approx(
-            float(probs[token_id]), abs=1e-6
+            float(probs[token_id]), rel=1e-3, abs=1e-6
         ), f"{entry['token']!r} probability"
 
     ranks = [e["rank"] for e in lens["top_k_tokens"]]
