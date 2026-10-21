@@ -4,8 +4,9 @@ Wires together the SDK pieces that shipped without any caller:
 
 * :class:`PluginManager` — install (with sandbox AST scan), enable/disable
   metadata, JSON registry persistence;
-* :class:`PluginLoader` — load an installed ``.py`` file's ``register()``
-  entry point into a live ``MechPlugin``;
+* :func:`~backend.plugins.runner.start_remote_plugin` — load an installed
+  ``.py`` file's ``register()`` entry point into a live ``MechPlugin``, in a
+  bounded worker process rather than in the backend process;
 * :class:`PluginRegistry` process singleton — live runtime instances;
 * :class:`PluginHookBus` — fan-out of platform hook events.
 
@@ -25,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from .plugin_base import MechPlugin
 from .plugin_hooks import PluginHookBus
-from .plugin_loader import PluginLoader, PluginLoadError
+from .plugin_loader import PluginLoadError
 from .plugin_manager import PluginManager
 from .plugin_registry import PluginNotFoundError, PluginRegistry
 from .runner import start_remote_plugin, stop_remote_plugin
@@ -146,7 +147,6 @@ class PluginService:
 
     def __init__(self, manager: Optional[PluginManager] = None) -> None:
         self._manager = manager or PluginManager()
-        self._loader = PluginLoader()
         self._registry = PluginRegistry.global_instance()
         self._bus: Optional[PluginHookBus] = None
         # plugin_id -> (proxy, worker process), so disable/uninstall can

@@ -49,7 +49,7 @@ from ..models.adapter_base import LiveUnavailable
 from .dataset_versioning import DatasetVersioningEngine
 from .induction_heads_pipeline import CANONICAL_HEADS, InductionHeadsPipeline
 from .reproducibility_report import ReproducibilityReportEngine
-from .pipeline_contract import LIVE, completed
+from .pipeline_contract import completed
 
 #: A head is treated as carrying the copying signal when its normalised
 #: previous-token attention clears this. Uniform attention scores 1.0, so this
@@ -222,7 +222,6 @@ class CopyTaskPipeline:
                     None if (rep_acc is None or shuf_acc is None)
                     else bool(rep_acc > shuf_acc)),
                 "shuffled_second_block_differs": bool(rep_ids != shuf_ids),
-                "provenance": LIVE,
                 "synthetic_fields": [],
             })
 

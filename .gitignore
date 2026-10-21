@@ -133,3 +133,21 @@ backend/storage/v2_jobs/
 # throwaway probe output.
 _audit_scratch/
 _team/
+
+# Staged backend tree for the Electron build (frontend/scripts/backend_source_set.js).
+frontend/build/
+
+# Harness scratch locks (.dsh-ops-update-*.lock). Transient write markers, not
+# source: the packaging guard and the Electron build's source-set rule both
+# exclude them, so git has to agree or `git add -A` would ship them.
+*.lock
+
+# Agent-harness skill installs. Tooling config copied into the workspace by
+# the harness, duplicated under two roots; not project source.
+/.claude/
+/agent/skills/
+
+# One-off local scratch: throwaway diagnostics and scratch run logs.
+_diag*.py
+.l2_roundtrip_demo.py
+.pytest-tmp*.log

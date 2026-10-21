@@ -52,7 +52,7 @@ from ..models.adapter_base import LiveUnavailable
 from ..models.gpt2_adapter import GPT2Adapter
 from .dataset_versioning import DatasetVersioningEngine
 from .reproducibility_report import ReproducibilityReportEngine
-from .pipeline_contract import LIVE, completed
+from .pipeline_contract import completed
 
 #: Prompt templates. The answer follows ``=`` immediately, so the metric is read
 #: at the final position and no free generation is involved.
@@ -300,7 +300,6 @@ class ArithmeticPipeline:
                 "corrupted_token_logit": round(corrupt_logit, 6),
                 "logit_diff": round(target_logit - corrupt_logit, 6),
                 "correct": bool(correct),
-                "provenance": LIVE,
                 "synthetic_fields": [],
             })
             if not correct:

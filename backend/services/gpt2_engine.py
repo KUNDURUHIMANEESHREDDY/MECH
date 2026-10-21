@@ -5,11 +5,12 @@ loaded HuggingFace GPT-2 model — nothing is hardcoded per neuron/layer.
 """
 from __future__ import annotations
 
+import functools
 import math
 import threading
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from backend.core.provenance import attest_measurement
+from backend.core.provenance import attest_measurement, is_failure_status
 from backend.services.model_lock import MODEL_LOCK
 
 try:
@@ -33,6 +34,10 @@ _cache: Dict[str, Any] = {}
 #: label rather than a request. Recorded so a response can name the weights that
 #: actually produced it.
 SUPPORTED_MODEL = "gpt2"
+
+#: The prompt an intervention measures on when the caller named none and no
+#: prompt is cached. Fixed rather than sampled: see `patch_neuron`.
+_DEFAULT_MEASURE_PROMPT = "The capital of France is"
 
 
 def _loaded_model_id() -> Optional[str]:
@@ -267,6 +272,37 @@ def _attest_info(description: Dict[str, Any]) -> Dict[str, Any]:
                               model_content_hash=weights_fingerprint())
 
 
+def _measure_done(result: Any) -> Any:
+    """Attest one engine result at the point the tensors were read.
+
+    ``attest_measurement`` is the only issuer of ``attested``, and the API
+    layer's ``pass_through`` withholds anything this layer did not attest.
+    Without a call here, a real forward pass reached the client as
+    ``status: "ok"`` carrying numbers with ``provenance: "unavailable"`` --
+    the two halves of one record disagreeing about whether anything was
+    measured.
+
+    Refusals are returned untouched. ``_ensure_loaded`` and the index checks
+    already say why nothing ran; they are withheld at the API boundary, as
+    before, and labelling them here would not make them measurements.
+    """
+    if not isinstance(result, dict) or is_failure_status(result.get("status")):
+        return result
+    return attest_measurement(result,
+                              model_loaded=_loaded_model_id(),
+                              model_content_hash=weights_fingerprint())
+
+
+def _measured(fn: Callable[..., Dict[str, Any]]) -> Callable[..., Dict[str, Any]]:
+    """Attest what a measurement function returns. See ``_measure_done``."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return _measure_done(fn(*args, **kwargs))
+
+    return wrapper
+
+
 def model_identity() -> Dict[str, Any]:
     """Immutable identity of the weights in memory, for research artifacts.
 
@@ -390,6 +426,7 @@ def _module_param_summary(module: Any) -> Dict[str, Any]:
 # Architecture tree (fully dynamic from loaded model)
 # ---------------------------------------------------------------------------
 
+@_measured
 def architecture() -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
@@ -585,6 +622,7 @@ def _forward_locked(prompt: str) -> Dict[str, Any]:
     return _cache
 
 
+@_measured
 def run_prompt(prompt: str) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
@@ -615,6 +653,7 @@ def run_prompt(prompt: str) -> Dict[str, Any]:
     }
 
 
+@_measured
 def generate_text(primer: str, max_new_tokens: int = 12,
                   temperature: float = 0.9, top_k: int = 40) -> Dict[str, Any]:
     """Sample a fresh prompt continuation from the live weights.
@@ -646,7 +685,11 @@ def generate_text(primer: str, max_new_tokens: int = 12,
         input_ids = inputs["input_ids"].to(device)
         generated = input_ids[0].tolist()
         for _ in range(max_new_tokens):
-            out = _model(input_ids=input_ids[:, -_cfg().n_positions:])
+            # The forward is under the lock because the shared model may
+            # carry another thread's hook; generating into it would sample
+            # that thread's intervention instead of the model's own logits.
+            with MODEL_LOCK:
+                out = _model(input_ids=input_ids[:, -_cfg().n_positions:])
             raw_logits = out.logits[0, -1].float()
             if greedy:
                 # Deterministic by construction: the model's own argmax, not a
@@ -678,6 +721,7 @@ def generate_text(primer: str, max_new_tokens: int = 12,
 # Layer detail
 # ---------------------------------------------------------------------------
 
+@_measured
 def layer_detail(layer: int) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
@@ -806,6 +850,7 @@ def layer_detail(layer: int) -> Dict[str, Any]:
 # Neuron listing (paginated, sorted by real metrics)
 # ---------------------------------------------------------------------------
 
+@_measured
 def list_neurons(
     layer: int,
     component: str = "mlp",
@@ -936,6 +981,7 @@ def list_neurons(
 # Single neuron deep inspection (real weights + activations)
 # ---------------------------------------------------------------------------
 
+@_measured
 def neuron_detail(
     layer: int,
     neuron_index: int,
@@ -1154,6 +1200,7 @@ def _nearest_mlp_neurons(layer: int, neuron_index: int, k: int = 8) -> List[Dict
 # Attention head detail
 # ---------------------------------------------------------------------------
 
+@_measured
 def head_detail(layer: int, head: int) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
@@ -1210,6 +1257,7 @@ def head_detail(layer: int, head: int) -> Dict[str, Any]:
     }
 
 
+@_measured
 def attention_head(layer: int, head: int, prompt: Optional[str] = None) -> Dict[str, Any]:
     """Attention pattern for one head, optionally for a specific prompt.
 
@@ -1240,6 +1288,7 @@ def attention_head(layer: int, head: int, prompt: Optional[str] = None) -> Dict[
         }
 
 
+@_measured
 def activations(layer: int, prompt: Optional[str] = None) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
@@ -1273,6 +1322,7 @@ def activations(layer: int, prompt: Optional[str] = None) -> Dict[str, Any]:
         return result
 
 
+@_measured
 def patch_head(layer: int, head: int, pos_token: str, neg_token: str) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
@@ -1334,6 +1384,7 @@ def patch_head(layer: int, head: int, pos_token: str, neg_token: str) -> Dict[st
         }
 
 
+@_measured
 def patch_neuron(
     layer: int,
     neuron_index: int,
@@ -1353,20 +1404,6 @@ def patch_neuron(
     if bad is not None:
         return bad
     neuron_index = int(neuron_index)
-    prompt = prompt or (_cache.get("prompt") if _cache else None)
-    if not prompt:
-        import random
-        _fallback_prompts = [
-            "The capital of France is",
-            "The quick brown fox jumps over",
-            "In a world where artificial intelligence",
-            "The meaning of life is",
-            "Once upon a time there was a",
-            "Machine learning models can",
-            "Scientists recently discovered that",
-            "The future of technology looks like",
-        ]
-        prompt = random.choice(_fallback_prompts)
 
     def run(with_patch: bool):
         hooks = []
@@ -1398,12 +1435,24 @@ def patch_neuron(
             for h in hooks:
                 h.remove()
 
-    before = run(False)
-    after = run(True)
-    before_logits = before["logits"]
-    after_logits = after["logits"]
-    top_id = int(torch.argmax(before_logits))
-    delta = round(float(after_logits[top_id] - before_logits[top_id]), 4)
+    with MODEL_LOCK:
+        # `prompt_defaulted` records that the engine chose this prompt rather
+        # than the caller naming it: the cache's last prompt, or the fixed
+        # default below. The previous `random.choice` made that choice
+        # unreproducible as well -- two identical requests measured different
+        # prompts, and only a careful caller reading the echoed prompt could
+        # tell what they had got.
+        prompt_defaulted = not prompt
+        prompt = prompt or (_cache.get("prompt") if _cache else None)
+        if not prompt:
+            prompt = _DEFAULT_MEASURE_PROMPT
+
+        before = run(False)
+        after = run(True)
+        before_logits = before["logits"]
+        after_logits = after["logits"]
+        top_id = int(torch.argmax(before_logits))
+        delta = round(float(after_logits[top_id] - before_logits[top_id]), 4)
 
     return {
         "status": "ok",
@@ -1411,6 +1460,7 @@ def patch_neuron(
         "neuron_index": neuron_index,
         "patch_value": float(patch_value),
         "prompt": prompt,
+        "prompt_defaulted": prompt_defaulted,
         "top_token_before": before["top_token"],
         "top_token_after": after["top_token"],
         "original_logit": before["top_logit"],
@@ -1419,6 +1469,7 @@ def patch_neuron(
     }
 
 
+@_measured
 def ioi(io_name: str, subj_name: str) -> Dict[str, Any]:
     err = _ensure_loaded()
     if err:
@@ -1437,8 +1488,13 @@ def ioi(io_name: str, subj_name: str) -> Dict[str, Any]:
         ld = float(logits[io_id].item()) - float(logits[subj_id].item())
         return top1, round(ld, 4)
 
-    clean_top1, clean_ld = run(clean_prompt)
-    corr_top1, corr_ld = run(corrupted_prompt)
+    # Both passes run under the lock so the clean and corrupted forwards see
+    # the same model state. A hook installed by another thread between them
+    # would land in one pass and not the other, and the difference would
+    # measure that hook rather than the corruption.
+    with MODEL_LOCK:
+        clean_top1, clean_ld = run(clean_prompt)
+        corr_top1, corr_ld = run(corrupted_prompt)
     return {
         "status": "ok",
         "io_name": io_name,
@@ -1547,6 +1603,7 @@ def _snapshot() -> Dict[str, Any]:
         return dict(_cache) if _cache else {}
 
 
+@_measured
 def layer_activations(layer: int, prompt: str) -> Dict[str, Any]:
     """Full per-token tensors for one layer: resid_post and mlp_post.
 
@@ -1589,6 +1646,7 @@ def layer_activations(layer: int, prompt: str) -> Dict[str, Any]:
         return {"status": "error", "error": str(exc)[:300]}
 
 
+@_measured
 def logit_lens_all(prompt: str, top_k: int = 3) -> Dict[str, Any]:
     """LogitLens top-k for every layer in a single cached forward."""
     err = _ensure_prompt(prompt)
@@ -1599,12 +1657,24 @@ def logit_lens_all(prompt: str, top_k: int = 3) -> Dict[str, Any]:
         r = logit_lens(li, prompt, top_k=top_k)
         if r.get("status") != "ok":
             return r
-        layers.append({"layer": li, "top_token": r["top_token"],
-                       "top_k_tokens": r["top_k_tokens"]})
+        layers.append({
+            "layer": li,
+            "top_token": r["top_token"],
+            "top_k_tokens": r["top_k_tokens"],
+            # Carry the truncation contract up with the numbers. A consumer
+            # summing one layer's top-k must be able to see that it is a
+            # truncation of the distribution, not the distribution (§13.3).
+            "probability_is_truncated": r.get("probability_is_truncated"),
+            "probabilities_reported": r.get("probabilities_reported"),
+            "probabilities_total": r.get("probabilities_total"),
+            "probabilities_reported_mass": r.get(
+                "probabilities_reported_mass"),
+        })
     return {"status": "ok", "method": "LogitLens", "prompt": prompt,
             "layers": layers}
 
 
+@_measured
 def ablate_layer(layer: int, prompt: str,
                  pos_token: str = " Paris",
                  neg_token: str = " London") -> Dict[str, Any]:
@@ -1614,34 +1684,39 @@ def ablate_layer(layer: int, prompt: str,
     (pos_token − neg_token) logit difference. True causal tracing: every
     number comes from live forward passes, nothing hardcoded.
     """
-    err = _ensure_prompt(prompt)
-    if err:
-        return err
-    bad = _check_layer(layer)
-    if bad is not None:
-        return bad
-    layer = int(layer)
-    clean_ld = _token_logit(pos_token, _cache["logits"]) \
-        - _token_logit(neg_token, _cache["logits"])
+    # One atomic unit: the clean logit diff reads the shared cache and the
+    # ablated forward installs a global hook on the shared model. Without the
+    # lock a concurrent forward can swap the cache under the clean read, or
+    # fire this ablation hook into its own measurement.
+    with MODEL_LOCK:
+        err = _ensure_prompt(prompt)
+        if err:
+            return err
+        bad = _check_layer(layer)
+        if bad is not None:
+            return bad
+        layer = int(layer)
+        clean_ld = _token_logit(pos_token, _cache["logits"]) \
+            - _token_logit(neg_token, _cache["logits"])
 
-    def zero_block(module: Any, inp: Any, out: Any) -> Any:
-        if isinstance(out, tuple):
-            return (torch.zeros_like(out[0]),) + tuple(out[1:])
-        return torch.zeros_like(out)
+        def zero_block(module: Any, inp: Any, out: Any) -> Any:
+            if isinstance(out, tuple):
+                return (torch.zeros_like(out[0]),) + tuple(out[1:])
+            return torch.zeros_like(out)
 
-    hook = _model.transformer.h[layer].register_forward_hook(zero_block)
-    try:
-        inputs = _tokenizer(prompt, return_tensors="pt")
-        device = next(_model.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        with torch.no_grad():
-            out = _model(**inputs)
-        ablated = out.logits[0, -1].detach().cpu()
-    finally:
-        hook.remove()
-    patched_ld = _token_logit(pos_token, ablated) \
-        - _token_logit(neg_token, ablated)
-    delta = round(patched_ld - clean_ld, 4)
+        hook = _model.transformer.h[layer].register_forward_hook(zero_block)
+        try:
+            inputs = _tokenizer(prompt, return_tensors="pt")
+            device = next(_model.parameters()).device
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            with torch.no_grad():
+                out = _model(**inputs)
+            ablated = out.logits[0, -1].detach().cpu()
+        finally:
+            hook.remove()
+        patched_ld = _token_logit(pos_token, ablated) \
+            - _token_logit(neg_token, ablated)
+        delta = round(patched_ld - clean_ld, 4)
     return {
         "status": "ok",
         "layer": layer,
@@ -1652,6 +1727,7 @@ def ablate_layer(layer: int, prompt: str,
     }
 
 
+@_measured
 def steer(prompt: str, layer: int, pos_prompt: str, neg_prompt: str,
           alpha: float = 10.0) -> Dict[str, Any]:
     """Activation steering: add alpha * unit(pos - neg) to block output.
@@ -1676,40 +1752,45 @@ def steer(prompt: str, layer: int, pos_prompt: str, neg_prompt: str,
             out = _model(**inputs, output_hidden_states=True)
         return out.hidden_states[layer + 1][0, -1].detach().float()
 
-    with torch.no_grad():
-        vec = resid(pos_prompt) - resid(neg_prompt)
-    norm = float(torch.linalg.vector_norm(vec))
-    if norm < 1e-9:
-        return {"status": "error",
-                "error": "Contrast prompts produce no residual difference."}
-    vec = (vec / norm).to(device)
-
-    def steer_hook(module: Any, inp: Any, out: Any) -> Any:
-        add = (alpha * vec).to(out[0].dtype).to(out[0].device)
-        if isinstance(out, tuple):
-            return (out[0] + add,) + tuple(out[1:])
-        return out + add
-
-    inputs = {k: v.to(device) for k, v in
-              _tokenizer(prompt, return_tensors="pt").items()}
-    with torch.no_grad():
-        clean_logits = _model(**inputs).logits[0, -1]
-        clean_top = _decode(int(torch.argmax(clean_logits)))
-        clean_top5 = [
-            _decode(int(i)) for i in
-            torch.topk(clean_logits, min(5, clean_logits.numel())).indices
-        ]
-    hook = _model.transformer.h[layer].register_forward_hook(steer_hook)
-    try:
+    # One atomic unit: the contrast forwards, the clean forward and the
+    # steering hook all run against the shared model. A concurrent thread's
+    # hook would fire inside these forwards, and this hook would fire inside
+    # that thread's.
+    with MODEL_LOCK:
         with torch.no_grad():
-            steered_logits = _model(**inputs).logits[0, -1]
-            steered_top = _decode(int(torch.argmax(steered_logits)))
-            steered_top5 = [
+            vec = resid(pos_prompt) - resid(neg_prompt)
+        norm = float(torch.linalg.vector_norm(vec))
+        if norm < 1e-9:
+            return {"status": "error",
+                    "error": "Contrast prompts produce no residual difference."}
+        vec = (vec / norm).to(device)
+
+        def steer_hook(module: Any, inp: Any, out: Any) -> Any:
+            add = (alpha * vec).to(out[0].dtype).to(out[0].device)
+            if isinstance(out, tuple):
+                return (out[0] + add,) + tuple(out[1:])
+            return out + add
+
+        inputs = {k: v.to(device) for k, v in
+                  _tokenizer(prompt, return_tensors="pt").items()}
+        with torch.no_grad():
+            clean_logits = _model(**inputs).logits[0, -1]
+            clean_top = _decode(int(torch.argmax(clean_logits)))
+            clean_top5 = [
                 _decode(int(i)) for i in
-                torch.topk(steered_logits, min(5, steered_logits.numel())).indices
+                torch.topk(clean_logits, min(5, clean_logits.numel())).indices
             ]
-    finally:
-        hook.remove()
+        hook = _model.transformer.h[layer].register_forward_hook(steer_hook)
+        try:
+            with torch.no_grad():
+                steered_logits = _model(**inputs).logits[0, -1]
+                steered_top = _decode(int(torch.argmax(steered_logits)))
+                steered_top5 = [
+                    _decode(int(i)) for i in
+                    torch.topk(steered_logits, min(5, steered_logits.numel())).indices
+                ]
+        finally:
+            hook.remove()
     return {
         "status": "ok",
         "layer": layer,
@@ -1723,12 +1804,19 @@ def steer(prompt: str, layer: int, pos_prompt: str, neg_prompt: str,
     }
 
 
+@_measured
 def logit_lens(layer: int, prompt: str, top_k: int = 5) -> Dict[str, Any]:
     """Raw LogitLens projection: unembed hidden state at `layer`.
 
     Projects hidden[layer] (last token) through ln_f + the tied unembedding
     matrix from a single cached forward pass. No trained translators —
     callers needing a tuned lens must supply probe weights.
+
+    Each returned token carries its `rank` in the FULL next-token distribution
+    (1-based: rank 1 is the argmax), computed from the whole vocabulary rather
+    than from its position in the truncated top-k. That is what makes a
+    cross-layer token-rank trajectory (§13.2) an actual measurement instead of
+    a relabelled array index.
     """
     err = _ensure_prompt(prompt)
     if err:
@@ -1760,8 +1848,20 @@ def logit_lens(layer: int, prompt: str, top_k: int = 5) -> Dict[str, Any]:
     probs = torch.softmax(logits, dim=-1)
     k = max(1, min(int(top_k), probs.numel()))
     topk = torch.topk(probs, k)
+    # Rank is the token's position in the full descending distribution, not in
+    # the truncated list. Computed here, once, because a caller cannot recover
+    # it from top-k order without knowing every other vocabulary entry; a UI
+    # that guessed would be inventing the number it plots.
+    full_order = torch.argsort(probs, descending=True)
+    rank_of = torch.empty_like(full_order)
+    rank_of[full_order] = torch.arange(probs.numel(), dtype=rank_of.dtype)
     toks = [
-        {"token": _decode(int(i)), "prob": round(float(probs[i]), 6)}
+        {
+            "token": _decode(int(i)),
+            "prob": round(float(probs[i]), 6),
+            "logit": round(float(logits[i]), 4),
+            "rank": int(rank_of[i]) + 1,
+        }
         for i in topk.indices
     ]
     return {

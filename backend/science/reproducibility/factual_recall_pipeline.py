@@ -54,7 +54,7 @@ from ..models.adapter_base import LiveUnavailable
 from ..models.gpt2_adapter import GPT2Adapter
 from .dataset_versioning import DatasetVersioningEngine
 from .reproducibility_report import ReproducibilityReportEngine
-from .pipeline_contract import LIVE, completed
+from .pipeline_contract import completed
 
 #: Twelve well-known facts. Authored here, not transcribed from a published
 #: benchmark; see the module docstring. Each is (subject, relation, object).
@@ -373,7 +373,6 @@ class FactualRecallPipeline:
                 "distractor_logit": round(float(logits[distractor_id]), 6),
                 "logit_diff": round(float(logits[target_id] - logits[distractor_id]), 6),
                 "correct": bool(correct),
-                "provenance": LIVE,
                 "synthetic_fields": [],
             }
             traces.append(entry)

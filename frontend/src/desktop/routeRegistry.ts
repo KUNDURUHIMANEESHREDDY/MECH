@@ -307,6 +307,42 @@ export const ROUTES: DesktopRoute[] = [
     legacy: false,
     load: () => import('../components/ResearchSocietyView.vue'),
   },
+  {
+    id: 'activations',
+    label: 'Activations',
+    group: 'Explore',
+    requirement: 'model',
+    legacy: false,
+    aliases: ['activation-browser'],
+    load: () => import('../components/ActivationBrowserView.vue'),
+  },
+  {
+    id: 'logitlens',
+    label: 'Logit Lens',
+    group: 'Explore',
+    requirement: 'model',
+    legacy: false,
+    aliases: ['logit-lens'],
+    load: () => import('../components/LogitLensView.vue'),
+  },
+  {
+    id: 'saelab',
+    label: 'SAE Lab',
+    group: 'Research',
+    requirement: 'model',
+    legacy: false,
+    aliases: ['sae-lab'],
+    load: () => import('../components/SAELabView.vue'),
+  },
+  {
+    id: 'datasets',
+    label: 'Datasets',
+    group: 'Research',
+    requirement: 'backend',
+    legacy: false,
+    aliases: ['dataset-browser'],
+    load: () => import('../components/DatasetsView.vue'),
+  },
 ];
 
 export const LEGACY_ROUTE_IDS = ROUTES.filter((route) => route.legacy).map((route) => route.id);

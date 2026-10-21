@@ -42,6 +42,13 @@ import sys
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
+# `scripts/` is not a package, so the sibling module is imported by path.
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import packaged_backend_guard  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUT = REPO_ROOT / "MECH-standalone"
 
@@ -203,9 +210,15 @@ def assemble(repo_root: Path, destination: Path) -> None:
     (destination / "frontend").mkdir(parents=True)
 
     print(f"[standalone] copying backend/ -> {destination/'backend'}")
-    shutil.copytree(repo_root / "backend", destination / "backend",
-                    ignore=shutil.ignore_patterns(
-                        "__pycache__", "*.pyc", "*.pyo"))
+    # The same source set the packaged-backend guard compares against: the
+    # tracked files plus the untracked-but-not-ignored ones, minus the secrets
+    # and runtime state. `shutil.copytree` cannot tell those apart, which is how
+    # the control-plane bearer token and the research database reached every
+    # standalone build.
+    staged = packaged_backend_guard.stage(repo_root / "backend",
+                                          destination / "backend")
+    print(f"[standalone] staged {len(staged.copied)} backend file(s); "
+          f"removed {len(staged.removed_secrets)} secret/runtime file(s)")
     print(f"[standalone] copying frontend/dist -> {destination/'frontend'/'dist'}")
     shutil.copytree(repo_root / "frontend" / "dist",
                     destination / "frontend" / "dist")

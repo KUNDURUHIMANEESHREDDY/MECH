@@ -186,9 +186,11 @@ def test_reports_cannot_leak_across_projects(tmp_path, monkeypatch):
 
     assert [s["id"] for s in sessions] == ["s1"], (
         "the archive carried a session that is not provably this project's")
-    # 'beta' and the unattributed one are both counted, so dropping them is
-    # visible in the archive rather than silent.
-    assert metadata["sessions_omitted_unattributed"] == 2
+    # 'beta' and the unattributed one are counted in separate buckets, so
+    # dropping them is visible in the archive rather than silent -- and the
+    # number of other projects is not passed off as "unattributed".
+    assert metadata["sessions_omitted_unattributed"] == 1
+    assert metadata["sessions_omitted_other_projects"] == 1
 
 
 def test_the_schema_gap_the_real_fix_needs_is_still_open(tmp_path):

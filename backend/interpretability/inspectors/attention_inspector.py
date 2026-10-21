@@ -13,35 +13,37 @@ class AttentionInspector:
     """Inspector for multi-head attention distributions."""
 
     def inspect(self, layer: int, head: int, tokens: List[str] | None = None) -> Dict[str, Any]:
-        """Inspect attention pattern matrix for specified head.
+        """Refuse: no model and no forward pass are bound to this inspector.
 
         Args:
-            layer: Layer index.
-            head: Attention head index.
-            tokens: Input token strings.
+            layer: Echoed back for correlation.
+            head: Echoed back for correlation.
+            tokens: Echoed back for correlation.
 
         Returns:
-            Dict containing attention weights matrix and head classification.
-        """
-        toks = tokens or ["The", "capital", "of", "France"]
-        seq_len = len(toks)
-        # Generate dummy triangular/causal attention weights matrix
-        matrix = []
-        for i in range(seq_len):
-            row = []
-            for j in range(seq_len):
-                if j <= i:
-                    row.append(round(1.0 / (i + 1), 3))
-                else:
-                    row.append(0.0)
-            matrix.append(row)
+            An unavailable record carrying no attention matrix.
 
-        head_type = "Induction Head" if head in (8, 9) else "Previous-Token Head" if head == 0 else "General Head"
+        This previously invented a causal matrix where row ``i`` held
+        ``1.0 / (i + 1)`` for attended positions, a token list, and a
+        ``head_type`` of "Induction Head" for any head in (8, 9) -- none of
+        it read from a model, all of it shaped like attention. The
+        implemented path is ``gpt2_engine.attention_head``.
+        """
         return {
             "layer": layer,
             "head": head,
             "head_id": f"L{layer}_H{head}",
-            "tokens": toks,
-            "head_type": head_type,
-            "attention_matrix": matrix,
+            "tokens": list(tokens or []),
+            "head_type": None,
+            "attention_matrix": [],
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "measured": False,
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": (
+                "Attention inspection is not implemented in this inspector: "
+                "no forward pass was run, so there is no attention to "
+                "report. See gpt2_engine.attention_head."
+            ),
         }

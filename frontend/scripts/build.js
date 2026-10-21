@@ -10,6 +10,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
+const { stageBackend } = require('./backend_source_set');
+
 const ROOT = path.join(__dirname, '..');
 
 function run(cmd, args, opts) {
@@ -38,15 +40,45 @@ function ensureRendererBuilt() {
 }
 
 /**
+ * Stage the backend into `build/backend` before the packaging config is
+ * resolved.
+ *
+ * The packaged backend must be exactly the repository's source for
+ * `backend/`: the tracked files plus the untracked-but-not-ignored ones,
+ * minus the secrets and runtime state. The electron-builder filter is the
+ * second line of defence; this staging is the first.
+ *
+ * A failure here stops the build. A packaged app without a backend cannot
+ * start, and an app with the wrong backend -- or with the developer's
+ * credential inside it -- is worse than no app at all.
+ */
+function stageBackendForBuild() {
+  const dest = path.join(ROOT, 'build', 'backend');
+  let files;
+  try {
+    files = stageBackend(dest);
+  } catch (err) {
+    console.error('[build] could not stage the backend:', err.message);
+    console.error('[build] The app bundle cannot start a backend it does not contain.');
+    process.exit(1);
+  }
+  console.log(`[build] staged ${files.length} backend file(s) into build/backend`);
+}
+
+/**
  * Decide which declared extraResources actually exist.
  *
- * `package.json` copies `../backend` and `../.venv` into the app bundle. A
- * missing `from` path is not reported clearly by electron-builder -- it fails
+ * `package.json` copies the staged backend (`build/backend`) and `../.venv`
+ * into the app bundle. A missing `from` path is not reported clearly by
+ * electron-builder -- it fails
  * partway through packaging with an error that does not name the absent
  * directory, which is why `frontend/release/` had never been produced here with
  * no indication of why.
  *
- * `../backend` is required: without it the app has no backend to start.
+ * `build/backend` is required: without it the app has no backend to start.
+ * It is staged from the repository's source for `backend/` (see
+ * `scripts/backend_source_set.js`) before this function runs, so the bundle
+ * cannot carry the developer's bearer token or the research database.
  * `../.venv` is not. `electron/main.js:resolvePythonPath` already falls back
  * through the bundled `.venv`, the repo `.venv`, the repo `venv`, and finally
  * bare `python` -- so a build without a bundled interpreter produces an app that
@@ -157,6 +189,7 @@ function effectiveConfig(extraResources) {
 }
 
 function main() {
+  stageBackendForBuild();
   const extraResources = resolveExtraResources();
   ensureRendererBuilt();
   const builder = require('electron-builder');

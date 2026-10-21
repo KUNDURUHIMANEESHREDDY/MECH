@@ -1,0 +1,34 @@
+# Packaging metadata for the `mech` CLI (spec §22).
+#
+# pytest.ini stays the authoritative pytest configuration. This file contains no
+# [tool.pytest.ini_options] table, so collection, testpaths and rootdir are
+# unchanged by its presence.
+#
+# No runtime dependencies are declared here: requirements.txt is the install
+# manifest, and this file only names the project and its console script.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mech"
+version = "0.1.0"
+description = "MECH - mechanistic interpretability research platform (command line interface)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+mech = "backend.cli.main:main"
+
+# Explicit discovery. Constraining `include` to the backend tree means
+# auto-discovery cannot fail on this checkout's several top-level directories
+# (tests/, frontend/, scripts/) and cannot ship them either. `namespaces = false`
+# keeps discovery to real packages (a directory with __init__.py), so data-folders
+# such as backend/science/portal/projects/gpt2-small_ioi (no __init__.py, and not
+# a valid dotted name) are not turned into packages.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*"]
+exclude = ["tests*", "frontend*", "scripts*", "backend.tests*"]
+namespaces = false

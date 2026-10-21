@@ -78,9 +78,9 @@ defineEmits<{
 const query = ref('');
 
 const sections = [
-  { title: 'Explore', items: ['explorer', 'gpt2', 'gpt2explorer', 'transformer', 'transformerExplorer', 'network', 'steering', 'workspace', 'neuralexplorer', 'knowledgegraph', 'circuitexplorer'] },
+  { title: 'Explore', items: ['explorer', 'gpt2', 'gpt2explorer', 'transformer', 'transformerExplorer', 'network', 'steering', 'workspace', 'neuralexplorer', 'knowledgegraph', 'circuitexplorer', 'logitlens', 'activations'] },
   { title: 'Develop', items: ['models', 'prompts', 'debugger', 'build', 'benchmark', 'benchmarksuite'] },
-  { title: 'Research', items: ['experiments', 'sessions', 'reports', 'reasoning', 'evidencefusion', 'analytics', 'health', 'society'] },
+  { title: 'Research', items: ['experiments', 'sessions', 'reports', 'reasoning', 'evidencefusion', 'analytics', 'health', 'society', 'saelab', 'datasets'] },
   { title: 'General', items: ['campaigns', 'plugins', 'notebook', 'labnotebook', 'reproduction', 'settings', 'logging', 'projects', 'recent'] },
 ];
 
@@ -95,6 +95,7 @@ const labels: Record<string, string> = {
   health: 'Health', society: 'Society', campaigns: 'Campaigns', plugins: 'Plugins', notebook: 'Research Notebook',
   labnotebook: 'Lab Notebook', reproduction: 'Paper Reproduction', settings: 'Settings',
   logging: 'Logging', projects: 'Projects', recent: 'Recent Files',
+  activations: 'Activations', logitlens: 'Logit Lens', saelab: 'SAE Lab', datasets: 'Datasets',
 };
 
 const icons: Record<string, any> = {
@@ -110,6 +111,8 @@ const icons: Record<string, any> = {
   notebook: markRaw(BookOpen), labnotebook: markRaw(ClipboardList),
   reproduction: markRaw(CopyCheck), settings: markRaw(Settings), logging: markRaw(ScrollText),
   projects: markRaw(FolderKanban), recent: markRaw(Clock),
+  activations: markRaw(Activity), logitlens: markRaw(TrendingUp),
+  saelab: markRaw(Boxes), datasets: markRaw(FolderKanban),
 };
 
 function getLabel(key: string): string {

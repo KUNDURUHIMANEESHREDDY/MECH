@@ -74,7 +74,7 @@ call("POST", "/api/gpt2/layer", {"layer": 5})
 call("POST", "/api/gpt2/neurons", {"layer": 5, "component": "mlp"})
 call("POST", "/api/gpt2/neuron", {"layer": 5, "neuron_index": 42})
 call("POST", "/api/gpt2/head", {"layer": 5, "head": 3})
-call("POST", "/api/gpt2/patch_neuron", {"layer": 5, "neuron_index": 42, "patch_value": 3.5})
+call("POST", "/api/gpt2/patch_neuron", {"layer": 5, "neuron_index": 42, "patch_value": 3.5, "prompt": "The capital of France is"})
 
 # DELETE endpoints
 print("\n--- DELETE endpoints ---")

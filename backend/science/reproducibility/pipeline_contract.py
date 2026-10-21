@@ -11,7 +11,10 @@ The envelope distinguishes three states, and the distinction is the point:
 ``completed``
     The measurement ran on loaded weights. ``observed_metrics`` carries values,
     ``raw_traces`` carries one entry per prompt, every entry with a boolean
-    outcome. ``provenance`` is ``"live"``.
+    outcome. The envelope is attested by
+    :func:`backend.core.provenance.attest_measurement`, which is the only
+    issuer of the ``live`` label -- setting it here was a claim no verifier
+    could check, and ``pass_through`` would have withheld it downstream.
 
 ``unavailable``
     The pipeline ran and *the model does not do the task*, or one component of
@@ -39,8 +42,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
-#: Provenance values used by every pipeline in this package.
-LIVE = "live"
+from backend.core.provenance import attest_measurement
+
+#: Provenance value used when a component of the measurement was not taken.
+#: There is deliberately no ``LIVE`` constant here: the ``live`` label is
+#: issued by ``attest_measurement``, never written by a pipeline.
 UNAVAILABLE = "unavailable"
 
 
@@ -89,9 +95,7 @@ def completed(
         "paper_id": paper_id,
         "status": "completed",
         "model_id": model_id,
-        "provenance": LIVE,
         "provenance_note": provenance_note,
-        "field_provenance": field_provenance(_ENVELOPE_FIELDS, LIVE),
         "observed_metrics": observed_metrics,
         "raw_traces": raw_traces,
         "n_traces": len(raw_traces),
@@ -102,7 +106,7 @@ def completed(
         "synthetic_fields": [],
     }
     payload.update(extra)
-    return payload
+    return attest_measurement(payload, model_loaded=model_id or None)
 
 
 def unavailable(

@@ -39,12 +39,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Iterable, Optional
 
 from backend.agents.evidence_policy import field_map
+from backend.core.provenance import REFERENCE
 
 #: Provenance label for a value this module read from a store it could open.
-#: Deliberately not "live": these counts are reads, not measurements, and the
-#: repository's own vocabulary reserves "live" for a value measured from loaded
-#: weights in the current request.
-READ = "live"
+#: `reference` is the repository's word for a value carried over from a stored
+#: record. This used to be spelled `"live"` -- under a comment saying it was
+#: deliberately not -- so every field of `/api/analytics` and
+#: `/api/scientific_health` claimed a current-request measurement that
+#: `attest_measurement` had never issued. A read is not a measurement, and a
+#: consumer that trusts the label would have no way to tell the difference.
+READ = REFERENCE
 
 #: Bound on how many run records are opened to compute the deeper statistics.
 #: `list_run_records` already caps its listing at 200; this is the second cap

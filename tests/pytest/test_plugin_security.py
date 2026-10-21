@@ -318,6 +318,88 @@ def test_bundled_sample_plugin_still_loads():
 
 
 # ---------------------------------------------------------------------------
+# The unsandboxed in-process loader must not come back
+#
+# `PluginLoader.load_from_file` built a module spec from a file path and
+# executed it inside the backend process with full privileges -- no sandbox.
+# It had no caller anywhere in backend/, so it was deleted rather than pointed
+# at the sandbox: the two loaders are not equivalent (package directories and
+# relative imports versus single-file exec, and the AST gate forbids relative
+# imports), so redirecting would have silently changed behaviour for a future
+# caller.
+#
+# The checks below fail if the primitive returns under its old name, under a
+# new name, or through a fresh caller.
+
+
+def test_unsandboxed_in_process_loader_is_gone():
+    """The in-process importlib loader must not exist on the loader class."""
+    from backend.plugins.plugin_loader import PluginLoader
+
+    assert not hasattr(PluginLoader, "load_from_file")
+
+
+def test_sandboxed_loader_twin_survives():
+    """The safe twin must still be there.
+
+    Asserting only the absence above would also pass if somebody deleted the
+    sandboxed loader as well.
+    """
+    from backend.plugins.plugin_loader import PluginLoader
+
+    assert hasattr(PluginLoader, "load_from_file_sandboxed") is True
+
+
+def test_plugin_loader_source_has_no_importlib_exec_primitive():
+    """A renamed copy of the primitive must fail this check too.
+
+    The hasattr check above cannot see a loader under a different name, and
+    the call form is used so that `load_from_file_sandboxed` is not a false
+    positive.
+    """
+    import inspect
+
+    from backend.plugins import plugin_loader
+
+    source = inspect.getsource(plugin_loader)
+    assert "spec_from_file_location" not in source
+    assert "exec_module" not in source
+    assert ".load_from_file(" not in source
+
+
+def test_no_backend_file_calls_the_unsandboxed_loader():
+    """No file under backend/ may call the removed loader."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    backend_root = repo_root / "backend"
+    assert backend_root.is_dir(), f"backend/ not found at {backend_root}"
+
+    # The build copies (frontend/release, MECH-standalone) sit outside
+    # backend/; excluding them by name keeps a widened scan root honest.
+    excluded_parts = {"frontend", "release", "MECH-standalone"}
+    this_file = Path(__file__).resolve()
+
+    scanned = []
+    offenders = []
+    for path in sorted(backend_root.rglob("*.py")):
+        relative = path.relative_to(repo_root)
+        if excluded_parts & set(relative.parts):
+            continue
+        if path.resolve() == this_file:
+            continue
+        scanned.append(relative.as_posix())
+        if ".load_from_file(" in path.read_text(encoding="utf-8", errors="replace"):
+            offenders.append(relative.as_posix())
+
+    assert scanned, "no backend .py file was scanned -- the check proves nothing"
+    assert "backend/plugins/plugin_loader.py" in scanned, (
+        "the loader module was not scanned -- the check proves nothing"
+    )
+    assert not offenders, f"backend code calls the removed loader: {offenders}"
+
+
+# ---------------------------------------------------------------------------
 # Module-alias pivots -- `collections._sys` and friends
 #
 # Every allowlisted stdlib module holds live module objects as plain

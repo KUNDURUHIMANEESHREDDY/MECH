@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import pytest
 

@@ -81,25 +81,12 @@ class Inspector:
         return self._engine_call("list_neurons", layer, component)
 
     def neuron(self, layer: int, neuron_index: int) -> Dict[str, Any]:
-        out = self._engine_call("neuron_detail", layer, neuron_index)
-        if out.get("status") in ("unavailable", "error"):
-            # Fall back to the interpretability inspector (needs activations).
-            try:
-                from backend.interpretability.inspectors.neuron_inspector import (
-                    NeuronInspector,
-                )
-                insp = NeuronInspector().inspect(
-                    layer=layer, neuron_index=neuron_index, activations=None)
-                return {
-                    "status": "ok",
-                    "provenance": "unavailable",
-                    "field_provenance": {"status": "unavailable", "result": "unavailable"},
-                    "source": "NeuronInspector",
-                    "result": insp,
-                }
-            except Exception as exc:
-                out.setdefault("fallback_error", str(exc)[:300])
-        return out
+        # No fallback. This used to delegate to the interpretability inspector
+        # whenever the engine could not measure and return its output as
+        # `status: "ok"` -- but that inspector has no model either, so the
+        # "fallback" supplied constant numbers under a success status. The
+        # engine's refusal is the truthful answer, and it says why.
+        return self._engine_call("neuron_detail", layer, neuron_index)
 
     def attention(self, layer: int, head: int,
                   tokens: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -114,22 +101,9 @@ class Inspector:
                 "When Alice and Bob went to the store, Alice gave a bottle to")
             if primed.get("status") == "ok":
                 out = self._engine_call("attention_head", layer, head)
-        if out.get("status") in ("unavailable", "error"):
-            try:
-                from backend.interpretability.inspectors.attention_inspector import (
-                    AttentionInspector,
-                )
-                insp = AttentionInspector().inspect(
-                    layer=layer, head=head, tokens=tokens or [])
-                return {
-                    "status": "ok",
-                    "provenance": "unavailable",
-                    "field_provenance": {"status": "unavailable", "result": "unavailable"},
-                    "source": "AttentionInspector",
-                    "result": insp,
-                }
-            except Exception as exc:
-                out.setdefault("fallback_error", str(exc)[:300])
+        # No inspector fallback: it had no model to read a matrix from, so it
+        # returned a synthetic one under `status: "ok"`. The engine's refusal
+        # is reported as-is.
         return out
 
     def head(self, layer: int, head: int) -> Dict[str, Any]:

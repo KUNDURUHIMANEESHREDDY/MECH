@@ -174,8 +174,14 @@ class Executor:
                                 pos_token, neg_token)
 
     async def patch_neuron(self, layer: int, neuron_index: int,
-                           patch_value: float = 3.5) -> Dict[str, Any]:
-        return await self._call("patch_neuron", layer, neuron_index, patch_value)
+                           patch_value: float = 3.5,
+                           prompt: str = "The capital of France is") -> Dict[str, Any]:
+        # The prompt goes straight through: patch_neuron takes it as an
+        # argument and never reads whichever prompt the shared cache happens
+        # to hold. The default matches patch_head above, so the agent path
+        # measures a stated prompt rather than a stale one.
+        return await self._call("patch_neuron", layer, neuron_index,
+                                patch_value, prompt)
 
     async def ioi(self, **kwargs: Any) -> Dict[str, Any]:
         return await self._call("ioi", **kwargs)

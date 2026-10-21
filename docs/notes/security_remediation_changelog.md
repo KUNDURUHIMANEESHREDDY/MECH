@@ -414,11 +414,31 @@ Modified (31): `backend/core/provenance.py`, `backend/core/evidence_graph.py`,
 `backend/main.py`, `main.py`, `.gitignore`, `frontend/src/services/api.ts`,
 `docs/api_reference.md`, and 12 test modules.
 
+---
+
+## Completed after the audit pass
+
+### 2026-10-20 — P2-15, P2-16 — in-process plugin import primitive removed
+
+- The in-process importlib loader was removed and the regression test added:
+  `PluginLoader.load_from_file` (`spec_from_file_location` + `exec_module`,
+  no sandbox) is deleted from `backend/plugins/plugin_loader.py`, and
+  `tests/pytest/test_plugin_security.py` now fails if the primitive returns
+  under its old name, under a renamed copy, or through a fresh caller in
+  `backend/`. `load_from_path` and `load_from_file_sandboxed` are unchanged.
+- Deleted rather than redirected at the sandbox: the two loaders are not
+  equivalent (package directories and relative imports versus single-file
+  exec, and the AST gate forbids relative imports), and the loader had no
+  caller in `backend/`. The dead `PluginService._loader` field went with it.
+- Audit trail: this open item shared a bullet with the still-open legacy
+  `TraceableEvidenceGraph.save` item, which stays in "Not yet done from the
+  audit" below.
+
 ## Not yet done from the audit
 - Plugin `rename`/`link`/`symlink` **destination** confinement (P2-14) — the
   capability hook validates `args[0]` only.
-- Legacy `TraceableEvidenceGraph.save` / in-process plugin
-  `load_from_file` removal (P2-15, P2-16).
+- Legacy `TraceableEvidenceGraph.save` removal — still open; the method is
+  still present in `backend/core/evidence_graph.py`.
 - Runtime "reachable" → `installed / configured / reachable / execution_ready`
   (P2-18).
 - Dual storage authorities (`DesktopStorage` vs `backend.core.database`)

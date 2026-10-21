@@ -8,7 +8,6 @@ Python module paths at runtime.
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import inspect
 import logging
 import pkgutil
@@ -116,11 +115,15 @@ class PluginLoader:
     def load_from_file_sandboxed(self, filepath: str | Path) -> MechPlugin:
         """Execute a plugin file under the sandbox, then bind it via register().
 
-        ``load_from_file`` uses ``importlib`` and therefore executes the file
-        with the backend process's full privileges, which makes the install-time
-        AST scan the *only* gate. This variant re-runs the AST gate and then
-        executes under a restricted global namespace, so a bypass that slipped
-        past installation still has no ``__builtins__`` to work with.
+        This loader runs **in-process**, in the backend's own interpreter. It
+        re-runs the install-time AST gate and then executes the file under a
+        restricted global namespace, so a bypass that slipped past installation
+        still has no ``__builtins__`` to work with. The sandbox is defence in
+        depth, not a boundary.
+
+        Running a plugin is still better done out-of-process:
+        ``backend.plugins.runner.start_remote_plugin`` starts a bounded worker
+        and returns a proxy, and is the path the plugin service uses.
 
         Args:
             filepath: Absolute path to a single plugin .py file.
@@ -172,37 +175,6 @@ class PluginLoader:
                 f"expected a MechPlugin subclass."
             )
         return instance
-
-    def load_from_file(self, filepath: str | Path) -> MechPlugin:
-        """Import a plugin from an absolute .py file path (no package required).
-
-        Args:
-            filepath: Absolute path to the plugin's __init__.py or single .py file.
-
-        Returns:
-            Instantiated MechPlugin.
-        """
-        filepath = Path(filepath)
-        if not filepath.exists():
-            raise PluginLoadError(f"Plugin file not found: {filepath}")
-
-        module_name = f"_mech_plugin_{filepath.stem}_{id(filepath)}"
-        spec = importlib.util.spec_from_file_location(module_name, filepath)
-        if spec is None or spec.loader is None:
-            raise PluginLoadError(f"Cannot create module spec from: {filepath}")
-
-        module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(module)
-        except Exception as exc:  # noqa: BLE001
-            raise PluginLoadError(f"Error executing plugin file '{filepath}': {exc}") from exc
-
-        plugin = self._extract_plugin(module, str(filepath))
-        if plugin is None:
-            raise PluginLoadError(
-                f"Plugin file '{filepath}' has no register() → MechPlugin entry point."
-            )
-        return plugin
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #

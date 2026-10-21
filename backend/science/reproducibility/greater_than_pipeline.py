@@ -63,7 +63,7 @@ from ..models.adapter_base import LiveUnavailable
 from ..models.gpt2_adapter import GPT2Adapter
 from .dataset_versioning import DatasetVersioningEngine
 from .reproducibility_report import ReproducibilityReportEngine
-from .pipeline_contract import LIVE, completed
+from .pipeline_contract import completed
 
 # Start years for the comparison. Each expands to a prompt whose final two
 # digits partition the 100 two-digit completions into valid and invalid halves.
@@ -262,7 +262,6 @@ class GreaterThanCircuitPipeline:
                 # interval. "Above chance" means the valid completions carry
                 # more mass than the invalid ones.
                 "above_chance": bool(stats["logit_diff"] > 0),
-                "provenance": LIVE,
                 "synthetic_fields": [],
             })
 

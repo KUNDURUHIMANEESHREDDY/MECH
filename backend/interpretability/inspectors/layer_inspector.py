@@ -13,18 +13,32 @@ class LayerInspector:
     """Inspector for entire transformer layers."""
 
     def inspect(self, layer: int) -> Dict[str, Any]:
-        """Inspect layer-wide statistics.
+        """Refuse: no model and no activation is bound to this inspector.
 
         Args:
-            layer: Layer index.
+            layer: Echoed back for correlation.
 
         Returns:
-            Dict containing MLP norm, Attention norm, and layer status.
+            An unavailable record carrying no layer statistics.
+
+        This previously returned ``round(14.2 + layer, 2)`` and
+        ``round(10.8 + layer * 0.9, 2)`` with ``status: "computed"`` -- the
+        layer index dressed up as a measurement of that layer. The
+        implemented path is ``gpt2_engine.layer_detail``.
         """
         return {
             "layer": layer,
-            "mlp_activation_norm": round(14.2 + layer, 2),
-            "attention_output_norm": round(10.8 + (layer * 0.9), 2),
-            "active_neurons_count": 768,
-            "status": "computed",
+            "mlp_activation_norm": None,
+            "attention_output_norm": None,
+            "active_neurons_count": None,
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "measured": False,
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": (
+                "Layer inspection is not implemented in this inspector: no "
+                "forward pass was run, so there are no norms to report. See "
+                "gpt2_engine.layer_detail."
+            ),
         }

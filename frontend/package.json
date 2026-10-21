@@ -55,12 +55,17 @@
     },
     "extraResources": [
       {
-        "from": "../backend",
+        "from": "build/backend",
         "to": "backend",
         "filter": [
           "**/*",
           "!__pycache__",
-          "!**/*.pyc"
+          "!**/*.pyc",
+          "!storage/.mech_api_token",
+          "!storage/*.db*",
+          "!storage/evidence/**",
+          "!storage/v2_jobs/**",
+          "!runtime.db"
         ]
       },
       {

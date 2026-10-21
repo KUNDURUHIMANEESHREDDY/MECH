@@ -13,25 +13,40 @@ class NeuronInspector:
     """Inspector for individual neurons and feature activations."""
 
     def inspect(self, layer: int, neuron_index: int, activations: List[float] | None = None) -> Dict[str, Any]:
-        """Inspect neuron activation statistics and firing patterns.
+        """Refuse: no model and no activation is bound to this inspector.
 
         Args:
-            layer: Transformer layer index (0-indexed).
-            neuron_index: Neuron index within the layer (0-indexed).
-            activations: Optional list of activation values per token.
+            layer: Echoed back for correlation.
+            neuron_index: Echoed back for correlation.
+            activations: Accepted for signature compatibility and ignored.
 
         Returns:
-            Dict containing mean, max, variance, and feature classification.
+            An unavailable record carrying no activation statistics.
+
+        This previously summarised the literal list
+        ``[0.12, 0.45, 2.41, 0.05, 0.88]`` whenever no activations were
+        supplied, and ``backend/agents/inspector.py`` wrapped the result as
+        ``status: "ok"``. Every number was a constant while the shape was
+        indistinguishable from a real inspection. The implemented path is
+        ``gpt2_engine.neuron_detail``, which reads one neuron's post-GELU
+        activation out of a live forward pass.
         """
-        vals = activations or [0.12, 0.45, 2.41, 0.05, 0.88]
-        mean_act = sum(vals) / len(vals)
-        max_act = max(vals)
         return {
             "layer": layer,
             "neuron_index": neuron_index,
             "neuron_id": f"L{layer}_N{neuron_index}",
-            "mean_activation": round(mean_act, 4),
-            "max_activation": round(max_act, 4),
-            "firing_frequency": round(len([v for v in vals if v > 0.5]) / len(vals), 2),
-            "feature_label": f"Layer {layer} Feature #{neuron_index}",
+            "mean_activation": None,
+            "max_activation": None,
+            "firing_frequency": None,
+            "feature_label": None,
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "measured": False,
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "reason": (
+                "Neuron inspection is not implemented in this inspector: no "
+                "forward pass was run, so there are no activations to "
+                "summarise. See gpt2_engine.neuron_detail."
+            ),
         }
