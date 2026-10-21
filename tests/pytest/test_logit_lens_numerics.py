@@ -413,7 +413,13 @@ def test_the_lens_normalises_extreme_logits_without_nan(engine):
             f"{name}: softmax produced non-finite probabilities"
         )
         total = float(probs.sum())
-        assert total == pytest.approx(1.0, abs=1e-5), (
+        # A float32 softmax over n terms sums to 1 to within the accumulation
+        # error of summing n float32 numbers: eps * n in the worst case and
+        # eps * sqrt(n) with a blocked reduction, which for 50257 terms is a
+        # few times 1e-5 (measured: 1.1e-5 on the model's own logits). What
+        # this test guards is a NaN or a distribution that is not a
+        # distribution; both are off by orders of magnitude more than this.
+        assert total == pytest.approx(1.0, abs=1e-4), (
             f"{name}: probabilities sum to {total}, not 1"
         )
 
