@@ -136,7 +136,19 @@ jobs:
           PY
 
       - name: Evidence boundary refuses unproven live claims
-        run: python -m pytest tests/pytest/test_evidence_boundary.py -v
+        # The guarantee lives in these three files. This step used to name
+        # tests/pytest/test_evidence_boundary.py, which does not exist, so the
+        # job failed on a missing path rather than on the boundary it exists to
+        # check. What holds the guarantee: the laundering tests (a `live` label
+        # the measurement layer did not issue is refused, a failure status is
+        # never attested, a forged `attested` flag cannot satisfy the evidence
+        # gate), the evidence-gate tests (the predicates and the validation and
+        # reproduction gates require an attestation), and the not-inverted tests
+        # (the engine attests what it measured and does not attest a refusal).
+        run: >-
+          python -m pytest tests/pytest/test_attestation_laundering.py
+          tests/pytest/test_attested_evidence.py
+          tests/pytest/test_provenance_not_inverted.py -v
 
   # Every other job must have passed before this one reports success.
   required:

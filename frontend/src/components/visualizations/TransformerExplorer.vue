@@ -1,5 +1,12 @@
 <template>
   <div class="flex flex-col gap-3 font-['system-ui',sans-serif] text-xs text-[var(--ink)]">
+    <!-- Title. The shell's navigation contract is that every tool view names
+    itself: the smoke test asserts a heading is present in the view it opens.
+    This view had none, so the assertion had nothing to hold. -->
+    <header class="px-1 shrink-0">
+      <h2 class="text-[var(--ink)] text-sm font-semibold m-0">Transformer Explorer</h2>
+      <p class="text-[11px] text-[var(--ink-muted-48)] m-0 mt-0.5 leading-snug">Head attention, neuron activations and the UMAP projection for the loaded model.</p>
+    </header>
     <!-- ── Live prompt bar ────────────── -->
     <div v-if="usesInternalData"
       class="flex gap-2 items-center flex-wrap bg-[var(--canvas)] p-2.5 rounded-lg border border-[var(--border)]">

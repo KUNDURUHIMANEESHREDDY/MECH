@@ -1,41 +1,58 @@
 const { test, expect } = require('@playwright/test');
 
 // Canonical route labels. Hash IDs remain compatible with deep links.
+//
+// This is every route the shell renders a nav button for. The three alias
+// routes (gpt2, gpt2explorer, campaigns) are deliberately absent: the
+// registry marks them `aliasOf` a canonical route, and the shell renders one
+// nav entry per canonical route so a keyboard or screen-reader user is never
+// offered the same tool twice. This list still expected `nav-gpt2` and
+// `nav-campaigns`, which the shell has not rendered since the aliases were
+// introduced, so the test failed on its second entry and stopped there.
 const NAV_PAGES = [
   ['explorer', 'Model Explorer'],
-  ['gpt2', 'GPT-2 Live'],
   ['transformer', 'Transformer Visualizer'],
+  ['transformerExplorer', 'Transformer Explorer'],
+  ['network', 'Network'],
+  ['steering', 'Steering Lab'],
   ['workspace', 'Workspace'],
-  ['neuralexplorer', 'Neural Explorer'],
-  ['knowledgegraph', 'Knowledge Graph'],
-  ['circuitexplorer', 'Circuit Explorer'],
   ['models', 'Models'],
   ['prompts', 'Prompts'],
   ['debugger', 'Debugger'],
-  ['build', 'Build'],
-  ['benchmark', 'Benchmark'],
-  ['benchmarksuite', 'Benchmark Suite'],
   ['experiments', 'Experiments'],
   ['sessions', 'Sessions'],
   ['reports', 'Reports'],
+  ['settings', 'Settings'],
+  ['logging', 'Logging'],
+  ['build', 'Build'],
+  ['neuralexplorer', 'Neural Explorer'],
+  ['benchmark', 'Benchmark'],
+  ['benchmarksuite', 'Benchmark Suite'],
+  ['knowledgegraph', 'Knowledge Graph'],
+  ['circuitexplorer', 'Circuit Explorer'],
   ['reasoning', 'Reasoning'],
   ['evidencefusion', 'Evidence Fusion'],
   ['analytics', 'Analytics'],
   ['health', 'Health'],
-  ['campaigns', 'Campaigns'],
   ['plugins', 'Plugins'],
   ['notebook', 'Research Notebook'],
   ['labnotebook', 'Lab Notebook'],
   ['reproduction', 'Paper Reproduction'],
-  ['settings', 'Settings'],
-  ['logging', 'Logging'],
   ['projects', 'Projects'],
   ['recent', 'Recent Files'],
+  ['society', 'Society'],
+  ['activations', 'Activations'],
+  ['logitlens', 'Logit Lens'],
+  ['saelab', 'SAE Lab'],
+  ['datasets', 'Datasets'],
 ];
 
+// Routes with no nav button of their own: they open by hash, and while one
+// is open the shell highlights the canonical entry it aliases.
 const HASH_ONLY_PAGES = [
+  ['gpt2', 'GPT-2 Live'],
   ['gpt2explorer', 'GPT-2 Neuron Explorer'],
-  ['transformerExplorer', 'Transformer Explorer'],
+  ['campaigns', 'Campaigns'],
 ];
 
 test('sidebar exposes every navigation item', async ({ page }) => {
@@ -46,6 +63,9 @@ test('sidebar exposes every navigation item', async ({ page }) => {
 });
 
 test('sidebar navigation shows one titled tool view and updates the hash', async ({ page }) => {
+  // One click per route, each with a scroll, a URL assertion and two view
+  // assertions. The default 30s timeout is not enough for the whole list.
+  test.setTimeout(180_000);
   await page.goto('/');
   for (const [key] of NAV_PAGES) {
     const item = page.getByTestId(`nav-${key}`);

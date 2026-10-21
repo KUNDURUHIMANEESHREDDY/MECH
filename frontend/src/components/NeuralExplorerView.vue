@@ -3,6 +3,14 @@
     id="neural-explorer-root"
     class="flex flex-col h-full bg-[var(--bg)] text-[var(--ink)] font-['Inter',system-ui,sans-serif] overflow-hidden"
   >
+    <!-- Title. The shell's navigation contract is that every tool view names
+    itself: the smoke test asserts a heading is present in the view it opens.
+    This view had none, so the assertion had nothing to hold. -->
+    <div class="flex items-baseline gap-2 px-4 pt-2.5 shrink-0">
+      <h2 class="text-[var(--ink)] text-sm font-semibold m-0">Neural Explorer</h2>
+      <span class="text-[10px] text-[var(--ink-muted-48)] uppercase tracking-widest">Activations</span>
+    </div>
+
     <!-- Prompt bar -->
     <div class="flex items-center gap-2.5 px-4 py-2.5 bg-[var(--surface-pearl)] border-b border-[var(--border)] shrink-0">
       <span class="text-[10px] text-[var(--ink-muted-48)] uppercase tracking-widest">Prompt</span>

@@ -124,6 +124,14 @@ def promote_dataset(dataset_id: str, author: str, key_path: str | None = None) -
     # are a valid signature over this exact payload, rather than an unverified
     # blob written next to a "signed" marker.
     from cryptography.hazmat.primitives import serialization
+    # The raw-seed fallback below needs the key class itself. It was never
+    # imported, so that branch raised NameError instead of deriving a public
+    # key -- and the NameError was swallowed by the except that was meant to
+    # report a clean failure, so the operator saw "could not derive a public
+    # key" for a key that was perfectly usable.
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+    )
 
     try:
         with open(path, "rb") as handle:

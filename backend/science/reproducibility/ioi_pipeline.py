@@ -1042,6 +1042,34 @@ class IOIReproductionPipeline:
             ] + failure_diagnostics,
         )
 
+        # The mock branch has no discovery stage, so there is no measured
+        # adequacy ladder to carry through -- and the payload below reads one.
+        # This is the same shape live_discovery._adequacy produces, with every
+        # rung false: a reference fixture is not a measurement, so nothing here
+        # can support a validation or publication decision. The thresholds are
+        # the module's own, which are the ones live_discovery uses.
+        adequacy = {
+            "live": False,
+            "measured": False,
+            "statistically_adequate": False,
+            "interaction_adequate": False,
+            "replicated": False,
+            "replicated_reason": (
+                "not measured: mock mode runs no model and performs no "
+                "replication"
+            ),
+            "validation_eligible": False,
+            "publication_eligible": False,
+            "min_prompts_for_validation": MIN_PROMPTS_FOR_MINIMALITY,
+            "min_prompts_for_interaction": self.MIN_DISCOVERY_INTERACTION_PROMPTS,
+            "n_prompts": n_prompts,
+            "n_interaction_prompts": 0,
+            "ineligible_because": [
+                "mock mode: reference fixtures are not measurements"
+            ],
+        }
+        n_prompts_requested = n_prompts
+
         return {
             "pipeline": "IOIReproductionPipeline-HighFidelity",
             "status": "completed",

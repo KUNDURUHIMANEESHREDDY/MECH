@@ -29,6 +29,25 @@ matplotlib>=3.7.0
 seaborn>=0.12.0
 pandas>=2.0.0,<2.1
 
+# Datasets / Parquet
+#
+# The pyarrow bound is load-bearing for the numpy<2 pin above, not for
+# pyarrow itself. `datasets` is pulled in transitively by transformer-lens and
+# imports pyarrow, which in 26.0.0 refuses to load against numpy 1.x --
+# python/pyarrow/lib.pyx raises at import, and the traceback is nowhere near
+# the cause:
+#
+#   ImportError: pyarrow requires NumPy 2.0 or newer, found 1.26.4
+#
+# 25.0.1 is the last release without that check (verified in the 26.0.0 and
+# 25.0.1 tags of python/pyarrow/lib.pyx), and `import datasets` works against
+# it: datasets 5.0.1, pyarrow 25.0.1, numpy 1.26.4.
+#
+# The alternative -- letting numpy float up to 2.x -- is not on the table:
+# transformer-lens 2.18 declares `numpy>=1.24,<2`, and the pin above explains
+# why that bound has to hold.
+pyarrow>=15.0.0,<26.0.0
+
 # ML / Interpretability
 #
 # UPPER BOUNDS ARE LOAD-BEARING. transformer-lens 4.0 removed HookedTransformer
@@ -69,7 +88,18 @@ httpx>=0.24.0
 # MCP control plane (external agents drive MECH through tools, not the UI).
 # Verified with 1.30.0; the FastMCP surface used here (tool/streamable_http_app
 # /run_stdio_async) is stable across 1.x.
-mcp>=1.30.0
+#
+# The upper bound is load-bearing. mcp 2.x renamed FastMCP to MCPServer and
+# changed the server API, so `backend/mcp_server/server.py` -- which does
+# `from mcp.server.fastmcp import FastMCP` -- cannot import it at all:
+#
+#   ModuleNotFoundError: No module named 'mcp.server.fastmcp'. This is mcp 2.x.
+#   ... or pin 'mcp<2' to keep running v1 code.
+#
+# The mount failure is caught and logged rather than raised, so it fails no test
+# and breaks no import: the control plane is simply absent, which is the worst
+# way for a capability to go missing.
+mcp>=1.30.0,<2.0.0
 
 # Testing
 pytest>=7.4.0
