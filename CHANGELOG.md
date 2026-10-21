@@ -171,7 +171,16 @@ is cut; nothing here is invented to fill a released-version heading.
 - Logit lens no longer applies `ln_f` twice to the final layer. Probabilities,
   not just token identity, are now correct; the returned list is explicitly
   marked `probability_is_truncated` and carries `probabilities_reported_mass`
-  (`backend/services/gpt2_engine.py:1794-1838`).
+  (`backend/services/gpt2_engine.py:1794-1838`). Correct is to float32
+  resolution: the lens and the model's own logits are the same quantity put
+  through two matmul shapes over the same weights, so the two agree to about
+  1e-6 rather than to the last bit.
+- A local SAE checkpoint identifier that is a Windows path is refused on every
+  host, not only on Windows. The check used `os.path.basename`, which splits on
+  the host's separator, so on POSIX `C:\Windows\sae.pt` was a bare filename
+  and resolved as a relative name inside the checkpoint directory while the
+  same request was refused on Windows: one identifier, two behaviours,
+  depending on where the server runs.
 - SAE checkpoints are centred on the checkpoint's own `b_pre`, falling back to
   `b_dec` for `mats_sae_training`/Cunningham format, and
   `SAEConfig.pre_encoder_center` records which was used
