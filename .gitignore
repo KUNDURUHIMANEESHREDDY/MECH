@@ -150,4 +150,4 @@ frontend/build/
 # One-off local scratch: throwaway diagnostics and scratch run logs.
 _diag*.py
 .l2_roundtrip_demo.py
-.pytest-tmp*.log
+.pytest-*.log

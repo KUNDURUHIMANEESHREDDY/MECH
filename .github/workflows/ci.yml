@@ -137,14 +137,16 @@ jobs:
 
       - name: Evidence boundary refuses unproven live claims
         # The guarantee lives in these three files. This step used to name
-        # tests/pytest/test_evidence_boundary.py, which does not exist, so the
-        # job failed on a missing path rather than on the boundary it exists to
-        # check. What holds the guarantee: the laundering tests (a `live` label
-        # the measurement layer did not issue is refused, a failure status is
-        # never attested, a forged `attested` flag cannot satisfy the evidence
-        # gate), the evidence-gate tests (the predicates and the validation and
-        # reproduction gates require an attestation), and the not-inverted tests
-        # (the engine attests what it measured and does not attest a refusal).
+        # tests/pytest/test_evidence_boundary.py, which does not exist: that spec
+        # was removed with backend/core/evidence_boundary.py (docs/roadmap.md
+        # 2.6), and the step was never repointed, so the job failed on a missing
+        # path rather than on the boundary it exists to check. What holds the
+        # guarantee now: the laundering tests (a `live` label the measurement
+        # layer did not issue is refused, a failure status is never attested, a
+        # forged `attested` flag cannot satisfy the evidence gate), the
+        # evidence-gate tests (the predicates and the validation and replication
+        # gates require an attestation), and the not-inverted tests (the engine
+        # attests what it measured and does not attest a refusal).
         run: >-
           python -m pytest tests/pytest/test_attestation_laundering.py
           tests/pytest/test_attested_evidence.py

@@ -64,8 +64,12 @@ a gate people have to disable is not a gate.
 
 ### Tests that must be run, in this order
 
-1. `tests/pytest/test_evidence_boundary.py` — the attestation rewrite changes
-   what counts as a live result. Expect breakage here first.
+1. `tests/pytest/test_attestation_laundering.py` — the attestation rewrite
+   changes what counts as a live result. Expect breakage here first. (The
+   `test_evidence_boundary.py` spec named here before was removed together with
+   `backend/core/evidence_boundary.py`; the guarantee it covered is now the
+   provenance boundary's, and the tests that hold it are the laundering, gate
+   and not-inverted specs.)
 2. `tests/pytest/test_plugin_read_confinement.py` — read allow-listing is the
    change most likely to break normal plugin operation, because it gates every
    file read a plugin makes.

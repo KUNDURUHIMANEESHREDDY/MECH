@@ -260,7 +260,9 @@ test.describe('Navigation and State', () => {
 
     const initialText = await status.textContent();
     
-    await page.getByTestId('nav-gpt2').click();
+    // `gpt2` is an alias route: the shell renders one nav entry per canonical
+    // route, so there is no `nav-gpt2` button to click. It is reached by hash.
+    await page.goto('/#gpt2');
     await expect(page).toHaveURL(/#gpt2$/);
     
     // Status should still be visible and consistent
