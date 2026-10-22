@@ -5,9 +5,7 @@ All notable changes to MECH are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-No version has been tagged yet: `git tag` is empty and `pyproject.toml` declares
-`0.1.0`. Entries therefore accumulate under `Unreleased` until the first release
-is cut; nothing here is invented to fill a released-version heading.
+The released version is **2.0.0** (`v2.0.0`, published 2026-10-04), and that\r\nis the version `pyproject.toml`, `frontend/package.json` and the release title\r\nall declare. Work that landed after that tag accumulates under `Unreleased`\r\nuntil the next release is cut; nothing here is invented to fill a\r\nreleased-version heading.
 
 ## [Unreleased]
 
@@ -478,14 +476,60 @@ with a check that can fail.
   `frontend/src/main.ts` and cross-checked against the tests, the Electron
   preload and the docs before deletion.
 
-- The locally trained SAE checkpoints under
-  `backend/storage/sae_checkpoints/` record no hook point, and they were
-  trained on a block-0 MLP contribution plus the residual stream, while
-  `POST /api/sae/inspect` encodes the residual stream at the requested layer.
-  The loader cannot refuse that mismatch, and the measured reconstruction
-  error is correspondingly poor (relative L2 0.97 for the layer-8 sample
-  checkpoint). The response carries that caveat; the numbers are real
-  measurements of a dictionary applied to a tensor it was not trained on.
+- Some of the older checkpoints under `backend/storage/sae_checkpoints/`
+  were trained before the trainer recorded what it had fitted, so they name
+  no hook point and no tensor source. `POST /api/sae/inspect` refuses them
+  (the reason says so) rather than applying a dictionary to an arbitrary
+  tensor, so those files are not inspectable until they are retrained. The
+  checkpoints the current trainer writes name their tensor and work.
+### The four remaining gaps, closed
+
+- **A cancelled or timed-out Society run kept burning CPU.** The run timeout
+  freed the admission slot, but the worker thread could not be killed, so the
+  sweep went on: the timeout bounded the *slot*, not the work. A run now
+  carries a stop event (`backend/api/dispatcher.py`), the cancel route and the
+  timeout set it, and the discovery sweep observes it *between measurements* --
+  `backend/interpretability/discovery/live_measure.py` raises `LiveStopped` at
+  the boundary of an ablation or a path patch, and
+  `backend/interpretability/discovery/live_discovery.py` reports a stopped run
+  as `cancelled` rather than as a failure or as a result. Measured: a
+  cancelled run reaches its terminal state in 6 s, and the backend's CPU grows
+  0.0 s in the 10 s after that.
+- **The cost of a Society run was decided by the layers below.** The live
+  discovery sweeps every attention head of GPT-2 on every prompt, so a run was
+  minutes of CPU whatever the caller wanted. The run owner now decides:
+  `POST /api/society/run` accepts `effort` (`quick`, `standard`, `full`), the
+  budget travels with the run
+  (`backend/interpretability/discovery/budget.py`), and the effort is reported
+  with the result. `quick` is two prompts -- a sample that cannot support a
+  validation claim, which the backend says rather than implying.
+- **The Society completion path is in the standard suite.**
+  `frontend/tests/playwright/society-lifecycle.spec.js` now runs a real run
+  and checks the ending against the backend's own status for that run id: the
+  panel ends on the backend's status, nothing is published that the backend
+  did not publish, and the run's admission slot is released (the next
+  submission is admitted, not refused with "active run limit"). It runs at the
+  `quick` effort and passes in 1.3 minutes.
+- **SAE no longer reports a decomposition of the wrong tensor.** The route
+  encodes the tensor the checkpoint declares -- a `transformers:` source
+  through `gpt2_engine.mlp_write`, a TransformerLens hook through
+  `hook_activation` -- and refuses a checkpoint that does not say what it
+  describes. An older local checkpoint that records no hook point is now
+  refused with that reason and zero feature indices, instead of producing
+  "relative L2 0.97" for a dictionary applied to an unrelated tensor. For a
+  checkpoint that does declare its tensor the reconstruction is measured
+  against that tensor (relative L2 0.925 for a 50-feature dictionary -- a
+  small dictionary, honestly reported), and the view names the tensor the
+  number refers to.
+- **The e2e budgets say what they are.** A per-assertion budget (20s) catches
+  a broken app quickly, and the specs that do real work -- 36 routes, a model
+  load, a real Society run -- carry their own per-test budget. The suite also
+  runs four workers rather than eight: every spec drives the same backend, and
+  that backend's inference is CPU-bound, so more browsers than the machine can
+  serve made the *slow* specs fail -- the product looked broken when it was
+  merely contended. A busy machine (another suite, a full pytest sweep) no
+  longer reads as a broken product.
+
 ### Known incomplete in this tree
 
 - `SAEInspector.inspect_feature` remains unimplemented and returns
