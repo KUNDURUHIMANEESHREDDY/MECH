@@ -19,13 +19,17 @@ _entries: deque = deque(maxlen=_MAX_ENTRIES)
 
 
 def record(method: str, path: str, status_code: int,
-           duration_ms: float) -> None:
+           duration_ms: float, request_id: str = "") -> None:
     entry = {
         "timestamp": time(),
         "method": str(method or "").upper()[:12],
         "path": str(path or "")[:512],
         "status": int(status_code),
         "duration_ms": round(float(duration_ms), 2),
+
+        # The correlation id of the request, when it has one. Empty when the
+        # caller did not supply one: the field is never a guess.
+        "request_id": str(request_id or "")[:64],
     }
     with _lock:
         _entries.append(entry)

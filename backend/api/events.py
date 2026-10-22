@@ -219,6 +219,24 @@ def _experiment_id(job: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _partial_failure(job: Dict[str, Any]) -> str:
+    """Describe a run that finished with part of its work missing.
+
+    A sweep that measured some items and could not measure others is not a
+    clean success, and the event must not read like one. The status itself
+    is not rewritten here -- the vocabulary is a contract -- but the message
+    carries the reason, so a client that shows the message shows the truth.
+    """
+    result = job.get("result")
+    if not isinstance(result, dict):
+        return ""
+    status = str(result.get("status") or "")
+    if status == "completed_with_unavailable":
+        return ("part of the work was unavailable: %s measured, %s unavailable"
+                % (result.get("measured", "?"), result.get("unavailable", "?")))
+    return ""
+
+
 def _signature(job: Dict[str, Any]) -> Tuple[Any, ...]:
     """What "the state changed" means. Nothing here is a guess."""
     return (
@@ -282,6 +300,10 @@ class EventHub:
             message = f"job {status or 'unknown'}"
             if error:
                 message = f"{message}: {error[:400]}"
+            else:
+                partial = _partial_failure(job)
+                if partial:
+                    message = f"{message}: {partial}"
             event = {
                 "event_id": f"evt_{sequence:012d}_{job_id}",
                 "event_version": EVENT_VERSION,

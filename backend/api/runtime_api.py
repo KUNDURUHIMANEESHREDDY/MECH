@@ -44,6 +44,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from backend.core.observability import get_settings
+from backend.core.recovery import (
+    EngineTimeout,
+    call_with_timeout,
+    cleanup_partial_files,
+)
+
 router = APIRouter()
 
 #: Terminal states. A job in one of these is never worked on again.
@@ -134,11 +141,22 @@ def _handle_benchmark_sweep(payload: Dict[str, Any],
             }
         try:
             # The runner takes an optional panel size where it supports one.
-            result = runner.run_benchmark(f"bench_{name}", n_prompts=n_prompts)
+            # A single benchmark is one engine call, so it gets the engine
+            # timeout: a call that does not finish in time is a failure of
+            # that item, never a silent success.
+            result = call_with_timeout(
+                lambda: runner.run_benchmark(f"bench_{name}", n_prompts=n_prompts),
+                get_settings().engine_timeout_s,
+                label="benchmark %s" % name,
+            )
         except TypeError:
             # Older runner signature: run it at its own fixed panel size and
             # say so, rather than pretending the requested size was honoured.
-            result = runner.run_benchmark(f"bench_{name}")
+            result = call_with_timeout(
+                lambda: runner.run_benchmark(f"bench_{name}"),
+                get_settings().engine_timeout_s,
+                label="benchmark %s" % name,
+            )
             if isinstance(result, dict):
                 result = dict(result)
                 result["requested_n_prompts"] = n_prompts
@@ -147,6 +165,7 @@ def _handle_benchmark_sweep(payload: Dict[str, Any],
             result = {
                 "status": "error",
                 "provenance": "unavailable",
+                "measured": False,
                 "error": f"{type(exc).__name__}: {exc}",
             }
         entry = {
@@ -234,6 +253,7 @@ class _JobQueue:
 
     def _persist(self, job: Dict[str, Any]) -> None:
         directory = _job_dir()
+        tmp = None
         try:
             directory.mkdir(parents=True, exist_ok=True)
             target = self._path(str(job["job_id"]))
@@ -245,6 +265,11 @@ class _JobQueue:
             os.replace(tmp, target)
         except Exception as exc:  # noqa: BLE001 - a persistence failure is recorded
             job["persist_error"] = f"{type(exc).__name__}: {exc}"
+            # A failed write leaves a half-written temp file behind. It is
+            # not a job record, nothing will ever read it, and it would sit
+            # in the job directory looking like work in progress.
+            if tmp is not None:
+                cleanup_partial_files([tmp])
 
     def _load(self) -> None:
         """Load persisted jobs. Queued/running jobs become `interrupted`."""
@@ -346,8 +371,19 @@ class _JobQueue:
                 self._persist(job)
             return
         try:
-            result = handler(payload, stop)
+            # The whole job gets a budget. A handler that overruns it is
+            # reported as failed -- a job that never finishes must not be
+            # left showing "running" for ever, and it must never be
+            # reported as completed.
+            result = call_with_timeout(
+                lambda: handler(payload, stop),
+                get_settings().job_timeout_s,
+                label="job %s" % kind,
+            )
             error = None
+        except EngineTimeout as exc:
+            result = None
+            error = f"timeout: {exc}"
         except Exception as exc:  # noqa: BLE001 - a failed job is reported
             result = None
             error = f"{type(exc).__name__}: {exc}"

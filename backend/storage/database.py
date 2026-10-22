@@ -317,10 +317,23 @@ class DesktopStorage:
     def _migrate(self, connection: sqlite3.Connection) -> None:
         """Bring an older database up to the current schema, in place.
 
+        All-or-nothing. SQLite rolls DDL back with the rest of a
+        transaction, but Python's sqlite3 module runs DDL in autocommit
+        unless a transaction is opened by hand -- so without the explicit
+        BEGIN below, a migration that failed on its second table left the
+        first one changed: a database that looks migrated and is only half
+        migrated, which is a state no later run can tell apart from a
+        healthy one.
+
+        Re-running is a no-op, and two processes migrating the same file at
+        once is safe: the loser of the race sees "duplicate column name",
+        re-reads the table, and finds the column already there.
+
         Existing rows get `updated_at` seeded from `created_at`, so an item's
         two stamps stay ordered rather than the update time reading as
         earlier than its own creation.
         """
+        pending: list[tuple[str, dict[str, str]]] = []
         for table, columns in self._ADDED_COLUMNS.items():
             present = {row[1] for row in connection.execute(
                 f"PRAGMA table_info({table})")}
@@ -328,14 +341,60 @@ class DesktopStorage:
                 # The table does not exist yet; CREATE TABLE above made it with
                 # every column already.
                 continue
-            for column, kind in columns.items():
+            missing = {name: kind for name, kind in columns.items()
+                       if name not in present}
+            if missing:
+                pending.append((table, missing))
+        if not pending:
+            return
+
+        previous_isolation = connection.isolation_level
+        connection.isolation_level = None  # the transaction is ours to manage
+        try:
+            connection.execute("BEGIN")
+            try:
+                for table, missing in pending:
+                    for column, kind in missing.items():
+                        self._add_column(connection, table, column, kind)
+                        if column == "updated_at":
+                            connection.execute(
+                                f"UPDATE {table} SET updated_at = created_at")
+                connection.execute("COMMIT")
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+        finally:
+            if not connection.in_transaction:
+                connection.isolation_level = previous_isolation
+
+    @staticmethod
+    def _add_column(
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        kind: str,
+    ) -> None:
+        """Add one column, naming the table and the column if it fails.
+
+        A migration that fails silently leaves a database that looks
+        migrated and is not, so the error says which column could not be
+        added and why. "cannot add a column to a view" and "the disk is
+        full" call for different repairs, and a bare sqlite3 error names
+        neither.
+        """
+        try:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" in str(exc).lower():
+                # Another process added it between our read and our write.
+                # Re-read to confirm, and treat it as done.
+                present = {row[1] for row in connection.execute(
+                    f"PRAGMA table_info({table})")}
                 if column in present:
-                    continue
-                connection.execute(
-                    f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
-                if column == "updated_at":
-                    connection.execute(
-                        f"UPDATE {table} SET updated_at = created_at")
+                    return
+            raise StorageError(
+                f"could not add column {table}.{column}: {exc}") from exc
 
     def get_settings(self) -> dict[str, Any]:
         with self._connect() as connection:

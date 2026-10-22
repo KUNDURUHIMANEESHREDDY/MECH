@@ -30,8 +30,22 @@ if _REPO_ROOT not in sys.path:
 # may use the session cookie, which may carry credentials cross-origin --
 # lives in one place: backend/core/auth.py.
 from backend.core import auth as auth_mod
+from backend.core.recovery import (
+    EngineFailure,
+    EngineTimeout,
+    call_with_timeout,
+    retry_call,
+)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+# One logging setup for the control plane. The level comes from the
+# configuration, a rotating file sink is written under the storage root, and
+# the formatter redacts credentials -- so no call site can leak the bearer
+# token by logging it. This replaces the ad-hoc `logging.basicConfig` call
+# that used to live here. See backend/core/observability.py.
+from backend.core import observability as observability_mod
+
+_settings = observability_mod.get_settings()
+_LOGGING_SUMMARY = observability_mod.configure_logging(_settings)
 logger = logging.getLogger("MECH")
 
 @asynccontextmanager
@@ -46,7 +60,9 @@ async def lifespan(application: FastAPI):
     logger.info("MECH starting up (lifespan).")
     try:
         from backend.core import auth as auth_mod
-        auth_mod.get_bearer_token()
+        # The token is registered as a secret, so even if some future call
+        # site logs it, the formatter removes it from the line.
+        observability_mod.register_secret(auth_mod.get_bearer_token())
         logger.info("Control-plane bearer auth active (token file: %s).",
                     auth_mod._token_file())
     except Exception as exc:
@@ -121,7 +137,7 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(
     title="MECH Research Platform",
-    version="2.0.0",
+    version=observability_mod.APP_VERSION,
     description="Mechanistic Interpretability Research Platform",
     lifespan=lifespan,
 )
@@ -173,6 +189,8 @@ app.add_middleware(
     # Only the verbs and headers this API actually uses.
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "Accept"],
+    # So a browser client can read the correlation id out of the response.
+    expose_headers=["X-Request-ID"],
 )
 
 
@@ -200,20 +218,101 @@ async def _preload_gpt2_engine() -> None:
     """Pre-load GPT-2 so the first interactive request does not time out.
 
     Failure here is not fatal: the platform stays up and every dependent view
-    degrades to seeded/unavailable responses with an explicit reason.
+    degrades to seeded/unavailable responses with an explicit reason. The
+    reason is recorded, so the diagnostics surface shows why the weights are
+    not in memory instead of leaving the user to guess.
+
+    The load is bounded by the configured model-load timeout and retried a
+    bounded number of times. Retrying is safe here: a load is idempotent, a
+    failed load leaves no weights behind, and the previous attempt has
+    finished before the next one starts. A timeout is never retried -- the
+    thread that overran may still be loading.
     """
     logger.info("Backend ready. ML model modules will load on demand.")
     try:
         from backend.services import gpt2_engine
         if gpt2_engine.is_available():
             logger.info("Pre-loading GPT-2 engine (torch/transformers)...")
-            result = await asyncio.to_thread(gpt2_engine.load)
-            logger.info("GPT-2 engine pre-loaded: status=%s",
-                        result.get("status", "unknown"))
+            settings = observability_mod.get_settings()
+
+            def _load_once():
+                outcome = call_with_timeout(
+                    gpt2_engine.load,
+                    settings.model_load_timeout_s,
+                    label="GPT-2 model load",
+                )
+                if not isinstance(outcome, dict) or outcome.get("status") != "loaded":
+                    reason = ((outcome or {}).get("error")
+                              or (outcome or {}).get("status")
+                              or "the engine did not report a loaded model")
+                    raise EngineFailure(reason)
+                return outcome
+
+            result, attempts = await asyncio.to_thread(
+                retry_call,
+                _load_once,
+                max(1, settings.retry_attempts),
+                settings.retry_backoff_s,
+            )
+            logger.info("GPT-2 engine pre-loaded: status=%s (attempt %s)",
+                        result.get("status", "unknown"), attempts)
         else:
             logger.info("GPT-2 engine not available - using seeded fallbacks.")
+    except EngineTimeout as exc:
+        logger.warning("GPT-2 pre-loading timed out: %s", exc)
+        observability_mod.record_error(exc, context="GPT-2 preload")
     except Exception as exc:
         logger.warning("GPT-2 pre-loading failed: %s", exc)
+        observability_mod.record_error(exc, context="GPT-2 preload")
+
+
+@app.middleware("http")
+async def _correlation_id_middleware(request: Request, call_next):
+    """Give every request a correlation id, and put it in the response.
+
+    The id travels in the ``X-Request-ID`` response header and in every log
+    line emitted while the request is handled, so an access-log line and the
+    application log can be joined without guessing from timestamps.
+
+    An id supplied by the caller is honoured, because it is what makes a
+    report from a user's browser traceable -- but it is sanitised first: an
+    id that could contain a newline would let a caller forge log lines.
+    """
+    request_id, token = observability_mod.bind_request_id(
+        _incoming_request_id(request.headers.get("x-request-id")))
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        logger.info("%s %s -> %s (request %s)",
+                    request.method, request.url.path, response.status_code,
+                    request_id)
+        return response
+    except Exception:
+        observability_mod.record_error(
+            sys.exc_info()[1],
+            context="unhandled error in %s %s" % (request.method, request.url.path),
+        )
+        raise
+    finally:
+        observability_mod.unbind_request_id(token)
+
+
+def _incoming_request_id(raw: Optional[str]) -> Optional[str]:
+    """Accept a caller-supplied correlation id only when it is safe to print.
+
+    Anything that is not a short run of letters, digits, dashes and
+    underscores is refused: a correlation id is written into every log line
+    of a request, so an id that carries a newline would let the caller
+    write log lines of their own.
+    """
+    if not raw:
+        return None
+    candidate = str(raw).strip()
+    if not candidate or len(candidate) > 64:
+        return None
+    if not all(char.isalnum() or char in "-_" for char in candidate):
+        return None
+    return candidate
 
 
 @app.middleware("http")
@@ -229,6 +328,7 @@ async def _request_log_middleware(request: Request, call_next):
                 request.url.path,
                 response.status_code,
                 (time.perf_counter() - started) * 1000.0,
+                request_id=observability_mod.current_request_id() or "",
             )
     except Exception:
         pass
@@ -376,15 +476,18 @@ async def _body_size_middleware(request: Request, call_next):
 #: and it changes whenever a middleware is added. This list is the order
 #: the security model needs, and the tests assert it:
 #:
-#:   1. CORS credentials - decides who may carry credentials cross-origin.
-#:   2. CORS             - every response (401/403/413 included) carries CORS
+#:   1. correlation id  - every request gets an id, and every response and
+#:                        log line carries it.
+#:   2. CORS credentials - decides who may carry credentials cross-origin.
+#:   3. CORS             - every response (401/403/413 included) carries CORS
 #:                         headers, so a browser client can read the refusal.
-#:   3. auth gate        - rejects an unauthenticated request BEFORE its body
+#:   4. auth gate        - rejects an unauthenticated request BEFORE its body
 #:                         is read, so an anonymous caller cannot make the
 #:                         server buffer megabytes.
-#:   4. body ceiling     - bounds the body of an authenticated request.
-#:   5. request log      - records what happened.
+#:   5. body ceiling     - bounds the body of an authenticated request.
+#:   6. request log      - records what happened.
 _MIDDLEWARE_ORDER = (
+    "_correlation_id_middleware",
     "_cors_credentials_middleware",
     "CORSMiddleware",
     "_auth_middleware",
@@ -422,7 +525,8 @@ _enforce_middleware_order()
 
 @app.get("/")
 def root():
-    return {"name": "MECH Platform", "version": "2.0.0", "status": "running"}
+    return {"name": "MECH Platform", "version": observability_mod.APP_VERSION,
+            "status": "running"}
 
 
 @app.post("/session")
@@ -550,6 +654,7 @@ for _module_name, _label in (
     ("backend.api.v1_contracts", "v1 contract API (21.1)"),
     ("backend.api.events", "job event stream (21.2)"),
     ("backend.api.export_contracts", "project export archive (19.3)"),
+    ("backend.api.diagnostics", "diagnostics and configuration API"),
 ):
     try:
         if importlib.util.find_spec(_module_name) is None:

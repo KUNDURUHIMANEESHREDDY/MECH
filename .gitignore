@@ -128,6 +128,12 @@ backend/interpretability/algorithms/translators/
 # Runtime job persistence for the /api/v2 queue. Regenerable state, not source.
 backend/storage/v2_jobs/
 
+# Rotating backend log (the observability module writes
+# <storage_root>/logs/mech.log and its rotations). Runtime output, not source:
+# committing it would put a developer's log -- and whatever paths it contains --
+# into the repository.
+backend/storage/logs/
+
 # Agent scratch: working notes and probe scripts from audit/engineering passes.
 # `_team/` notes are hand-written and worth keeping locally; `_audit_scratch/` is
 # throwaway probe output.
@@ -185,3 +191,13 @@ pip-modern-metadata-*/
 # Verification scratch written by the frontend checks (build/util/vitest
 # reports and screenshots). They are evidence for one run, not source.
 /frontend/tmp-*
+
+# Root-level scratch from agent and verification passes: probe scripts, spec
+# dumps, scratch reports. Working notes for one pass, not project source.
+/_*.py
+/_*.sh
+/_*.txt
+/_*.json
+/gs_*.txt
+/.deps-dryrun.json
+/frontend/release-build.log
