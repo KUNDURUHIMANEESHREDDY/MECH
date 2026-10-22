@@ -187,12 +187,23 @@ test.describe('Persistence and Reload', () => {
 
 test.describe('API Response Validation', () => {
   test('inference endpoint returns expected schema', async ({ page }) => {
+    // Loading the weights and running a prompt is minutes of CPU when the
+    // machine is busy. The point of this test is the response contract, so it
+    // gets a budget that covers the work rather than the default one.
+    test.setTimeout(600_000);
     const responses = [];
+    // Observe the response without sending the request twice.
+    //
+    // `route.fetch()` followed by `route.continue()` performs the request
+    // twice: the backend runs the forward pass twice, and on a busy machine
+    // the first fetch can exceed Playwright's 30s default, so the page never
+    // receives a response at all. Fulfilling the page with the fetched
+    // response sends it once and still lets the test read the body.
     await page.route('**/api/gpt2/run_prompt', async route => {
-      const response = await route.fetch();
+      const response = await route.fetch({ timeout: 180000 });
       const body = await response.json();
       responses.push(body);
-      route.continue();
+      await route.fulfill({ response });
     });
 
     await page.goto('/#explorer');

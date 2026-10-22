@@ -339,6 +339,31 @@ function resolveBuildPython() {
  * `requirements.txt` into the staged site-packages with pip, for a release that
  * must not inherit the build machine's resolution.
  */
+/**
+ * The pip invocation that resolves `requirements.txt` into the staged tree.
+ *
+ * The CPU index is an EXTRA index, not the only one. pip compares the
+ * candidates and a local version sorts above the plain release, so
+ * `2.14.1+cpu` wins over `2.14.1` and the CPU wheel is the one that gets
+ * installed -- while every other dependency still resolves against PyPI.
+ *
+ * Without it, the CPU profile downloaded the CUDA build (and the gigabytes of
+ * `nvidia*` libraries that come with it) and then threw it away, which is how
+ * a release build spent an hour downloading a wheel it did not ship.
+ *
+ * Exported so the profile's index handling can be asserted without
+ * downloading anything.
+ */
+function pipInstallArgs(siteTarget, { cpu = false } = {}) {
+  const args = [
+    '-m', 'pip', 'install', '--target', siteTarget, '--requirement', REQUIREMENTS,
+  ];
+  if (cpu) {
+    args.splice(args.indexOf('--requirement'), 0, '--extra-index-url', CPU_TORCH_INDEX);
+  }
+  return args;
+}
+
 function stage({ python = resolveBuildPython(), mode = 'installed', force = false, cpu = false } = {}) {
   const existing = readManifest();
   if (!force && isFresh(existing, python, mode, cpu)) {
@@ -367,8 +392,8 @@ function stage({ python = resolveBuildPython(), mode = 'installed', force = fals
     fs.rmSync(siteTarget, { recursive: true, force: true });
     const res = spawnSync(
       python,
-      ['-m', 'pip', 'install', '--target', siteTarget, '--requirement', REQUIREMENTS],
-      { encoding: 'utf8', stdio: 'inherit' }
+      pipInstallArgs(siteTarget, { cpu }),
+      { encoding: 'utf8', stdio: 'inherit' },
     );
     if (res.status !== 0) {
       throw new Error(`pip install --target failed with code ${res.status}`);
@@ -397,6 +422,9 @@ function stage({ python = resolveBuildPython(), mode = 'installed', force = fals
     python,
     mode,
     cpu,
+    // The profile in words, so the record does not depend on the reader
+    // knowing that `mode: reinstall` + `cpu: true` means "CPU-only torch".
+    profile: cpu ? 'cpu' : 'default',
     sizeBytes,
     basePrefix: base,
     sitePackages: siteTarget,
@@ -411,6 +439,41 @@ function stage({ python = resolveBuildPython(), mode = 'installed', force = fals
   );
 
   return { skipped: false, dest: DEST, manifest };
+}
+
+/**
+ * The torch profile a build must ship.
+ *
+ * `MECH_TORCH_PROFILE` makes the choice explicit:
+ *
+ *   `cpu`   stage (or keep) the CPU-only profile: pip-resolved requirements
+ *           plus the CPU torch wheel from download.pytorch.org/whl/cpu.
+ *   `auto`  (default) keep whatever profile is already staged, and stage the
+ *           default 'installed' profile only when nothing is staged at all.
+ *
+ * Why it has to be explicit: the default wheel on PyPI is the CUDA build,
+ * which drags in several GiB of `nvidia*` runtime libraries. A bundle built
+ * that way is ~5.8 GB, which NSIS cannot pack (makensis.exe is 32-bit and
+ * cannot memory-map an archive over 2 GB). The profile is recorded in
+ * MECH-RUNTIME.json, so the artifact says which torch it carries.
+ *
+ * The rule that matters: a profile is never changed silently. A staged CPU
+ * runtime stays CPU, and a staged default runtime stays default, unless the
+ * environment names a different one.
+ */
+function resolveProfile(existing, env = process.env) {
+  const raw = String(env.MECH_TORCH_PROFILE || 'auto').trim().toLowerCase();
+  if (raw === 'cpu') return { mode: 'reinstall', cpu: true, explicit: true };
+  if (raw !== 'auto') {
+    throw new Error(`unknown MECH_TORCH_PROFILE "${raw}": expected "cpu" or "auto"`);
+  }
+  // No explicit request: keep the profile that is already staged. Silently
+  // replacing a staged CPU runtime with the build machine's CUDA one is the
+  // exact failure this guards against.
+  if (existing && existing.mode) {
+    return { mode: existing.mode, cpu: Boolean(existing.cpu), explicit: false };
+  }
+  return { mode: 'installed', cpu: false, explicit: false };
 }
 
 function plan(options = {}) {
@@ -463,4 +526,16 @@ if (require.main === module) {
   }
 }
 
-module.exports = { DEST, MANIFEST, REQUIRED_IMPORTS, plan, stage, verify };
+module.exports = {
+  CPU_TORCH_INDEX,
+  DEST,
+  MANIFEST,
+  REQUIRED_IMPORTS,
+  isFresh,
+  pipInstallArgs,
+  plan,
+  readManifest,
+  resolveProfile,
+  stage,
+  verify,
+};

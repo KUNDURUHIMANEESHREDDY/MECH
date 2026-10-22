@@ -116,10 +116,19 @@ async function main() {
   }
 
   const electronBin = require('electron');
-  const child = spawn(electronBin, ['.'], {
+  // `ELECTRON_RUN_AS_NODE=1` in the environment makes electron.exe run as a
+  // plain Node process: `require('electron')` then resolves to the npm
+  // package -- a path string -- `app` is undefined, and the main process dies
+  // on its first line. The variable means "do not start the app", so the
+  // process that starts the app must not inherit it.
+  const childEnv = { ...process.env, VITE_DEV_SERVER_URL: DEV_URL };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  // Anything after `--` goes to Electron itself, e.g.
+  // `npm run dev:electron -- --no-sandbox`.
+  const child = spawn(electronBin, ['.', ...process.argv.slice(2)], {
     cwd: ROOT,
     stdio: 'inherit',
-    env: { ...process.env, VITE_DEV_SERVER_URL: DEV_URL }
+    env: childEnv
   });
   child.on('close', (code) => { killBackend(); process.exit(code ?? 0); });
 }

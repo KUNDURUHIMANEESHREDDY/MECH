@@ -64,9 +64,9 @@ test('sidebar exposes every navigation item', async ({ page }) => {
 
 test('sidebar navigation shows one titled tool view and updates the hash', async ({ page }) => {
   // One click per route, each with a scroll, a URL assertion and two view
-  // assertions. The default 30s timeout is not enough for the whole list.
-  // 36 routes, each with its own assertion budget.
-  test.setTimeout(900_000);
+  // assertions: 36 routes, each with its own assertion budget, and a test
+  // budget that covers the whole list.
+  test.setTimeout(1200_000);
   await page.goto('/');
   for (const [key] of NAV_PAGES) {
     const item = page.getByTestId(`nav-${key}`);
@@ -74,8 +74,11 @@ test('sidebar navigation shows one titled tool view and updates the hash', async
     await item.click();
     await expect(page).toHaveURL(new RegExp(`#${key}$`));
     const view = page.getByTestId(`view-${key}`);
-    await expect(view).toBeVisible();
-    await expect(view.getByRole('heading').first()).toBeVisible();
+    // A route's chunk is compiled on first request, so the first visit to a
+    // tool can take longer than the default per-assertion budget on a
+    // loaded machine.
+    await expect(view).toBeVisible({ timeout: 30_000 });
+    await expect(view.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
   }
 });
 

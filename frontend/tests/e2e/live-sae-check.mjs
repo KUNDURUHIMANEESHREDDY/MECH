@@ -216,6 +216,34 @@ if (canUseCheckpoint) {
       activationMismatches.join('; ') || 'all match',
     ) && passed;
 
+    // The reconstruction number on screen is the number the API returned, and
+    // the tensor it refers to is named: a fidelity figure without the tensor
+    // it was measured on is a number about nothing.
+    const reconstruction = await view.getByTestId('sae-reconstruction').innerText().catch(() => '');
+    const apiError = payload.relative_l2_error;
+    if (payload.reconstruction_measured === true && typeof apiError === 'number') {
+      const renderedError = reconstruction.includes(String(apiError))
+        || reconstruction.includes(apiError.toFixed(6))
+        || reconstruction.includes(String(Number(apiError.toFixed(6))));
+      passed = check(
+        'the rendered reconstruction error is the value the API returned',
+        renderedError,
+        `api relative_l2_error=${apiError}`,
+      ) && passed;
+    } else {
+      passed = check(
+        'an unmeasured reconstruction is shown as unavailable, not as a number',
+        reconstruction.includes('NOT AVAILABLE'),
+        reconstruction.replace(/\s+/g, ' ').slice(0, 120),
+      ) && passed;
+    }
+    const apiTensor = String(payload.tensor_source ?? '');
+    passed = check(
+      'the view names the tensor the reconstruction was measured on',
+      apiTensor ? reconstruction.includes(apiTensor) : true,
+      apiTensor || 'the API named no tensor',
+    ) && passed;
+
     const evidence = await view.getByTestId('sae-evidence').innerText().catch(() => '');
     console.log('evidence level shown:', evidence);
   }

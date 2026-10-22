@@ -1,11 +1,25 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, dialog, session } = require('electron');
+const electron = require('electron');
+
+// `ELECTRON_RUN_AS_NODE=1` makes electron.exe run as a plain Node process.
+// `require('electron')` then resolves to the npm package -- a path string --
+// so every API below is undefined and the next line dies with a TypeError
+// that says nothing about the cause. Name the cause instead.
+if (!electron || !electron.app) {
+  console.error('[mech] ELECTRON_RUN_AS_NODE is set, so Electron ran as plain Node.');
+  console.error('[mech] Unset it (set ELECTRON_RUN_AS_NODE=) and start the app again.');
+  process.exit(1);
+}
+
+const { app, BrowserWindow, ipcMain, shell, dialog, session } = electron;
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const http = require('node:http');
 const fs = require('node:fs');
 const { registerIpcHandlers } = require('./ipc');
+const { resolveApiToken } = require('./apiProxy');
+const crypto = require('node:crypto');
 const { getLogger } = require('./logger');
 const { getStorage } = require('./storage');
 
@@ -149,6 +163,14 @@ async function startBackend(logger) {
     const res = await probeHealth();
     if (res.statusCode && res.statusCode < 500) {
       logger.info('backend_reuse', { url: BACKEND_URL });
+      if (!resolveApiToken()) {
+        // The backend on this port was not started by this build and its
+        // token is not readable here, so every proxied request will fail
+        // with "API token unavailable". Say so once, at startup.
+        logger.error('backend_token_unresolved', {
+          hint: 'set MECH_API_TOKEN to the token the reused backend accepts'
+        });
+      }
       return null;
     }
   } catch {
@@ -185,6 +207,20 @@ async function startBackend(logger) {
     );
   }
 
+  // The backend and this process must agree on one token. The backend prefers
+  // MECH_API_TOKEN over the file it writes, and the renderer proxy prefers
+  // the same variable, so sharing it here means a packaged install
+  // authenticates even where the token file cannot be written.
+  const tokenFromFile = resolveApiToken();
+  if (tokenFromFile) {
+    process.env.MECH_API_TOKEN = tokenFromFile;
+  } else if (!isDev && !process.env.MECH_API_TOKEN) {
+    // No token file: a fresh packaged install, or one whose storage
+    // directory is not writable. The token travels in the child's
+    // environment instead. In development the backend writes the file
+    // itself and a browser session reads that same file.
+    process.env.MECH_API_TOKEN = crypto.randomBytes(32).toString('base64url');
+  }
   logger.info('backend_spawning', { pythonPath, scriptPath, cwd, pythonPathEnv });
 
   const stderrTail = [];

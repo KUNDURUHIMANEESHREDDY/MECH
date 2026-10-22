@@ -199,10 +199,32 @@ function stagePythonRuntime() {
   // A release ships its interpreter. `scripts/python_runtime.js` assembles a
   // relocatable CPython + site-packages and executes the result to prove the
   // backend's imports resolve; a failure here stops the build.
-  const { stage } = require('./python_runtime');
+  //
+  // Two invariants:
+  //
+  // 1. The runtime that ships is the runtime that was staged, and staging
+  //    happens once, explicitly. `stage()` skips a restage when the manifest
+  //    on disk is fresh for the profile being requested, so a second
+  //    `npm run build` cannot quietly rewrite the staged tree.
+  // 2. The profile is never changed silently. A staged CPU runtime stays CPU
+  //    unless `MECH_TORCH_PROFILE=cpu` says so, and a staged default runtime
+  //    stays default unless it says `cpu`.
+  const { stage, readManifest, resolveProfile } = require('./python_runtime');
+  const existing = readManifest();
+  const profile = resolveProfile(existing);
   let result;
   try {
-    result = stage({ force: false });
+    result = stage({
+      mode: profile.mode,
+      cpu: profile.cpu,
+      force: false,
+      // Compare like with like: a restage must use the interpreter the
+      // staged runtime came from, or the freshness check compares two
+      // different installations and calls a fresh runtime stale.
+      ...(existing && existing.python && fs.existsSync(existing.python)
+        ? { python: existing.python }
+        : {}),
+    });
   } catch (err) {
     console.error('[build] could not stage the bundled Python runtime:', err.message);
     console.error('[build] The installer would have no interpreter to start the backend.');
@@ -211,7 +233,8 @@ function stagePythonRuntime() {
   const manifest = result.manifest || {};
   console.log(
     `[build] python runtime ${result.skipped ? 'already staged' : 'staged'}: ` +
-    `${manifest.version || '?'} -> build/python`
+    `${manifest.version || '?'} ` +
+    `(${manifest.profile || (manifest.cpu ? 'cpu' : 'default')}) -> build/python`
   );
 }
 

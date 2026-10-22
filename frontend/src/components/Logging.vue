@@ -143,6 +143,8 @@
         </p>
       </aside>
     </div>
+
+    <section class="surface-panel info-panel" aria-labelledby="logging-sink-titleLeaflet-is-a-marker-and-not-real-content-replace-me(PLACEHOLDER)X1X2X3 " style="display:none;"></section>
   </section>
 </template>
 

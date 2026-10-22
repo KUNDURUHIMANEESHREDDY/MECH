@@ -50,6 +50,19 @@
       {{ promptMsg.text }}
     </div>
 
+    <!-- Availability. The backend's own reason, shown verbatim: a surface
+         that could not read anything says so, instead of rendering an empty
+         result that reads like a measurement. -->
+    <div
+      v-if="modelError || treeError"
+      class="px-4 py-1.5 text-[11px] shrink-0 border-b border-[var(--border)] text-[var(--danger)] bg-[var(--danger)]/[0.09]"
+      role="alert"
+      data-testid="ne-unavailable"
+    >
+      <span v-if="modelError">{{ modelError }}</span>
+      <span v-else>{{ treeError }}</span>
+    </div>
+
     <!-- Token strip -->
     <div
       v-if="strTokens.length > 0"
@@ -113,7 +126,7 @@
                 v-for="h in layer.attention_heads_preview"
                 :key="h.head_index"
                 :id="`tree-head-btn-${layer.layer_index}-${h.head_index}`"
-                :title="`Head ${h.head_index} — Q L2: ${h.q_weight_l2?.toFixed(3)}`"
+                :title="`Head ${h.head_index} — Q L2: ${metric(h.q_weight_l2, 3)}`"
                 @click="() => { selectLayer(layer); handleSelectHead(layer.layer_index, h.head_index); }"
                 class="block w-full text-left py-[3px] px-2 bg-transparent border-none text-[11px] cursor-pointer"
                 :class="selectedHead?.layer === layer.layer_index && selectedHead?.head_index === h.head_index
@@ -123,7 +136,7 @@
                 <span v-if="h.top_token" class="text-[var(--primary)] text-[10px] ml-1">· {{ fmtToken(h.top_token) }}</span>
               </button>
               <div class="text-[10px] text-[var(--ink-muted-48)] pl-2 mt-1">
-                {{ layer.num_mlp_neurons }} MLP neurons
+                {{ metric(layer.num_mlp_neurons, 0) }} MLP neurons
               </div>
               <template v-if="layer.mlp_neurons_preview?.length">
                 <button
@@ -149,10 +162,10 @@
       <div v-if="selectedLayer" class="w-[260px] bg-[var(--surface-pearl)] border-r border-[var(--border)] overflow-y-auto p-4">
         <div class="text-[13px] font-bold text-[var(--primary)] mb-3">
           Layer {{ selectedLayer.layer_index }}
-          <span class="text-[10px] text-[var(--ink-muted-48)] font-normal ml-2">d={{ selectedLayer.residual_stream_dim }}</span>
+          <span class="text-[10px] text-[var(--ink-muted-48)] font-normal ml-2">d={{ metric(selectedLayer.residual_stream_dim, 0) }}</span>
         </div>
         <div class="text-[10px] text-[var(--ink-muted-48)] uppercase tracking-widest mb-1.5">
-          Attention Heads ({{ selectedLayer.num_attention_heads }}) · click to inspect
+          Attention Heads ({{ metric(selectedLayer.num_attention_heads, 0) }}) · click to inspect
         </div>
         <div class="grid grid-cols-4 gap-1 mb-4">
           <button
@@ -235,7 +248,12 @@
         </div>
       </div>
       <div v-else class="flex-1 overflow-y-auto p-5 bg-[var(--bg)]">
-        <div v-if="!neuronDetail" class="flex-1 flex items-center justify-center text-[var(--ink-muted-48)] text-[14px]">
+        <div v-if="neuronError" class="flex-1 p-5" role="alert" data-testid="ne-neuron-error">
+          <div class="bg-[var(--danger)]/[0.09] border border-[var(--danger)]/[0.33] text-[var(--danger)] rounded-lg px-4 py-3 text-xs">
+            {{ neuronError }}
+          </div>
+        </div>
+        <div v-else-if="!neuronDetail" class="flex-1 flex items-center justify-center text-[var(--ink-muted-48)] text-[14px]">
           Select a neuron to inspect
         </div>
         <template v-else>
@@ -265,15 +283,15 @@
               <div class="text-[11px] text-[var(--ink-muted-48)] mb-1 uppercase tracking-widest">Weight Summary</div>
               <div class="grid grid-cols-2 gap-1.5 text-[11px]">
                 <span class="text-[var(--ink-muted-48)]">Bias</span>
-                <span class="text-[var(--body-muted)]">{{ neuronDetail.bias !== null ? neuronDetail.bias.toFixed(4) : 'N/A' }}</span>
+                <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.bias) }}</span>
                 <span class="text-[var(--ink-muted-48)]">In Weight L2</span>
-                <span class="text-[var(--body-muted)]">{{ neuronDetail.in_weight_l2 !== null ? neuronDetail.in_weight_l2.toFixed(4) : 'N/A' }}</span>
+                <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.in_weight_l2) }}</span>
                 <span class="text-[var(--ink-muted-48)]">Out Weight L2</span>
-                <span class="text-[var(--body-muted)]">{{ neuronDetail.out_weight_l2 !== null ? neuronDetail.out_weight_l2.toFixed(4) : 'N/A' }}</span>
+                <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.out_weight_l2) }}</span>
                 <span class="text-[var(--ink-muted-48)]">In Mean</span>
-                <span class="text-[var(--body-muted)]">{{ neuronDetail.in_weight_stats?.mean !== undefined ? neuronDetail.in_weight_stats.mean.toFixed(4) : 'N/A' }}</span>
+                <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.in_weight_stats?.mean) }}</span>
                 <span class="text-[var(--ink-muted-48)]">Out Mean</span>
-                <span class="text-[var(--body-muted)]">{{ neuronDetail.out_weight_stats?.mean !== undefined ? neuronDetail.out_weight_stats.mean.toFixed(4) : 'N/A' }}</span>
+                <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.out_weight_stats?.mean) }}</span>
               </div>
             </div>
 
@@ -283,13 +301,13 @@
               <template v-if="neuronDetail.activation_stats">
                 <div class="grid grid-cols-2 gap-1.5 text-[11px]">
                   <span class="text-[var(--ink-muted-48)]">Mean</span>
-                  <span class="text-[var(--body-muted)]">{{ neuronDetail.activation_stats.mean.toFixed(4) }}</span>
+                  <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.activation_stats.mean) }}</span>
                   <span class="text-[var(--ink-muted-48)]">Std</span>
-                  <span class="text-[var(--body-muted)]">{{ neuronDetail.activation_stats.std.toFixed(4) }}</span>
+                  <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.activation_stats.std) }}</span>
                   <span class="text-[var(--ink-muted-48)]">Min</span>
-                  <span class="text-[var(--body-muted)]">{{ neuronDetail.activation_stats.min.toFixed(4) }}</span>
+                  <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.activation_stats.min) }}</span>
                   <span class="text-[var(--ink-muted-48)]">Max</span>
-                  <span class="text-[var(--body-muted)]">{{ neuronDetail.activation_stats.max.toFixed(4) }}</span>
+                  <span class="text-[var(--body-muted)]">{{ metric(neuronDetail.activation_stats.max) }}</span>
                 </div>
               </template>
               <span v-else class="text-[var(--ink-muted-48)] text-[11px]">No activations — run a prompt first</span>
@@ -366,7 +384,7 @@
               <template v-if="neuronDetail.nearest_neurons?.length">
                 <div v-for="n in neuronDetail.nearest_neurons" :key="n.neuron_index" class="flex justify-between text-[11px] mb-1">
                   <span class="text-[var(--ink-muted-48)]">L{{ n.layer }}N{{ n.neuron_index }}</span>
-                  <span class="text-[var(--primary)]">{{ (n.similarity * 100).toFixed(1) }}%</span>
+                  <span class="text-[var(--primary)]">{{ percent(n.similarity) }}</span>
                 </div>
               </template>
               <span v-else class="text-[var(--ink-muted-48)] text-[11px]">No nearest neighbors.</span>
@@ -388,32 +406,50 @@
                 <button
                   id="patch-run-btn"
                   @click="handlePatch"
-                  class="rounded-lg px-5 py-2 text-[13px] font-semibold text-white cursor-pointer mt-5 bg-[var(--primary)]"
+                  :disabled="!selectedNeuron"
+                  :title="selectedNeuron
+                    ? 'Patch this neuron and re-read it from the live model'
+                    : 'Select a neuron first: there is nothing to patch.'"
+                  class="rounded-lg px-5 py-2 text-[13px] font-semibold text-white cursor-pointer mt-5 bg-[var(--primary)] disabled:cursor-default disabled:opacity-60"
                 >
                   <svg width="12" height="12" viewBox="0 0 12 12" class="mr-1.5 inline-block align-middle">
                     <polygon points="2,0 12,6 2,12" fill="currentColor" />
                   </svg>
                   Run Patch
                 </button>
-                <template v-if="patchResult">
+                <p class="text-[10px] text-[var(--ink-muted-48)] mt-2 max-w-[420px]">
+                  Intervention prompt: <code>The Eiffel Tower is in</code> — the same prompt is read before and
+                  after the patch, so the two readings differ only by the patched neuron.
+                </p>
+                <div
+                  v-if="patchError"
+                  class="bg-[var(--danger)]/[0.09] border border-[var(--danger)]/[0.33] text-[var(--danger)] rounded-lg px-4 py-3 text-xs mt-4"
+                  role="alert"
+                  data-testid="ne-patch-error"
+                >
+                  {{ patchError }}
+                </div>
+                <template v-if="patchResult && patchResult.status === 'ok'">
                   <div class="flex gap-4 mt-4 flex-wrap">
                     <div class="bg-[var(--bg)] rounded-lg px-3.5 py-2 text-center">
                       <div class="text-[10px] text-[var(--ink-muted-48)]">Before</div>
-                      <code class="text-[var(--primary-focus)] text-[13px]">{{ patchResult.top_token_before }}</code>
+                      <code class="text-[var(--primary-focus)] text-[13px]">{{ patchResult.top_token_before ?? 'not measured' }}</code>
                     </div>
                     <svg width="20" height="14" viewBox="0 0 20 14" class="text-[var(--primary)] self-center">
                       <path d="M0 7 H16 M11 2 L16 7 L11 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                     <div class="bg-[var(--bg)] rounded-lg px-3.5 py-2 text-center">
                       <div class="text-[10px] text-[var(--ink-muted-48)]">After</div>
-                      <code class="text-[var(--primary)] text-[13px]">{{ patchResult.top_token_after }}</code>
+                      <code class="text-[var(--primary)] text-[13px]">{{ patchResult.top_token_after ?? 'not measured' }}</code>
                     </div>
                     <div class="bg-[var(--bg)] rounded-lg px-3.5 py-2 text-center">
                       <div class="text-[10px] text-[var(--ink-muted-48)]">Δ logit</div>
                       <span class="text-[13px] font-bold"
-                        :class="patchResult.delta > 0 ? 'text-[var(--primary)]' : 'text-[var(--danger)]'"
+                        :class="typeof patchResult.delta === 'number' && Number.isFinite(patchResult.delta)
+                          ? (patchResult.delta > 0 ? 'text-[var(--primary)]' : 'text-[var(--danger)]')
+                          : 'text-[var(--ink-muted-48)]'"
                       >
-                        {{ patchResult.delta > 0 ? '+' : '' }}{{ patchResult.delta?.toFixed(4) }}
+                        {{ metric(patchResult.delta) }}
                       </span>
                     </div>
                   </div>
@@ -440,6 +476,23 @@ function fmtToken(tok: string) {
   return String(tok).replaceAll('Ġ', '␣').replaceAll('Ċ', '⏎').trim();
 }
 
+/**
+ * One measured number, or the words "not measured".
+ *
+ * A field the backend did not return is not zero and not a rounded guess.
+ * Rendering it as 0 would put a number on screen that nobody measured.
+ */
+function metric(value: unknown, digits = 4): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : 'not measured';
+}
+
+/** A measured percentage, or the words "not measured". */
+function percent(value: unknown, digits = 1): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${(value * 100).toFixed(digits)}%`
+    : 'not measured';
+}
+
 class ToggleSet {
   private s = reactive(new Set<number>());
   has(v: number) { return this.s.has(v); }
@@ -458,6 +511,16 @@ const selectedHead = ref<any>(null);
 const headDetail = ref<any>(null);
 const headError = ref<string | null>(null);
 const headLoading = ref(false);
+/**
+ * Why a surface has nothing to show.
+ *
+ * Each holds the backend's own reason, shown verbatim. A view that cannot
+ * say why it is empty must not render an empty result as if it were one.
+ */
+const modelError = ref<string | null>(null);
+const treeError = ref<string | null>(null);
+const neuronError = ref<string | null>(null);
+const patchError = ref<string | null>(null);
 const loading = ref(false);
 const prompt = ref('The capital of France is');
 const promptRunning = ref(false);
@@ -497,31 +560,83 @@ const selTokIdx = computed(() => {
 });
 
 /* ── API helpers ────────────────────────────────── */
-async function callApi(path: string, params: Record<string, unknown> = {}) {
-  try {
-    return await api.pythonCall(path, params);
-  } catch { return null; }
+/**
+ * Every backend call in this view goes through here.
+ *
+ * It throws instead of swallowing: a request that never completed must not
+ * become an empty result that reads like a measurement. `POST /api/gpt2/*`
+ * fails closed -- it answers `status: "unavailable"` with an `error` string
+ * when there are no live weights -- so the status and the provenance are
+ * both checked here and the backend's own reason is what the user reads.
+ */
+async function callApi(path: string, params: Record<string, unknown> = {}): Promise<any> {
+  const record = await api.pythonCall(path, params) as any;
+  if (!record || typeof record !== 'object') {
+    throw new Error(`POST /api/${path} returned no payload.`);
+  }
+  if (!isMeasurement(record)) {
+    throw new Error(recordReason(record, path));
+  }
+  return record;
+}
+
+/**
+ * A record is a measurement only when the backend both ran it and attested it.
+ *
+ * `status: "ok"` alone is not enough: the API boundary withholds a record it
+ * cannot vouch for by setting `provenance: "unavailable"`, and such a record
+ * still carries its numbers and can still say `status: "ok"`. Rendering those
+ * numbers would present an unmeasured value as a measurement.
+ */
+function isMeasurement(record: any): boolean {
+  if (!record || typeof record !== 'object') return false;
+  if (record.status !== 'ok') return false;
+  const provenance = typeof record.provenance === 'string' ? record.provenance.trim().toLowerCase() : '';
+  return provenance !== 'unavailable';
+}
+
+/** The backend's own words for why nothing was measured. */
+function recordReason(record: any, path: string): string {
+  const detail = [record?.error, record?.reason]
+    .find((value) => typeof value === 'string' && value.trim());
+  if (typeof detail === 'string') return detail.trim();
+  const status = typeof record?.status === 'string' && record.status ? record.status : 'unknown';
+  return `POST /api/${path} did not run (status: ${status}).`;
+}
+
+function reasonOf(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error);
 }
 
 /* ── model loading ──────────────────────────────── */
 onMounted(async () => {
   loading.value = true;
+  modelError.value = null;
   try {
     const arch = await api.gpt2Architecture();
-    if ((arch as any).status === 'ok') {
-      const model = {
-        id: 'gpt2-small',
-        label: (arch as any).model_name || 'GPT-2',
-        family: (arch as any).model_type || 'gpt2',
-        layers: (arch as any).n_layers,
-        heads: (arch as any).n_heads,
-        d_model: (arch as any).d_model,
-        d_mlp: (arch as any).d_mlp,
-      };
-      models.value = [model];
-      selectedModel.value = model;
+    if (!isMeasurement(arch)) {
+      modelError.value = recordReason(arch, 'gpt2/architecture');
+      return;
     }
-  } catch { /* ok */ } finally {
+    const layerCount = Number(arch.n_layers);
+    if (!Number.isFinite(layerCount) || layerCount <= 0) {
+      modelError.value = 'POST /api/gpt2/architecture did not report a layer count.';
+      return;
+    }
+    models.value = [{
+      id: 'gpt2-small',
+      label: arch.model_name || 'GPT-2',
+      family: arch.model_type || 'gpt2',
+      layers: layerCount,
+      heads: arch.n_heads,
+      d_model: arch.d_model,
+      d_mlp: arch.d_mlp,
+    }];
+    selectedModel.value = models.value[0];
+  } catch (error) {
+    modelError.value = reasonOf(error);
+  } finally {
     loading.value = false;
   }
 });
@@ -530,14 +645,16 @@ onMounted(async () => {
 async function loadTree() {
   if (!selectedModel.value) return;
   loading.value = true;
+  treeError.value = null;
   const layers: any[] = [];
+  const failures: string[] = [];
   let anyActivations = false;
   for (let li = 0; li < selectedModel.value.layers; li++) {
-    const res = await callApi('gpt2/layer', { layer: li }) as any;
-    if (res && res.status === 'ok') {
-      const preview = res.top_active_neurons || [];
+    try {
+      const res = await callApi('gpt2/layer', { layer: li });
+      const preview = Array.isArray(res.top_active_neurons) ? res.top_active_neurons : [];
       if (preview.length > 0) anyActivations = true;
-      if (res.str_tokens) strTokens.value = res.str_tokens;
+      if (Array.isArray(res.str_tokens)) strTokens.value = res.str_tokens;
       layers.push({
         layer_index: res.layer,
         label: res.path || `blocks.${li}`,
@@ -545,17 +662,32 @@ async function loadTree() {
         num_mlp_neurons: res.num_mlp_neurons,
         residual_stream_dim: res.residual_stream_dim,
         n_params: res.n_params,
-        attention_heads_preview: res.attention_heads || [],
+        attention_heads_preview: Array.isArray(res.attention_heads) ? res.attention_heads : [],
         mlp_neurons_preview: preview,
         known_circuits: [],
       });
+    } catch (error) {
+      // One unreadable layer is recorded, not hidden: a partially read model
+      // is shown as partial, and a model that could not be read at all is
+      // shown as unavailable rather than as an empty tree.
+      failures.push(`L${li}: ${reasonOf(error)}`);
     }
+  }
+  if (!layers.length) {
+    treeData.value = null;
+    hasActivations.value = false;
+    treeError.value = failures.length
+      ? `No layer could be read from POST /api/gpt2/layer. ${failures.join(' · ')}`
+      : 'POST /api/gpt2/layer returned no layers.';
+    loading.value = false;
+    return;
   }
   treeData.value = { layers };
   hasActivations.value = anyActivations;
-  if (layers.length > 0) {
-    selectedLayer.value = layers.find((l: any) => l.layer_index === selectedLayer.value?.layer_index) || layers[0];
+  if (failures.length) {
+    treeError.value = `${failures.length} of ${selectedModel.value.layers} layers could not be read. ${failures.join(' · ')}`;
   }
+  selectedLayer.value = layers.find((l: any) => l.layer_index === selectedLayer.value?.layer_index) || layers[0];
   loading.value = false;
 }
 
@@ -573,12 +705,22 @@ watch(selectedModel, () => {
 watch(selectedNeuron, () => {
   if (!selectedNeuron.value) return;
   patchResult.value = null;
-  callApi('gpt2/neuron', {
-    layer: selectedNeuron.value.layer,
-    neuron_index: selectedNeuron.value.neuron_index,
-    component: 'mlp',
-    top_k_weights: 16,
-  }).then((data) => { if (data) neuronDetail.value = data; });
+  patchError.value = null;
+  neuronError.value = null;
+  neuronDetail.value = null;
+  void (async () => {
+    try {
+      neuronDetail.value = await callApi('gpt2/neuron', {
+        layer: selectedNeuron.value.layer,
+        neuron_index: selectedNeuron.value.neuron_index,
+        component: 'mlp',
+        top_k_weights: 16,
+      });
+    } catch (error) {
+      neuronDetail.value = null;
+      neuronError.value = reasonOf(error);
+    }
+  })();
 });
 
 /* ── head detail ────────────────────────────────── */
@@ -587,15 +729,19 @@ watch(selectedHead, () => {
   headLoading.value = true;
   headError.value = null;
   headDetail.value = null;
-  callApi('gpt2/attention_head', {
-    layer: selectedHead.value.layer,
-    head: selectedHead.value.head_index,
-  }).then((data: any) => {
-    headLoading.value = false;
-    if (!data) { headError.value = 'No response from the Python backend.'; return; }
-    if (data.status === 'ok') headDetail.value = data;
-    else headError.value = data.error || 'Failed to load attention pattern.';
-  });
+  void (async () => {
+    try {
+      headDetail.value = await callApi('gpt2/attention_head', {
+        layer: selectedHead.value.layer,
+        head: selectedHead.value.head_index,
+      });
+    } catch (error) {
+      headDetail.value = null;
+      headError.value = reasonOf(error);
+    } finally {
+      headLoading.value = false;
+    }
+  })();
 });
 
 /* ── actions ────────────────────────────────────── */
@@ -629,21 +775,33 @@ function onModelChange(e: Event) {
 
 async function handlePatch() {
   if (!selectedNeuron.value) return;
-  const result = await callApi('gpt2/patch_neuron', {
-    layer: selectedNeuron.value.layer,
-    neuron_index: selectedNeuron.value.neuron_index,
-    patch_value: patchVal.value,
-    prompt: 'The Eiffel Tower is in',
-  }) as any;
-  if (result) {
-    patchResult.value = result;
-    const updated = await callApi('gpt2/neuron', {
+  patchError.value = null;
+  patchResult.value = null;
+  try {
+    patchResult.value = await callApi('gpt2/patch_neuron', {
+      layer: selectedNeuron.value.layer,
+      neuron_index: selectedNeuron.value.neuron_index,
+      patch_value: patchVal.value,
+      prompt: 'The Eiffel Tower is in',
+    });
+  } catch (error) {
+    // The patch did not run. Nothing is rendered for it: an unrun patch is
+    // not a patch with no effect.
+    patchResult.value = null;
+    patchError.value = reasonOf(error);
+    return;
+  }
+  try {
+    neuronDetail.value = await callApi('gpt2/neuron', {
       layer: selectedNeuron.value.layer,
       neuron_index: selectedNeuron.value.neuron_index,
       component: 'mlp',
       top_k_weights: 16,
     });
-    if (updated) neuronDetail.value = updated;
+  } catch (error) {
+    // The patch itself ran; only the refreshed detail could not be read.
+    neuronDetail.value = null;
+    neuronError.value = reasonOf(error);
   }
 }
 
@@ -652,18 +810,24 @@ async function handleRunPrompt() {
   if (!text || promptRunning.value) return;
   promptRunning.value = true;
   promptMsg.value = null;
+  treeError.value = null;
   try {
-    const res = await api.gpt2RunPrompt(text);
-    if (res && (res as any).status === 'ok') {
-      promptMsg.value = {
-        ok: true,
-        text: `Prompt ran — ${(res as any).str_tokens?.length || 0} tokens. Reloading activation map…`,
-      };
-      await loadTree();
-      promptMsg.value = { ok: true, text: `Prompt ran — activation map populated.` };
-    } else {
-      promptMsg.value = { ok: false, text: 'Prompt failed — check the Python backend status.' };
+    const res = await api.gpt2RunPrompt(text) as any;
+    if (!isMeasurement(res)) {
+      promptMsg.value = { ok: false, text: `Prompt failed — ${recordReason(res, 'gpt2/run_prompt')}` };
+      return;
     }
+    const tokenCount = Array.isArray(res.str_tokens) ? res.str_tokens.length : null;
+    promptMsg.value = {
+      ok: true,
+      text: tokenCount === null
+        ? 'Prompt ran — the backend reported no token count. Reloading activation map…'
+        : `Prompt ran — ${tokenCount} tokens. Reloading activation map…`,
+    };
+    await loadTree();
+    promptMsg.value = treeError.value
+      ? { ok: false, text: `Prompt ran, but the activation map could not be read in full. ${treeError.value}` }
+      : { ok: true, text: 'Prompt ran — activation map populated.' };
   } catch (e: any) {
     promptMsg.value = { ok: false, text: `Error running prompt: ${e?.message || String(e)}` };
   } finally {
