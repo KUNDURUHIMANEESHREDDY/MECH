@@ -37,6 +37,20 @@
             autocomplete="off"
             @input="validationMessage = ''"
           />
+          <div class="society__effort">
+            <label for="society-effort">Effort</label>
+            <select
+              id="society-effort"
+              v-model="effort"
+              class="society__effort-select"
+              data-testid="society-effort"
+              :disabled="isActive"
+            >
+              <option value="quick">Quick — 2 prompts, no validation claim</option>
+              <option value="standard">Standard — 10 prompts</option>
+              <option value="full">Full — 25 prompts</option>
+            </select>
+          </div>
           <button
             type="submit"
             class="society__button society__button--primary"
@@ -102,8 +116,9 @@
       <span>{{ errorMessage }}</span>
     </div>
 
-    <p v-if="runId" class="society__run-meta">
+    <p v-if="runId" class="society__run-meta" data-testid="society-run-meta">
       <span>Run <code>{{ runId }}</code></span>
+      <span v-if="effortUsed"> · Effort: {{ effortUsed }}</span>
       <span v-if="runStatus"> · Backend status: {{ runStatus }}</span>
       <span v-else-if="phase === 'done' || phase === 'failed'"> · Backend status unavailable</span>
       <span> · Provenance: {{ runProvenance }}</span>
@@ -288,6 +303,9 @@ const runHistoryUrl = `${SOCIETY_BASE}/runs`;
 
 const goal = ref('');
 const phase = ref<Phase>('idle');
+/** How much the run may cost. The backend reports what it actually used. */
+const effort = ref<'quick' | 'standard' | 'full'>('standard');
+const effortUsed = ref('');
 const runId = ref<string | null>(null);
 const runGoal = ref('');
 const runStatus = ref<string | null>(null);
@@ -637,9 +655,10 @@ async function handleRun(): Promise<void> {
   validationMessage.value = '';
 
   try {
-    const started = await startSocietyRun(submittedGoal);
+    const started = await startSocietyRun(submittedGoal, 'gpt2', effort.value);
     if (generation !== requestGeneration || phase.value !== 'starting') return;
     runId.value = started.runId;
+    effortUsed.value = describeEffort(started.effort);
     runStatus.value = asText(started.status) ?? null;
     phase.value = 'running';
     backendState.value = 'online';
@@ -723,6 +742,17 @@ function handleOnline(): void {
 function handleOffline(): void {
   browserOnline.value = false;
   backendState.value = 'offline';
+}
+
+/** The effort the backend reported, in words rather than as raw numbers. */
+function describeEffort(effortUsedByBackend: Record<string, number> | null | undefined): string {
+  if (!effortUsedByBackend) return '';
+  const prompts = Number(effortUsedByBackend.n_prompts);
+  if (!Number.isFinite(prompts)) return '';
+  const interaction = Number(effortUsedByBackend.n_interaction_prompts);
+  return Number.isFinite(interaction)
+    ? `${prompts} prompts, ${interaction} interaction prompts`
+    : `${prompts} prompts`;
 }
 
 const isActive = computed(() => phase.value === 'starting' || phase.value === 'running');
@@ -969,6 +999,34 @@ onBeforeUnmount(() => {
 .society__run-card,
 .society__card {
   padding: 14px;
+}
+
+.society__effort {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 168px;
+}
+
+.society__effort label {
+  color: var(--ink-muted-80);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.society__effort-select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.society__effort-select:disabled {
+  opacity: 0.6;
 }
 
 .society__field {

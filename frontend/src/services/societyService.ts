@@ -15,6 +15,8 @@ export interface SocietyRunStarted {
   runId: string;
   status: string;
   stream: string;
+  /** The effort the backend was asked to spend, as it reported it. */
+  effort?: Record<string, number> | null;
 }
 
 export interface SocietyEvent {
@@ -31,11 +33,25 @@ export interface SocietyRunStatus {
   result: Record<string, any> | null;
 }
 
-export async function startSocietyRun(goal: string, modelName = 'gpt2'): Promise<SocietyRunStarted> {
+/**
+ * Start a run.
+ *
+ * `effort` is how much the run may cost: the live discovery sweeps every
+ * attention head of GPT-2 on every prompt, so the cost of a run is set by its
+ * sample. "quick" is a smaller sample that cannot support a validation claim
+ * (the backend says so), "standard" is the sample the platform treats as
+ * adequate, and "full" is a larger one. The backend reports the effort it
+ * used, and that is what the panel shows.
+ */
+export async function startSocietyRun(goal: string, modelName = 'gpt2', effort?: string): Promise<SocietyRunStarted> {
   const res = await apiFetch(`${SOCIETY_BASE}/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ goal, model_name: modelName }),
+    body: JSON.stringify({
+      goal,
+      model_name: modelName,
+      ...(effort ? { effort } : {}),
+    }),
   });
   if (!res.ok) throw new Error(`Society run failed: ${res.status} ${res.statusText}`);
   const data = (await res.json()) as SocietyRunStarted & { error?: string };

@@ -259,6 +259,87 @@ is cut; nothing here is invented to fill a released-version heading.
 - Plugin install confined to trusted roots; plugin `name`/`entry` validated;
   sandbox escape via `collections._sys` closed at the dynamic capability layer.
 
+### Fixed (release-gate pass: evidence chain, science, security, packaging)
+
+- **A run is bound to the whole chain, not just the weights.** `run_id`,
+  `dataset_sha256` and `code_revision` are now attested together
+  (`backend/science/reproducibility/run_attestation.py`). The revision is read from
+  git — with the working tree's dirty state recorded — and is empty when git cannot
+  be asked, rather than a plausible-looking placeholder. The dataset digest is taken
+  from the bytes actually used. A chain that cannot be computed from real inputs
+  reports itself unattested with a reason.
+- **One admission gate for the Society agents.** `Scribe`, `Critic` and `Discoverer`
+  no longer each build their own evidence envelope; they route through a single
+  admission function, so a result's provenance is derived in one place and can only
+  ever be downgraded, never promoted by a caller asserting a label.
+- **The SAE Lab now encodes the tensor the checkpoint declares.** It fed
+  `transformers` `hidden_states`, but the published `jbloom/GPT2-Small-SAEs`
+  dictionaries were trained against TransformerLens' `blocks.L.hook_resid_pre` —
+  a different tensor. Measured: the layer-8 dictionary reconstructs at relative L2
+  **0.2428** on the right tensor and **3.418** on the wrong one. The guard that
+  refuses a layer the dictionary does not describe (`SAE.assert_applies_to`) had no
+  production callers; it is now called from the route. Locally trained checkpoints
+  record the tensor they were fitted on, and a checkpoint that records none is
+  refused rather than applied to an arbitrary tensor.
+- **`live_measure.path_patch` had never run on GPT-2.** It raised `IndexError` on
+  every real forward pass — three shape bugs — so the "real, two-hook
+  implementation" was untested code. The `isolates_direct_path` claim was also
+  corrected to what the intervention actually does. The published reference circuit
+  is now re-derived through the same harness rather than cited, and
+  `published_baseline_is_comparable` stays false with the reason attached.
+- **The IOI screen publishes both rankings** — the raw clean effect and the
+  corrupted-control contrast — from the same two ablations, so the IOI-specific
+  signal is auditable. Measured: the ranking changed for 144/144 heads, the top-20
+  overlap is 10/20, and ten heads are promoted by the raw metric alone. The control
+  reorders every head; it does not produce a late-layer-only circuit.
+- **A stored benchmark run says which weights and which code produced it.** The
+  `model_id`, `weights_fingerprint` and `git_commit` columns were arriving NULL
+  because the route narrowed the executor's record to scores. A name-derived
+  fingerprint is refused rather than stored as if it identified the weights, and the
+  refusal branches now report `recorded: false` and `run_id: null` like the success
+  branch does.
+- **The MCP HTTP transport works.** Every authenticated request used to 500 with
+  "Task group is not initialized"; an authenticated `initialize` now returns 200
+  with a real JSON-RPC response. The `/mcp` mount is registered at import time and
+  startup swaps the transport behind it, so the route table — and the OpenAPI
+  schema built from it — no longer depends on whether the application has started.
+- **A cookie-authenticated request is checked against the origin.** A session cookie
+  is same-site across loopback ports, so any page on any loopback port could
+  previously drive the authenticated control plane. A loopback port other than the
+  request's own is now allowed only under an explicit `MECH_TRUST_LOOPBACK_ORIGINS=1`
+  opt-in; `MECH_TRUSTED_ORIGINS` names origins explicitly.
+- **`MECH_CORS_ORIGINS` can no longer turn on credentialed cross-origin access to a
+  remote host.** Every added origin is validated, and the credentialed flavour is
+  granted only to origins the operator has explicitly trusted.
+- **The body-size ceiling runs after the auth gate.** It was outside it, so an
+  anonymous caller could make the server buffer up to the cap and get a 413 where it
+  should have got a 401. The middleware stack is now stated explicitly and asserted
+  in a test, and CORS is outermost so a 401 carries CORS headers.
+- **The second, ungated FastAPI app is deleted.** `backend/interpretability/api.py`
+  built an application with no bearer gate, no CORS policy and no body ceiling. It
+  was not mounted and nothing imported it, but it could have been served
+  unauthenticated. A test now walks `backend/` and asserts that
+  `backend/main.py` is the only place a `FastAPI()` is constructed.
+- **A failed evidence write is no longer swallowed.** A run whose evidence was not
+  recorded is reported as `completed_unrecorded`, with the reason, rather than as a
+  plain `completed`.
+- **The dead in-process plugin loader is deleted.** It executed plugin code inside
+  the backend process and had zero callers; the production path runs plugins in a
+  separate worker process.
+- **The Electron packaging step no longer fails on its own configuration.**
+  `frontend/scripts/build.js` re-supplied `extraResources` and `files` to
+  electron-builder, whose `deepAssign` concatenates arrays, so every entry was
+  staged twice and the second copy failed with `EBUSY`. The packaged backend and
+  Python runtime are now complete — the previous installer had no
+  `Lib/site-packages` at all, so it could not start the backend. The final NSIS step
+  is still outstanding: the bundled CUDA torch makes the app 5.8 GB, which the
+  32-bit `makensis` cannot embed.
+- **The standalone build no longer ships the database its own import check
+  created.** The validation step ran the backend from the staged tree, and the
+  storage layer opened its SQLite file there. The check now uses an in-memory
+  database, and the assembled artifact is checked for forbidden state rather than
+  assumed clean.
+
 ### Frontend verification pass (desktop shell, all 36 tools)
 
 The redesign was verified against a running backend rather than rebuilt. Every

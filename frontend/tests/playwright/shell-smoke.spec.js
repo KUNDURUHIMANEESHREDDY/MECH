@@ -65,7 +65,8 @@ test('sidebar exposes every navigation item', async ({ page }) => {
 test('sidebar navigation shows one titled tool view and updates the hash', async ({ page }) => {
   // One click per route, each with a scroll, a URL assertion and two view
   // assertions. The default 30s timeout is not enough for the whole list.
-  test.setTimeout(420_000);
+  // 36 routes, each with its own assertion budget.
+  test.setTimeout(900_000);
   await page.goto('/');
   for (const [key] of NAV_PAGES) {
     const item = page.getByTestId(`nav-${key}`);

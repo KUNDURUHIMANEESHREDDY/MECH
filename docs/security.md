@@ -63,10 +63,12 @@ Three properties are worth stating plainly:
 - **Loopback reachability is not authorization, and neither is Origin.** Both
   are documented as non-credentials in `auth.py:1-11` and enforced by
   `_auth_middleware`, which runs before any route.
-- **The token is also accepted as a query parameter** (`token` or
-  `bearer_token`) — `backend/main.py:184`. This exists so the SSE stream can be
-  opened by clients that cannot set headers. It means the credential can appear
-  in browser history, shell history and proxy logs. Prefer the header.
+- **The token can be carried as a query parameter** (`token` or
+  `bearer_token`), but only when `MECH_ALLOW_QUERY_TOKEN=1` is set — it is
+  **off by default**. The seam exists so the SSE stream can be opened by
+  clients that cannot set headers, and it is off by default because a
+  credential in a URL reaches browser history, shell history and the
+  server's access log in cleartext. Prefer the header.
 - **One token, all privileges.** There is no scoping. A token that can read
   `/api/health` can also install and enable plugins, write experiments, delete
   them, and trigger model runs.
@@ -76,16 +78,30 @@ Three properties are worth stating plainly:
 `_cors_origins()` returns `["null"]` plus any exact origins listed in
 `MECH_CORS_ORIGINS` (comma-separated, trailing slash stripped). `"null"` is
 required because Electron loads the packaged renderer from `file://`, which
-browsers report as the opaque origin `null`.
+browsers report as the opaque origin `null`. An entry that is not a
+well-formed origin — a path, a query, a fragment, a wildcard, embedded
+credentials — is refused and logged rather than allowed by accident.
 
 `_LOOPBACK_ORIGIN_REGEX = ^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$` is
 anchored, so `http://localhost.evil.com` and `http://127.0.0.1.attacker.org` do
 not match. Methods are restricted to `GET, POST, PUT, PATCH, DELETE, OPTIONS`;
-headers to `Content-Type, Authorization, Accept`; `allow_credentials=True`.
+headers to `Content-Type, Authorization, Accept`.
 
-Consequence: any web page served from a `file://` context, or from any loopback
-port, is a permitted origin. CORS is not an authorization mechanism here — the
-bearer token is. A page that somehow learns the token is not stopped by CORS.
+**Credentials are granted per origin, not per allowlist.** The CORS middleware
+runs with `allow_credentials=False`, and a separate middleware adds
+`Access-Control-Allow-Credentials: true` only for origins that are allowed to
+carry them: loopback origins, and origins the operator names explicitly in
+`MECH_TRUSTED_ORIGINS`. Adding a host to `MECH_CORS_ORIGINS` therefore cannot
+by itself switch on credentialed cross-origin access to the control plane. The
+opaque `"null"` origin does **not** carry credentials — a `file://` page, a
+sandboxed iframe and a `data:` URL all report it, so it identifies no page the
+server can trust — and the session gate refuses it for the same reason.
+
+Consequence: a page served from any loopback port may *read* a response, but
+only a cookie-authenticated request is additionally checked against the origin
+server-side (see `docs/auth.md`). CORS is not an authorization mechanism here
+— the bearer token is. A page that somehow learns the token is not stopped by
+CORS.
 
 ## 5. Request size and input bounds
 
@@ -101,10 +117,21 @@ The body middleware counts *streamed bytes*, not `Content-Length`, so a lying or
 chunked header cannot slip a large payload past it; oversized bodies get `413`,
 a malformed `Content-Length` gets `400`.
 
+**The ceiling runs after the auth gate, not before it.** Starlette's
+`add_middleware` inserts at position 0, so the *last* registered middleware is
+the outermost. The body middleware used to be registered after the auth
+middleware, which put it outside: an unauthenticated caller could make the
+server buffer up to the cap and receive `413` where it should have received
+`401`. The stack is now stated explicitly in `_MIDDLEWARE_ORDER` and asserted
+in a test rather than left to registration order — outermost first: CORS
+credentials, CORS, auth, body ceiling, request log. CORS is outermost so that
+a `401` carries `Access-Control-Allow-Origin`; a cross-origin browser client
+otherwise sees an opaque CORS failure where it should see a readable refusal.
+
 ## 6. Electron IPC
 
-`frontend/electron/main.js:52-58` sets `contextIsolation: true`,
-`nodeIntegration: false`, `sandbox: false`. The renderer therefore has no
+`frontend/electron/main.js:43-48` sets `contextIsolation: true`,
+`nodeIntegration: false`, `sandbox: true`. The renderer therefore has no
 Node.js access; everything goes through the `appApi` object exposed by
 `contextBridge` in `frontend/electron/preload.js:39-95`.
 
@@ -220,8 +247,8 @@ State each of these as a known limit, not a bug report:
 2. **No rate limiting.** No route enforces a request rate; the only throttles are
    the body cap and per-feature queue limits (e.g. SAE training holds a single
    slot, `dispatcher.py:1620`).
-3. **No transport security.** Plain HTTP, and the token may be carried in a query
-   string.
+3. **No transport security.** Plain HTTP on loopback, and the token can still be
+   carried in a query string when `MECH_ALLOW_QUERY_TOKEN=1` is set.
 4. **Same-user processes are inside the boundary.** Anything running as the
    operator can read `backend/storage/.mech_api_token` and call the API.
 5. **The renderer holds the token.** See §6. Renderer-side XSS is control-plane

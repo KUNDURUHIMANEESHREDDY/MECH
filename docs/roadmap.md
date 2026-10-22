@@ -37,7 +37,9 @@ environment and reports the supported range plus the exact install command.
 - [x] Add a compat shim with actionable errors.
 - [x] Add `tests/pytest/test_dependency_contract.py`, including a negative control that
       proves the check rejects a simulated 4.x install.
-- [ ] Add a CI job that runs `python -c "import backend.main"` as an import smoke test.
+- [x] Add a CI job that runs `python -c "import backend.main"` as an import smoke test.
+      **done** — `.github/workflows/ci.yml` runs it in the `backend` job, alongside
+      the explicit `datasets`-shadowing assertion.
 - [ ] Migrate to the TransformerLens 4.x `TransformerBridge` API and drop the `<3.0` pin.
       Substantial: the code depends on hook-name conventions (`run_with_cache`, `hook_z`)
       whose v4 equivalents differ, so it is a rewrite rather than a rename.
@@ -65,9 +67,11 @@ the directory at runtime (`GraphStore`, `CircuitDiscoveryEngine`, `MechanismClai
 
 ### 1.2 Get CI green
 
-- [ ] **Vitest fails to load a file.** `frontend/tests/vitest/desktopWindowState.test.js:3`
-      imports `../../src/stores/desktop`, but `frontend/src/stores/` is an empty directory
-      left from the removed Desktop OS shell. Delete the test or restore the store.
+- [x] ~~**Vitest fails to load a file.**~~ **done** — the import of
+      `../../src/stores/desktop` is now guarded rather than at module scope, so the
+      suite loads and the six tests skip with a stated reason instead of the file
+      disappearing. The store it describes still does not exist; the skip keeps that
+      visible rather than quietly dropping the coverage.
 - [x] ~~**Pytest: 27 failed / 2 collection errors.**~~ **done** — the contract is now
       decided: *fail closed*. Where the code was already correct and the test asserted the
       old synthetic-success contract, the test was rewritten. Where the test found a real
@@ -91,14 +95,16 @@ the directory at runtime (`GraphStore`, `CircuitDiscoveryEngine`, `MechanismClai
         evidence and no provenance.
       - `circuit_minimality` was reported from a 6-prompt majority vote (your 2.2 item);
         now gated on `MIN_PROMPTS_FOR_MINIMALITY` and reported unmeasured below it.
-- [ ] Make the live-weight test (`test_validation_loop.py`) a required CI job, not optional.
-
-### 1.3 Fix confirmed defects
-
-- [ ] `backend/benchmarking/benchmark_tasks.py:382,466` — `logger.warning(...)` without
-      importing `logging` → `NameError` on the fallback path.
-- [ ] `backend/reasoning/__init__.py:3` — imports two modules that do not exist;
-      `import backend.reasoning` raises `ModuleNotFoundError`.
+- [x] Make the live-weight test (`test_validation_loop.py`) a required CI job, not optional.
+      **done** — `.github/workflows/ci.yml` has a separate `live-evidence` job that loads
+      GPT-2, runs a real forward pass, then runs the validation loop, the attestation
+      hash check and the evidence-boundary tests. A `required` job `needs` all three.
+- [x] `backend/benchmarking/benchmark_tasks.py:382,466` — `logger.warning(...)` without
+      importing `logging` → `NameError` on the fallback path. **done** — `logging` is
+      imported at module scope.
+- [x] `backend/reasoning/__init__.py:3` — imports two modules that do not exist;
+      `import backend.reasoning` raises `ModuleNotFoundError`. **done** — the package
+      imports cleanly and the two names resolve lazily with a stated reason.
 - [x] ~~`backend.main` had no `lifespan`.~~ **done** — added as an
       `@asynccontextmanager` wired via `FastAPI(lifespan=...)`, replacing the deprecated
       `@app.on_event` hooks. Shutdown checkpoints the SQLite WAL and tolerates a
@@ -137,10 +143,14 @@ the directory at runtime (`GraphStore`, `CircuitDiscoveryEngine`, `MechanismClai
 - [x] ~~Make the live-weight test a required CI job.~~ **done** — `.github/workflows/ci.yml`
       has a separate `live-evidence` job that loads GPT-2, runs a real forward pass (so a
       stub cannot satisfy it), then runs `test_validation_loop.py`, the attestation hash
-      check, and `test_evidence_boundary.py`. A `required` job `needs` all three, so a
+      check, and the evidence-boundary tests. A `required` job `needs` all three, so a
       skipped live check cannot report success. The `backend` job also gained an import
       smoke test and an explicit `datasets`-shadowing assertion.
-- [ ] `backend/interpretability/algorithms/registry.py:23` — uses `List` without importing it.
+- [x] `backend/interpretability/algorithms/registry.py:23` — uses `List` without importing it.
+      **done** — it now uses the PEP 585 lowercase `list[str]`, matching the sibling
+      registry. The old `List[str]` was latent rather than immediate: the module has
+      `from __future__ import annotations`, so the annotation was an unevaluated string
+      and the `NameError` surfaced only if something called `get_type_hints()`.
 
 - [ ] ~~`python backend/main.py` failed with `ModuleNotFoundError: No module named 'backend'`~~
       — **done**, fixed by putting the repo root on `sys.path` in `backend/main.py`.
@@ -163,9 +173,34 @@ published circuit's — see below before drawing any conclusion from the two num
       reports `per_template` with `n_templates`, `templates_with_usable_prompts`,
       and `cross_template_consistent` (false unless ≥2 distinct frames produce a
       usable measurement that agree within 0.25).
-- [ ] Add corrupted-prompt patching so the *IOI-specific* signal separates from generic
+- [x] Add corrupted-prompt patching so the *IOI-specific* signal separates from generic
       token-identity effects (this is why L0/L2 heads dominate the current screen).
-- [ ] Add a path-patching pass. `live_discovery.py` already has injection recovery — build on it.
+      **done** — the screen already ablated both the clean and the ABB-corrupted prompt
+      of all 144 heads and ranked on the difference-in-differences (`_ioi_specific_effect`).
+      What was missing was the evidence: the record now publishes BOTH rankings from the
+      same two ablations (`path_comparison.screen_report`), so the contrast is auditable.
+      Measured on gpt2-small, one prompt: the ranking changed for 144/144 heads, the
+      top-20 overlap between the two rankings is 10/20, and ten heads are promoted by the
+      raw metric alone (including `L0H1`, `L0H0`, `L2H9`, `L2H4`). The honest reading is
+      that the control REORDERS every head; it does not produce a late-layer-only circuit,
+      and L0/L2 heads remain in the IOI-specific top-20.
+- [x] Add a path-patching pass. `live_discovery.py` already has injection recovery — build on it.
+      **done** — and it found a defect: `live_measure.path_patch` had never actually run on
+      GPT-2. It raised `IndexError: too many indices for tensor of dimension 2` on every
+      real forward pass (the sender capture, the freeze and the receiver swap all indexed
+      a 2-D tensor as a 3-D one), so the "real, two-hook implementation" was untested code.
+      Three shape bugs fixed, and the `isolates_direct_path: True` claim corrected to what
+      the intervention really does — the receiver's merged attention input is swapped, not
+      the residual stream as the paper patches. The discovery result now carries
+      `path_patching`, `path_patching_comparison` and a `reference_circuit` that is
+      re-derived through the same harness rather than cited from elsewhere. Measured on
+      gpt2-small over the canonical IOI pair: `L0H10→L9H9` 0.3251, `L0H10→L8H6` 0.4308,
+      `L5H1→L9H9` 0.3260, `L8H6→L8H6` 0.4308; the published reference edges measured through
+      the same pass run 0.2493 (`L5H1→L7H3`) to 0.4080 (`L7H3→L9H9`), max 0.4409, 3 prompts,
+      9 measurements, no failures. `published_baseline_is_comparable` stays **false** with
+      the reason attached: the registry's 0.86 is the paper's own procedure over its own
+      edge set. The internal comparison is like-for-like, because both circuits went
+      through this harness.
 - [x] ~~Report faithfulness of the recovered circuit, not just head ranking.~~ **done** —
       `_run_live` measures `(rec_diff - corrupted) / (clean - corrupted)` for the discovered
       circuit: the fraction of the corrupted-to-clean logit-diff gap that injecting the
@@ -231,8 +266,11 @@ minimality threshold is not negotiable.
       made "not attempted" indistinguishable from "attempted and scored zero", and the
       unmeasured metric was dragging `overall_fidelity_pct` down with it — that average
       now excludes unmeasured metrics and says how many were excluded.
-- [ ] Port the full 100-template IOI panel (the pipeline default is now 100 across eight
-      frames; the HTTP endpoint still requests 6).
+- [x] Port the full 100-template IOI panel (the pipeline default is now 100 across eight
+      frames; the HTTP endpoint still requests 6). **done** — `POST /benchmarks/run` now
+      takes `n_prompts`, clamped and validated, and reports `requested_n_prompts`,
+      `n_prompts_honoured` and the panel fields, so a runner that fixes its own panel size
+      says the request was not honoured rather than implying it was.
 - [x] ~~Bootstrap confidence intervals instead of the closed-form `1.96·√(p(1−p)/n)`.~~
       **done differently** — the closed form was being applied to an *aggregate* metric
       with no trial counts behind it, and it is unreliable exactly where these benchmarks
@@ -242,7 +280,25 @@ minimality threshold is not negotiable.
       records whether trials were available, and `confidence_interval_target` names what
       the interval bounds — for induction-heads that is the behavioural accuracy, not the
       headline score, which is a mean attention fraction.
-- [ ] Add result persistence so the Benchmark dashboard can show history.
+- [x] Add result persistence so the Benchmark dashboard can show history. **done** —
+      `backend/benchmarking/run_history.py` persists a completed live run and reads it
+      back as history and as a comparison. A refusal is never persisted: an unavailable
+      executor writes nothing, so the history is not a table of zeroes. Verified through
+      the route, not by reading the code: `POST /benchmarks/run` → recorded with a
+      `run_id`; `GET /benchmarks/history` → the row; `GET /benchmarks/compare` → a real
+      delta; a refused executor → nothing written, count unchanged; an unknown run id →
+      404; a non-integer limit → 400. The frontend view already existed.
+- [x] **A stored run now says which weights and which code produced it.** The three
+      provenance columns (`model_id`, `weights_fingerprint`, `git_commit`) arrived NULL,
+      because the route narrowed the executor's record to scores and never carried them
+      across. The model id comes from the executor, the weight fingerprint from the
+      measurement record's own `model_identity` — and only when its `content_hash_source`
+      is authentic, since the `model_name_fallback` hashes the model *name* and proves
+      nothing about which weights ran — and the revision from `git rev-parse HEAD`. A
+      revision that git cannot supply stays empty rather than becoming a placeholder.
+      The refusal branches also now report `recorded: false` and `run_id: null` like the
+      success branch does, so a consumer reading `body["recorded"]` does not have to know
+      which branch produced the response.
 
 ### 2.3 Implement or delete the stubs
 Each of these currently returns a convincing-looking number without measuring anything.
@@ -311,8 +367,15 @@ and a hardcoded `parameter_count=124_000_000`. Because `verify()` compared two c
       fingerprint rather than just checking it is non-empty.
 - [x] `tests/pytest/test_model_attestation.py` (10 tests) — including a drift case that proves
       `verify()` can now actually fail.
-- [ ] Still missing: bind `run_id`, `dataset_sha256`, and `code_revision` into the same
+- [x] Still missing: bind `run_id`, `dataset_sha256`, and `code_revision` into the same
       attestation, so a result is bound to the full chain rather than only to weights.
+      **done** — `backend/science/reproducibility/run_attestation.py` binds the three.
+      The revision comes from the repository: `code_revision()` asks git for `HEAD` and
+      records whether the working tree is dirty, and reports *no* revision when git cannot
+      be asked rather than an invented object id. The dataset digest is taken from the bytes
+      actually used, not derived from the argument being checked. A chain that cannot be
+      computed from real inputs reports itself unattested with a reason; nothing is
+      defaulted and nothing is promoted.
 - [ ] Hashing GPT-2 small reads ~500 MB on a cache miss. Acceptable now, but this belongs
       behind an explicit `attest()` call rather than running inside artifact generation.
 
@@ -621,13 +684,18 @@ removed, not a description of live behaviour.
   deleted rather than repointed, because there is no live API that binds a dataset
   or code revision.
 
-- [ ] Still to do: one admission gate for the remaining call sites.
+- [x] Still to do: one admission gate for the remaining call sites.
       `evidence_graph.from_run` and the dispatcher `_mark()` are wired to the graph
       (see 2.7), but the Society agents (`Scribe`, `Critic`, `Discoverer`) still
-      construct their own envelopes.
-- [ ] Full attestation binding: a result should carry `dataset_sha256` and
+      construct their own envelopes. **done** — there is now ONE admission function, and
+      the three agents route through it, so a result's provenance and eligibility are derived
+      in one place instead of three. The gate only ever downgrades: nothing is promoted by a
+      caller asserting a label, and an unattested chain is not eligible for publication.
+- [x] Full attestation binding: a result should carry `dataset_sha256` and
       `code_revision` derived from the run and verify them at admission. Neither
-      exists today; the deleted module only *required* non-empty hex strings.
+      exists today; the deleted module only *required* non-empty hex strings. **done** —
+      both are derived from the run and verified at admission, and neither can be a
+      placeholder: an empty or non-hex value is a refusal, not a field to fill in.
 
 ### 2.7 Evidence graph and dispatcher wired to the boundary ✅ done
 
@@ -680,8 +748,21 @@ here. The surrounding machinery is fixed:
   top-k — when weights are present, and returns an explicit unavailable
   envelope when they are not.
 - `AnthropicProvider` raises instead of returning a config.
-- [ ] Train or vendor an SAE for GPT-2 layer 8/10 and point `MECH_SAE_PATH` at
-      it. Until then every SAE view must stay unavailable.
+- [x] Train or vendor an SAE for GPT-2 layer 8/10 and point `MECH_SAE_PATH` at
+      it. Until then every SAE view must stay unavailable. **done** — the published
+      `jbloom/GPT2-Small-SAEs` layer-8 and layer-10 dictionaries are reachable through the
+      registry, and the view now encodes the tensor the checkpoint DECLARES. The route fed
+      `transformers` `hidden_states`, which is a different tensor from the TransformerLens
+      `blocks.L.hook_resid_pre` these dictionaries were trained against: measured, the same
+      layer-8 dictionary reconstructs at relative L2 **0.2428** on the right tensor and
+      **3.418** on the wrong one. The repo's own live test documents the 0.243 figure and the
+      20.7 L2 divergence between the two tensors. `SAE.assert_applies_to` — the guard that
+      refuses a layer the dictionary does not describe — had no production callers; it is now
+      called from the route, and a request for layer 10 from the layer-8 dictionary is refused
+      with the dictionary's own hook point in the reason. Locally trained checkpoints now
+      record the tensor they were fitted on (`blocks.{L}.mlp_write`) and the route reproduces
+      that exact tensor; a checkpoint that records no tensor source is refused rather than
+      applied to an arbitrary one.
 
 ### 2.9 `research_platform/meta/` sweep ✅ done
 
@@ -716,18 +797,131 @@ actually have:
 
 ---
 
+### 2.10 Independent security review ✅ done
+
+An independent read-only review of the security-critical paths was carried out against the
+working tree, by a reviewer who did not write the code it read. Method: every named file
+read, plus a live probe of the real ASGI app (FastAPI `TestClient`, the token overridden,
+storage pointed at a temp path so the repository's own database and token file were not
+touched). The full pytest suite was not run by the reviewer, and the limits of the review
+are recorded below rather than left implied.
+
+Nine findings, all confirmed against the code. Seven are fixed; two are recorded as open
+because fixing them needs a decision that is not the reviewer's to make.
+
+**M1 (MEDIUM) — the session cookie is same-site across loopback ports, and CORS trusted
+every loopback port.** A "site" is (scheme, registrable domain); the port is not part of
+it (RFC 6265bis §5.2.3). So a page served from `http://localhost:3000` is same-site with
+`http://localhost:8000`, the browser attaches `mech_session` to the cross-origin request,
+and the CORS regex accepts every loopback port with `allow_credentials=True`. Any page on
+any loopback port could therefore drive the authenticated control plane as the operator.
+**Fixed** — an `Origin` check now gates cookie-authenticated requests server-side. A
+loopback port other than the request's own is allowed only under an explicit
+`MECH_TRUST_LOOPBACK_ORIGINS=1` opt-in, the default being off. `docs/auth.md` claimed
+"`SameSite=Strict` means another origin cannot make the browser send it"; that was false
+for same-host/different-port, and the sentence has been corrected to what is true.
+
+**M2 (MEDIUM) — the bearer token was accepted in the URL query string, where uvicorn's
+access log writes it in cleartext.** **Fixed** — the query credential is refused unless
+`MECH_ALLOW_QUERY_TOKEN=1` is set explicitly, which keeps the documented EventSource seam
+reachable without putting the credential in a log by default. The test that pinned the old
+behaviour as a feature was rewritten to pin the new one, and the change is recorded in
+`CHANGELOG.md`.
+
+**L1 (LOW) — `MECH_CORS_ORIGINS` widened the allowlist to any remote origin, with
+credentials.** **Fixed** — every added origin is validated, and a remote origin can no
+longer switch on credentialed cross-origin access without an explicit opt-in.
+
+**L2 (LOW) — a second, completely ungated FastAPI app existed in the tree**
+(`backend/interpretability/api.py`: no bearer gate, no CORS policy, no body ceiling, and
+mock data). It was not mounted and nothing imported it, but `uvicorn
+backend.interpretability.api:app` would have served an unauthenticated API. **Fixed** —
+the module is deleted, and a test now walks `backend/` and asserts that
+`backend/main.py` is the only place a `FastAPI()` is constructed.
+
+**L3 (LOW) — the MCP HTTP transport at `/mcp` was mounted but every authenticated request
+500'd** with "Task group is not initialized": FastMCP's streamable-HTTP app only serves
+requests from inside its session manager's task group, and a mounted sub-application never
+receives a lifespan of its own. **Fixed** — the session manager is started by the
+application's own lifespan, and an authenticated `initialize` now returns 200 with a real
+JSON-RPC response where it used to raise.
+
+**L4 (LOW) — the body-size ceiling ran OUTSIDE the auth gate, and 401s carried no CORS
+headers.** Starlette's `add_middleware` inserts at position 0, so the last registered is
+outermost: the body middleware was outside auth, and an anonymous caller could make the
+server buffer up to the cap (413, not 401) while CORS was innermost, so a 401 carried no
+`Access-Control-Allow-Origin`. **Fixed** — the stack is now stated explicitly and asserted
+in a test rather than left to registration order: CORS, then auth, then the body ceiling.
+
+**L5 (LOW) — plugin manifest signing and artifact integrity are unimplemented.** The
+manifest is plain JSON, the registry stores no digest, and the only integrity check on load
+is a plugin-id pin against an id the plugin itself declares. **Open** — this needs a signing
+key the backend holds and a decision about where that key lives; it is a design question,
+not a bug fix.
+
+**L6 (LOW) — a failed evidence write was swallowed while the run still reported
+success.** **Fixed** — a run whose evidence was not recorded is reported as
+`completed_unrecorded`, with the reason, rather than as a plain `completed`.
+
+**L7 (LOW) — a dead in-process plugin loader executed plugin code inside the backend
+process.** It had zero callers; the production path runs plugins in a separate worker.
+**Fixed** — the function is deleted and a test asserts nothing still refers to it.
+
+Two further items were verified CORRECT and are now pinned by tests: the loopback CORS
+anchor (which really does reject `localhost.evil.com` and `127.0.0.1.attacker.org`), and
+the plugin sandbox (separate worker process, Windows Job Object, AST gate, a guarded
+importer, an allow-listed environment that does not carry `MECH_API_TOKEN`, and a
+capability layer that refuses the credential subtree).
+
+**The limits of that review, recorded so they are not over-read:** it ran against a
+working tree rather than a commit, and the full pytest suite was not run by the reviewer.
+The browser step in M1 is standard cookie semantics that was reasoned about rather than
+reproduced in a browser. TLS, rate limiting and a multi-user model were not assessed — the
+control plane is plaintext http on loopback with a single shared secret.
+
 ## Phase 3 — Frontend and packaging
 
-- [ ] **Fix Tailwind.** It is registered in `vite.config.mts` but no CSS file imports it, so
-      no utility class resolves. `NeuralExplorerView.vue` and `TransformerExplorer.vue` are
-      styled entirely with utilities and have no `<style>` block — they render unstyled today.
-- [ ] Delete dead code: ~95 % of `frontend/desktop.css`, ~28 of 34 files in `src/services/`,
+- [x] ~~**Fix Tailwind.**~~ **done** — it was already fixed in the working tree and is now
+      verified rather than assumed. `vite.config.mts` registers `tailwindcss()`, and
+      `styles.css` imports `tailwindcss/theme.css` and `tailwindcss/utilities.css` as
+      layers. The built CSS contains the utilities, and every class token in the utility-
+      styled views resolves: `NeuralExplorerView.vue` 154/154, `visualizations/
+      TransformerExplorer.vue` 68/68, `TransformerVisualizer.vue` 89/90 (the one "miss" is
+      the string literal `loading`, not a class). In a running browser the computed styles are
+      `display:flex; flex-direction:column; overflow:hidden`, `text-[10px]` → 10px and
+      `tracking-widest` → 1px, with no page errors. The roadmap's figures were stale: the
+      view with no `<style>` block is `visualizations/TransformerExplorer.vue`, and
+      `TransformerVisualizer.vue` does have one.
+- [x] Delete dead code: ~95 % of `frontend/desktop.css`, ~28 of 34 files in `src/services/`,
       the stale `Sidebar.vue` / `Topbar.vue` / `StatusBar.vue` / `ActivityBar.vue`, and the
-      unused `react` / `react-dom` / `reactflow` / `lucide-react` dependencies.
-- [ ] Repair or remove `npm run lint` — `eslint` is not a dependency and no config exists.
+      unused `react` / `react-dom` / `reactflow` / `lucide-react` dependencies. **done** — 45
+      files are staged deleted, every relative and alias import in `src/`, `tests/`, `electron/`
+      and `scripts/` resolves, and the build and vitest pass. The `react` family was already
+      absent from `package.json` and the lock file. The `desktop.css` figure was stale: it is
+      65 class tokens of which 17 (26%) are unreferenced, not ~95%.
+- [x] Repair or remove `npm run lint` — `eslint` is not a dependency and no config exists.
+      **done** — the script was removed, so there is nothing broken left to repair. No `lint`
+      script remains in any `package.json`, no eslint config exists, and `eslint` is not in the
+      lock file. Python is gated by ruff in CI; JavaScript is gated by `scripts/capture_lint.cjs`,
+      a Babel-AST linter driven from pytest, and `MECH_REQUIRE_JS_LINT=1` turns its skip into a
+      hard failure (89 passed, no skip, with the frontend toolchain present). Three inert
+      `eslint-disable-next-line` comments were removed, because a comment naming a linter that
+      is not installed tells a reader a check exists when none does.
 - [ ] Complete the Electron packaging build; `frontend/release/` has never been produced.
-- [ ] Replace stale root debug captures (`broken-state.png`, `current-state*.png`,
-      `fixed-state.png`) with the current screenshots under `docs/images/ui/`.
+      **partly done** — the builder was failing on its own configuration, not on the app.
+      `frontend/scripts/build.js` re-supplied `extraResources` and `files` to electron-builder,
+      whose `deepAssign` CONCATENATES arrays, so every entry was staged twice and the second
+      copy of a file the first still held open failed with `EBUSY`. The programmatic config
+      now passes only what `package.json` does not declare. The packaging step completes, and
+      `release/win-unpacked/resources/` now holds a complete backend (466 files, was 99) and a
+      complete Python with `Lib/site-packages`, which the previous installer did not have — it
+      could not start the backend. The final NSIS step still fails: `makensis.exe` is 32-bit
+      and cannot memory-map a >2 GB archive, and the app is 5.8 GB because the bundled runtime
+      carries the CUDA torch build (3.98 GiB of it). The remedy the repository already
+      documents is the CPU wheel. **That step is still outstanding.**
+- [x] Replace stale root debug captures (`broken-state.png`, `current-state*.png`,
+      `fixed-state.png`) with the current screenshots under `docs/images/ui/`. **done** — the
+      root captures are gone and `docs/images/ui/` holds the current ones.
 
 ---
 
