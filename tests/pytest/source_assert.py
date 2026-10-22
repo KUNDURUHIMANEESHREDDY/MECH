@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import ast
 import inspect
-from typing import Any
+import os
+from pathlib import Path
+from typing import Any, Iterator, Sequence
 
 
 def source_of(module_or_text: Any) -> str:
@@ -57,3 +59,50 @@ def doc_and_comments(module_or_text: Any) -> str:
     rejection is documented, so the next person does not re-add it.
     """
     return source_of(module_or_text)
+
+
+#: Directory names a repository-wide source scan never needs to look inside.
+#: Every one of these is generated, vendored, or a scratch copy of the tree, so
+#: scanning it either finds nothing or finds a second copy of the real sources.
+PRUNED_DIR_NAMES = frozenset({
+    ".git", ".hg", ".svn",
+    "node_modules", "site-packages", "dist-packages",
+    "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache",
+    ".tox", ".venv", "venv", "env",
+    "build", "dist", "release",
+    ".pytest-tmp", "htmlcov", ".next",
+    "MECH-standalone",  # duplicate copy of the tree, not the shipped package
+})
+
+
+def walk_python_files(root: Path,
+                      extra_pruned: Sequence[str] = ()) -> Iterator[Path]:
+    """Every ``*.py`` under *root*, without descending into excluded trees.
+
+    ``Path.rglob`` cannot prune. It walks every directory it can reach and the
+    caller filters afterwards, so the filter saves nothing: on this checkout a
+    plain ``ROOT.rglob("*.py")`` walks **143 491** files, because the repo root
+    carries ~300 leftover ``pip-*`` scratch directories and a staged CPython
+    runtime under ``frontend/build/python``. Two tests in this suite did exactly
+    that and spent over a minute each before parsing a single file.
+
+    ``os.walk`` is used instead because it hands the caller the directory list
+    *before* descending, which is the only point where the cost can be removed.
+
+    ``extra_pruned`` adds names for one caller's own exclusions -- for example a
+    build copy it must ignore. Names match a directory's basename, and any name
+    starting with ``.pytest-tmp`` is treated as a prefix too, because
+    ``pytest.ini``'s ``addopts`` plus a per-session basetemp leaf invent siblings
+    such as ``.pytest-tmp-lead``.
+    """
+    pruned = set(PRUNED_DIR_NAMES) | set(extra_pruned)
+    root = Path(root)
+    for current, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in pruned and not name.startswith(".pytest-tmp")
+        ]
+        for filename in filenames:
+            if filename.endswith(".py"):
+                yield Path(current) / filename
+

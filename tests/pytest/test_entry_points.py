@@ -75,6 +75,8 @@ from typing import List, Set, Tuple
 
 import pytest
 
+from tests.pytest.source_assert import walk_python_files
+
 ROOT = Path(__file__).resolve().parents[2]
 
 #: Directories that are not part of the shipped package.
@@ -162,7 +164,7 @@ def _unresolved_imports() -> List[Tuple[str, int, str]]:
     stdlib = set(sys.stdlib_module_names)
     found: List[Tuple[str, int, str]] = []
 
-    for path in sorted(ROOT.rglob("*.py")):
+    for path in sorted(walk_python_files(ROOT)):
         relative = path.relative_to(ROOT)
         if _pruned(relative):
             continue
@@ -334,7 +336,7 @@ def test_backend_science_imports_without_the_deleted_orchestrator():
 def test_the_deleted_orchestrator_is_not_referenced_anywhere():
     """No surviving file may still route through the deleted orchestrator."""
     offenders = []
-    for path in ROOT.rglob("*.py"):
+    for path in walk_python_files(ROOT):
         relative = path.relative_to(ROOT)
         if _pruned(relative):
             continue
