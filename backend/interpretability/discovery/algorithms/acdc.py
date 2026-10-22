@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from .base_algorithm import DiscoveryAlgorithm, DiscoveryReport
 from .registry import register_algorithm, AlgorithmMetadata
 from .configs import DiscoveryAlgorithmConfig, ACDCConfig
+from backend.interpretability.discovery.live_measure import MIN_DENOMINATOR
 
 
 @dataclass
@@ -37,26 +38,31 @@ class ActivationCache:
     authors="Arthur Conmy, Ian Mavor, Aengus Lynch, et al.",
     year=2023,
     supported_models=["gpt2", "gemma", "llama", "mistral"],
-    required_capabilities=["patch_head_output", "capture_head_outputs", "get_logits"],
+    required_capabilities=["patch_head_outputs", "capture_head_outputs", "get_logits"],
     estimated_runtime="10s-5m",
     search_space="attention_heads, mlps",
     output_schema="DiscoveryReport"
 ))
 class ACDCAlgorithm(DiscoveryAlgorithm):
-    """Greedy reverse-topological edge pruning over cached activations.
+    """Greedy reverse-topological pruning of a measured circuit.
 
     The intervention is head-level throughout: the clean run's output vector for
     a candidate head is written into the corrupted run, and the recovery of the
-    target token's logit is measured. Edge weights and confidences in the
-    reported graph are those measured recoveries.
+    target token's logit is measured. The whole circuit is measured at once --
+    every retained head is injected in a single forward pass -- so the number
+    the search optimises is the circuit's own recovery, not a head's.
 
-    What is real: activation capture, the pruning sweep, the resulting component
-    set, and the per-edge recovery fractions -- all from the adapter.
+    What is real: activation capture, the pruning sweep, the resulting
+    component set, the circuit's measured recovery, and each retained head's
+    measured marginal contribution -- all from the adapter.
 
-    What is not, when it does not run: the whole-circuit fidelity. Recovering the
-    clean logit difference with the entire pruned circuit at once needs
-    multi-site injection, which the single-head adapter primitive cannot express,
-    so fidelity is reported as unmeasured rather than approximated. See `run()`.
+    What changed, and why. The search used to score each head independently
+    against a fixed fraction of the clean-minus-corrupted logit gap and kept
+    every head that cleared the bar. A head's individual contribution to a
+    collective effect is small by construction, so nearly every head cleared
+    it: a live run retained 138 of 144 candidates -- a "circuit" of 138 nodes
+    whose own measured recovery was -307% of the gap. The search was not
+    pruning, and nothing in the report's shape said so.
 
     Two behaviours were removed rather than fixed, because both replaced a
     measurement with an assumption:
@@ -68,6 +74,7 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
       circuit carried `confidence: 1.0`.
     """
 
+
     def __init__(self, adapter: Any = None) -> None:
         super().__init__(adapter)
         # Populated by build_activation_cache; kept on the instance because the
@@ -75,6 +82,10 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
         # extra forward passes.
         self._head_vectors: Dict[Tuple[int, int], List[float]] = {}
         self._capture_error: Optional[str] = None
+        # Measured circuit recoveries, keyed by the retained head set. The
+        # search measures a circuit more than once (a trial set becomes the
+        # next starting point), and a forward pass is the expensive part.
+        self._recovery_cache: Dict[Any, Any] = {}
 
     def build_activation_cache(self, clean_prompt: str, corrupted_prompt: str, num_layers: int, num_heads: int) -> ActivationCache:
         """Capture the clean prompt's real per-head output vectors.
@@ -126,17 +137,32 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
         top-k. The target of an IOI pair is often not in the top 5 of the
         corrupted run -- that is the whole point of the corrupted prompt -- so a
         top-k lookup could not score it.
+
+        The attention kernel is pinned to `eager` because that is the kernel
+        `capture_head_outputs` and `patch_head_outputs` run under. A baseline
+        measured under one kernel and an intervention measured under the other
+        carry a constant disagreement term (measured at 0.0625 logits at layer
+        6), and the IOI logit gap this search normalises by is smaller than
+        that -- so a mixed-kernel baseline would put a systematic error into
+        every candidate's recovery.
         """
         import torch
-
         scores = []
-        for prompt in (clean_prompt, corrupted_prompt):
-            inputs = self.adapter._tokenizer(prompt, return_tensors="pt").to(
-                self.adapter._model.device
-            )
-            with torch.no_grad():
-                logits = self.adapter._model(**inputs).logits[0, -1, :]
-            scores.append(float(logits[target_id]))
+        config = self.adapter._model.config
+        previous_impl = getattr(config, "_attn_implementation", None)
+        if previous_impl != "eager":
+            config._attn_implementation = "eager"
+        try:
+            for prompt in (clean_prompt, corrupted_prompt):
+                inputs = self.adapter._tokenizer(prompt, return_tensors="pt").to(
+                    self.adapter._model.device
+                )
+                with torch.no_grad():
+                    logits = self.adapter._model(**inputs).logits[0, -1, :]
+                scores.append(float(logits[target_id]))
+        finally:
+            if previous_impl is not None:
+                config._attn_implementation = previous_impl
         return scores[0], scores[1]
 
     def _target_token_id(self, target_token: str) -> Optional[int]:
@@ -152,223 +178,251 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
             return None
         return ids[0] if len(ids) == 1 else None
 
+    def _circuit_recovery(self, corrupted_prompt: str, target_id: int,
+                          retained: Set[Tuple[int, int]],
+                          clean_score: float, corr_score: float
+                          ) -> Optional[Dict[str, Any]]:
+        """Measure the circuit `retained` recovers, or ``None``.
+
+        The retained heads' clean-run output vectors are injected into the
+        corrupted run in ONE forward pass and the target token's logit is read
+        from the result. That is ACDC's faithfulness metric, measured on the
+        circuit rather than on one head at a time.
+
+        ``None`` means the measurement could not be taken: a retained head with
+        no captured vector, a model without a multi-head injection primitive,
+        or a denominator too small to divide by. A measurement that did not
+        happen is not a measurement of zero.
+        """
+        if not retained:
+            return {"recovery": 0.0, "patched_logit": corr_score}
+        denom = clean_score - corr_score
+        if abs(denom) < MIN_DENOMINATOR:
+            return None
+        patches: Dict[Tuple[int, int], Any] = {}
+        for layer, head in sorted(retained):
+            vector = self._head_vectors.get((layer, head))
+            if vector is None:
+                return None
+            patches[(layer, head)] = vector
+        patcher = getattr(self.adapter, "patch_head_outputs", None)
+        if patcher is None:
+            return None
+        key = frozenset(retained)
+        cached = self._recovery_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            result = patcher(corrupted_prompt, patches, score_token_id=target_id)
+        except Exception:
+            # LiveUnavailable (no weights, no multi-head primitive) and every
+            # other failure land here: the circuit was not measured, so the
+            # search says so instead of ranking on nothing.
+            return None
+        if not isinstance(result, dict):
+            return None
+        patched = result.get("patched_logit")
+        if patched is None:
+            return None
+        value = (float(patched) - corr_score) / denom
+        if not math.isfinite(value):
+            return None
+        measured = {"recovery": value, "patched_logit": float(patched)}
+        self._recovery_cache[key] = measured
+        return measured
+
     def run(self, dataset: Dict[str, Any], config: Optional[DiscoveryAlgorithmConfig] = None) -> DiscoveryReport:
-        """Runs greedy reverse-topological edge pruning ACDC search."""
+        """Greedy reverse-topological pruning of a measured circuit.
+
+        The search, in order:
+
+          1. Capture the clean run's per-head output vectors -- a real forward
+             pass over the loaded weights.
+          2. Measure the baseline: the target token's logit on the clean prompt
+             and on the corrupted one. Their difference is the effect the
+             circuit has to explain.
+          3. Start from every candidate head and remove them one at a time, in
+             reverse topological order. A head is removed when the circuit that
+             remains still recovers at least `threshold` of the gap; a head is
+             kept when removing it would break the circuit, and the amount it
+             contributes is the recovery that removing it costs.
+
+        Step 3 measures the CIRCUIT, not one head at a time. That is the
+        difference from the version it replaces, which scored each head
+        independently against a fixed fraction of the gap and kept every head
+        that cleared the bar. A head's individual contribution to a collective
+        effect is small by construction, so nearly every head cleared it: the
+        search that reported 144 candidates and 138 retained components was
+        not pruning at all, and the circuit it returned recovered -307% of the
+        gap. Nothing in that report was measurable, and the shape of the
+        report hid it.
+        """
         t0 = time.time()
 
         if not isinstance(config, ACDCConfig):
             config = ACDCConfig()
-
         threshold = config.threshold
 
         clean_prompt = dataset.get("clean", "John gave a drink to Mary")
         corrupted_prompt = dataset.get("corrupted", "John gave a drink to John")
-        target_token = dataset.get("target_token", " Mary")
+        # The bundled datasets name the target as `target`; `target_token` is
+        # the name this algorithm has always used. Both are read, because
+        # reading only the second one silently scored " Mary" for every
+        # prompt whose real target was somebody else.
+        target_token = dataset.get("target_token") or dataset.get("target") or " Mary"
 
         num_layers = self.adapter.spec.num_layers if self.adapter else 12
         num_heads = self.adapter.spec.num_heads if self.adapter else 12
 
-        # 1. Populate Activation Cache
+        # 1. Populate the activation cache with the clean run's head vectors.
         self._capture_error = None
         self._head_vectors = {}
+        self._recovery_cache = {}
         cache = self.build_activation_cache(clean_prompt, corrupted_prompt, num_layers, num_heads)
 
-        # 2. Define Search Candidate Edges in Reverse Topological Order
+        # 2. Candidate edges in reverse topological order.
         candidate_edges: List[Tuple[int, int]] = []
         for layer in reversed(range(num_layers)):
             for head in range(num_heads):
                 candidate_edges.append((layer, head))
 
-        pruned_components: Set[Tuple[int, int]] = set()
-        retained_components: Set[Tuple[int, int]] = set()
-        recoveries: Dict[Tuple[int, int], float] = {}
-
-        # Baseline metric: the target token's logit on the clean prompt minus the
-        # same token's logit on the corrupted prompt. That is the gap the circuit
-        # is supposed to explain.
-        #
-        # It used to be `abs(clean_top_logit - corrupted_top_logit)`, comparing
-        # whichever token each prompt happened to rank first. On the IOI pair
-        # those are different tokens (" Mary" and " John"), so the "difference"
-        # was between two unrelated quantities, and dividing by it scaled every
-        # candidate's effect by a meaningless number. Whatever the pruning
-        # selected, the divisor did not mean anything.
+        # 3. The baseline: the target token's logit, clean minus corrupted.
         target_id = self._target_token_id(target_token)
         baseline_note: Optional[str] = None
-        baseline_diff = 0.0
         clean_score: Optional[float] = None
         corr_score: Optional[float] = None
+        baseline_diff = 0.0
         if target_id is None:
             baseline_note = (
                 f"target_token {target_token!r} is not a single token, so the "
                 f"logit difference is undefined; no pruning was performed"
             )
         else:
-            clean_score, corr_score = self._score_tokens(
-                clean_prompt, corrupted_prompt, target_id
-            )
+            clean_score, corr_score = self._score_tokens(clean_prompt, corrupted_prompt, target_id)
             baseline_diff = clean_score - corr_score
-            if abs(baseline_diff) < 1e-6:
+            if abs(baseline_diff) < MIN_DENOMINATOR:
                 baseline_note = (
-                    "the clean and corrupted prompts give the target token "
-                    "identical logits, so there is no gap to explain and no "
-                    "candidate can be ranked; no pruning was performed"
+                    f"the clean and corrupted prompts give the target token "
+                    f"nearly identical logits (gap {baseline_diff:.4f}, below "
+                    f"the {MIN_DENOMINATOR} floor below which a recovery "
+                    f"fraction stops describing the measurement), so there is "
+                    f"no gap to explain and no candidate can be ranked; no "
+                    f"pruning was performed"
                 )
 
-        # 3. Greedy Reverse-Topological Search Loop
-        #
-        # The intervention is now a genuine head-level patch: the clean run's
-        # output vector for that head is written into the corrupted run, and the
-        # recovery of the target logit is measured.
-        #
-        # It previously called `patch_activation(layer=layer, neuron_index=head,
-        # patch_value=clean_act_val)`. That writes
-        # `transformer.h[layer].mlp` output at index `head` -- MLP neuron `head`
-        # of 3072 -- so every candidate "head" was an MLP neuron, the patch
-        # succeeded (3072 > 12), and a plausible delta came back. The component
-        # set this loop selected was therefore chosen on MLP noise while being
-        # labelled L{layer}H{head}, and the fidelity number later computed over
-        # it via `circuit_fidelity` was real -- a real measurement of a
-        # noise-selected circuit. That combination is worse than either failure
-        # alone, because the output looked valid.
+        # 4. Greedy reverse-topological pruning on the circuit's own recovery.
+        retained_components: Set[Tuple[int, int]] = set()
+        pruned_components: Set[Tuple[int, int]] = set()
+        contributions: Dict[Tuple[int, int], float] = {}
         total_evaluations = 0
+        retained_set: Set[Tuple[int, int]] = set(candidate_edges)
+        final_measurement: Optional[Dict[str, Any]] = None
+
         if target_id is not None and baseline_note is None:
-            for layer, head in candidate_edges:
-                total_evaluations += 1
-                vector = self._head_vectors.get((layer, head))
-                if vector is None:
-                    pruned_components.add((layer, head))
-                    continue
-
-                patch_res = self.adapter.patch_head_output(
-                    prompt=corrupted_prompt,
-                    layer=layer,
-                    head_index=head,
-                    patch_vector=vector,
-                    score_token_id=target_id,
+            current = self._circuit_recovery(corrupted_prompt, target_id, retained_set,
+                                             clean_score, corr_score)
+            if current is None:
+                baseline_note = (
+                    "the whole-circuit measurement could not be taken on this "
+                    "model, so no candidate could be ranked; no pruning was "
+                    "performed"
                 )
-                recovery = (patch_res.patched_logit - corr_score) / baseline_diff
-                recoveries[(layer, head)] = round(recovery, 4)
+            else:
+                for candidate in candidate_edges:
+                    total_evaluations += 1
+                    trial = retained_set - {candidate}
+                    trial_measurement = self._circuit_recovery(
+                        corrupted_prompt, target_id, trial, clean_score, corr_score)
+                    if trial_measurement is None:
+                        # This removal could not be measured. Keep the head
+                        # rather than drop a component on a measurement that
+                        # did not happen.
+                        retained_components.add(candidate)
+                        continue
+                    trial_recovery = trial_measurement["recovery"]
+                    if trial_recovery >= threshold:
+                        # The circuit still explains the effect without it, so
+                        # it is not part of the circuit.
+                        retained_set = trial
+                        pruned_components.add(candidate)
+                        contributions[candidate] = 0.0
+                        current = trial_measurement
+                    else:
+                        # Removing it would break the circuit. What it
+                        # contributes is the recovery that removing it costs.
+                        retained_components.add(candidate)
+                        contributions[candidate] = round(
+                            current["recovery"] - trial_recovery, 4)
+                final_measurement = self._circuit_recovery(
+                    corrupted_prompt, target_id, retained_set, clean_score, corr_score)
 
-                # If the recovered fraction is BELOW threshold, this head is not
-                # carrying the effect and can be pruned.
-                if abs(recovery) < threshold:
-                    pruned_components.add((layer, head))
-                else:
-                    retained_components.add((layer, head))
-        else:
-            total_evaluations = 0
-
-        # An empty retained set is reported as empty. It previously injected
-        # L9H9 and L10H0 "to ensure the top critical heads are retained", with a
-        # comment naming them -- i.e. when the search found nothing, the search's
-        # answer was replaced by the published answer. A circuit that measures no
-        # surviving head is a finding.
-
-        # 4. Construct Reconstructed Graph
+        # 5. The graph: what was measured, and what was not.
+        #
+        # The nodes are the token, the retained heads and the prediction. The
+        # measured relation is each head's contribution to the output, so that
+        # is what the head -> prediction edges carry. The token -> head edges
+        # carry no weight, because this search measured no relation between
+        # the token and any head -- the previous version chained the heads
+        # together, which asserted a wiring between them that nothing had
+        # measured, and made every retained set produce the same graph.
         nodes = [{"id": "T_0", "type": "Token", "label": clean_prompt}]
-        edges = []
-        last_node = "T_0"
-
-        sorted_retained = sorted(list(retained_components), key=lambda x: (x[0], x[1]))
-        for layer, head in sorted_retained:
+        edges: List[Dict[str, Any]] = []
+        for layer, head in sorted(retained_components):
             node_id = f"H_L{layer}_H{head}"
+            contribution = contributions.get((layer, head))
             nodes.append({
                 "id": node_id,
                 "type": "Head",
-                "label": f"L{layer}H{head} (Retained)"
+                "label": f"L{layer}H{head} (Retained)",
+                "contribution": contribution,
             })
-            # Edge weight and confidence are the measured recovery fraction for
-            # this head. They were a literal `weight: min(0.99, act_val)` (the
-            # head's L2 norm, so ~0.6, carrying no meaning as an edge weight) and
-            # a literal `confidence: 0.95` on every edge.
-            measured = recoveries.get((layer, head))
             edges.append({
-                "source": last_node,
+                "source": "T_0",
                 "target": node_id,
-                "weight": measured,
-                "confidence": measured,
-                "measured_from": "clean-to-corrupted head-output patch recovery",
+                "weight": None,
+                "confidence": None,
+                "reason": (
+                    "The token-to-head relation was not measured. This search "
+                    "measured each head's contribution to the output, not how "
+                    "the heads are wired together."
+                ),
             })
-            last_node = node_id
-
-        # Prediction Output Node
+            edges.append({
+                "source": node_id,
+                "target": "P_0",
+                "weight": contribution,
+                "confidence": None,
+                "measured_from": (
+                    "target-logit recovery lost when this head is removed from "
+                    "the circuit"
+                ),
+            })
         nodes.append({"id": "P_0", "type": "Prediction", "label": target_token})
-        # Was `weight: 1.0, confidence: 1.0` -- an assertion of total certainty
-        # on the edge completing the circuit, from no measurement. The whole-graph
-        # recovery is measured below by the fidelity path; until it runs, this
-        # edge is unmeasured and says so.
-        edges.append({
-            "source": last_node,
-            "target": "P_0",
-            "weight": None,
-            "confidence": None,
-            "reason": (
-                "Whole-circuit recovery is measured by the fidelity pass, not "
-                "here. The previous value of 1.0 was a literal, on the one edge "
-                "that would most reward a fabricated circuit."
-            ),
-        })
 
-        circuit_score = round(len(retained_components) / max(1, len(candidate_edges)), 3)
-        # Real fidelity: inject the retained heads into the corrupted run and
-        # compare the recovered logit difference against the clean-minus-
-        # corrupted gap. The previous expression
-        # (0.90 + 0.09 * (1 - circuit_score)) was a rescaling of the pruning
-        # ratio into a number named "logit recovery fidelity" that could not
-        # fall below 0.90 -- so it reported success no matter how little of the
-        # circuit survived.
-        #
-        # Two metrics, never confused. The bundled datasets name a target
-        # token but not the IO/subject pair a logit *difference* needs, so
-        # the gap-based `circuit_fidelity` cannot run on them -- and for a
-        # long time that meant fidelity was always unmeasured on the standard
-        # path. When only the target token is known, fidelity is the
-        # target-logit recovery from `circuit_fidelity_target`, recorded
-        # under its own metric name.
+        # 6. The headline metric: the pruned circuit's own recovery.
         logit_recovery_fidelity: Optional[float] = None
         fidelity_metric = "unmeasured"
         fidelity_detail: Dict[str, Any] = {
             "measured": False,
-            "reason": "no token ids available to score recovery against",
+            "reason": baseline_note or "no circuit was measured",
         }
-        if dataset.get("io_id") is not None and dataset.get("subject_id") is not None:
-            try:
-                from backend.interpretability.discovery.live_measure import (
-                    circuit_fidelity,
-                )
-                detail = circuit_fidelity(
-                    clean_prompt, corrupted_prompt,
-                    int(dataset["io_id"]), int(dataset["subject_id"]),
-                    set(retained_components))
-                fidelity_detail = detail
-                logit_recovery_fidelity = detail.get("fidelity")
-                fidelity_metric = "logit-difference recovery"
-            except Exception as exc:
-                fidelity_detail = {
-                    "measured": False,
-                    "reason": f"fidelity measurement failed: {exc}",
-                }
-        elif target_id is not None and retained_components:
-            try:
-                from backend.interpretability.discovery.live_measure import (
-                    circuit_fidelity_target,
-                )
-                detail = circuit_fidelity_target(
-                    clean_prompt, corrupted_prompt, target_id,
-                    set(retained_components))
-                fidelity_detail = detail
-                logit_recovery_fidelity = detail.get("fidelity")
-                fidelity_metric = "target-logit recovery"
-            except Exception as exc:
-                fidelity_detail = {
-                    "measured": False,
-                    "reason": f"fidelity measurement failed: {exc}",
-                }
-        runtime_ms = (time.time() - t0) * 1000
+        if final_measurement is not None:
+            logit_recovery_fidelity = round(float(final_measurement["recovery"]), 4)
+            fidelity_metric = "target-logit recovery"
+            fidelity_detail = {
+                "measured": True,
+                "metric": "target-logit recovery",
+                "clean_target_logit": round(clean_score, 4),
+                "corrupted_target_logit": round(corr_score, 4),
+                "recovered_target_logit": round(float(final_measurement["patched_logit"]), 4),
+                "denominator": round(baseline_diff, 4),
+                "retained_heads": sorted(
+                    f"L{layer}H{head}" for layer, head in retained_components),
+            }
 
-        # Component List for Discovery Evaluation
-        component_list = [f"L{l}H{h}" for l, h in retained_components]
+        runtime_ms = (time.time() - t0) * 1000
+        component_list = [f"L{l}H{h}" for l, h in sorted(retained_components)]
+        circuit_score = logit_recovery_fidelity
 
         return DiscoveryReport(
             algorithm="acdc",
@@ -379,16 +433,25 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                 "total_candidate_components": len(candidate_edges),
                 "retained_components": len(retained_components),
                 "pruned_components": len(pruned_components),
+                # The fraction of the candidates the search REMOVED. It used to
+                # be written twice with opposite meanings -- once as
+                # pruned/candidates and once, later, as retained/candidates,
+                # so the second silently overwrote the first and the key
+                # named "pruning ratio" reported how much survived.
                 "pruning_ratio": round(len(pruned_components) / max(1, len(candidate_edges)), 3),
-                "patch_threshold": threshold,
+                "retained_ratio": round(len(retained_components) / max(1, len(candidate_edges)), 3),
+                "min_circuit_fidelity": threshold,
                 "total_evaluations": total_evaluations,
                 "logit_recovery_fidelity": logit_recovery_fidelity,
-                "logit_recovery_fidelity_measured":
-                    bool(fidelity_detail.get("measured")),
+                "logit_recovery_fidelity_measured": bool(fidelity_detail.get("measured")),
                 "logit_recovery_fidelity_metric": fidelity_metric,
                 "logit_recovery_fidelity_detail": fidelity_detail,
-                "pruning_ratio": round(len(retained_components) / max(1, len(candidate_edges)), 3),
-                "component_list": component_list # Added for Phase 39.2
+                "component_list": component_list,
+                "marginal_contributions": {
+                    f"L{layer}H{head}": value
+                    for (layer, head), value in sorted(contributions.items())
+                    if value
+                },
             },
             evidence={
                 "clean_prompt": clean_prompt,
@@ -396,17 +459,18 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                 "target_token": target_token,
                 "baseline_logit_diff": round(baseline_diff, 4),
                 "activation_cache_size": len(cache.head_activations),
+                "baseline_note": baseline_note,
             },
             # Confidence was previously the fabricated fidelity, which could
             # not fall below 0.90. Nothing here calibrates a confidence in the
             # recovered circuit, so none is claimed. The graph score is the
-            # pruning ratio, which is what was actually measured.
+            # circuit's measured recovery, which is what was measured.
             confidence=0.0,
             graph={
                 "nodes": nodes,
                 "edges": edges,
                 "score": circuit_score,
-                "score_meaning": "pruning_ratio_retained_over_candidate"
+                "score_meaning": "target-logit recovery of the pruned circuit",
             },
             provenance={
                 **self.provenance_block(),
@@ -421,11 +485,7 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                 # GPT2Adapter.get_logits, which returns `"provenance": "live"`.
                 # "live" means measurements were taken from loaded weights, which
                 # is true whenever the sweep ran -- and every retained edge's
-                # confidence is a measured recovery fraction, not a constant. It
-                # does not mean the whole-circuit fidelity was computed; that is
-                # tracked separately by `logit_recovery_fidelity_measured` and
-                # spelled out in `logit_recovery_fidelity` below. Conflating the
-                # two made a run that measured 144 heads report `unavailable`.
+                # weight is a measured marginal contribution, not a constant.
                 "source": "live" if total_evaluations else "unavailable",
                 "provenance": "live" if total_evaluations else "unavailable",
                 "measured": bool(total_evaluations),
@@ -438,5 +498,5 @@ class ACDCAlgorithm(DiscoveryAlgorithm):
                      "clean-minus-corrupted logit gap")
                     if fidelity_detail.get("measured") else
                     f"not measured: {fidelity_detail.get('reason')}"),
-            }
+            },
         )

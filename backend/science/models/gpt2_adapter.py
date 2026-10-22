@@ -11,7 +11,7 @@ import hashlib
 import math
 import random
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .adapter_base import (
     ActivationResult, AttentionPattern, LiveUnavailable, ModelAdapter, ModelSpec,
@@ -1113,7 +1113,137 @@ class GPT2Adapter(ModelAdapter):
             provenance="seeded",
         )
 
+    def patch_head_outputs(self, prompt: str,
+                           patches: Dict[Tuple[int, int], List[float]],
+                           score_token_id: Optional[int] = None,
+                           position: Optional[int] = None,
+                           all_positions: bool = False) -> Dict[str, Any]:
+        """Inject several captured head vectors into ONE forward pass.
+
+        The multi-site primitive a circuit measurement needs.
+        `patch_head_output` writes a single head, so a circuit of N heads
+        could only ever be measured one head at a time. Scoring heads
+        independently and adding the results is not the measurement of the
+        circuit: the heads interact in the residual stream, so the circuit's
+        effect is not the sum of its parts, and a per-head score cannot say
+        whether a head is *necessary* -- only whether it has some effect.
+
+        This writes every vector in `patches` -- keyed by
+        ``(layer, head_index)`` -- in the same forward pass, so the returned
+        logit is the logit of the whole patched circuit.
+
+        The vectors are the same c_proj input slices `capture_head_outputs`
+        returns, so a capture and a patch stay comparable.
+
+        Position matters, and the default here is the last one.
+        `capture_head_outputs` reads the LAST position of the merged
+        attention input, so writing that vector back at the last position is
+        what makes the corrupted run read the clean run's head output.
+        Writing it at every position instead -- which is what
+        `patch_head_output` does by default, because it is given a vector and
+        is not told where to put it -- writes the final position's head
+        output over every earlier position too. That is a different
+        intervention from the one that was measured, and a large one: with
+        the write at every position the circuit's recovered logit came out
+        4.8 logits ABOVE the clean run's, so the "recovery" came out at
+        700% of the clean-minus-corrupted gap. `position` names a position
+        explicitly; `all_positions=True` asks for the every-position write,
+        and the caller then owns the difference between the two.
+
+        Returns ``original_logit``, ``patched_logit`` and ``delta`` for
+        `score_token_id` (or the unpatched run's top token when it is None),
+        plus the list of heads that were written. Without weights this
+        refuses rather than returning a fixture: a multi-head injection is a
+        forward-pass measurement and has no mock.
+        """
+        if self.spec.mock_mode or self._model is None:
+            raise LiveUnavailable(
+                "patch_head_outputs requires loaded weights: a multi-head "
+                "injection is a forward-pass measurement and has no fixture."
+            )
+        import torch
+
+        if not patches:
+            raise ValueError(
+                "patch_head_outputs needs at least one (layer, head) patch; "
+                "an empty circuit is not a measurement."
+            )
+
+        d_head = self.spec.d_model // self.spec.num_heads
+        by_layer: Dict[int, Dict[int, Any]] = {}
+        for (layer, head), vector in patches.items():
+            if not isinstance(layer, int) or not (0 <= layer < self.spec.num_layers):
+                raise ValueError(
+                    f"layer {layer!r} is out of range; this model has "
+                    f"{self.spec.num_layers} layers (0..{self.spec.num_layers - 1})"
+                )
+            if not isinstance(head, int) or not (0 <= head < self.spec.num_heads):
+                raise ValueError(
+                    f"head {head!r} is out of range; layer {layer} has "
+                    f"{self.spec.num_heads} heads (0..{self.spec.num_heads - 1})."
+                )
+            if vector is None or len(vector) != d_head:
+                raise ValueError(
+                    f"patch vector for L{layer}H{head} has length "
+                    f"{0 if vector is None else len(vector)}; a GPT-2 head "
+                    f"occupies {d_head} components (d_model {self.spec.d_model} "
+                    f"/ num_heads {self.spec.num_heads}). A shorter vector "
+                    f"would broadcast across the whole head rather than fail."
+                )
+            self._refuse_cross_checkpoint_patch(vector)
+            by_layer.setdefault(layer, {})[head] = vector
+
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+        config = self._model.config
+        previous_impl = getattr(config, "_attn_implementation", None)
+        if previous_impl != "eager":
+            config._attn_implementation = "eager"
+        handles = []
+        try:
+            with torch.no_grad():
+                orig_logits = self._model(**inputs).logits[0, -1, :]
+            orig_top = orig_logits.topk(1)
+            scored_index = int(orig_top.indices[0]) if score_token_id is None else int(score_token_id)
+            original_logit = float(orig_logits[scored_index])
+
+            def make_hook(heads: Dict[int, Any]):
+                def hook(module, inp):
+                    x = inp[0].clone()
+                    for h_idx, vec in heads.items():
+                        v = torch.tensor(vec, device=x.device, dtype=x.dtype)
+                        if all_positions:
+                            x[..., h_idx * d_head:(h_idx + 1) * d_head] = v
+                        else:
+                            p = -1 if position is None else position
+                            x[:, p, h_idx * d_head:(h_idx + 1) * d_head] = v
+                    return (x,) + tuple(inp[1:])
+                return hook
+
+            for layer, heads in by_layer.items():
+                handles.append(
+                    self._model.transformer.h[layer].attn.c_proj
+                    .register_forward_pre_hook(make_hook(heads))
+                )
+            with torch.no_grad():
+                patched_logits = self._model(**inputs).logits[0, -1, :]
+            patched_logit = float(patched_logits[scored_index])
+            return {
+                "original_logit": original_logit,
+                "patched_logit": patched_logit,
+                "delta": patched_logit - original_logit,
+                "scored_token_id": scored_index,
+                "patched_heads": sorted(f"L{l}H{h}" for (l, h) in patches),
+                "model_fingerprint": self.model_fingerprint(),
+                "provenance": "live",
+            }
+        finally:
+            for handle in handles:
+                handle.remove()
+            if previous_impl is not None:
+                config._attn_implementation = previous_impl
+
     def run_isolated_circuit(self, prompt: str, head_list: List[str]) -> Dict[str, Any]:
+
         """Run a forward pass where only specified heads are active (all others are zero-ablated)."""
         if not self.spec.mock_mode and self._model is not None:
             import torch

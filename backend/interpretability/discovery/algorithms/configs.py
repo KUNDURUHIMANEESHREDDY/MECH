@@ -16,8 +16,20 @@ class DiscoveryAlgorithmConfig:
 
 @dataclass
 class ACDCConfig(DiscoveryAlgorithmConfig):
-    """Configuration for the ACDC Algorithm."""
-    threshold: float = 0.05
+    """Configuration for the ACDC Algorithm.
+
+    `threshold` is the fraction of the clean-minus-corrupted logit gap the
+    pruned circuit must still recover.
+
+    It used to mean something else: a per-head floor of 0.05 of the gap,
+    applied to heads scored one at a time. That criterion could not prune.
+    A head's individual contribution to a collective effect is small by
+    construction, so almost every head cleared the floor, and a live run
+    retained 138 of 144 candidates -- a circuit of 138 nodes whose own
+    measured recovery was -307% of the gap. The floor is now a floor on the
+    circuit, which is the quantity the search actually controls.
+    """
+    threshold: float = 0.9
     search_space: str = "attention_heads" # Options: attention_heads, mlps, neurons
     metric: str = "logit_difference"
 

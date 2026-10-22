@@ -27,11 +27,19 @@ class TransformerLensAdapter(ModelAdapter):
             hf_repo_id=model_name,
             mock_mode=mock_mode
         )
-        super().__init__(spec)
+        # Both attributes must exist BEFORE the base constructor runs.
+        # ModelAdapter.__init__ calls self._load_model(), which assigns
+        # self._tl_model and may set self.load_error; assigning them
+        # afterwards threw the loaded model away and erased the reason for
+        # a degraded load. The adapter then served the mock path even when
+        # real weights had loaded successfully, and a caller could not tell
+        # the difference without reading an attribute that had been reset
+        # to None (issue #15).
         self._tl_model = None
         #: Set when a genuine load failure forced the mock fallback, so the
         #: degradation can be reported rather than hidden.
         self.load_error: Optional[str] = None
+        super().__init__(spec)
 
     def _load_model(self) -> None:
         """Loads a HookedTransformer."""
@@ -56,7 +64,20 @@ class TransformerLensAdapter(ModelAdapter):
             # Keep the historical mock fallback for genuine load failures
             # (no network, no cached weights), but make the reason visible
             # instead of degrading silently.
+            #
+            # `simulated` is set alongside `mock_mode`, not replaced by it.
+            # The reproducibility pipelines refuse to report a measurement
+            # from a simulated adapter (greater_than_pipeline and the other
+            # pipelines check `simulated`), so a degraded load that left it
+            # False would let mock fixtures out as a measurement. That is
+            # the same defect ModelAdapter._load_model already guards.
             self.spec.mock_mode = True
+            self.simulated = True
+            self.simulation_reason = (
+                f"TransformerLens weights for {self.spec.hf_repo_id!r} could "
+                f"not be loaded ({type(exc).__name__}: {exc}). This adapter "
+                f"returns mock fixtures, not model output."
+            )
             self.load_error = f"{type(exc).__name__}: {exc}"
 
     def get_activations(self, prompt: str, layer: int, neuron_index: Optional[int] = None) -> List[ActivationResult]:

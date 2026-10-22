@@ -2885,12 +2885,26 @@ def _society_worker(run_id: str, goal: str, model_name: str) -> None:
         with _society_lock:
             stop = _society_runs.get(run_id, {}).get("stop")
             effort = dict(_society_runs.get(run_id, {}).get("effort") or {})
+        # The stop check and the effort are optional: a society implementation
+        # that does not accept them still runs, it just cannot be stopped
+        # between measurements. The signature is checked rather than the call
+        # wrapped in a try, so a real error inside the run is not mistaken for
+        # an unsupported argument.
+        import inspect as _inspect
+        try:
+            accepted = _inspect.signature(society.run_blocking).parameters
+        except (TypeError, ValueError):
+            accepted = {}
+        extra = {}
+        if stop is not None and "should_stop" in accepted:
+            extra["should_stop"] = stop.is_set
+        if effort and "effort" in accepted:
+            extra["effort"] = effort
         result = society.run_blocking(
             goal, model_name=model_name,
             on_event=lambda ev: _society_push(run_id, ev),
             run_id=run_id,
-            should_stop=(stop.is_set if stop is not None else None),
-            effort=effort or None,
+            **extra,
         )
         status = result.get("status", "completed")
     except Exception as exc:
