@@ -28,7 +28,7 @@ class EventBus {
         try {
           callback(payload);
         } catch (err) {
-          // eslint-disable-next-line no-console
+          // A throwing listener must not break the emitter.
           console.error(`[EventBus] Error in listener for ${event}:`, err);
         }
       }

@@ -141,9 +141,12 @@ def test_loop_stop_unknown_run_is_an_error():
 def test_loop_stop_is_cooperative_cancel():
     from backend.api import dispatcher as core
 
+    # A run whose pipeline is in flight: the request is recorded and the run
+    # keeps running until its worker observes the flag.
     run_id = "r_test_cancel_probe"
     core._society_runs[run_id] = {"run_id": run_id, "status": "running",
                                   "events": [], "result": None,
+                                  "pipeline_started": True,
                                   "queue": __import__("queue").Queue(),
                                   "created": 0.0}
     try:
@@ -153,6 +156,25 @@ def test_loop_stop_is_cooperative_cancel():
         # Post-cancel events are dropped, not recorded.
         core._society_push(run_id, {"type": "probe"})
         assert core._society_runs[run_id]["events"] == []
+    finally:
+        core._society_runs.pop(run_id, None)
+
+
+def test_loop_stop_cancels_a_run_that_never_started():
+    from backend.api import dispatcher as core
+
+    # Nothing is in flight, so the terminal state is certain and the run is
+    # cancelled outright rather than left "running" with a flag nobody will
+    # read. The MCP tool and POST /api/society/runs/{id}/cancel agree.
+    run_id = "r_test_cancel_not_started"
+    core._society_runs[run_id] = {"run_id": run_id, "status": "running",
+                                  "events": [], "result": None,
+                                  "queue": __import__("queue").Queue(),
+                                  "created": 0.0}
+    try:
+        res = srv.mech_loop_stop(run_id)
+        assert res["status"] == "cancelled", res
+        assert "before the pipeline started" in res["note"], res
     finally:
         core._society_runs.pop(run_id, None)
 

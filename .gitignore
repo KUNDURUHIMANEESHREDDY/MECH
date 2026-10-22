@@ -151,3 +151,37 @@ frontend/build/
 _diag*.py
 .l2_roundtrip_demo.py
 .pytest-*.log
+frontend/build/
+
+# pip's build/ephemeral temp dirs, when a pip invocation runs with its
+# temporary directory inside the workspace. They are hundreds of empty
+# scaffolding directories that git would otherwise offer to add: `git status`
+# showed 300+ of them as untracked, which buries the handful of real source
+# files that are actually new. They are build scratch, not project source, and
+# the same applies to the per-run logs pip leaves behind.
+pip-build-env-*/
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+pip-metadata-*/
+pip-unpack-*/
+pip-install.log
+npm-restore.log
+
+# Local run scratch produced by the verification scripts and the harness.
+_verify_run/
+_verify_snapshot/
+_vs2/
+_audit_scratch/
+_tmprobe/
+/*.log
+/load.json
+/runs.json
+/pipdl/
+pip-modern-metadata-*/
+/vite.pid
+/frontend/_*.log
+/frontend/scripts/_probe.cjs
+# Verification scratch written by the frontend checks (build/util/vitest
+# reports and screenshots). They are evidence for one run, not source.
+/frontend/tmp-*

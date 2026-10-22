@@ -1,24 +1,16 @@
-"""P0 #2 -- the frontend must authenticate; no raw fetch may drop the token.
-
-Claim under test: the frontend uses the authenticated client rather than a raw
-``fetch`` that drops the bearer token, and no authenticated control-plane route
-is reachable without one.
+"""P0 -- no renderer holds the control-plane credential.
 
 Two halves, because either alone is weak evidence:
 
-* **Script half.** Every ``fetch(`` call site under ``frontend/src`` is located
-  and required to carry a credential (an ``authHeaders`` spread, an explicit
-  ``Authorization`` header, or the ``apiToken()`` query-parameter path that
-  ``EventSource`` needs because it cannot set headers).  A path that lands in
-  neither bucket is a defect.
-* **Backend half.** The script claim is only meaningful if the backend actually
-  rejects the unauthenticated request.  ``/api`` is probed anonymously, and
-  ``auth.is_public_path`` is attacked with the bypass shapes -- query strings,
-  trailing slashes, case, missing leading slash.
-
-The polyfill is loaded as a module into a fake ``window`` and its observed
-``fetch`` calls are inspected, so "it carries the token" is measured rather than
-read off the source.
+* **Frontend half.** No source under ``frontend/src`` may attach a bearer
+  credential. Desktop requests are authenticated by the Electron main process
+  (the ``api:request`` proxy); the browser build is authenticated by the
+  HttpOnly session cookie issued by ``POST /session``. The polyfill is
+  *executed* and the request it actually makes is inspected, so "it carries no
+  token" is measured rather than read off the source.
+* **Backend half.** The script claim only matters if the backend enforces it:
+  ``/api`` is probed anonymously, the session cookie is minted from the token and
+  accepted, and ``auth.is_public_path`` is attacked with the bypass shapes.
 """
 
 from __future__ import annotations
@@ -33,16 +25,15 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_SRC = REPO_ROOT / "frontend" / "src"
 
-#: Markers that prove a call site attached a credential.
-CREDENTIAL_MARKERS = ("authHeaders", "Authorization", "apiToken(")
-
-#: A call site is allowed to *implement* credential attachment rather than use
-#: it: `apiFetch` and the private `request` helper in services/api.ts are the
-#: authenticated client. They are named explicitly so an unauthenticated call
-#: anywhere else cannot hide behind the same exemption.
-IMPLEMENTATION_SITES = {
-    "services/api.ts": ("apiFetch", "request"),
+#: The only files allowed to call ``fetch`` directly: the authenticated client
+#: and the browser polyfill. Everything else must go through ``apiFetch``.
+FETCH_IMPLEMENTATION_SITES = {
+    "services/api.ts",
+    "utils/browserPolyfill.js",
 }
+
+#: Strings that would mean a renderer can still read or build a credential.
+FORBIDDEN_IN_RENDERER = ("__MECH_API_TOKEN__", "apiToken", "Bearer ")
 
 
 def _frontend_sources():
@@ -54,25 +45,12 @@ def _frontend_sources():
 
 
 def _source_text(path: Path) -> str:
-    """File text, decoded leniently.
-
-    Some components carry mojibake banners (byte sequences that are not valid
-    UTF-8).  They are cosmetic, but a strict decode raises and a strict read of
-    a *scanned* file would make the scanner fragile for the wrong reason.  The
-    undecodable bytes are replaced rather than dropped so line numbers hold.
-    """
+    """File text, decoded leniently (some components carry mojibake banners)."""
     return path.read_bytes().decode("utf-8", errors="replace")
 
 
 def _strip_comments(text: str) -> str:
-    """Blank out JS/TS comments, preserving offsets but not stray matches.
-
-    Without this, ``fetch(`` inside a comment or a docstring -- including the
-    mojibake box-drawing banners in these components -- is reported as an
-    unauthenticated call site, which is a false positive that would train a
-    reader to ignore the check.  Line length is preserved so reported line
-    numbers stay correct.
-    """
+    """Blank out JS/TS comments, preserving offsets but not stray matches."""
     text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"),
                   text, flags=re.DOTALL)
     return re.sub(r"//[^\n]*", "", text)
@@ -83,83 +61,61 @@ def _fetch_call_windows(text: str, size: int = 700):
     windows = []
     for match in re.finditer(r"(?<![.\w])fetch\s*\(", text):
         start = match.start()
-        window = text[start:start + size]
-        line = text.count("\n", 0, start) + 1
-        windows.append((line, window))
+        windows.append((text.count("\n", 0, start) + 1, text[start:start + size]))
     return windows
 
 
 def test_the_scan_finds_the_expected_call_sites():
     """Guard the scan: a refactor must not silently empty it."""
     total = 0
-    files_with_fetch = 0
+    files_with_fetch = set()
     for path in _frontend_sources():
         windows = _fetch_call_windows(_strip_comments(_source_text(path)))
         if windows:
-            files_with_fetch += 1
+            files_with_fetch.add(path.relative_to(FRONTEND_SRC).as_posix())
             total += len(windows)
-    assert total >= 10, (
-        f"the scan found only {total} fetch() call(s); it may be matching "
-        f"nothing after a refactor"
-    )
-    assert files_with_fetch >= 5, files_with_fetch
+    assert total >= 2, f"the scan found only {total} fetch() call(s)"
+    assert files_with_fetch, "no frontend source issues a fetch at all"
 
 
-def test_every_fetch_call_site_carries_a_credential():
-    """The defect the claim is about: a raw fetch that drops the token.
-
-    A call site passes when its own text attaches a credential.  Two whole
-    files are exempt because their *job* is to attach it -- and each is
-    separately required to contain the credential logic, so the exemption
-    cannot be used to hide an unauthenticated call.
-    """
-    unauthenticated = []
-    for path in _frontend_sources():
-        rel = path.relative_to(FRONTEND_SRC).as_posix()
-        text = _source_text(path)
-        if rel in IMPLEMENTATION_SITES:
-            assert any(marker in text for marker in CREDENTIAL_MARKERS), (
-                f"{rel} is exempted as the authenticated client but contains no "
-                f"credential logic"
-            )
-            continue
-        code = _strip_comments(text)
-        for line, window in _fetch_call_windows(code):
-            if not any(marker in window for marker in CREDENTIAL_MARKERS):
-                unauthenticated.append(f"{rel}:{line}")
-
-    assert not unauthenticated, (
-        f"{len(unauthenticated)} fetch() call site(s) attach no bearer "
-        f"credential, so the request will 401 (or worse, be silently "
-        f"unauthenticated): {unauthenticated}"
-    )
-
-
-def test_no_vite_env_token_is_bundled():
-    """A VITE_-prefixed token would be compiled into the shipped bundle."""
+def test_no_renderer_source_reads_or_builds_a_credential():
+    """The defect: renderer JavaScript that can obtain the bearer token."""
     offenders = []
     for path in _frontend_sources():
-        # Comments are stripped: api.ts documents *why* it avoids the variable,
-        # and the prohibition is on referencing it in code.
         code = _strip_comments(_source_text(path))
-        if "VITE_MECH_API_TOKEN" in code:
-            offenders.append(path.relative_to(FRONTEND_SRC).as_posix())
+        for marker in FORBIDDEN_IN_RENDERER:
+            if marker in code:
+                offenders.append(f"{path.relative_to(FRONTEND_SRC).as_posix()}: {marker!r}")
     assert not offenders, (
-        f"VITE_MECH_API_TOKEN is referenced in {offenders}; Vite inlines "
-        f"VITE_* into the bundle, which ships the secret to every client"
+        "renderer source still references a bearer credential: " + "; ".join(offenders)
     )
 
 
-def test_browser_polyfill_actually_sends_the_token():
-    """Run the polyfill under Node and observe the request it actually makes.
+def test_only_the_authenticated_client_calls_fetch():
+    """A raw fetch cannot carry the session cookie to another origin."""
+    callers = set()
+    for path in _frontend_sources():
+        rel = path.relative_to(FRONTEND_SRC).as_posix()
+        if _fetch_call_windows(_strip_comments(_source_text(path))):
+            callers.add(rel)
+    unexpected = sorted(callers - FETCH_IMPLEMENTATION_SITES)
+    assert not unexpected, (
+        f"these files call fetch() directly instead of apiFetch(): {unexpected}"
+    )
 
-    The polyfill is a second, independent path to the control plane: it is what
-    the web build uses when Electron's bridge is absent.  Reading its source
-    would only show intent, so it is executed with ``fetch`` and ``window``
-    stubbed and the resulting ``init.headers`` are inspected.  Skipped when
-    Node is unavailable -- and the skip is loud, because a silent skip here
-    would remove the only execution-level evidence for this path.
-    """
+
+def test_desktop_and_browser_use_their_own_credential_path():
+    """Both paths must be present, or one of the builds is unauthenticated."""
+    api = _strip_comments(_source_text(FRONTEND_SRC / "services" / "api.ts"))
+    assert "apiProxy()" in api, "api.ts does not consult the desktop IPC proxy"
+    assert "apiRequest" in api, "api.ts does not call the preload proxy"
+    assert "credentials: 'same-origin'" in api, (
+        "the browser build does not send the session cookie"
+    )
+
+
+def test_browser_polyfill_sends_no_token():
+    """Run the polyfill and inspect the request it actually makes."""
     import shutil
     import subprocess
 
@@ -172,28 +128,33 @@ def test_browser_polyfill_actually_sends_the_token():
 
     harness = r"""
 const captured = [];
-let assigned = null;
 
 globalThis.fetch = async (url, init) => {
-  captured.push({ url: String(url), headers: (init && init.headers) || {} });
+  captured.push({
+    url: String(url),
+    headers: (init && init.headers) || {},
+    credentials: init && init.credentials,
+    body: init && init.body,
+  });
   return { json: async () => ({ result: { ok: true } }) };
 };
 
 const win = {
-  __MECH_API_TOKEN__: '',
-  localStorage: { getItem: (k) => (k === 'mech_api_token' ? 'storage-token' : null) },
+  localStorage: { getItem: () => 'storage-token' },
 };
 
 Object.defineProperty(globalThis, 'window', { value: win, configurable: true });
 
 const src = require('fs').readFileSync(process.argv[1], 'utf8');
 const fn = new Function('window', 'fetch', src + '\n;return window.appApi;');
-assigned = fn(win, globalThis.fetch);
+const api = fn(win, globalThis.fetch);
 
 (async () => {
-  const token = assigned.getApiToken();
-  await assigned.pythonPing();
-  console.log(JSON.stringify({ token, captured }));
+  await api.pythonPing();
+  console.log(JSON.stringify({
+    captured,
+    hasGetApiToken: typeof api.getApiToken === 'function',
+  }));
 })().catch((err) => {
   console.log(JSON.stringify({ error: String(err && err.message || err) }));
   process.exit(3);
@@ -202,55 +163,49 @@ assigned = fn(win, globalThis.fetch);
 
     proc = subprocess.run(
         [node, "-e", harness, str(polyfill)],
-        capture_output=True, text=True, timeout=120,
-        cwd=str(REPO_ROOT),
+        capture_output=True, text=True, timeout=120, cwd=str(REPO_ROOT),
     )
     assert proc.returncode == 0, (
         f"the polyfill failed to execute under node:\n{proc.stderr[-800:]}"
     )
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert "error" not in payload, payload.get("error")
 
-    assert "error" not in payload, payload["error"]
-    assert payload["token"] == "storage-token", (
-        "the polyfill did not resolve the token from localStorage; "
-        f"got {payload['token']!r}"
+    assert payload["hasGetApiToken"] is False, (
+        "the polyfill exposes getApiToken(); a renderer could read the credential"
     )
     assert payload["captured"], "the polyfill issued no request"
-    url, init = payload["captured"][0]["url"], payload["captured"][0]
-    headers = {k.lower(): v for k, v in init["headers"].items()}
-    assert "authorization" in headers, (
-        f"the polyfill called {url} with no Authorization header: {init}"
+    request = payload["captured"][0]
+    headers = {k.lower(): v for k, v in request["headers"].items()}
+    assert "authorization" not in headers, (
+        f"the polyfill sent a credential to {request['url']}: {headers}"
     )
-    assert headers["authorization"] == "Bearer storage-token", headers
-
-
-def test_browser_polyfill_has_no_unauthenticated_fetch_path():
-    """Even without Node, no fetch in the polyfill may lack the header."""
-    text = _source_text(FRONTEND_SRC / "utils" / "browserPolyfill.js")
-    for line, window in _fetch_call_windows(_strip_comments(text)):
-        assert "Authorization" in window, (
-            f"browserPolyfill.js:{line} issues a fetch without an "
-            f"Authorization header"
-        )
-
-
-def test_event_source_token_travels_as_a_query_parameter():
-    """EventSource cannot set headers; the token must be in the URL.
-
-    Without it every SSE subscribe 401s and the panel degrades to polling --
-    silently, which is why the contract is pinned.
-    """
-    text = (FRONTEND_SRC / "services" / "societyService.ts").read_text(
-        encoding="utf-8")
-    assert "apiToken()" in text, (
-        "societyService must resolve the token for the SSE subscribe"
+    assert request["credentials"] == "include", (
+        "the polyfill does not ask for the session cookie; it will 401"
     )
-    assert re.search(r"token=\$\{encodeURIComponent\(token\)\}", text), (
-        "the SSE url must carry the encoded token as a query parameter"
+    assert "/api/" in request["url"] and "/api/v1/" not in request["url"], (
+        f"the polyfill targets a path the backend does not serve: {request['url']}"
     )
+
+
+def test_event_source_does_not_put_the_token_in_the_url():
+    """A credential in a URL ends up in history and in access logs."""
+    text = (FRONTEND_SRC / "services" / "societyService.ts").read_text(encoding="utf-8")
     assert "EventSource" in text, "expected an EventSource-based stream"
+    assert "token=" not in text, (
+        "societyService still puts a credential in the SSE query string"
+    )
+    assert "apiToken" not in text
 
 
+def test_scan_is_not_vacuous():
+    """The scan must be looking at a non-trivial tree."""
+    sources = _frontend_sources()
+    assert len(sources) > 50, f"only {len(sources)} frontend sources found"
+    joined = "\n".join(_source_text(p) for p in sources)
+    assert "apiFetch" in joined
+    assert "EventSource" in joined
+    json.dumps({"ok": True})  # keep the import used and deterministic
 # --------------------------------------------------------------------------- #
 # backend half: unauthenticated requests are actually rejected
 # --------------------------------------------------------------------------- #
@@ -349,11 +304,3 @@ def test_openapi_spec_is_not_public_json():
     """`/openapi.json` ends in .json but must not be caught by static matching."""
     assert _auth().is_public_path("/openapi.json", "GET") is False
     assert _auth().is_public_path("/openapi.yaml", "GET") is False
-
-
-def test_scan_is_not_vacuous():
-    """The credential markers must appear in the tree at all."""
-    joined = "\n".join(_source_text(p) for p in _frontend_sources())
-    for marker in CREDENTIAL_MARKERS:
-        assert marker in joined, f"no frontend source references {marker!r}"
-    json.dumps({"ok": True})  # keep the import used and deterministic

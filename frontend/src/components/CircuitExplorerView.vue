@@ -162,7 +162,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { apiUrl, authHeaders } from '../services/api';
+import { apiFetch, apiUrl, authHeaders } from '../services/api';
 
 type Provenance = 'live' | 'reference' | 'unavailable';
 type SourceTone = 'online' | 'offline' | 'loading' | 'reference';
@@ -261,7 +261,7 @@ function looksOffline(message: string): boolean {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(apiUrl(path), {
+  const response = await apiFetch(apiUrl(path), {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   if (!response.ok) throw new Error(`GET ${path} returned ${response.status}`);

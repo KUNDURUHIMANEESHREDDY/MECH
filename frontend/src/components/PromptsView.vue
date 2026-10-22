@@ -1,5 +1,5 @@
 <template>
-  <main class="prompts-surface">
+  <section class="prompts-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Develop / Prompt workspace</p>
@@ -188,7 +188,7 @@
       </header>
       <pre class="result-code">{{ formattedResult }}</pre>
     </section>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

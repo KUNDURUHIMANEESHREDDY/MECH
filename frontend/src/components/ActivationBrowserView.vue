@@ -1,5 +1,5 @@
 <template>
-  <main class="activation-surface" data-testid="activation-browser">
+  <section class="activation-surface" data-testid="activation-browser">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Explore / Live tensors</p>
@@ -327,7 +327,7 @@
         </section>
       </div>
     </template>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

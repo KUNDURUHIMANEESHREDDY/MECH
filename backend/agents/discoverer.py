@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from backend.core.provenance import admit_result
+
 #: Sample sizes the Society's discovery asks for. These are
 #: `live_discovery.MIN_PROMPTS_FOR_VALIDATION` and
 #: `..._MIN_PROMPTS_FOR_INTERACTION` -- the thresholds the executor itself uses
@@ -109,8 +111,6 @@ class Discoverer:
             from .evidence_policy import (
                 blocked_reason,
                 discovery_is_live,
-                field_map,
-                provenance_of,
             )
             from backend.interpretability.discovery.discovery_engine import (
                 DiscoveryEngine,
@@ -129,27 +129,17 @@ class Discoverer:
                 n_interaction_prompts=SOCIETY_DISCOVERY_N_INTERACTION_PROMPTS,
             )
             if not discovery_is_live(res):
-                # Do not place the synthetic result under ``result``: that
+                # The same gate, on the refusal path. The label is still the
+                # engine's own, the eligibility is still derived rather than
+                # asserted, and the reason still says why. The synthetic
+                # result is deliberately not placed under ``result``: that
                 # key is consumed by validation, evidence graphs, and the
                 # scribe as scientific evidence.
-                out = {
-                    "status": "unavailable",
-                    "provenance": provenance_of(res),
-                    "validation_eligible": False,
-                    "publication_eligible": False,
-                    "discovery_id": res.get("discovery_id", ""),
-                    "reason": blocked_reason(res, "Discovery"),
-                }
-                # Built from `out` rather than a fixed tuple. The tuple named
-                # `result`, which this branch deliberately does not return, so
-                # the map claimed a field the response did not contain -- and a
-                # provenance map is a lookup keyed by field name, so an entry
-                # with no field behind it trains a consumer to read the map as
-                # a description of the payload.
-                out["field_provenance"] = field_map(
-                    tuple(out), provenance_of(res),
+                return admit_result(
+                    res, stage="discovery",
+                    extra={"discovery_id": res.get("discovery_id", "")},
+                    reason=blocked_reason(res, "Discovery"),
                 )
-                return out
             # `**res` first, the guarded verdict last.
             #
             # The spread used to come last, so it overwrote the keys this
@@ -174,28 +164,32 @@ class Discoverer:
             # reaching the caller at `provenance: "live"`. Those are the
             # fields a consumer quotes, and the guarded-verdict ordering above
             # protects only the three keys the wrapper decided for itself.
+            # The verdict itself is no longer assembled here either: the
+            # shared admission gate derives it, so the label, the attestation
+            # flag and the eligibility flags are decided in exactly one
+            # place. `**res` still comes first, so the payload cannot
+            # overwrite the verdict.
+            admitted = admit_result(res, stage="discovery", extra=res)
             out = {
                 **res,
-                "status": "completed",
-                "provenance": "live",
-                # Propagated, never asserted: the guard above already required
-                # an attested live result, and the spread carries it through.
-                # A result that measured nothing arrives unattested and stays
-                # ineligible downstream.
-                "attested": res.get("attested", False),
+                "status": admitted["status"],
+                "provenance": admitted["provenance"],
+                "attested": admitted["attested"],
+                "validation_eligible": admitted["validation_eligible"],
+                "publication_eligible": admitted["publication_eligible"],
             }
-            out["field_provenance"] = field_map(tuple(out), "live")
+            out["field_provenance"] = admitted["field_provenance"]
             return out
         except Exception as exc:
-            out = {
-                "status": "error",
-                "provenance": "unavailable",
-                "validation_eligible": False,
-                "publication_eligible": False,
-                "error": str(exc)[:500],
-            }
-            out["field_provenance"] = field_map(tuple(out), "unavailable")
-            return out
+            # The exception arm builds a fresh envelope rather than echoing
+            # whatever it had in hand: a payload reached under `status:
+            # "error"` would still be read by the evidence chain. The gate
+            # derives the label and the eligibility here too.
+            return admit_result(
+                {}, stage="discovery", status="error",
+                extra={"error": str(exc)[:500]},
+                reason=str(exc)[:500],
+            )
 
     def cross_model(self, source_model: str = "gpt2",
                     target_model: str = "gpt2-medium",

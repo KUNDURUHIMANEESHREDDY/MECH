@@ -58,7 +58,14 @@ from .layer_inspector import LayerInspector
 from .token_inspector import TokenInspector
 from .logit_inspector import LogitInspector
 from .heatmap import VisualizationGenerator, HeatmapGenerator
-from .api import app
+
+# NOTE: the "Activation Viewer API" module that used to live here (api.py) was
+# a second, independently built FastAPI application -- no bearer gate, no CORS
+# policy, no body-size ceiling -- and it was mounted nowhere. Nothing outside
+# this package imported it, and the endpoints it served were mock data, so it
+# was deleted rather than re-mounted: a control plane with two security
+# postures is the shape this repository exists to avoid. The real API is the
+# single gated app in backend/main.py.
 
 # Sub-packages
 from . import algorithms
@@ -101,6 +108,4 @@ __all__ = [
     # Visualization
     "VisualizationGenerator",
     "HeatmapGenerator",
-    # API
-    "app",
 ]

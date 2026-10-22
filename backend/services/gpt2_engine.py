@@ -1646,6 +1646,100 @@ def layer_activations(layer: int, prompt: str) -> Dict[str, Any]:
         return {"status": "error", "error": str(exc)[:300]}
 
 
+#: The TransformerLens model, loaded on first use and then reused. It is a
+#: second view of the same GPT-2 weights: its hook points name activations
+#: that HuggingFace does not expose, and the published GPT-2 SAE dictionaries
+#: were trained against exactly those hooks -- so a dictionary can only be
+#: applied to the activation it describes by reading it from here.
+_tl_model: Any = None
+_tl_lock = threading.Lock()
+
+
+def _transformer_lens_model() -> Any:
+    """The TransformerLens model, loaded once and cached.
+
+    Resolved through ``tl_compat``, so an unsupported transformer-lens release
+    raises the project's actionable error -- the supported range and the exact
+    install command -- instead of an ImportError from deep inside the stack.
+    """
+    global _tl_model
+    with _tl_lock:
+        if _tl_model is not None:
+            return _tl_model
+        from backend.interpretability.tl_compat import resolve_hooked_transformer
+        hooked = resolve_hooked_transformer()
+        _tl_model = hooked.from_pretrained("gpt2", device="cpu")
+        return _tl_model
+
+
+def hook_activation(hook_point: str, prompt: str) -> Dict[str, Any]:
+    """One TransformerLens hook's activation at the final position.
+
+    The hook point names a tensor that only TransformerLens produces -- for
+    example ``blocks.8.hook_resid_pre``, the residual stream at the input to
+    block 8. HuggingFace's ``hidden_states`` is a *different* tensor: the two
+    differ by the constant TransformerLens' ``center_writing_weights`` adds to
+    the residual stream, and a dictionary trained against one of them
+    reconstructs the other far worse than it reconstructs its own. Measured on
+    this host at layer 8, the same dictionary reconstructs the TransformerLens
+    tensor at relative L2 0.243 and the ``transformers`` one at 3.42.
+
+    So the tensor is read from TransformerLens' own ``run_with_cache``, and a
+    hook TransformerLens did not return is an explicit refusal rather than an
+    empty tensor.
+    """
+    hook_point = str(hook_point or "").strip()
+    if not hook_point:
+        return {"status": "error", "error": "no hook point was named"}
+    try:
+        model = _transformer_lens_model()
+    except Exception as exc:
+        return {"status": "unavailable",
+                "error": f"{type(exc).__name__}: {exc}"[:400]}
+    try:
+        with torch.no_grad():
+            _logits, cache = model.run_with_cache(prompt)
+        if hook_point not in cache:
+            return {"status": "unavailable",
+                    "error": f"TransformerLens returned no {hook_point}"}
+        tensor = cache[hook_point][0, -1, :].detach().float().cpu()
+        return {"status": "ok", "hook_point": hook_point, "prompt": prompt,
+                "tensor": tensor, "d_model": int(tensor.shape[-1])}
+    except Exception as exc:
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}"[:300]}
+
+
+def mlp_write(layer: int, prompt: str) -> Dict[str, Any]:
+    """What one block writes into the residual stream.
+
+    The MLP's contribution, ``c_proj(act(c_fc(ln_2(resid_post))))``. This is
+    the tensor this repository's SAE trainer fits, and it is reproduced here
+    from the same weights and the same cached forward pass, so a locally
+    trained dictionary is applied to exactly the activation it was trained on
+    rather than to a neighbouring one that merely has the right width.
+    """
+    err = _ensure_prompt(prompt)
+    if err:
+        return err
+    bad = _check_layer(layer)
+    if bad is not None:
+        return bad
+    layer = int(layer)
+    with MODEL_LOCK:
+        try:
+            acts = _cache["mlp_post"][layer]
+            block = _model.transformer.h[layer]
+            with torch.no_grad():
+                write = block.mlp.c_proj(acts).detach().cpu().float()
+            return {"status": "ok", "layer": layer, "prompt": prompt,
+                    "tensor": write, "d_model": int(write.shape[-1]),
+                    "tokens": list(_cache.get("str_tokens") or []),
+                    "hook_point": f"blocks.{layer}.mlp_write"}
+        except Exception as exc:
+            return {"status": "error",
+                    "error": f"{type(exc).__name__}: {exc}"[:300]}
+
+
 @_measured
 def logit_lens_all(prompt: str, top_k: int = 3) -> Dict[str, Any]:
     """LogitLens top-k for every layer in a single cached forward."""

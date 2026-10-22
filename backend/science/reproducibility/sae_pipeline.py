@@ -1,8 +1,25 @@
 """SAE Reproduction Pipeline.
 
-Trains a sparse autoencoder on GPT-2's MLP post-activation residuals and reports
-reconstruction error, L0 sparsity and per-feature max-activation attributions,
-all measured.
+Trains a sparse autoencoder on GPT-2's MLP writes -- what a block writes into
+the residual stream -- and reports reconstruction error, L0 sparsity and
+per-feature max-activation attributions, all measured.
+
+What the dictionary describes
+------------------------------
+
+The activation a dictionary is trained on is a fact about the checkpoint, so
+the checkpoint records it: the hook point, the layer, the tensor source and
+the model id. Without those facts the loader cannot tell which activation the
+weights belong to, and the route has to encode whichever tensor it happens to
+have -- which is how a locally trained dictionary came to be reported against
+a residual stream it had never seen.
+
+The tensor is the MLP's write, ``c_proj(act(c_fc(ln_2(resid_post))))``: a
+named tensor that ``gpt2_engine.mlp_write`` recomputes from the same weights,
+so the route encodes exactly what the trainer fitted. The previous version
+collected the block's *input* residual stream plus that write, which is
+neither ``resid_pre`` nor ``resid_post`` and is a tensor no published
+dictionary can describe.
 
 What this used to be
 --------------------
@@ -208,7 +225,8 @@ class SAEReproductionPipeline:
             corpus: Optional[str] = None, n_tokens: int = 4096,
             k: Optional[int] = None, steps: int = 400,
             learning_rate: float = 3e-4, top_tokens: int = 8,
-            checkpoint_dir: Optional[Any] = None) -> Dict[str, Any]:
+            checkpoint_dir: Optional[Any] = None,
+            layer: int = 0) -> Dict[str, Any]:
         """Train and evaluate a top-k SAE. Raises rather than simulating."""
         torch = self._torch()
         if torch is None:
@@ -244,6 +262,18 @@ class SAEReproductionPipeline:
                 "The corpus is empty, so no activations could be collected. No "
                 "autoencoder was fitted.")
 
+        # The layer whose MLP write is fitted, and the model it is fitted on.
+        # Both are recorded in the checkpoint, so the route can reproduce the
+        # training tensor instead of guessing at it.
+        layer = int(layer)
+        n_layers = int(getattr(getattr(model, "config", None), "n_layer", 0) or 0)
+        if n_layers and not 0 <= layer < n_layers:
+            raise LiveUnavailable(
+                f"Layer {layer} is outside this model's range "
+                f"(0-{n_layers - 1}), so no activation could be collected from "
+                "it. No autoencoder was fitted.")
+        model_id = self._model_id()
+
         # Determinism is load-bearing: same seed + params + corpus must pin
         # the artifact, or "seed" is decoration. Two sources break it:
         # (1) the global RNG (reset by manual_seed), and (2) multithreaded
@@ -251,7 +281,8 @@ class SAEReproductionPipeline:
         # therefore runs single-threaded, restoring the previous setting
         # afterwards so interactive use keeps its threads.
         torch.manual_seed(seed)
-        acts = self._collect_activations(torch, model, tokenizer, corpus, n_tokens)
+        acts = self._collect_activations(torch, model, tokenizer, corpus,
+                                         n_tokens, layer)
         prev_threads = torch.get_num_threads()
         torch.set_num_threads(1)
         try:
@@ -321,7 +352,8 @@ class SAEReproductionPipeline:
             # not fatal: the metrics above were still measured.
             checkpoint_record = self._save_checkpoint(
                 torch, sae, d_model, n_features, top_k, int(seed), int(steps),
-                float(learning_rate), checkpoint_dir)
+                float(learning_rate), checkpoint_dir, layer=layer,
+                model_id=model_id)
 
             metrics = {
                 # The measured reconstruction error, from a real encode/decode.
@@ -396,7 +428,7 @@ class SAEReproductionPipeline:
                 "mock_mode": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
-                "model_id": getattr(self.engine, "MODEL_ID", None),
+                "model_id": model_id,
                 "autoencoder": "top_k_sae",
                 "observed_metrics": metrics,
                 "checkpoint": checkpoint_record,
@@ -407,7 +439,7 @@ class SAEReproductionPipeline:
                 "reason": (
                     f"Top-k SAE with {n_features} dictionary elements and k={top_k} "
                     f"trained for {int(steps)} steps on {int(acts.shape[0])} real "
-                    f"GPT-2 MLP post-activation vectors "
+                    f"GPT-2 block-{layer} MLP-write vectors "
                     f"({int(held_x.shape[0])} held out). Reconstruction MSE "
                     f"{held_mse:.6g} on held-out activations, normalised "
                     f"{nmse:.4g} of activation variance, mean L0 {held_l0:.1f}."
@@ -430,7 +462,8 @@ class SAEReproductionPipeline:
     def _save_checkpoint(self, torch, sae, d_model: int, n_features: int,
                          top_k: int, seed: int, steps: int,
                          learning_rate: float,
-                         checkpoint_dir: Optional[Any]) -> Dict[str, Any]:
+                         checkpoint_dir: Optional[Any],
+                         layer: int = 0, model_id: str = "") -> Dict[str, Any]:
         """Persist fitted weights beside the metrics that describe them.
 
         Keys match what the checkpoint loader reads (`W_enc`, `b_enc`,
@@ -438,6 +471,12 @@ class SAEReproductionPipeline:
         `b_dec`). A unique filename per run: overwriting a previous
         checkpoint with a new fit would silently re-point every inspection
         at different weights.
+
+        The checkpoint also records *what it describes*: the hook point, the
+        layer, the tensor source and the model id. Without those facts the
+        loader cannot tell which activation the weights belong to, so the
+        route has to encode whichever tensor it has -- and a dictionary is
+        only meaningful on the activation it was trained on.
         """
         import uuid
 
@@ -445,9 +484,15 @@ class SAEReproductionPipeline:
                   else self._default_checkpoint_dir(self.root))
         try:
             target.mkdir(parents=True, exist_ok=True)
-            name = (f"sae_d{d_model}_n{n_features}_k{top_k}_s{seed}_"
+            name = (f"sae_l{layer}_d{d_model}_n{n_features}_k{top_k}_s{seed}_"
                     f"{steps}st_{uuid.uuid4().hex[:8]}.pt")
             path = target / name
+            # The facts that make this checkpoint inspectable: which tensor it
+            # describes, which layer that tensor is at, and which model it was
+            # trained on. The route reads the tensor this names, so the
+            # dictionary is applied to the activation it was fitted on.
+            hook_point = f"blocks.{int(layer)}.mlp_write"
+            tensor_source = f"transformers:{hook_point}"
             with torch.no_grad():
                 payload = {
                     "W_enc": sae.W_enc.detach().cpu().clone(),
@@ -462,6 +507,14 @@ class SAEReproductionPipeline:
                     "steps": int(steps),
                     "learning_rate": float(learning_rate),
                     "autoencoder": "top_k_sae",
+                    "hook_point": hook_point,
+                    "tensor_source": tensor_source,
+                    "layer": int(layer),
+                    "model_name": str(model_id or ""),
+                    "model_id": str(model_id or ""),
+                    "tensor_description": (
+                        "the MLP's write into the residual stream at block "
+                        f"{int(layer)}: c_proj(act(c_fc(ln_2(resid_post))))"),
                 }
                 torch.save(payload, str(path))
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -488,6 +541,10 @@ class SAEReproductionPipeline:
                 "checkpoint_content_sha256": f"sha256:{content.hexdigest()}",
                 "checkpoint_d_in": int(d_model),
                 "checkpoint_d_sae": int(n_features),
+                "checkpoint_hook_point": hook_point,
+                "checkpoint_tensor_source": tensor_source,
+                "checkpoint_layer": int(layer),
+                "checkpoint_model_id": str(model_id or ""),
             }
         except Exception as exc:
             return {
@@ -536,9 +593,31 @@ class SAEReproductionPipeline:
             })
         return out
 
+    def _model_id(self) -> str:
+        """The identity of the weights being fitted.
+
+        Read from the engine's loaded model where it exposes one, so the
+        checkpoint names the weights it was actually trained on rather than
+        the name of a model someone meant to load.
+        """
+        engine = self.engine
+        loader = getattr(engine, "_loaded_model_id", None)
+        if callable(loader):
+            try:
+                value = loader()
+            except Exception:
+                value = None
+            if isinstance(value, str) and value:
+                return value
+        for attr in ("MODEL_ID", "SUPPORTED_MODEL"):
+            value = getattr(engine, attr, None)
+            if isinstance(value, str) and value:
+                return value
+        return ""
+
     def _collect_activations(self, torch, model, tokenizer, corpus: str,
-                             n_tokens: int):
-        """Real MLP post-activation vectors from a forward pass.
+                             n_tokens: int, layer: int = 0):
+        """The MLP's write into the residual stream, from a forward pass.
 
         GPT-2's activation function is `gelu_new`, so `mlp.act(...)` is the
         post-activation residual. Pre-activation would be a different quantity
@@ -552,6 +631,14 @@ class SAEReproductionPipeline:
         `RuntimeError: mat1 and mat2 shapes cannot be multiplied (128x3072 and
         768x3072)`. Letting the module do its own matmul removes the transpose
         question entirely.
+
+        What is collected is the tensor the block writes, not a mixture of
+        tensors: the previous version added the block's *input* residual
+        stream to that write, which is neither `resid_pre` nor `resid_post`
+        and is a tensor no published dictionary can describe. The route has to
+        reproduce whatever this collects, so it is a named tensor with a
+        producer -- `blocks.{layer}.mlp_write`, recomputed by
+        `gpt2_engine.mlp_write` from the same weights.
         """
         device = next(model.parameters()).device
         collected = []
@@ -573,14 +660,12 @@ class SAEReproductionPipeline:
                     continue
                 with torch.no_grad():
                     out = model(chunk, output_hidden_states=True)
-                layer = 0
                 hidden = out.hidden_states[layer + 1]
-                residual = out.hidden_states[layer]
                 block_obj = model.transformer.h[layer]
                 normed = block_obj.ln_2(hidden)
                 acts = block_obj.mlp.act(block_obj.mlp.c_fc(normed))
                 contribution = block_obj.mlp.c_proj(acts)
-                rows = (residual + contribution)[0]
+                rows = contribution[0]
                 collected.append(rows.detach().float())
                 total += rows.shape[0]
             if total >= budget:

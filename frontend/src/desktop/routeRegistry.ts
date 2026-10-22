@@ -343,6 +343,14 @@ export const ROUTES: DesktopRoute[] = [
     aliases: ['dataset-browser'],
     load: () => import('../components/DatasetsView.vue'),
   },
+  {
+    id: 'jobs',
+    label: 'Jobs',
+    group: 'Develop',
+    requirement: 'backend',
+    legacy: false,
+    load: () => import('../components/JobsView.vue'),
+  },
 ];
 
 export const LEGACY_ROUTE_IDS = ROUTES.filter((route) => route.legacy).map((route) => route.id);

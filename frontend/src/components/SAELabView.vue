@@ -1,5 +1,5 @@
 <template>
-  <main class="sae-surface" data-testid="sae-lab">
+  <section class="sae-surface" data-testid="sae-lab">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Research / Sparse autoencoders</p>
@@ -41,11 +41,18 @@
 
       <template v-else-if="statusRecord">
         <p v-if="!checkpointConfigured" class="notice notice-warn" role="status" data-testid="sae-checkpoint-warning">
-          <strong>No SAE checkpoint is configured.</strong>
+          <strong>No SAE checkpoint is configured on the server.</strong>
           The backend returned <code>checkpoint_configured: false</code>. Inspection needs a
           checkpoint: <code>MECH_SAE_SOURCE</code> + <code>MECH_SAE_CHECKPOINT</code> on the server,
           or an explicit source + identifier below. Without one the backend answers NOT AVAILABLE
-          and this view shows that answer — it does not show an empty feature set.
+          and this view shows that answer — it does not show an empty feature set. If the checkpoint
+          directory below lists files, choose one to send it explicitly.
+        </p>
+
+        <p v-else-if="checkpointIdentifier" class="notice" role="status" data-testid="sae-checkpoint-configured">
+          <strong>A checkpoint is configured on the server.</strong>
+          An inspection sent without an identifier uses
+          <code class="mono">{{ checkpointIdentifier }}</code>.
         </p>
 
         <table class="status-table" data-testid="sae-compatibility">
@@ -67,6 +74,21 @@
             </tr>
           </tbody>
         </table>
+
+        <dl class="fact-grid" data-testid="sae-checkpoint-facts">
+          <div>
+            <dt>Checkpoint directory</dt>
+            <dd class="mono" data-testid="sae-checkpoint-dir">{{ checkpointDirLabel }}</dd>
+          </div>
+          <div>
+            <dt>Server checkpoint</dt>
+            <dd class="mono" data-testid="sae-checkpoint-identifier">{{ checkpointIdentifierLabel }}</dd>
+          </div>
+          <div>
+            <dt>Checkpoints in that directory</dt>
+            <dd data-testid="sae-checkpoint-count">{{ checkpointCountLabel }}</dd>
+          </div>
+        </dl>
       </template>
 
       <p v-else class="panel-message">The backend has not been probed yet.</p>
@@ -113,6 +135,24 @@
             :disabled="isInspecting"
           />
         </div>
+        <div class="form-row">
+          <label class="field-label" for="sae-checkpoint">Checkpoint file</label>
+          <select
+            id="sae-checkpoint"
+            class="text-input"
+            ref="checkpointSelect"
+            data-testid="sae-checkpoint-select"
+            :value="selectedCheckpoint"
+            :disabled="!checkpointOptions.length"
+            @change="onCheckpointSelected"
+          >
+            <option value="">— use the server&rsquo;s checkpoint —</option>
+            <option v-for="name in checkpointOptions" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </div>
+
+        <p class="help-copy" data-testid="sae-checkpoint-listing">{{ checkpointListingNote }}</p>
+
         <div class="form-row">
           <label class="field-label" for="sae-source">Checkpoint source (optional)</label>
           <input
@@ -244,11 +284,14 @@
           <strong>NOT AVAILABLE — reconstruction fidelity</strong>
           <p>
             This response reports <code>reconstruction_measured: {{ asBoolean(currentRun.record.reconstruction_measured) === null ? 'not returned' : String(asBoolean(currentRun.record.reconstruction_measured)) }}</code>
-            and carries no reconstruction metric. The loader ships encoder weights only, so
-            measuring reconstruction would require decoder weights the checkpoint did not provide.
+            and carries no reconstruction metric. Reconstruction fidelity was not measured for this
+            request, so no fidelity number is shown here.
           </p>
           <p>No number is shown rather than a plausible-looking one.</p>
         </div>
+        <p v-if="tensorMismatchNote" class="field-help" role="note" data-testid="sae-tensor-mismatch-note">
+          {{ tensorMismatchNote }}
+        </p>
       </section>
 
       <div class="split">
@@ -358,11 +401,11 @@
         </section>
       </div>
     </template>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
   asArray,
   asBoolean,
@@ -410,6 +453,7 @@ const COMPATIBILITY: Array<{ key: string; label: string; kind: 'flag' | 'text' }
 ];
 
 const RECONSTRUCTION_KEYS: Array<{ key: string; label: string }> = [
+  { key: 'relative_l2_error', label: 'Relative L2 error (returned)' },
   { key: 'reconstruction_r2', label: 'R² (returned)' },
   { key: 'reconstruction_fvu', label: 'FVU (returned)' },
   { key: 'reconstruction_loss', label: 'Loss (returned)' },
@@ -433,6 +477,9 @@ const runHistory = ref<InspectRun[]>([]);
 const featureFilter = ref('');
 const selectedFeature = ref<number | null>(null);
 let runCounter = 0;
+// The server's checkpoint is prefilled into the form once, so a re-probe
+// never overwrites what the operator typed.
+let prefilledFromStatus = false;
 
 const statusProvenance = computed(() => provenanceOf(statusRecord.value));
 const statusUnavailable = computed(() => Boolean(statusFailure.value));
@@ -466,6 +513,85 @@ const compatibilityRows = computed(() =>
   }),
 );
 
+// -- Checkpoint inventory ----------------------------------------------------
+// The status route reports three checkpoint fields. Each is read as
+// "reported" or "not reported": a field the backend did not send is
+// unknown, which is neither an empty list nor a missing checkpoint.
+
+const NOT_REPORTED = 'not returned by this backend';
+
+function statusHas(key: string): boolean {
+  const record = statusRecord.value;
+  return Boolean(record) && Object.prototype.hasOwnProperty.call(record, key);
+}
+
+const availableCheckpoints = computed<string[] | null>(() => {
+  if (!statusHas('available_checkpoints')) return null;
+  const raw = statusRecord.value?.available_checkpoints;
+  if (!Array.isArray(raw)) return null;
+  return raw.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+});
+
+const checkpointOptions = computed<string[]>(() => availableCheckpoints.value ?? []);
+
+const checkpointDir = computed<string | null>(() => {
+  if (!statusHas('checkpoint_dir')) return null;
+  const text = asString(statusRecord.value?.checkpoint_dir);
+  return text ? text : null;
+});
+
+const checkpointIdentifier = computed<string | null>(() => {
+  if (!statusHas('checkpoint_identifier')) return null;
+  const text = asString(statusRecord.value?.checkpoint_identifier);
+  return text ? text : null;
+});
+
+const checkpointDirLabel = computed(() => checkpointDir.value ?? NOT_REPORTED);
+
+const checkpointIdentifierLabel = computed(() => {
+  if (!statusHas('checkpoint_identifier')) return NOT_REPORTED;
+  return checkpointIdentifier.value ?? 'none configured';
+});
+
+const checkpointCountLabel = computed(() => {
+  const list = availableCheckpoints.value;
+  if (list === null) return NOT_REPORTED;
+  if (!list.length) return 'none — no .pt files in that directory';
+  return `${list.length} checkpoint file(s)`;
+});
+
+const checkpointListingNote = computed(() => {
+  const list = availableCheckpoints.value;
+  if (list === null) {
+    return 'This backend does not report which checkpoints exist, so none are listed. Name one explicitly below to point at it.';
+  }
+  if (!list.length) {
+    return 'The checkpoint directory holds no .pt files. A checkpoint can still be named explicitly below.';
+  }
+  return 'Choosing a file sends it as source “local” with that identifier; the backend resolves the name inside the checkpoint directory.';
+});
+
+const selectedCheckpoint = computed(() => {
+  const value = identifierInput.value.trim();
+  return checkpointOptions.value.includes(value) ? value : '';
+});
+
+// A <select> whose options arrive after its value was patched keeps the
+// first option selected, so the DOM value is re-applied once the options
+// are on screen.
+const checkpointSelect = ref<HTMLSelectElement | null>(null);
+
+watch(
+  () => [selectedCheckpoint.value, checkpointOptions.value.length],
+  () => {
+    const element = checkpointSelect.value;
+    if (element && element.value !== selectedCheckpoint.value) {
+      element.value = selectedCheckpoint.value;
+    }
+  },
+  { flush: 'post' },
+);
+
 const features = computed<Feature[]>(() => (currentRun.value ? currentRun.value.features : []));
 
 const filteredFeatures = computed(() => {
@@ -480,6 +606,21 @@ const featureMismatch = computed(() => {
   const activations = asArray(currentRun.value.record.activations).length;
   if (indices === activations) return '';
   return `${indices} feature index(es) and ${activations} activation(s) were returned; each index without an activation reads “—” rather than a substituted value.`;
+});
+
+/**
+ * The backend's own caveat about which tensor the number refers to.
+ *
+ * A checkpoint that records no hook point cannot be refused a layer mismatch,
+ * so the reconstruction error is measured against the tensor the route encoded
+ * -- which may not be the tensor the dictionary was trained on. The backend
+ * reports that fact; the view must not hide it behind a bare number.
+ */
+const tensorMismatchNote = computed(() => {
+  const record = currentRun.value?.record;
+  if (!record) return '';
+  const note = asString(record.tensor_mismatch_note);
+  return note ?? '';
 });
 
 const reconstructionEntries = computed(() => {
@@ -537,6 +678,7 @@ async function loadStatus() {
       return;
     }
     statusRecord.value = record;
+    prefillFromStatus();
   } catch (error) {
     statusRecord.value = null;
     statusFailure.value = {
@@ -617,6 +759,38 @@ function zipFeatures(record: JsonRecord): Feature[] {
     featuresOut.push({ index, activation: asNumber(activations[position]) });
   });
   return featuresOut;
+}
+
+function onCheckpointSelected(event: Event) {
+  const value = (event.target as HTMLSelectElement).value;
+  if (!value) {
+    identifierInput.value = '';
+    return;
+  }
+  identifierInput.value = value;
+  sourceInput.value = 'local';
+}
+
+/** A bare file name inside the checkpoint directory — not a path. */
+function isBareFilename(value: string): boolean {
+  const name = value.trim();
+  if (!name || name === '.' || name === '..') return false;
+  if (name.startsWith('.')) return false;
+  if (name.includes('/') || name.includes('\\') || name.includes(':')) return false;
+  return true;
+}
+
+function prefillFromStatus() {
+  if (prefilledFromStatus) return;
+  const record = statusRecord.value;
+  if (!record) return;
+  prefilledFromStatus = true;
+  const source = asString(record.checkpoint_source);
+  if (source && !sourceInput.value.trim()) sourceInput.value = source;
+  const identifier = checkpointIdentifier.value;
+  if (identifier && !identifierInput.value.trim() && isBareFilename(identifier)) {
+    identifierInput.value = identifier;
+  }
 }
 
 function formatTimestamp(value: string): string {

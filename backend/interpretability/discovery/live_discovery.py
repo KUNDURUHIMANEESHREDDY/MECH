@@ -16,6 +16,18 @@ Method (all quantities measured from the loaded model, nothing hardcoded):
      (|ΔAB − (ΔA + ΔB)| >= edge floor), directed earlier-layer → later-layer.
      Same-layer pairs are reported as unresolved interactions, not edges.
   5. Recovery = clean-to-corrupted activation injection of the circuit.
+  6. Path patching = the isolated direct path for every discovered edge
+     (the sender frozen at its clean value while the receiver reads the
+     clean value that arrived at its position), so the result carries a
+     measured path-patching number next to the injection recovery.
+  7. The published reference circuit is re-measured through the same
+     injection code on the same prompts, so the two circuits are compared
+     like for like. The registry's published number stays marked not
+     comparable: it is a different measurement, and saying so is the point.
+
+The screen reports both rankings -- the raw clean-prompt ablation effect
+and the IOI-specific difference-in-differences -- so a reader can see
+which heads the corrupted control moved and which it did not.
 
 The result carries explicit live provenance.  Downstream eligibility is
 *derived*, not asserted: a measurement being live does not make it scientifically
@@ -37,6 +49,13 @@ from backend.agents.evidence_policy import field_map
 from backend.core.provenance import attest_measurement
 
 from . import live_measure as lm
+from .path_comparison import (
+    PATH_PATCHING_MAX_PROMPTS,
+    injection_faithfulness,
+    measure_paths,
+    reference_circuit,
+    screen_report,
+)
 
 NAMES = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank"]
 PAIR_POOL: List[Tuple[str, str]] = [
@@ -381,9 +400,10 @@ def _allocate_validation_panel(
 class LiveIOIDiscovery:
     """Zero-ablation + injection discovery over the live GPT-2 Small weights."""
 
-    method = ("zero-ablation head screening with causal verification, "
-              "pairwise ablation-interaction edges, and clean-to-corrupted "
-              "injection recovery")
+    method = ("zero-ablation head screening with corrupted-control "
+              "difference-in-differences, causal verification, pairwise "
+              "ablation-interaction edges, clean-to-corrupted injection "
+              "recovery, and a path-patching pass over the discovered edges")
 
     #: Recorded in the result and mixed into the discovery identity, so that the
     #: same hypothesis screened against a different model is a different
@@ -437,6 +457,24 @@ class LiveIOIDiscovery:
                 "replicated": False,
                 "validation_eligible": False,
                 "publication_eligible": False,
+                "reason": str(exc),
+            }
+        except lm.LiveStopped as exc:
+            # The run was stopped (cancelled, or past its deadline) between
+            # measurements. This is neither a failure nor a result: nothing was
+            # measured to completion, so no eligibility is claimed and the
+            # reason says what happened. Reporting it as `unavailable` would
+            # hide the difference between "could not measure" and "stopped";
+            # reporting it as a completed discovery would be a fabrication.
+            return {
+                "status": "cancelled",
+                "provenance": "live",
+                "field_provenance": field_map(("status", "reason"), "live"),
+                "measured": False,
+                "replicated": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "cancelled": True,
                 "reason": str(exc),
             }
 
@@ -529,6 +567,7 @@ class LiveIOIDiscovery:
         # every head.
         screen = prompts[0]
         screen_effects: Dict[Tuple[int, int], float] = {}
+        screen_raw_effects: Dict[Tuple[int, int], float] = {}
         for layer in range(n_layers):
             for head in range(n_heads):
                 cand = (layer, head)
@@ -537,11 +576,15 @@ class LiveIOIDiscovery:
                 corrupted_after = lm.ablate(screen["corrupted"],
                                            screen["io_id"], screen["subj_id"],
                                            {cand})
+                screen_raw_effects[cand] = (float(screen["clean_diff"])
+                                            - float(clean_after))
                 screen_effects[cand] = _ioi_specific_effect(
                     screen["clean_diff"], clean_after,
                     screen["corrupted_diff"], corrupted_after)
         ranked = sorted(screen_effects, key=lambda k: -abs(screen_effects[k]))
         candidates = ranked[:SCREEN_CANDIDATES]
+        screen_audit = screen_report(screen, screen_effects, screen_raw_effects,
+                                     candidates, SCREEN_CANDIDATES)
 
         # Stage B: verify candidates on every panel prompt.
         #
@@ -645,25 +688,53 @@ class LiveIOIDiscovery:
                     })
 
         # Stage E: injection recovery of the selected circuit.
-        faithfulness: List[float] = []
-        completeness: List[float] = []
-        for prompt in prompts:
-            _, caps = lm.capture(prompt["clean"])
-            patched = lm.inject(prompt["corrupted"], prompt["io_id"],
-                                prompt["subj_id"], caps, set(circuit))
-            clean_diff = prompt["clean_diff"]
-            corr_diff = prompt["corrupted_diff"]
-            rec_diff = patched["logit_diff"]
-            denom = clean_diff - corr_diff
-            faith = ((rec_diff - corr_diff) / denom
-                     if denom > 0.2 else 0.0)
-            faithfulness.append(max(0.0, min(1.0, faith)))
-            compl = (rec_diff / clean_diff if clean_diff > 0.2 else 0.0)
-            completeness.append(max(0.0, min(1.0, compl)))
+        #
+        # The same helper measures the published reference circuit below, so
+        # both numbers come out of identical code on identical prompts and
+        # the comparison between them is like for like.
+        faithfulness, completeness = injection_faithfulness(prompts,
+                                                             set(circuit))
+
+        # Stage F: path patching over the discovered edges.
+        #
+        # The injection recovery measures the circuit as a whole. The
+        # published figure comes from a path-patching procedure over a
+        # specific edge set, so the recovery fraction is not that number,
+        # and the record says so instead of presenting one as the other.
+        path_patching = measure_paths(edges, prompts[:PATH_PATCHING_MAX_PROMPTS])
+
+        # Stage G: the published reference circuit, re-derived here.
+        reference = reference_circuit(prompts)
 
         disc_id = _discovery_id(hypothesis_statement, prompts, self.model_id)
-        mean_faithfulness = round(mean(faithfulness), 4) if faithfulness else 0.0
-        adequacy = _adequacy(len(prompts), len(pair_prompts), mean_faithfulness)
+        # No faithfulness measurement is no measurement: it is reported as
+        # absent rather than as a zero, and it blocks the adequacy ladder
+        # instead of claiming a circuit that recovered nothing.
+        mean_faithfulness = (round(mean(faithfulness), 4)
+                             if faithfulness else None)
+        adequacy = _adequacy(len(prompts), len(pair_prompts),
+                              mean_faithfulness)
+        reference_faithfulness = reference.get("faithfulness_same_harness")
+        faithfulness_vs_reference = (
+            round(mean_faithfulness / reference_faithfulness, 4)
+            if (mean_faithfulness is not None and reference_faithfulness
+                and reference_faithfulness > 0) else None)
+        reference_paths = reference.get("path_patching") or {}
+        path_comparison = {
+            "metric": ("mean absolute isolated path effect over each "
+                       "circuit's own edges, on the same prompts, through "
+                       "the same harness"),
+            "discovered_mean_abs_path_effect":
+                path_patching.get("mean_abs_path_effect"),
+            "reference_mean_abs_path_effect":
+                reference_paths.get("mean_abs_path_effect"),
+            "like_for_like": bool(path_patching.get("measured")
+                                  and reference_paths.get("measured")),
+            "note": ("each circuit is measured over its own edge set -- the "
+                     "discovered edges and the published edges -- so this "
+                     "compares the procedure applied to two circuits, not "
+                     "two measurements of one circuit"),
+        }
         if validation_panel is None:
             # No disjoint held-out panel exists for this discovery size,
             # so no validation decision can ever be supported, regardless
@@ -697,6 +768,8 @@ class LiveIOIDiscovery:
                  "model_id", "seed",
                  "n_prompts", "heads", "head_effects", "edges",
                  "unresolved_interactions", "faithfulness", "completeness",
+                 "screen", "path_patching", "path_patching_comparison",
+                 "reference_circuit", "faithfulness_vs_reference_circuit",
                  "baselines", "discovery_panel", "validation_panel",
                  "interaction_panel"),
                 "live",
@@ -721,7 +794,33 @@ class LiveIOIDiscovery:
             "edges": edges,
             "unresolved_interactions": unresolved,
             "faithfulness": mean_faithfulness,
-            "completeness": round(mean(completeness), 4) if completeness else 0.0,
+            "completeness": (round(mean(completeness), 4)
+                             if completeness else None),
+            # The screen's two rankings, from the same two ablations per
+            # head: the raw clean-prompt effect and the IOI-specific
+            # difference-in-differences.
+            "screen": screen_audit,
+            # A measured path-patching number for the discovered circuit,
+            # next to the injection recovery. Two different quantities, both
+            # measured, neither standing in for the other.
+            "path_patching": path_patching,
+            "path_patching_comparison": path_comparison,
+            # The published reference circuit, re-measured through this
+            # harness on this run's prompts.
+            "reference_circuit": reference,
+            "faithfulness_vs_reference_circuit": faithfulness_vs_reference,
+            # The registry's published number is still not comparable: it is
+            # the paper's own procedure over its own edge set. The reference
+            # circuit measured in this run is comparable -- same code, same
+            # prompts, same metric -- and that is a different statement.
+            "published_baseline_is_comparable": False,
+            "published_baseline_note": (
+                "the registry's published circuit_faithfulness comes from "
+                "the paper's own path-patching procedure over its own edge "
+                "set; it is not this harness's injection recovery, so the "
+                "two are not compared here. The reference circuit measured "
+                "in this run is comparable: same code, same prompts, same "
+                "metric."),
             "per_prompt_recovery": [
                 {"subject": prompt["subject"], "io": prompt["io"],
                  "pool_index": prompt["pool_index"],
@@ -766,7 +865,9 @@ class LiveIOIDiscovery:
                           "validation_panel", "interaction_panel"],
             output_fields=["heads", "head_effects", "edges",
                            "unresolved_interactions", "faithfulness",
-                           "completeness", "methodology"],
+                           "completeness", "screen", "path_patching",
+                           "path_patching_comparison", "reference_circuit",
+                           "faithfulness_vs_reference_circuit", "methodology"],
         )
         remember(result)
         return result

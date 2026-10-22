@@ -1,5 +1,5 @@
 <template>
-  <main class="plugins-surface">
+  <section class="plugins-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">General / Local bridge</p>
@@ -186,7 +186,7 @@
         <p>A future catalog reader can be added to <code>window.appApi</code>; until then, the backend registry is the source of truth in this browser.</p>
       </div>
     </section>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

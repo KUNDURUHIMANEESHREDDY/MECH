@@ -1,5 +1,5 @@
 <template>
-  <main class="build-surface">
+  <section class="build-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Develop / Local Process</p>
@@ -156,7 +156,7 @@
         </p>
       </aside>
     </div>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

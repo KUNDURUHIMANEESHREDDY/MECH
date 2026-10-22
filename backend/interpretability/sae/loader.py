@@ -32,6 +32,25 @@ which vector was used, so the arithmetic is visible in the result.
 ``encoder.bias`` is no longer a fallback for it. In SAELens that bias *is*
 ``b_enc``, which is added after the matmul; subtracting it from the input as
 well applies it twice, with the centering's sign inverted.
+
+Which tensor a dictionary describes
+-----------------------------------
+
+A dictionary is trained on ONE activation at ONE hook point on ONE model, so
+the checkpoint has to say which. ``SAEConfig.hook_point`` names it and
+``SAEConfig.tensor_source`` says where that tensor comes from
+(``transformer_lens:blocks.8.hook_resid_pre``,
+``transformers:blocks.8.mlp_write``). The route reads the tensor the source
+names, so a dictionary is applied to the activation it was trained on rather
+than to whichever activation happened to be available.
+
+Two facts make that checkable rather than decorative:
+
+* a checkpoint that records no hook point applies to nothing -- it used to
+  answer "yes, it applies" to any request, which is how a dictionary could be
+  pointed at an activation it had never described;
+* ``assert_applies_to`` raises on a mismatch, and the route calls it, so the
+  guard is walked through rather than merely defined.
 """
 
 from __future__ import annotations
@@ -39,6 +58,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import os
+import re
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -63,6 +83,12 @@ class SAEConfig:
     #: for this one hook point on this one model; the loader refuses a
     #: mismatch rather than encoding a different activation.
     hook_point: str = ""
+    #: Where that activation comes from, as ``<library>:<name>``. This is the
+    #: fact that makes a checkpoint inspectable: the route reads the tensor
+    #: this names, so the dictionary is applied to the tensor it was trained
+    #: on instead of to an arbitrary activation. A checkpoint that records no
+    #: tensor source cannot be inspected at all, and says so.
+    tensor_source: str = ""
     model_id: str = ""
     dataset: str = ""
     l1_coefficient: Optional[float] = None
@@ -82,9 +108,15 @@ class SAEConfig:
     pre_encoder_center: str = ""
 
     def applies_to(self, layer: int, hook_point: str) -> bool:
-        """Whether this dictionary describes the given activation."""
+        """Whether this dictionary describes the given activation.
+
+        Fails closed. A checkpoint that records no hook point describes no
+        activation, so it applies to nothing; this used to answer ``True``
+        for unknown provenance, which let any caller encode any tensor with
+        a dictionary that had never said what it was trained on.
+        """
         if not self.hook_point:
-            return True  # unknown provenance: caller decides, and is told so
+            return False
         return (int(layer) == int(self.layer)
                 and str(hook_point) == self.hook_point)
 
@@ -98,12 +130,58 @@ def _cfg_fact(cfg: Any, *names: str) -> Any:
     return None
 
 
+def _payload_fact(payload: Any, *names: str) -> Any:
+    """First present key among ``names`` in a checkpoint payload.
+
+    A checkpoint stores its own facts in two shapes: Bloom's format keeps a
+    ``cfg`` object beside the tensors, and a checkpoint written by this
+    repository's trainer keeps them as keys beside the tensors. Both are
+    read, so a locally trained checkpoint describes itself the same way a
+    published one does.
+    """
+    if not isinstance(payload, dict):
+        return None
+    for name in names:
+        value = payload.get(name)
+        if value is not None:
+            return value
+    return None
+
+
 def _layer_from_hook(hook_point: Any) -> int:
     """``blocks.8.hook_resid_pre`` -> ``8``; ``-1`` when it does not parse."""
-    import re
-
     match = re.search(r"blocks\.(\d+)\.", str(hook_point or ""))
     return int(match.group(1)) if match else -1
+
+
+def hook_at_layer(hook_point: Any, layer: int) -> str:
+    """The same hook name at a different block index.
+
+    ``blocks.8.hook_resid_pre`` -> ``blocks.10.hook_resid_pre``. This is how
+    the mismatch guard is asked the question the caller actually asked: "does
+    this dictionary describe *that* layer?"
+    """
+    text = str(hook_point or "")
+    match = re.match(r"^(.*?blocks\.)(\d+)(\..*)$", text)
+    if not match:
+        return text
+    return f"{match.group(1)}{int(layer)}{match.group(3)}"
+
+
+def infer_tensor_source(hook_point: Any) -> str:
+    """The library a hook name belongs to, or ``""`` when it is not one.
+
+    ``blocks.8.hook_resid_pre`` is a TransformerLens hook name -- HuggingFace
+    has no such concept -- so a checkpoint recording it describes a
+    TransformerLens tensor, and the route has to read that tensor from
+    TransformerLens to match it. A hook name that is not a TransformerLens
+    one yields ``""``, and the checkpoint is then not inspectable until it
+    says where its activation comes from.
+    """
+    text = str(hook_point or "")
+    if re.match(r"^.*blocks\.\d+\.hook_", text):
+        return f"transformer_lens:{text}"
+    return ""
 
 
 class SAE:
@@ -316,6 +394,11 @@ class SAE:
         """Refuse to encode an activation this dictionary does not describe."""
         if self.config.applies_to(layer, hook_point):
             return
+        if not self.config.hook_point:
+            raise SAELoadError(
+                "This checkpoint records no hook point, so it describes no "
+                "activation at all. Encoding an arbitrary tensor with it "
+                "would return feature indices that mean nothing.")
         raise SAELoadError(
             f"This SAE was trained on {self.config.model_id or 'a model'} at "
             f"{self.config.hook_point!r} (layer {self.config.layer}); it does "
@@ -440,6 +523,18 @@ def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
     if not isinstance(state, dict):
         raise SAELoadError(f"SAE checkpoint is not a state dict: {path}")
 
+    # The facts a checkpoint states about the activation it was trained on.
+    # Read from the payload itself, because a checkpoint written by this
+    # repository's trainer keeps them beside its tensors rather than in a
+    # `cfg` object. A checkpoint that states none of them describes no
+    # activation, and the route says so instead of encoding a guess.
+    facts = {
+        "hook_point": _payload_fact(payload, "hook_point", "hook_name") or "",
+        "tensor_source": _payload_fact(payload, "tensor_source") or "",
+        "layer": _payload_fact(payload, "layer"),
+        "model_name": _payload_fact(payload, "model_name", "model_id") or "",
+    }
+
     # Explicit `is None` checks, not `or`: a weight tensor with more than one
     # element has an ambiguous truth value, so `state.get("W_enc") or ...`
     # raises "Boolean value of Tensor with more than one value is ambiguous".
@@ -481,9 +576,56 @@ def _load_tensors(path: str) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
         "W_dec": state.get("W_dec"),
         "b_dec": state.get("b_dec"),
         "config": config,
+        "facts": facts,
         "pre_encoder_center": center,
     }
     return weights, biases, meta
+
+
+def _build_config(weights: Any, meta: Dict[str, Any], *, model_name: str,
+                  repo_id: str, version: str, checkpoint_sha: str,
+                  revision: str = "") -> SAEConfig:
+    """The configuration a loaded checkpoint describes.
+
+    Every fact comes from the checkpoint itself -- its own ``cfg`` object or
+    the keys it stores beside its tensors -- so a locally trained checkpoint
+    describes the tensor it was trained on exactly as a published one does.
+    The layer is taken from the checkpoint's own statement when it has one
+    and parsed out of the hook point otherwise.
+    """
+    cfg = meta.get("config")
+    facts = meta.get("facts") or {}
+    hook_point = str(facts.get("hook_point")
+                     or _cfg_fact(cfg, "hook_point", "hook_name") or "")
+    tensor_source = str(facts.get("tensor_source")
+                         or _cfg_fact(cfg, "tensor_source") or "")
+    if not tensor_source:
+        tensor_source = infer_tensor_source(hook_point)
+    layer = facts.get("layer")
+    if layer is None:
+        layer = _layer_from_hook(hook_point)
+    try:
+        layer = int(layer)
+    except (TypeError, ValueError):
+        layer = -1
+    model_id = str(facts.get("model_name")
+                   or _cfg_fact(cfg, "model_name", "model_class_name") or "")
+    return SAEConfig(
+        d_in=int(getattr(weights, "shape")[0]),
+        d_sae=int(getattr(weights, "shape")[1]),
+        model_name=model_id or model_name,
+        layer=layer,
+        repo_id=repo_id,
+        version=version,
+        checkpoint_sha=checkpoint_sha,
+        hook_point=hook_point,
+        tensor_source=tensor_source,
+        model_id=model_id,
+        dataset=str(_cfg_fact(cfg, "dataset_path") or ""),
+        l1_coefficient=_cfg_fact(cfg, "l1_coefficient"),
+        revision=revision or str(_cfg_fact(cfg, "revision") or ""),
+        pre_encoder_center=str(meta.get("pre_encoder_center") or ""),
+    )
 
 
 class LocalCheckpointProvider(SAEProvider):
@@ -507,23 +649,9 @@ class LocalCheckpointProvider(SAEProvider):
         with open(path, "rb") as handle:
             file_sha = hashlib.sha256(handle.read()).hexdigest()
 
-        cfg = meta.get("config")
-        hook_point = _cfg_fact(cfg, "hook_point", "hook_name") or ""
-        config = SAEConfig(
-            d_in=int(getattr(weights, "shape")[0]),
-            d_sae=int(getattr(weights, "shape")[1]),
-            model_name=_cfg_fact(cfg, "model_name") or version,
-            layer=_layer_from_hook(hook_point),
-            repo_id=identifier,
-            version=version,
-            checkpoint_sha=f"sha256:{file_sha}",
-            hook_point=hook_point,
-            model_id=_cfg_fact(cfg, "model_name", "model_class_name") or "",
-            dataset=_cfg_fact(cfg, "dataset_path") or "",
-            l1_coefficient=_cfg_fact(cfg, "l1_coefficient"),
-            revision=_cfg_fact(cfg, "revision") or "",
-            pre_encoder_center=meta.get("pre_encoder_center") or "",
-        )
+        config = _build_config(weights, meta, model_name=version,
+                               repo_id=identifier, version=version,
+                               checkpoint_sha=f"sha256:{file_sha}")
         return SAE(config, weights=weights, biases=biases,
                    decoder=meta.get("W_dec"), bias_dec=meta.get("b_dec"))
 
@@ -575,21 +703,10 @@ class HuggingFaceProvider(SAEProvider):
         weights, biases, meta = _load_tensors(path)
         with open(path, "rb") as handle:
             file_sha = hashlib.sha256(handle.read()).hexdigest()
-        cfg = meta.get("config")
-        hook_point = _cfg_fact(cfg, "hook_point", "hook_name") or ""
-        config = SAEConfig(
-            d_in=int(weights.shape[0]), d_sae=int(weights.shape[1]),
-            model_name=_cfg_fact(cfg, "model_name") or repo_id,
-            layer=_layer_from_hook(hook_point),
-            repo_id=repo_id, version=version,
-            checkpoint_sha=f"sha256:{file_sha}",
-            hook_point=hook_point,
-            model_id=_cfg_fact(cfg, "model_name", "model_class_name") or "",
-            dataset=_cfg_fact(cfg, "dataset_path") or "",
-            l1_coefficient=_cfg_fact(cfg, "l1_coefficient"),
-            revision=revision,
-            pre_encoder_center=meta.get("pre_encoder_center") or "",
-        )
+        config = _build_config(weights, meta, model_name=repo_id,
+                               repo_id=repo_id, version=version,
+                               checkpoint_sha=f"sha256:{file_sha}",
+                               revision=revision)
         return SAE(config, weights=weights, biases=biases,
                    decoder=meta.get("W_dec"), bias_dec=meta.get("b_dec"))
 

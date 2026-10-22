@@ -184,7 +184,11 @@ class ResearchSocietyV2:
 
     @staticmethod
     def _failed(res: Dict[str, Any]) -> bool:
-        return res.get("status") in ("error", "unavailable", "failed", "blocked")
+        # "cancelled" belongs here: a stage that was stopped measured
+        # nothing, so it is not a success. Leaving it out let a stopped
+        # discovery count as a successful one.
+        return res.get("status") in ("error", "unavailable", "failed",
+                                      "blocked", "cancelled")
 
     @staticmethod
     def _confidence_of(vres: Any) -> float:
@@ -219,7 +223,44 @@ class ResearchSocietyV2:
     async def run(self, goal: str,
                   model_name: str = "gpt2",
                   on_event: Any = None,
-                  run_id: str = "") -> Dict[str, Any]:
+                  run_id: str = "",
+                  should_stop: Any = None,
+                  effort: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        """Run the Society workflow under this run's cost budget.
+
+        `effort` is how much the run may spend (prompts, interaction prompts,
+        candidate heads) and `should_stop` is consulted between stages and
+        between measurements. Both are the run owner's decision: the API
+        caller sets them, and the layers below inherit them. A run that is
+        stopped ends as "cancelled" -- not as a completed workflow with fewer
+        steps, and not as a failure of the science.
+        """
+        from backend.interpretability.discovery.budget import (
+            DiscoveryBudget,
+            reset_budget,
+            set_budget,
+        )
+        budget = None
+        if effort is not None or should_stop is not None:
+            eff = effort or {}
+            budget = DiscoveryBudget(
+                n_prompts=int(eff.get("n_prompts", 0) or 0),
+                n_interaction_prompts=int(eff.get("n_interaction_prompts", 0) or 0),
+                max_heads=int(eff.get("max_heads", 0) or 0),
+                should_stop=should_stop if callable(should_stop) else (lambda: False),
+            )
+        token = set_budget(budget)
+        try:
+            return await self._run(goal, model_name, on_event, run_id,
+                                   should_stop)
+        finally:
+            reset_budget(token)
+
+    async def _run(self, goal: str,
+                   model_name: str = "gpt2",
+                   on_event: Any = None,
+                   run_id: str = "",
+                   should_stop: Any = None) -> Dict[str, Any]:
         events: List[Dict[str, Any]] = []
         self._emit(events, on_event, "ResearchStarted", {"goal": goal})
         self._emit_plugin_hook("on_campaign_started",
@@ -237,8 +278,20 @@ class ResearchSocietyV2:
         trace: List[Dict[str, Any]] = []
         ctx: Dict[str, Any] = {"goal": goal, "model_name": model_name,
                                "trace": trace}
+        stopped = False
         for node in nodes:
+            if callable(should_stop) and should_stop():
+                # The run was cancelled or ran out of time. Say so and stop;
+                # the stages that follow would measure on a run that is over.
+                stopped = True
+                self._emit(events, on_event, "RunStopped",
+                           {"node": node["id"],
+                            "reason": "the run was cancelled or reached its "
+                                      "deadline before this stage"})
+                break
             res = await self._run_node(node, ctx)
+            if res.get("status") == "cancelled":
+                stopped = True
             step = {"node": node["id"], "agent": self.dispatch(node), **res}
             step["field_provenance"] = _response_field_provenance(res)
             trace.append(step)
@@ -390,7 +443,11 @@ class ResearchSocietyV2:
                                 "goal": goal,
                                 "status": publication.get("status", "")})
 
-        if publication.get("status") == "blocked":
+        if stopped:
+            # A stopped run is not a completed workflow, and not a failure of
+            # the science either: it is a run that was asked to stop.
+            status = "cancelled"
+        elif publication.get("status") == "blocked":
             status = "blocked"
         elif failed:
             status = "failed"
@@ -422,10 +479,14 @@ class ResearchSocietyV2:
     def run_blocking(self, goal: str,
                      model_name: str = "gpt2",
                      on_event: Any = None,
-                     run_id: str = "") -> Dict[str, Any]:
+                     run_id: str = "",
+                     should_stop: Any = None,
+                     effort: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """Sync entry point for FastAPI handlers (dispatcher POST /society/run)."""
         return asyncio.run(self.run(goal, model_name=model_name,
-                                    on_event=on_event, run_id=run_id))
+                                    on_event=on_event, run_id=run_id,
+                                    should_stop=should_stop,
+                                    effort=effort))
 
 
 # Keep the legacy import name, but point it at the guarded supervisor.  The

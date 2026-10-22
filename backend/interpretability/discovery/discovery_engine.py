@@ -122,8 +122,29 @@ class DiscoveryEngine:
                     forwarded["n_prompts"] = n_prompts
                 if n_interaction_prompts is not None:
                     forwarded["n_interaction_prompts"] = n_interaction_prompts
+                # The run owner's budget, when there is one, decides the cost
+                # of this discovery. The resolved effort is reported with the
+                # result, so a cheap run is never mistaken for a thorough one.
+                from .budget import effective_effort
+                eff_prompts, eff_interaction, eff_heads = effective_effort(
+                    forwarded.get("n_prompts"),
+                    forwarded.get("n_interaction_prompts"),
+                    None,
+                )
+                if eff_prompts is not None:
+                    forwarded["n_prompts"] = eff_prompts
+                if eff_interaction is not None:
+                    forwarded["n_interaction_prompts"] = eff_interaction
+                if eff_heads is not None:
+                    forwarded["max_heads"] = eff_heads
                 result = LiveIOIDiscovery().run(
                     hypothesis_statement, **forwarded)
+                if isinstance(result, dict):
+                    result["effort"] = {
+                        "n_prompts": eff_prompts,
+                        "n_interaction_prompts": eff_interaction,
+                        "max_heads": eff_heads,
+                    }
             except Exception as exc:
                 # Record the failure before propagating. A raising executor
                 # must not strand the discovery mid-run with no record of why

@@ -25,6 +25,19 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 # unaffected.
 from backend.science.models.adapter_base import LiveUnavailable  # noqa: E402,F401
 from backend.services.model_lock import MODEL_LOCK
+from backend.interpretability.discovery.budget import stop_requested
+
+
+class LiveStopped(RuntimeError):
+    """The run was asked to stop before this measurement was taken.
+
+    A cancelled or timed-out run must stop *between* measurements. A
+    measurement is a forward pass that cannot be interrupted, so the check
+    happens at the boundary: the run ends within one measurement of the
+    request instead of sweeping every remaining candidate. This is a different
+    outcome from `LiveUnavailable` (the measurement could not be taken) and
+    from a failure (the measurement was wrong): the run was stopped.
+    """
 
 
 # All model forwards share MODEL_LOCK with gpt2_engine (see
@@ -176,6 +189,9 @@ def ablate(prompt: str, io_id: int, subj_id: int,
 
     An empty set measures the clean baseline through the same code path.
     """
+    if stop_requested():
+        raise LiveStopped(
+            "the run was asked to stop before this ablation was measured")
     key = (f"ablate|{prompt}|{io_id}|{subj_id}|"
            f"{','.join(f'{l}H{h}' for l, h in sorted(ablate_heads))}")
     if key in _CACHE:
@@ -344,6 +360,9 @@ def path_patch(clean: str, corrupted: str, io_id: int, subj_id: int,
     with the sender's total effect and overstates every edge it reports. That
     is why the two hooks must be installed together.
     """
+    if stop_requested():
+        raise LiveStopped(
+            "the run was asked to stop before this patch was measured")
     s_layer, s_head = sender
     engine = _engine()
     import torch
@@ -355,7 +374,13 @@ def path_patch(clean: str, corrupted: str, io_id: int, subj_id: int,
     hooks = []
     with _MEASURE_LOCK:
         def sender_hook(_mod: Any, _inp: Any, out: Any) -> Any:
-            sender_out["value"] = out[0][:, -1, :].detach().clone()
+            # `out` is the c_proj output: (batch, seq, hidden). The value that
+            # matters is the last position's vector, and it is captured *with*
+            # its batch dimension. `out[0][:, -1, :]` dropped the batch and
+            # left a 2-D tensor, which the next index then tried to address
+            # with three indices -- so every path patch raised IndexError on a
+            # real forward pass and the pass had never actually run.
+            sender_out["value"] = out[:, -1, :].detach().clone()
             return out
 
         def make_receiver_hook(layer: int) -> Any:
@@ -411,7 +436,25 @@ def path_patch(clean: str, corrupted: str, io_id: int, subj_id: int,
         "denominator": denom,
         "sender_frozen": True,
         "receiver_input_swapped": True,
-        "isolates_direct_path": True,
+        # What this measurement is, stated without inflating it. The sender's
+        # ordinary contribution is excluded -- that is what the freeze is for --
+        # but the receiver reads the clean run's *merged attention input*, not
+        # the residual stream at the receiver's position as the published
+        # procedure patches. So this is the harness's receiver-input contrast
+        # under a frozen sender, and it is not the paper's path effect. The two
+        # circuits compared through it are compared like for like, which is what
+        # makes the comparison meaningful; it is not what makes it the paper's
+        # number.
+        "intervention": (
+            "the sender's head output at the last position is frozen at its "
+            "clean value while the receiver reads the clean run's merged "
+            "attention input at its position"),
+        "isolates_direct_path": False,
+        "isolates_direct_path_reason": (
+            "the receiver's merged attention input is swapped for the clean "
+            "run's rather than the residual stream at the receiver's position, "
+            "so the effect still carries the clean-vs-corrupted context "
+            "difference for the other heads at that position"),
     }
 
 
@@ -426,15 +469,24 @@ def _path_patched_forward(engine: Any, prompt: str, io_id: int, subj_id: int,
 
     with _MEASURE_LOCK:
         def freeze_sender(_mod: Any, _inp: Any, out: Any) -> Any:
-            x = out[0].clone()
+            # The sender's head slice at the last position is replaced by the
+            # clean run's value. The batch dimension is kept throughout, so the
+            # hook returns a tensor (a tuple here would be handed to the
+            # module as its input) and the slice is addressed on the last two
+            # axes only.
+            x = out.clone()
             src = clean_sender.to(x.device).to(x.dtype)
-            x[:, -1, s_slice] = src[:, -1, s_slice]
-            return (x,) + tuple(out[1:])
+            x[:, -1, s_slice] = src[:, s_slice]
+            return x
 
         def swap_receiver(_mod: Any, inp: Any) -> Any:
+            # The receiver reads the clean run's merged attention input at its
+            # position. `src` is (batch, hidden), so it is written across the
+            # last position directly rather than indexed as if it still had a
+            # sequence axis.
             x = inp[0].clone()
             src = cached_receiver_in.to(x.device).to(x.dtype)
-            x[:, -1, :] = src[:, -1, :]
+            x[:, -1, :] = src
             return (x,) + tuple(inp[1:])
 
         hooks.append(engine._model.transformer.h[s_layer].attn.c_proj

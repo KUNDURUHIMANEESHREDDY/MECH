@@ -36,15 +36,15 @@
 
     <section class="metric-strip" aria-label="Observed record counts">
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ runs.length }}</span>
+        <span class="metric-tile__value">{{ runsCountText }}</span>
         <span class="metric-tile__label">Society runs</span>
       </div>
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ experiments.length }}</span>
+        <span class="metric-tile__value">{{ experimentsCountText }}</span>
         <span class="metric-tile__label">Experiments</span>
       </div>
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ sessions.length }}</span>
+        <span class="metric-tile__value">{{ sessionsCountText }}</span>
         <span class="metric-tile__label">Sessions</span>
       </div>
       <div class="metric-tile metric-tile--note">
@@ -60,7 +60,7 @@
             <p class="section-kicker">Run ledger</p>
             <h2 id="status-distribution-title">Observed run status</h2>
           </div>
-          <span class="count-label">{{ runs.length }} records</span>
+          <span class="count-label">{{ runsCountText }} records</span>
         </header>
         <div v-if="loading" class="state-block state-block--compact" role="status" aria-live="polite">
           <span class="spinner" aria-hidden="true" />
@@ -139,7 +139,7 @@
       <section class="tool-panel record-panel" aria-labelledby="experiment-records-title">
         <header class="panel-header">
           <div><p class="section-kicker">Local storage</p><h2 id="experiment-records-title">Experiment records</h2></div>
-          <span class="count-label">{{ experiments.length }}</span>
+          <span class="count-label">{{ experimentsCountText }}</span>
         </header>
         <ul v-if="experiments.length" class="record-list">
           <li v-for="item in experiments.slice(0, 8)" :key="item.id">
@@ -152,7 +152,7 @@
       <section class="tool-panel record-panel" aria-labelledby="session-records-title">
         <header class="panel-header">
           <div><p class="section-kicker">Local storage</p><h2 id="session-records-title">Session records</h2></div>
-          <span class="count-label">{{ sessions.length }}</span>
+          <span class="count-label">{{ sessionsCountText }}</span>
         </header>
         <ul v-if="sessions.length" class="record-list">
           <li v-for="item in sessions.slice(0, 8)" :key="item.id">
@@ -173,7 +173,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { apiUrl, authHeaders } from '../services/api';
+import { apiFetch, apiUrl, authHeaders } from '../services/api';
 
 type JsonRecord = Record<string, unknown>;
 type SourceTone = 'online' | 'offline' | 'loading' | 'partial';
@@ -198,7 +198,7 @@ function messageOf(error: unknown): string { return error instanceof Error ? err
 function isOffline(message: string): boolean { return /offline|failed to fetch|network|load|connection|timeout/i.test(message); }
 async function request<T>(path: string): Promise<T> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Browser is offline');
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   if (!response.ok) throw new Error(`GET ${path} returned ${response.status}`);
@@ -226,6 +226,9 @@ function normalizeStored(value: unknown, prefix: string): StoredRecord | null {
 }
 function formatDate(value: string): string { if (!value) return 'Unavailable'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
 
+const runsCountText = computed(() => loading.value || offline.value ? '\u2014' : String(runs.value.length));
+const experimentsCountText = computed(() => loading.value || offline.value ? '\u2014' : String(experiments.value.length));
+const sessionsCountText = computed(() => loading.value || offline.value ? '\u2014' : String(sessions.value.length));
 const sourceTone = computed<SourceTone>(() => loading.value ? 'loading' : offline.value ? 'offline' : errorMessage.value ? 'partial' : 'online');
 const sourceLabel = computed(() => sourceTone.value === 'loading' ? 'Loading records' : sourceTone.value === 'offline' ? 'Offline / unavailable' : sourceTone.value === 'partial' ? 'Partially available' : 'Record sources reachable');
 const availableStatuses = computed(() => [...new Set(runs.value.map((run) => run.status || 'Unavailable'))].sort());

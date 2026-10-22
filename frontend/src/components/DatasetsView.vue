@@ -1,5 +1,5 @@
 <template>
-  <main class="datasets-surface" data-testid="datasets">
+  <section class="datasets-surface" data-testid="datasets">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Research / On-disk data</p>
@@ -262,7 +262,7 @@
         <p>Controls that cannot be backed by the API are not invented.</p>
       </div>
     </section>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

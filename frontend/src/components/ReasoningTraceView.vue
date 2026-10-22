@@ -34,7 +34,7 @@
 
     <section class="metric-strip" aria-label="Trace observations">
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ runs.length }}</span>
+        <span class="metric-tile__value">{{ runsCountText }}</span>
         <span class="metric-tile__label">Runs available</span>
       </div>
       <div class="metric-tile">
@@ -170,7 +170,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { apiUrl, authHeaders } from '../services/api';
+import { apiFetch, apiUrl, authHeaders } from '../services/api';
 
 type JsonRecord = Record<string, unknown>;
 type SourceTone = 'online' | 'offline' | 'loading' | 'partial';
@@ -197,7 +197,7 @@ function messageOf(error: unknown): string { return error instanceof Error ? err
 function offlineMessage(message: string): boolean { return /offline|failed to fetch|network|load|connection|timeout/i.test(message); }
 async function request<T>(path: string): Promise<T> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Browser is offline');
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   if (!response.ok) throw new Error(`GET ${path} returned ${response.status}`);
@@ -263,6 +263,7 @@ function prettyPayload(payload: JsonRecord): string {
 
 const selectedTrace = computed(() => selectedRun.value?.trace ?? []);
 const selectedEvents = computed(() => selectedRun.value?.events ?? []);
+const runsCountText = computed(() => loadingRuns.value || offline.value || errorMessage.value ? '\u2014' : String(runs.value.length));
 const sourceTone = computed<SourceTone>(() => loadingRuns.value ? 'loading' : offline.value ? 'offline' : errorMessage.value ? 'partial' : 'online');
 const sourceLabel = computed(() => sourceTone.value === 'loading' ? 'Loading runs' : sourceTone.value === 'offline' ? 'Offline / unavailable' : sourceTone.value === 'partial' ? 'Partially available' : 'Backend trace source live');
 const statusText = computed(() => selectedRun.value?.status || '');

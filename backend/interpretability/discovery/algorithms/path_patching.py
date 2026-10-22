@@ -1,8 +1,9 @@
 """Path Patching Search Algorithm.
 
 Discovers causal pathways between sender nodes (early attention heads) and
-receiver nodes (late heads) by intervening on the residual-stream edges that
-connect them.
+receiver nodes (late heads) by intervening on the edges that connect them:
+the sender's head output is frozen at its clean value while the receiver
+reads the clean run's merged attention input at its position.
 
 The procedure requires *two simultaneous interventions* on the corrupted run:
 the sender's output is frozen at its clean value, and the receiver reads the
@@ -17,9 +18,9 @@ confidence to every edge it drew. That is why `implements_published_method` was
 False.
 
 Real path patching now lives in `live_measure.path_patch`, which installs both
-hooks on the live TransformerLens model. This algorithm delegates to it when
-the dataset supplies the IOI/subject token ids the logit difference is measured
-against. Without those, it refuses rather than reporting a conflated number.
+hooks on the live model. This algorithm delegates to it when the dataset
+supplies the IOI/subject token ids the logit difference is measured against.
+Without those, it refuses rather than reporting a conflated number.
 """
 
 from __future__ import annotations
@@ -194,14 +195,15 @@ class PathPatchingAlgorithm(DiscoveryAlgorithm):
                 "target_token": target_token,
                 "measurements": measurements,
             },
-            # A measured quantity: the mean absolute isolated path effect.
-            # Not a rescaled graph score, and not floored at some constant.
+            # A measured quantity: the mean absolute path effect under the
+            # two-hook intervention. Not a rescaled graph score, and not
+            # floored at some constant.
             confidence=round(min(0.99, circuit_score), 4),
             graph={
                 "nodes": graph_nodes,
                 "edges": unique_edges,
                 "score": circuit_score,
-                "score_meaning": "mean_absolute_isolated_path_effect",
+                "score_meaning": "mean_absolute_receiver_input_path_effect",
             },
             provenance={
                 "implements_published_method": True,
@@ -209,11 +211,26 @@ class PathPatchingAlgorithm(DiscoveryAlgorithm):
                 "provenance": "live",
                 "sender_frozen": True,
                 "receiver_input_swapped": True,
-                "isolates_direct_path": True,
+                # What this intervention is, stated without inflating it. The
+                # sender's ordinary contribution is excluded -- that is what
+                # the freeze is for -- but the receiver reads the clean run's
+                # merged attention input, not the residual stream at the
+                # receiver's position as the published procedure patches. So the
+                # number is this harness's receiver-input contrast under a
+                # frozen sender, and it is not the paper's path effect.
+                "isolates_direct_path": False,
+                "isolates_direct_path_reason": (
+                    "the receiver's merged attention input is swapped for the "
+                    "clean run's rather than the residual stream at the "
+                    "receiver's position, so the effect still carries the "
+                    "clean-vs-corrupted context difference for the other heads "
+                    "at that position"),
                 "search_space": (
                     config.sender_nodes + " -> " + config.receiver_nodes),
                 "metric": config.metric,
-                "confidence_basis": "mean absolute isolated path effect",
+                "confidence_basis": (
+                    "mean absolute receiver-input path effect under a frozen "
+                    "sender"),
                 "paper_citation": (
                     "Wang et al. 2022: path patching freezes the sender and "
                     "swaps the receiver input in one corrupted forward pass"),

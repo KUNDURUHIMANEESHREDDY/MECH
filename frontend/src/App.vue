@@ -35,13 +35,26 @@
         </div>
       </nav>
 
-      <div class="nav-status" role="status" aria-live="polite" data-testid="runtime-status">
-        <span class="status-dot" :class="`status-${modelStatus}`" aria-hidden="true" />
-        <span class="nav-status__text">{{ statusLabel }}</span>
+      <div class="nav-status" data-testid="runtime-status">
+        <span class="status-dot" :class="`status-${status.state}`" aria-hidden="true" />
+        <span class="nav-status__text" role="status" aria-live="polite" :title="status.detail">
+          {{ status.label }}
+        </span>
+        <button
+          v-if="status.retryable"
+          type="button"
+          class="status-retry"
+          data-testid="runtime-retry"
+          :disabled="probing"
+          :title="status.detail"
+          @click="probe()"
+        >
+          {{ probing ? 'Retrying…' : 'Retry' }}
+        </button>
       </div>
     </aside>
 
-    <main class="app-main">
+    <main class="app-main" :aria-busy="pendingRoute ? 'true' : 'false'">
       <button
         v-if="sidebarCollapsed"
         type="button"
@@ -61,6 +74,18 @@
         <p>Choose a tool from the navigation.</p>
         <button class="desktop-button primary" type="button" @click="openRoute('explorer')">Open Model Explorer</button>
       </div>
+
+      <section
+        v-else-if="pendingRoute"
+        class="route-loading"
+        role="status"
+        :data-testid="`loading-${pendingRoute.id}`"
+      >
+        <div>
+          <div class="route-loading__bar" aria-hidden="true"></div>
+          <strong>Loading {{ pendingRoute.label }}</strong>
+        </div>
+      </section>
 
       <section
         v-else-if="activeRoute"
@@ -101,37 +126,36 @@ import {
   ref,
 } from 'vue';
 import { ROUTES, getRouteById } from './desktop/routeRegistry';
-import { api } from './services/api';
-
-type RuntimeStatus = 'connecting' | 'connected' | 'offline';
+import { apiFetch, apiUrl } from './services/api';
+import {
+  classifyProbe,
+  connectingStatus,
+  type ProbeResult,
+  type RuntimeStatus,
+} from './services/runtimeStatus';
 
 const unknownRoute = ref('');
-const modelStatus = ref<RuntimeStatus>('connecting');
-const modelName = ref('No model selected');
 const activeRouteId = ref('explorer');
+/**
+ * Route whose chunk is still loading.
+ *
+ * `<Suspense>` keeps the previously resolved subtree on screen while a new
+ * async component resolves, so clicking a nav item used to leave the last
+ * tool's DOM -- labels, results and all -- inside the newly addressed view.
+ * The slug said "Circuit Explorer" while the neurons from Model Explorer were
+ * still rendered underneath it. Resolving the chunk before switching means the
+ * shell never shows one tool's content under another tool's name.
+ */
+const pendingRouteId = ref('');
+let navSequence = 0;
 const sidebarCollapsed = ref(readSidebarCollapsed());
 const loadErrors = reactive<Record<string, string>>({});
+/** Connection state for the sidebar pill. Measured by a probe, never guessed. */
+const status = ref<RuntimeStatus>(connectingStatus());
+const probing = ref(false);
 const componentCache = new Map<string, ReturnType<typeof defineAsyncComponent>>();
 
 const GROUP_ORDER = ['Explore', 'Develop', 'Research', 'General'] as const;
-
-/**
- * Label for the nav status pill.
- *
- * This used to render `modelName` unconditionally, so when the backend was
- * unreachable the dot went red (modelStatus = 'offline') while the text still
- * read "No model selected" -- reporting an infrastructure failure as a user
- * choice, which is precisely the fabrication the rest of the app is careful to
- * avoid. tests/playwright/trust.spec.js asserts the offline wording.
- *
- * Derived rather than assigned on error, so a transient outage does not
- * permanently overwrite the model the user had selected.
- */
-const statusLabel = computed(() => {
-  if (modelStatus.value === 'connecting') return 'Connecting to backend…';
-  if (modelStatus.value === 'offline') return 'Offline — backend unreachable';
-  return modelName.value;
-});
 
 const navGroups = computed(() =>
   GROUP_ORDER.map(name => ({
@@ -142,9 +166,21 @@ const navGroups = computed(() =>
 
 const activeRoute = computed(() => getRouteById(activeRouteId.value));
 
+const pendingRoute = computed(() =>
+  pendingRouteId.value ? getRouteById(pendingRouteId.value) : null,
+);
+
 // Sidebar highlights the canonical entry when an alias slug is open,
-// so keyboard and screen-reader users always see where they are.
-const highlightedRouteId = computed(() => activeRoute.value?.aliasOf ?? activeRouteId.value);
+// so keyboard and screen-reader users always see where they are. The target of
+// an in-flight switch is highlighted immediately: it is what the user asked
+// for, and the main region is marked busy until it renders.
+const highlightedRouteId = computed(
+  () =>
+    pendingRoute.value?.aliasOf ??
+    pendingRoute.value?.id ??
+    activeRoute.value?.aliasOf ??
+    activeRouteId.value,
+);
 
 function componentFor(routeId: string) {
   const cached = componentCache.get(routeId);
@@ -192,17 +228,32 @@ function setHash(routeId: string) {
   if (window.location.hash !== `#${routeId}`) window.location.hash = routeId;
 }
 
-function openRoute(routeId: string, updateHash = true) {
+async function openRoute(routeId: string, updateHash = true): Promise<void> {
   const route = getRouteById(routeId);
   if (!route) {
     unknownRoute.value = routeId;
+    pendingRouteId.value = '';
     if (updateHash) setHash(routeId);
     return;
   }
 
   unknownRoute.value = '';
-  activeRouteId.value = route.id;
   if (updateHash) setHash(route.id);
+  if (route.id === activeRouteId.value && !pendingRouteId.value) return;
+
+  const sequence = (navSequence += 1);
+  pendingRouteId.value = route.id;
+  try {
+    // Preload the chunk so the swap is a swap, not a layering of two tools.
+    await route.load();
+  } catch (error) {
+    // Show the tool's own error state rather than silently keeping the old one.
+    loadErrors[route.id] = error instanceof Error ? error.message : String(error);
+  }
+  if (sequence !== navSequence) return;
+
+  pendingRouteId.value = '';
+  activeRouteId.value = route.id;
 }
 
 function routeFromHash(): string {
@@ -214,29 +265,77 @@ function handleHashChange() {
   openRoute(routeId, false);
 }
 
-async function refreshRuntimeStatus() {
-  modelStatus.value = 'connecting';
+const PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * Measure whether the control plane answers, then describe it honestly.
+ *
+ * Two claims were wrong here before:
+ *  - the probe was `GET /api/models`, which serves a static reference
+ *    catalogue tagged `provenance: "reference"`. It answers even when no
+ *    weights are cached, so it cannot measure readiness;
+ *  - readiness was rendered as "N models available", turning a catalogue
+ *    length into a claim of research capability.
+ *
+ * `GET /api/status` is the readiness probe. The pill reports one of the four
+ * documented states and never claims a model is loaded: that is per-view
+ * state, reported by the view that actually loaded one.
+ */
+async function probe(): Promise<void> {
+  const previous = status.value.state;
+  probing.value = true;
+  status.value = connectingStatus();
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  let result: ProbeResult;
   try {
-    const result = await api.listModels();
-    modelStatus.value = 'connected';
-    if (Array.isArray(result.models) && result.models.length > 0 && modelName.value === 'No model selected') {
-      modelName.value = `${result.models.length} models available`;
-    }
-  } catch {
-    modelStatus.value = 'offline';
+    const response = await apiFetch(apiUrl('/api/status'), { signal: controller.signal });
+    result = response.ok
+      ? { ok: true }
+      : {
+          ok: false,
+          status: response.status,
+          message: `GET /api/status answered HTTP ${response.status}.`,
+        };
+  } catch (error) {
+    const message =
+      error instanceof DOMException && error.name === 'AbortError'
+        ? `GET /api/status timed out after ${PROBE_TIMEOUT_MS} ms.`
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    result = { ok: false, message };
+  } finally {
+    clearTimeout(timeout);
   }
+
+  status.value = classifyProbe(result, previous);
+  probing.value = false;
 }
 
 onMounted(() => {
   const initialRoute = routeFromHash() || 'explorer';
-  openRoute(initialRoute, false);
+  void openRoute(initialRoute, false);
 
   window.addEventListener('hashchange', handleHashChange);
-  refreshRuntimeStatus();
+  // `disconnected` is only reachable if a drop is observed, so re-probe when
+  // the window regains attention instead of assuming the mount-time answer
+  // holds for the life of the session.
+  window.addEventListener('focus', reprobeOnReturn);
+  document.addEventListener('visibilitychange', reprobeOnReturn);
+  void probe();
 });
+
+function reprobeOnReturn() {
+  if (document.visibilityState === 'hidden' || probing.value) return;
+  void probe();
+}
 
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', handleHashChange);
+  window.removeEventListener('focus', reprobeOnReturn);
+  document.removeEventListener('visibilitychange', reprobeOnReturn);
 });
 </script>
 
@@ -403,7 +502,10 @@ onBeforeUnmount(() => {
   background: var(--text-muted);
 }
 
-.status-dot.status-connected {
+/* State is carried by the label text; the dot is a second, redundant cue.
+   `disconnected` is a ring instead of a solid dot so it stays distinguishable
+   from `failed` without relying on colour perception. */
+.status-dot.status-ready {
   background: var(--success);
 }
 
@@ -411,8 +513,35 @@ onBeforeUnmount(() => {
   background: var(--warning);
 }
 
-.status-dot.status-offline {
+.status-dot.status-disconnected {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--danger);
+}
+
+.status-dot.status-failed {
   background: var(--danger);
+}
+
+.status-retry {
+  margin-left: auto;
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status-retry:hover:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.status-retry:disabled {
+  cursor: progress;
+  opacity: 0.65;
 }
 
 .nav-status__text {

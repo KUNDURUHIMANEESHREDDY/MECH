@@ -109,25 +109,10 @@ class PluginManager:
              self.active_plugins = []
              raise RuntimeError(f"Failed to resolve dependencies: {str(e)}")
 
-    def load_active_plugins(self) -> Dict[str, Any]:
-        """
-        Loads all active plugins in the correct dependency order.
-        """
-        self._recalculate_active()
-        loaded_modules = {}
-        
-        for plugin_name in self.active_plugins:
-             path = self.registry[plugin_name]["path"]
-             with open(path, 'r') as f:
-                 code = f.read()
-             
-             # Context can include already loaded plugins as dependencies
-             context = {"plugins": loaded_modules}
-             try:
-                 locals_dict = PluginSandbox.execute(code, context)
-                 loaded_modules[plugin_name] = locals_dict
-             except Exception as e:
-                 print(f"Failed to load plugin {plugin_name}: {str(e)}")
-                 # In a robust system, might disable the plugin and recalculate
-                 
-        return loaded_modules
+    # NOTE: there is deliberately no in-process plugin loader here.
+    # Executing plugin code inside the backend process was dead code --
+    # zero callers anywhere in the tree. The production path is
+    # PluginService.enable -> start_remote_plugin, which runs the plugin in
+    # a separate worker process (backend/plugins/service.py). A loader that
+    # exec's plugin source in the control-plane process would also have
+    # written its failures to stdout with a bare print().

@@ -1,5 +1,5 @@
 <template>
-  <main class="recent-surface">
+  <section class="recent-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Workspace / History</p>
@@ -199,7 +199,7 @@
         <p v-else class="panel-message">No local recent files have been created in this browser.</p>
       </div>
     </section>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

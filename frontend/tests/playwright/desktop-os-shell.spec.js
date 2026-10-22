@@ -7,7 +7,7 @@ test('deep-linked local tools open without loading a model', async ({ page }) =>
   await expect(shell).toBeVisible();
   await expect(page.getByTestId('view-settings')).toBeVisible();
   await expect(page.getByTestId('view-settings').getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
-  await expect(page.getByTestId('runtime-status')).toContainText(/Offline|Connected|models available|No model selected/);
+  await expect(page.getByTestId('runtime-status')).toContainText(/Connecting to backend|Backend ready|Disconnected|Backend failed|Unauthorized/);
 });
 
 test('sidebar navigation switches the visible tool and updates the hash', async ({ page }) => {

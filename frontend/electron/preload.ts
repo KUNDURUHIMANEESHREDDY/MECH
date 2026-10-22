@@ -8,6 +8,9 @@ function pythonRequest(method: string, params: Record<string, unknown> = {}) {
 }
 
 const api: DesktopApi = {
+  // Authenticated control-plane proxy. The token lives in the main process and
+  // never crosses the bridge.
+  apiRequest: (request) => ipcRenderer.invoke("api:request", request),
   ping: () => pythonRequest("ping", {}),
   getSettings: () => pythonRequest("settings.get", {}),
   updateSettings: (settings: Settings) =>

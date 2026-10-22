@@ -69,15 +69,13 @@
         ]
       },
       {
-        "from": "../.venv",
-        "to": ".venv",
+        "from": "build/python",
+        "to": "python",
         "filter": [
           "**/*",
           "!**/__pycache__/**",
           "!**/*.pyc",
-          "!**/pip*/**",
-          "!**/setuptools*/**",
-          "!**/wheel*/**"
+          "!**/*.pyo"
         ]
       }
     ]

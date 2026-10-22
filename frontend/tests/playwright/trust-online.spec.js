@@ -45,18 +45,11 @@ test('circuit detail shows measured members', async ({ page }) => {
   await expect(circuitView.locator('.explorer-page .member-chip').first()).toBeVisible({ timeout: 15000 });
 });
 
-test('Research Society runs before model loading and persists its evidence surfaces', async ({ page }) => {
-  await page.goto('/#society');
-  const society = page.getByTestId('view-society');
-  await expect(society.getByRole('heading', { name: 'Research Society', exact: true })).toBeVisible();
-  await society.locator('#society-goal').fill('Verify the live Society trace and validation gate contract');
-  await society.getByRole('button', { name: 'Run Society' }).click();
-
-  await expect(society).toContainText(/Backend status: completed/i, { timeout: 90000 });
-  await expect(society.locator('.society__steps li').first()).toBeVisible({ timeout: 90000 });
-  await expect(society.locator('.society__report')).toContainText(/Experiment ID|Generated At/i, { timeout: 90000 });
-  await expect(society).toContainText(/Fidelity|Confidence|Validated/i, { timeout: 90000 });
-});
+// The Society lifecycle is owned by society-lifecycle.spec.js, which is the
+// only spec that starts a Society run: the backend admits two concurrent runs,
+// so two specs starting one each would make both of them race for the same
+// slots. That spec also pins the "no result before the backend returns one"
+// rule this file used to check.
 
 test('native Vue visualization surfaces mount without a React bridge error', async ({ page }) => {
   for (const id of ['neuralexplorer', 'transformerExplorer']) {

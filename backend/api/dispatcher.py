@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 import asyncio
 import importlib.util
 import json
+import logging
 import os
 import queue
 import random
@@ -19,6 +20,11 @@ from backend.core.identifiers import entity_id
 from backend.core.provenance import pass_through
 
 router = APIRouter()
+
+#: Logger for this module. A failure that must not be swallowed has to have
+#: somewhere to go: an exception that is caught and dropped is a run that is
+#: reported as successful when it was not.
+logger = logging.getLogger("MECH.dispatcher")
 
 _STORAGE_PATH = os.environ.get(
     "MECH_STORAGE_DB",
@@ -298,6 +304,49 @@ def _panel_fields(res: Dict[str, Any], requested: int) -> Dict[str, Any]:
     }
 
 
+def _measured_weights_fingerprint(result: Dict[str, Any]) -> str:
+    """The weight fingerprint the measurement bound itself to, if authentic.
+
+    The measurement record carries ``model_identity.content_hash`` together
+    with ``content_hash_source``. Only ``model_weights`` and ``explicit``
+    are authentic -- they hash the loaded weight bytes. ``model_name_fallback``
+    hashes the model NAME, which proves nothing about which weights ran, so
+    it is refused rather than stored as if it were a fingerprint.
+    """
+    record = result.get("measurement_record")
+    if not isinstance(record, dict):
+        return ""
+    identity = record.get("model_identity")
+    if not isinstance(identity, dict):
+        return ""
+    source = str(identity.get("content_hash_source", "")).strip().lower()
+    if source not in {"model_weights", "explicit"}:
+        return ""
+    digest = identity.get("content_hash")
+    if not isinstance(digest, str) or not digest.strip():
+        return ""
+    return digest.strip()
+
+
+def _repository_code_revision() -> str:
+    """The commit the working tree is on, or empty when git cannot say.
+
+    A revision is only useful if it is the real one. An unavailable
+    repository yields no revision at all: a placeholder object id would
+    bind a stored run to nothing while looking exactly like a real one.
+    """
+    try:
+        from backend.science.reproducibility.run_attestation import code_revision
+    except Exception:
+        return ""
+    try:
+        revision = code_revision()
+    except Exception:
+        return ""
+    value = getattr(revision, "revision", "")
+    return value.strip() if isinstance(value, str) else ""
+
+
 @router.post("/benchmarks/run")
 def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Run a benchmark over a caller-sized prompt panel."""
@@ -336,6 +385,12 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "field_provenance": field_map(echo_fields, label),
                 **panel,
                 "reason": str(res.get("reason") or "Live benchmark execution is unavailable."),
+                # A refusal is not a run. The success branch reports these two
+                # keys, so a consumer reading `body["recorded"]` must not have
+                # to know which branch produced the response: the absence of a
+                # run is a fact, not a missing key.
+                "run_id": None,
+                "recorded": False,
             }
 
         try:
@@ -349,6 +404,10 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "field_provenance": field_map(echo_fields, "unavailable"),
                 **panel,
                 "reason": "The live executor did not return numeric score fields.",
+                # Same contract as the refusal above: no run, and the keys
+                # that say so are present rather than absent.
+                "run_id": None,
+                "recorded": False,
             }
 
         body = {
@@ -362,6 +421,39 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
             "score": round(score, 4),
             "pass_rate": round(pass_rate, 4),
             **panel,
+        }
+        # Which model, which weights and which code produced this run. The
+        # history store keeps these three columns, and they were arriving
+        # NULL because the route narrowed the executor's record to scores
+        # and never carried them across. A stored row that cannot say which
+        # weights produced it is not evidence of anything repeatable, so
+        # the provenance is taken from the measurement itself -- never
+        # invented here, and never a placeholder.
+        #
+        # `model_id` is the executor's own claim about the model it ran.
+        model_id = res.get("model_id")
+        if isinstance(model_id, str) and model_id.strip():
+            body["model_id"] = model_id
+        # The weights fingerprint is only recorded when the measurement
+        # bound it to real weight bytes. A name-derived fallback hashes the
+        # model NAME, which proves nothing about which weights ran, so it is
+        # refused rather than stored as if it were a fingerprint.
+        weights_fingerprint = _measured_weights_fingerprint(res)
+        if weights_fingerprint:
+            body["weights_fingerprint"] = weights_fingerprint
+        # The commit the working tree is on, as git reports it. When git
+        # cannot be asked, the column stays empty: an invented object id
+        # would bind the row to nothing and would be indistinguishable from
+        # a real one.
+        revision = _repository_code_revision()
+        if revision:
+            body["git_commit"] = revision
+        body["field_provenance"] = {
+            **body["field_provenance"],
+            "model_id": "live" if body.get("model_id") else "unavailable",
+            "weights_fingerprint": (
+                "live" if body.get("weights_fingerprint") else "unavailable"),
+            "git_commit": "live" if body.get("git_commit") else "unavailable",
         }
         # Persist the completed live run and hand back the stored id.
         # `record_benchmark_run` returns None for anything that is not a
@@ -405,6 +497,11 @@ def run_benchmark(payload: Dict[str, Any]) -> Dict[str, Any]:
             "field_provenance": field_map(echo_fields, "unavailable"),
             **_panel_fields({}, n_prompts),
             "error": str(exc)[:300],
+            # The handler failed before a measurement existed, so no run was
+            # recorded. The keys are present so a consumer does not have to
+            # treat a missing key as "maybe recorded".
+            "run_id": None,
+            "recorded": False,
         }
 
 
@@ -1711,10 +1808,16 @@ def _sae_probe() -> Dict[str, bool]:
         pipeline_ok = True
     except Exception:
         pipeline_ok = False
+    try:
+        from backend.interpretability.tl_compat import check_compatibility
+        tl_ok = bool(check_compatibility().get("compatible"))
+    except Exception:
+        tl_ok = False
     engine = get_engine()
     return {
         "torch_available": torch_ok,
         "gpt2_available": bool(engine and engine.is_available()),
+        "transformer_lens_available": tl_ok,
         "pipeline_importable": pipeline_ok,
         "checkpoint_configured": bool(os.environ.get(_SAE_CHECKPOINT_ENV, "").strip()),
     }
@@ -1727,39 +1830,113 @@ def sae_status() -> Dict[str, Any]:
     probe = _sae_probe()
     with _sae_lock:
         training_running = any(r.get("phase") == "running" for r in _sae_runs.values())
+    from backend.interpretability.sae.local_checkpoints import (
+        checkpoint_dir,
+        checkpoint_names,
+    )
     return {
         "status": "ok",
         "torch_available": probe["torch_available"],
         "gpt2_available": probe["gpt2_available"],
+        "transformer_lens_available": probe["transformer_lens_available"],
         "pipeline_importable": probe["pipeline_importable"],
         "checkpoint_configured": probe["checkpoint_configured"],
         "checkpoint_source": os.environ.get(_SAE_SOURCE_ENV, "") or None,
+        "checkpoint_identifier": os.environ.get(_SAE_CHECKPOINT_ENV, "").strip() or None,
+        "checkpoint_dir": str(checkpoint_dir()),
+        "available_checkpoints": checkpoint_names(),
         "training_running": training_running,
         "provenance": "live",
         "field_provenance": field_map(
             ("status", "torch_available", "gpt2_available",
-             "pipeline_importable", "checkpoint_configured",
-             "training_running"),
+             "transformer_lens_available", "pipeline_importable",
+             "checkpoint_configured", "checkpoint_identifier", "checkpoint_dir",
+             "available_checkpoints", "training_running"),
             "live",
         ),
     }
+
+
+def _sae_activation(engine, tensor_source: str, prompt: str):
+    """The activation a checkpoint names, or ``(None, reason)``.
+
+    The tensor source is the fact that binds a dictionary to an activation, so
+    it is resolved rather than guessed at: ``transformer_lens:<hook>`` is read
+    from TransformerLens' own cache, and ``transformers:blocks.<L>.<name>``
+    from this engine. A source this platform cannot read is a refusal, never
+    a fallback to some other tensor of the right width.
+    """
+    source = str(tensor_source or "").strip()
+    library, _, name = source.partition(":")
+    library = library.strip().lower()
+    name = name.strip()
+    if not name:
+        return None, (
+            f"Tensor source {source!r} names no activation, so there is "
+            "nothing to encode.")
+    if library == "transformer_lens":
+        result = engine.hook_activation(name, prompt)
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            reason = (result or {}).get("error") or "unknown error"
+            return None, (
+                f"The activation {name!r} could not be read from "
+                f"TransformerLens: {reason}")
+        return result.get("tensor"), (
+            f"TransformerLens hook {name}, last token")
+    if library == "transformers":
+        parts = name.split(".")
+        if len(parts) >= 3 and parts[0] == "blocks":
+            try:
+                layer = int(parts[1])
+            except ValueError:
+                layer = -1
+            kind = ".".join(parts[2:])
+            if kind == "mlp_write" and layer >= 0:
+                result = engine.mlp_write(layer, prompt)
+                if not isinstance(result, dict) or result.get("status") != "ok":
+                    reason = (result or {}).get("error") or "unknown error"
+                    return None, (
+                        f"The activation {name!r} could not be read from the "
+                        f"live model: {reason}")
+                tensor = result.get("tensor")
+                if tensor is not None and getattr(tensor, "ndim", 1) > 1:
+                    tensor = tensor[-1]
+                return tensor, (
+                    "the MLP's write into the residual stream at block "
+                    f"{layer} (c_proj(act(c_fc(ln_2(resid_post))))), last token")
+        return None, (
+            f"Tensor source {source!r} is not an activation this platform can "
+            "reproduce, so nothing was encoded.")
+    return None, (
+        f"Tensor source {source!r} names an unknown library, so nothing was "
+        "encoded.")
 
 
 @router.post("/sae/inspect")
 def sae_inspect(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Encode one live hidden state with a real SAE checkpoint.
 
-    Hidden state comes from a live GPT-2 forward over the caller-supplied
-    prompt; encoding is the checkpoint's own matrix. Dimension mismatch
-    between checkpoint and model state fails closed — a 768-wide encoder
-    applied to a 3072-wide MLP state would be a shape error reported as a
-    finding.
+    The activation is the one the checkpoint describes. A dictionary is
+    trained on one activation at one hook point on one model, so the
+    checkpoint says which -- its ``hook_point`` and ``tensor_source`` -- and
+    the route reads exactly that tensor: from TransformerLens when the hook is
+    a TransformerLens hook, from this engine when it is not. The `transformers`
+    residual stream is a *different* tensor from the TransformerLens one, and
+    the same dictionary reconstructs the TransformerLens tensor at relative L2
+    0.243 against 3.43 for the `transformers` one at layer 8, so encoding
+    whichever tensor was convenient would report a measurement of the wrong
+    quantity.
+
+    A layer the dictionary does not describe is refused rather than encoded,
+    and a checkpoint that records no tensor source is refused rather than
+    applied to an arbitrary tensor. Dimension mismatch between checkpoint and
+    model state also fails closed: a 768-wide encoder applied to a 3072-wide
+    MLP state would be a shape error reported as a finding.
     """
     from backend.agents.evidence_policy import field_map
 
     prompt = _as_text(payload, "prompt", "") or "The capital of France is"
     _check_prompt(prompt)
-    layer = _as_int(payload, "layer", 8)
     source, identifier, version = _sae_checkpoint_ref(payload)
     from_payload = bool((_as_text(payload, "identifier", "") or "").strip())
     if not source or not identifier:
@@ -1789,8 +1966,32 @@ def sae_inspect(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "reason": ("No checkpoint file with that name exists in the "
                            "configured checkpoint directory."),
             }
+    elif (not source or source.strip().lower() == "local"):
+        # Operator configuration (the environment pointer). An absolute path is
+        # honoured as given; a bare file name is resolved inside the
+        # checkpoint directory, so `MECH_SAE_CHECKPOINT=<file name>` means
+        # what it says instead of being resolved against the server's cwd.
+        raw = identifier.strip()
+        if raw and os.path.basename(raw) == raw and not raw.startswith("."):
+            resolved = _resolve_local_checkpoint(raw, _sae_checkpoint_dir())
+            if resolved is None:
+                return {
+                    "status": "unavailable",
+                    "provenance": "unavailable",
+                    "field_provenance": field_map(("status",), "unavailable"),
+                    "reason": (
+                        f"No checkpoint file named {raw!r} exists in the "
+                        "configured checkpoint directory "
+                        f"({_sae_checkpoint_dir()})."
+                    ),
+                }
+            identifier = resolved
     try:
-        from backend.interpretability.sae.loader import SAELoader, SAELoadError
+        from backend.interpretability.sae.loader import (
+            SAELoadError,
+            SAELoader,
+            hook_at_layer,
+        )
     except Exception as exc:
         return {
             "status": "error",
@@ -1807,6 +2008,56 @@ def sae_inspect(payload: Dict[str, Any]) -> Dict[str, Any]:
             "field_provenance": field_map(("status",), "unavailable"),
             "reason": f"SAE checkpoint could not be loaded: {exc}"[:500],
         }
+
+    # Which activation does this dictionary describe? The checkpoint says, and
+    # the route encodes that one. A checkpoint that says nothing describes no
+    # activation, so there is nothing honest to encode it with.
+    config = sae.config
+    declared_hook = str(getattr(config, "hook_point", "") or "")
+    tensor_source = str(getattr(config, "tensor_source", "") or "")
+    try:
+        declared_layer = int(getattr(config, "layer", -1))
+    except (TypeError, ValueError):
+        declared_layer = -1
+    if not tensor_source:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": field_map(("status",), "unavailable"),
+            "reason": (
+                "This checkpoint records no hook point and no tensor source, "
+                "so the activation it was trained on cannot be reproduced "
+                "from these weights. Encoding an arbitrary tensor instead "
+                "would be a silent mismatch reported as a decomposition, so "
+                "no feature indices are reported."),
+        }
+    if declared_layer < 0:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": field_map(("status",), "unavailable"),
+            "reason": (
+                "This checkpoint does not record which layer its dictionary "
+                "describes, so a layer mismatch cannot be refused. Nothing "
+                "was encoded."),
+        }
+
+    # The layer asked for, defaulting to the dictionary's own layer. A layer
+    # the dictionary does not describe is refused below, before any encoding.
+    if payload.get("layer") is None:
+        layer = declared_layer
+    else:
+        layer = _as_int(payload, "layer", declared_layer)
+    try:
+        sae.assert_applies_to(layer, hook_at_layer(declared_hook, layer))
+    except SAELoadError as exc:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": field_map(("status",), "unavailable"),
+            "reason": str(exc)[:500],
+        }
+
     engine = get_engine()
     if not (engine and engine.is_available()):
         return {
@@ -1815,51 +2066,27 @@ def sae_inspect(payload: Dict[str, Any]) -> Dict[str, Any]:
             "field_provenance": field_map(("status",), "unavailable"),
             "reason": "torch/transformers not available — no live hidden state to encode.",
         }
-    try:
-        import torch
-    except Exception:
+
+    state, tensor_detail = _sae_activation(engine, tensor_source, prompt)
+    if state is None:
         return {
             "status": "unavailable",
             "provenance": "unavailable",
             "field_provenance": field_map(("status",), "unavailable"),
-            "reason": "torch is not importable, so the hidden state cannot be tensorised.",
-        }
-    try:
-        detail = engine.layer_activations(layer, prompt)
-    except Exception as exc:
-        return {
-            "status": "error",
-            "provenance": "unavailable",
-            "field_provenance": field_map(("status",), "unavailable"),
-            "error": str(exc)[:300],
-        }
-    if not isinstance(detail, dict) or detail.get("status") != "ok":
-        return {
-            "status": "unavailable",
-            "provenance": "unavailable",
-            "field_provenance": field_map(("status",), "unavailable"),
-            "reason": f"Live activations unavailable: {detail.get('error', 'unknown')}"[:300],
+            "reason": tensor_detail[:500],
         }
     d_in = int(sae.config.d_in)
-    resid = detail.get("resid_post") or []
-    mlp = detail.get("mlp_post") or []
-    if d_in == int(detail.get("d_model", -1)) and resid:
-        state = torch.tensor(resid[-1], dtype=torch.float32)
-        tensor_source = f"residual stream, last token, layer {detail.get('layer')}"
-    elif d_in == int(detail.get("d_mlp", -1)) and mlp:
-        state = torch.tensor(mlp[-1], dtype=torch.float32)
-        tensor_source = f"MLP post-activation, last token, layer {detail.get('layer')}"
-    else:
+    width = int(getattr(state, "shape", [-1])[-1])
+    if d_in != width:
         return {
             "status": "unavailable",
             "provenance": "unavailable",
             "field_provenance": field_map(("status",), "unavailable"),
             "reason": (
-                f"Checkpoint expects d_in={d_in} but the live state offers "
-                f"residual {detail.get('d_model')} / MLP {detail.get('d_mlp')}. "
-                "Encoding across mismatched dimensions would be a shape "
-                "error reported as features."
-            ),
+                f"Checkpoint expects d_in={d_in} but the declared tensor "
+                f"{tensor_source} is {width} wide. Encoding across "
+                "mismatched dimensions would be a shape error reported as "
+                "features."),
         }
     try:
         encoded = sae.activate(state)
@@ -1878,18 +2105,74 @@ def sae_inspect(payload: Dict[str, Any]) -> Dict[str, Any]:
             "reason": "SAE encoding did not complete.",
         }
     encoded["prompt"] = prompt
-    encoded["layer"] = detail.get("layer")
+    encoded["layer"] = layer
+    encoded["hook_point"] = declared_hook
     encoded["tensor_source"] = tensor_source
+    encoded["tensor_source_detail"] = tensor_detail
     encoded["d_in"] = d_in
     encoded["d_sae"] = sae.config.d_sae
     encoded["weights_sha256"] = sae.weights_sha256()
-    # The loader ships encoder weights only: encoding is measured,
-    # reconstruction fidelity of this checkpoint is not.
-    encoded["reconstruction_measured"] = False
+    encoded["model_id"] = sae.config.model_id
+    # Reconstruction fidelity is a measurement, not a constant: it is computed
+    # from the checkpoint's own decoder when it has one, and refused with a
+    # reason when it does not. It used to be hardcoded to False here, which
+    # reported a measurable quantity as absent.
+    try:
+        reconstruction = sae.reconstruction_error(
+            state, list(encoded.get("feature_indices") or []))
+    except Exception as exc:  # pragma: no cover - reported, never hidden
+        reconstruction = {
+            "status": "unavailable",
+            "measured": False,
+            "reason": f"reconstruction error could not be measured: {type(exc).__name__}: {exc}"[:300],
+        }
+    if isinstance(reconstruction, dict) and reconstruction.get("measured"):
+        encoded["reconstruction_measured"] = True
+        error = reconstruction.get("relative_l2_error")
+        encoded["relative_l2_error"] = error
+        encoded["n_active_features"] = reconstruction.get("n_active_features")
+        encoded["reconstruction_hook_point"] = reconstruction.get("hook_point")
+        # A relative L2 of 1.0 is the predict-the-mean baseline: at or above
+        # it the reconstruction explains no more of the activation than
+        # predicting the mean would, so it is not a reconstruction at all.
+        # The number stays as measured -- it is a measurement, not a score --
+        # and the flag is the qualification a reader needs, the same one the
+        # training pipeline applies to its own fit.
+        try:
+            useful = error is not None and float(error) < 1.0
+        except (TypeError, ValueError):
+            useful = False
+        encoded["reconstruction_useful"] = bool(useful)
+        if not useful:
+            encoded["reconstruction_note"] = (
+                f"Relative L2 {error} is at or above 1.0, which is the "
+                "predict-the-mean baseline: this dictionary explains no more "
+                "of the activation than predicting the mean would. The "
+                "figure is the measurement, not a score.")
+    else:
+        encoded["reconstruction_measured"] = False
+        encoded["reconstruction_useful"] = False
+        encoded["reconstruction_reason"] = (
+            (reconstruction or {}).get("reason")
+            or "the checkpoint carries no decoder weights, so the "
+               "reconstruction cannot be measured"
+        )
+    # The activation encoded here is the one the checkpoint declares, and the
+    # requested layer was checked against the checkpoint's own hook point
+    # before anything was encoded. The note says so, because the reader of a
+    # reconstruction number needs to know what it is a reconstruction of.
+    encoded["tensor_mismatch_note"] = (
+        f"No mismatch: the activation encoded is {tensor_source!r}, the "
+        "tensor this dictionary was trained on, and the requested layer was "
+        "checked against the checkpoint's own hook point before encoding.")
     encoded.setdefault("evidence_level", "OBSERVATIONAL")
+    encoded["attested"] = False
     encoded["field_provenance"] = field_map(
         ("status", "feature_indices", "activations", "prompt", "layer",
-         "tensor_source", "d_in", "d_sae", "weights_sha256"),
+         "tensor_source", "tensor_source_detail", "hook_point", "d_in", "d_sae",
+         "weights_sha256", "reconstruction_measured", "relative_l2_error",
+         "reconstruction_useful", "reconstruction_note",
+         "n_active_features", "tensor_mismatch_note", "model_id"),
         "live",
     )
     return encoded
@@ -1920,6 +2203,7 @@ def _sae_train_worker(run_id: str, run: Dict[str, Any]) -> None:
                 n_features=params["n_features"], seed=params["seed"],
                 corpus=run.get("corpus"), n_tokens=params["n_tokens"],
                 k=params.get("k"), steps=params["steps"],
+                layer=int(params.get("layer", 0)),
                 checkpoint_dir=params.get("checkpoint_dir"),
             )
         except LiveUnavailable as exc:
@@ -1976,6 +2260,9 @@ def sae_train(payload: Dict[str, Any]) -> Dict[str, Any]:
     n_features, n_tokens, steps = (
         bounds["n_features"], bounds["n_tokens"], bounds["steps"])
     seed = _as_int(payload, "seed", 42)
+    # Which block's MLP write is fitted. The checkpoint records it, so the
+    # route can reproduce the training tensor instead of guessing at it.
+    layer = max(0, _as_int(payload, "layer", 0))
     k_raw = payload.get("k", None)
     k = None if k_raw is None else max(1, min(512, _as_int(payload, "k", 8)))
     corpus = _opt_text(payload, "corpus")
@@ -2016,6 +2303,7 @@ def sae_train(payload: Dict[str, Any]) -> Dict[str, Any]:
         "created": time.time(),
         "params": {"n_features": n_features, "seed": seed,
                    "n_tokens": n_tokens, "steps": steps, "k": k,
+                   "layer": layer,
                    "corpus_chars": len(corpus) if corpus else None,
                    "checkpoint_dir": str(checkpoint_dir)},
         # The corpus text travels with the run record (outside `params`, so
@@ -2174,13 +2462,22 @@ def figure_attention(prompt: str = "The capital of France is",
 # ---------------------------------------------------------------------------
 # Research Society v2 — autonomous runs + SSE
 # Mounted under /api (see main.py include_router prefix), so live paths are:
-#   POST /api/society/run              {goal, model_name?} -> {runId, status}
-#   GET  /api/society/stream?runId=... -> text/event-stream (live trace)
-#   GET  /api/society/runs/{runId}     -> polling fallback (status + result)
+#   POST /api/society/run                  {goal, model_name?} -> {runId, status}
+#   GET  /api/society/stream?runId=...    -> text/event-stream (live trace)
+#   GET  /api/society/runs/{runId}        -> polling fallback (status + result)
+#   POST /api/society/runs/{runId}/cancel -> cooperative cancel, mirroring
+#                                            /api/v1/jobs/{jobId}/cancel
 # NOTE: docs/API_v1.md sketches /api/v1/... and backend/api/runtime_api.py now
 # exists, but Society still ships on this active dispatcher: the v2 module
 # exposes the job/cancel surface, not these routes.
 # Long GPU work runs in a daemon thread; the event loop is never blocked.
+#
+# A run must not be able to hold an admission slot forever. Every admitted
+# run carries a deadline and a worker thread: a run that outlives its
+# deadline is finalized as a failure whose reason names the timeout, and a
+# run whose worker thread is gone is finalized as interrupted. Without both,
+# one hung pipeline kept status "running" for the lifetime of the process and
+# every later submission was refused ("active run limit reached (2/2)").
 # ---------------------------------------------------------------------------
 
 _society_runs: Dict[str, Dict[str, Any]] = {}
@@ -2197,6 +2494,239 @@ _SOCIETY_MAX_ACTIVE_RUNS = 2
 _SOCIETY_MAX_QUEUED_RUNS = 5
 _SOCIETY_MAX_GOAL_CHARS = 4096
 _SOCIETY_MAX_MODEL_NAME_CHARS = 128
+#: Bounded lifetime of one run, in seconds. A normal Society run takes
+#: 75-160s on a CPU-only host, so the default leaves room for the slow end
+#: while still bounding how long a hung pipeline may hold its slot.
+#: Override with MECH_SOCIETY_RUN_TIMEOUT_S.
+_SOCIETY_DEFAULT_RUN_TIMEOUT_S = 600.0
+#: Grace period for attaching a worker thread to an admitted run. Past it the
+#: run is finalized as interrupted: nothing will ever start it.
+_SOCIETY_STARTUP_GRACE_S = 30.0
+#: Statuses that mean "this run is over". Anything else still holds an
+#: admission slot.
+_SOCIETY_TERMINAL_STATUSES = frozenset({
+    "completed", "completed_unrecorded", "blocked", "error", "failed",
+    "cancelled", "interrupted",
+})
+#: Statuses that mean "this run finished successfully".
+_SOCIETY_SUCCESS_STATUSES = frozenset({"completed"})
+#: The status a successful run carries when its evidence record could not be
+#: written. The work happened; the proof of it did not. Reporting a plain
+#: "completed" would claim a durable record that does not exist, so the run is
+#: reported as finished-but-unrecorded instead -- still terminal, so it still
+#: releases its admission slot, but not a success anyone can cite.
+_SOCIETY_UNRECORDED_STATUS = "completed_unrecorded"
+#: Statuses that hold an admission slot.
+_SOCIETY_LIVE_STATUSES = frozenset({"running"})
+
+
+#: How much a Society run may cost, by name.
+#:
+#: A live discovery sweeps every attention head of GPT-2 on a prompt and
+#: verifies the candidates on every panel prompt, so a run's cost is set by
+#: its sample: the "standard" preset is the sample the platform considers
+#: adequate for a validation claim (10 prompts, 5 interaction prompts), and it
+#: takes minutes on a CPU. "quick" is a smaller sample -- it cannot support a
+#: validation claim, and the run says so -- for callers that need a run to
+#: finish now. The effort is reported with the result, so a quick run is
+#: never mistaken for a thorough one.
+_SOCIETY_EFFORTS: Dict[str, Dict[str, int]] = {
+    "quick": {"n_prompts": 2, "n_interaction_prompts": 1, "max_heads": 4},
+    "standard": {"n_prompts": 10, "n_interaction_prompts": 5, "max_heads": 10},
+    "full": {"n_prompts": 25, "n_interaction_prompts": 5, "max_heads": 10},
+}
+
+_SOCIETY_DEFAULT_EFFORT = "standard"
+
+
+def _society_effort(payload: Dict[str, Any]) -> Dict[str, int]:
+    """The effort a run may spend, and an error when the name is unknown."""
+    name = str((payload or {}).get("effort", "") or _SOCIETY_DEFAULT_EFFORT).strip()
+    effort = _SOCIETY_EFFORTS.get(name)
+    if effort is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"unknown effort {name!r}; one of "
+                    f"{sorted(_SOCIETY_EFFORTS)}"))
+    return dict(effort)
+
+
+def _society_run_timeout_s() -> float:
+    """Bounded lifetime of one Society run, in seconds.
+
+    MECH_SOCIETY_RUN_TIMEOUT_S overrides the default (600s). A malformed or
+    non-positive value falls back to the default instead of removing the
+    bound: an unbounded run is exactly the leak this guards against.
+    """
+    raw = os.environ.get("MECH_SOCIETY_RUN_TIMEOUT_S", "")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _SOCIETY_DEFAULT_RUN_TIMEOUT_S
+    if value <= 0:
+        return _SOCIETY_DEFAULT_RUN_TIMEOUT_S
+    return value
+
+
+def _society_is_terminal(status: Any) -> bool:
+    """True when the run is over and no longer holds an admission slot."""
+    return str(status) in _SOCIETY_TERMINAL_STATUSES
+
+
+def _society_finalize_locked(run: Dict[str, Any], status: str,
+                             result: Dict[str, Any], reason: str = "") -> None:
+    """Write the terminal state of a run. The caller holds the lock."""
+    run["status"] = status
+    run["result"] = result
+    run["reason"] = reason
+    run["finished_at"] = time.time()
+    try:
+        run["queue"].put(("done", None), block=False)
+    except Exception:
+        pass
+
+
+def _society_persist_record(run_id: str, goal: str, model_name: str,
+                             status: str, result: Any) -> bool:
+    """Durable per-run evidence record (survives restarts).
+
+    Returns True when the record was written. A failed write is reported,
+    not swallowed: a run whose evidence was not recorded must not be
+    reported as a plain success (see ``_society_mark_unrecorded``).
+    """
+    try:
+        from backend.core.evidence_graph import save_run_record
+        save_run_record(run_id, {"run_id": run_id, "goal": goal,
+                                 "model_name": model_name,
+                                 "status": status, "result": result})
+        return True
+    except Exception as exc:
+        logger.warning("Society run %s: evidence record not written (%s: %s)",
+                       run_id, type(exc).__name__, exc)
+        return False
+
+
+def _society_mark_unrecorded(run_id: str, status: str) -> None:
+    """Downgrade a successful run whose evidence could not be recorded.
+
+    The work ran; the durable record of it did not. Reporting plain
+    "completed" would claim an evidence record that does not exist, so the
+    run carries ``completed_unrecorded`` and a reason that says why. The
+    status is still terminal -- the run is over and releases its admission
+    slot -- it simply is not a plain success.
+    """
+    if status not in _SOCIETY_SUCCESS_STATUSES:
+        return
+    reason = ("the run finished but its evidence record could not be "
+              "written, so the result is not durable")
+    with _society_lock:
+        run = _society_runs.get(run_id)
+        if run is None:
+            return
+        if run.get("status") not in _SOCIETY_SUCCESS_STATUSES:
+            return
+        run["status"] = _SOCIETY_UNRECORDED_STATUS
+        run["reason"] = reason
+        result = run.get("result")
+        if isinstance(result, dict):
+            result["status"] = _SOCIETY_UNRECORDED_STATUS
+            result["reason"] = reason
+
+
+def _society_reap_locked(now: float) -> list:
+    """Finalize runs that can no longer make progress. Caller holds the lock.
+
+    Two cases end a run that would otherwise hold its admission slot for the
+    lifetime of the process:
+
+    * the worker thread is gone and the run never produced a result -- the
+      thread died without finalizing, so nothing can complete it; and
+    * the run outlived its deadline (MECH_SOCIETY_RUN_TIMEOUT_S).
+
+    A thread that is alive but stuck cannot be killed in CPython, so the
+    timeout bounds the *slot*, not the thread: the run is reported as failed
+    and the worker is asked to stop cooperatively.
+
+    Returns the finalized runs so the caller can persist them after
+    releasing the lock.
+    """
+    pending = []
+    for run_id, run in list(_society_runs.items()):
+        if _society_is_terminal(run.get("status")):
+            continue
+        deadline = run.get("deadline")
+        if deadline is not None and now >= float(deadline):
+            timeout = float(run.get("timeout_s")
+                            or _SOCIETY_DEFAULT_RUN_TIMEOUT_S)
+            reason = ("run exceeded the %.0fs society run timeout "
+                      "(MECH_SOCIETY_RUN_TIMEOUT_S=%.0f); it was finalized as "
+                      "a failure" % (timeout, timeout))
+            run["cancel_requested"] = True  # ask the stuck worker to stop
+            stop = run.get("stop")
+            if stop is not None:
+                # The worker observes this between stages and between
+                # measurements, so the sweep unwinds instead of running to
+                # the end of the sample.
+                stop.set()
+            result = {"status": "failed", "error": reason, "reason": reason,
+                      "timeout_s": timeout, "run_id": run_id,
+                      "goal": run.get("goal", "")}
+            _society_finalize_locked(run, "failed", result, reason)
+            pending.append((run_id, run.get("goal", ""),
+                            run.get("model_name", ""), "failed", result))
+            continue
+        worker = run.get("worker")
+        if worker is None:
+            # Admitted, but no worker was ever attached: it can never start.
+            created = float(run.get("created") or now)
+            if now - created <= _SOCIETY_STARTUP_GRACE_S:
+                continue
+            reason = ("the run was admitted but its worker thread was never "
+                      "started, so it can no longer progress")
+            result = {"status": "interrupted", "error": reason,
+                      "reason": reason, "run_id": run_id,
+                      "goal": run.get("goal", "")}
+            _society_finalize_locked(run, "interrupted", result, reason)
+            pending.append((run_id, run.get("goal", ""),
+                            run.get("model_name", ""), "interrupted", result))
+            continue
+        if not worker.is_alive() and run.get("result") is None:
+            reason = ("the worker thread exited without finalizing the run, "
+                      "so the run was interrupted")
+            result = {"status": "interrupted", "error": reason,
+                      "reason": reason, "run_id": run_id,
+                      "goal": run.get("goal", "")}
+            _society_finalize_locked(run, "interrupted", result, reason)
+            pending.append((run_id, run.get("goal", ""),
+                            run.get("model_name", ""), "interrupted", result))
+    return pending
+
+
+def _society_reap() -> list:
+    """Reap dead/expired runs, then persist what changed."""
+    with _society_lock:
+        pending = _society_reap_locked(time.time())
+    for run_id, goal, model_name, status, result in pending:
+        if not _society_persist_record(run_id, goal, model_name, status, result):
+            _society_mark_unrecorded(run_id, status)
+    return [item[0] for item in pending]
+
+
+def _society_finalize(run_id: str, status: str, result: Dict[str, Any],
+                      reason: str = "") -> bool:
+    """Finalize a run by id. False when it was already finalized."""
+    goal = ""
+    model_name = ""
+    with _society_lock:
+        run = _society_runs.get(run_id)
+        if run is None or _society_is_terminal(run.get("status")):
+            return False
+        goal = run.get("goal", "")
+        model_name = run.get("model_name", "")
+        _society_finalize_locked(run, status, result, reason)
+    if not _society_persist_record(run_id, goal, model_name, status, result):
+        _society_mark_unrecorded(run_id, status)
+    return True
 
 
 def _society_admit_and_reserve() -> tuple[str, dict | None]:
@@ -2206,44 +2736,67 @@ def _society_admit_and_reserve() -> tuple[str, dict | None]:
     was granted and run dict (with run_id, etc.) is returned. If reason is
     non-empty, admission was denied and None is returned.
     """
+    reason = ""
+    run = None
+    pending = []
     with _society_lock:
+        # Runs that can no longer finish release their slot before the count,
+        # so the counter only ever counts runs that can still finish.
+        pending = _society_reap_locked(time.time())
         active = sum(1 for r in _society_runs.values()
-                     if r.get("status") == "running")
+                     if r.get("status") in _SOCIETY_LIVE_STATUSES)
         queued = sum(1 for r in _society_runs.values()
                      if r.get("status") == "queued")
         if active >= _SOCIETY_MAX_ACTIVE_RUNS:
-            return (f"active run limit reached ({active}/"
-                    f"{_SOCIETY_MAX_ACTIVE_RUNS})", None)
-        if queued >= _SOCIETY_MAX_QUEUED_RUNS:
-            return (f"queue capacity reached ({queued}/"
-                    f"{_SOCIETY_MAX_QUEUED_RUNS} queued)", None)
-        
-        # Admission granted — create and reserve the run slot atomically
-        run_id = "r" + uuid.uuid4().hex[:12]
-        run: Dict[str, Any] = {
-            "run_id": run_id,
-            "goal": "",  # will be set by caller
-            "model_name": "",  # will be set by caller
-            "status": "running",
-            "cancel_requested": False,
-            "events": [],
-            "result": None,
-            "queue": queue.Queue(maxsize=1000),
-            "created": time.time(),
-        }
-        _society_runs[run_id] = run
-        
-        # Prune oldest finished runs
-        if len(_society_runs) > _SOCIETY_MAX_RUNS:
-            finished = sorted(
-                ((rid, r) for rid, r in _society_runs.items()
-                 if r.get("status") != "running"),
-                key=lambda kv: kv[1].get("created", 0),
-            )
-            for rid, _ in finished[: len(_society_runs) - _SOCIETY_MAX_RUNS]:
-                _society_runs.pop(rid, None)
-        
-        return ("", run)
+            reason = (f"active run limit reached ({active}/"
+                      f"{_SOCIETY_MAX_ACTIVE_RUNS})")
+        elif queued >= _SOCIETY_MAX_QUEUED_RUNS:
+            reason = (f"queue capacity reached ({queued}/"
+                      f"{_SOCIETY_MAX_QUEUED_RUNS} queued)")
+        else:
+            # Admission granted — create and reserve the run slot atomically
+            run_id = "r" + uuid.uuid4().hex[:12]
+            timeout = _society_run_timeout_s()
+            created = time.time()
+            run = {
+                "run_id": run_id,
+                "goal": "",  # will be set by caller
+                "model_name": "",  # will be set by caller
+                "status": "running",
+                "cancel_requested": False,
+                "events": [],
+                "result": None,
+                "queue": queue.Queue(maxsize=1000),
+                "created": created,
+                "started_at": None,
+                "finished_at": None,
+                "deadline": created + timeout,
+                "timeout_s": timeout,
+                "worker": None,        # the worker thread, once attached
+                "pipeline_started": False,
+                "reason": "",
+                # Set when the run is cancelled or times out. The worker
+                # checks it between stages and between measurements, so a
+                # stopped run stops instead of sweeping every remaining
+                # candidate on a CPU nobody is waiting for.
+                "stop": threading.Event(),
+                "effort": {},
+            }
+            _society_runs[run_id] = run
+
+            # Prune oldest finished runs
+            if len(_society_runs) > _SOCIETY_MAX_RUNS:
+                finished = sorted(
+                    ((rid, r) for rid, r in _society_runs.items()
+                     if _society_is_terminal(r.get("status"))),
+                    key=lambda kv: kv[1].get("created", 0),
+                )
+                for rid, _ in finished[: len(_society_runs) - _SOCIETY_MAX_RUNS]:
+                    _society_runs.pop(rid, None)
+    for item in pending:
+        if not _society_persist_record(*item):
+            _society_mark_unrecorded(item[0], item[3])
+    return (reason, run)
 
 
 def _society_admission_reason() -> str:
@@ -2252,9 +2805,10 @@ def _society_admission_reason() -> str:
     Returns reason string if denied, empty string if admitted.
     This is kept for backward compatibility with other callers.
     """
+    _society_reap()
     with _society_lock:
         active = sum(1 for r in _society_runs.values()
-                     if r.get("status") == "running")
+                     if r.get("status") in _SOCIETY_LIVE_STATUSES)
         queued = sum(1 for r in _society_runs.values()
                      if r.get("status") == "queued")
     if active >= _SOCIETY_MAX_ACTIVE_RUNS:
@@ -2287,43 +2841,85 @@ def _society_push(run_id: str, event: Dict[str, Any]) -> None:
         pass
 
 
+def _society_begin_pipeline(run_id: str) -> bool:
+    """Mark that the run's pipeline has started.
+
+    Returns False when the pipeline must not run: the record is gone, the run
+    was already finalized (timeout, interrupt), or a cancel arrived before
+    the pipeline started -- nothing is in flight then, so the terminal state
+    is certain.
+    """
+    pending = None
+    with _society_lock:
+        run = _society_runs.get(run_id)
+        if run is None:
+            # The in-memory record is gone (pruned, or the process restarted).
+            # The run still happens and the durable record keeps the evidence.
+            return True
+        if _society_is_terminal(run.get("status")):
+            return False
+        if run.get("cancel_requested"):
+            reason = "cancelled before the pipeline started"
+            result = {"status": "cancelled", "run_id": run_id,
+                      "goal": run.get("goal", ""), "reason": reason}
+            _society_finalize_locked(run, "cancelled", result, reason)
+            pending = (run_id, run.get("goal", ""), run.get("model_name", ""),
+                       "cancelled", result)
+        else:
+            run["pipeline_started"] = True
+            run["started_at"] = time.time()
+    if pending is not None:
+        if not _society_persist_record(*pending):
+            _society_mark_unrecorded(pending[0], pending[3])
+        return False
+    return True
+
+
 def _society_worker(run_id: str, goal: str, model_name: str) -> None:
+    if not _society_begin_pipeline(run_id):
+        # Cancelled before it started, already finalized, or the record is
+        # gone: the pipeline must not run.
+        return
     try:
         society = _society_get()
+        with _society_lock:
+            stop = _society_runs.get(run_id, {}).get("stop")
+            effort = dict(_society_runs.get(run_id, {}).get("effort") or {})
         result = society.run_blocking(
             goal, model_name=model_name,
             on_event=lambda ev: _society_push(run_id, ev),
             run_id=run_id,
+            should_stop=(stop.is_set if stop is not None else None),
+            effort=effort or None,
         )
         status = result.get("status", "completed")
     except Exception as exc:
         result = {"status": "error", "error": str(exc)[:500]}
         status = "error"
-    run = _society_runs.get(run_id)
-    if run is not None:
-        # Cooperative cancel (requested via mech_loop_stop): the in-flight
-        # step ran to completion, but the run is reported cancelled rather
-        # than completed. The worker thread itself cannot be killed.
-        if run.get("cancel_requested"):
-            status = "cancelled"
-            result = {"status": "cancelled", "run_id": run_id, "goal": goal,
-                      "reason": "cancel requested via control plane; "
-                                "in-flight step ran to completion."}
-        with _society_lock:
-            run["result"] = result
-            run["status"] = status
-    # Durable per-run evidence record (survives restarts).
-    try:
-        from backend.core.evidence_graph import save_run_record
-        save_run_record(run_id, {"run_id": run_id, "goal": goal,
-                                 "model_name": model_name,
-                                 "status": status, "result": result})
-    except Exception:
-        pass
-    try:
-        run["queue"].put(("done", None), block=False)
-    except Exception:
-        pass
+    persist = False
+    with _society_lock:
+        run = _society_runs.get(run_id)
+        if run is None:
+            persist = True  # the record was dropped; keep the evidence
+        elif not _society_is_terminal(run.get("status")):
+            # Cooperative cancel (requested via mech_loop_stop or the cancel
+            # route): the in-flight step ran to completion, but the run is
+            # reported cancelled rather than completed. The worker thread
+            # itself cannot be killed.
+            if run.get("cancel_requested"):
+                status = "cancelled"
+                result = {"status": "cancelled", "run_id": run_id, "goal": goal,
+                          "reason": "cancel requested via control plane; "
+                                    "in-flight step ran to completion."}
+            reason = str((result or {}).get("reason")
+                         or (result or {}).get("error") or "")
+            _society_finalize_locked(run, status, result, reason)
+            persist = True
+        # Otherwise a timeout or an interrupt already finalized this run: the
+        # first finalization wins, a late result never overwrites it.
+    if persist:
+        if not _society_persist_record(run_id, goal, model_name, status, result):
+            _society_mark_unrecorded(run_id, status)
 
 
 @router.post("/society/run")
@@ -2336,8 +2932,9 @@ def society_run(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "error": f"goal exceeds {_SOCIETY_MAX_GOAL_CHARS} characters"}
     model_name = str((payload or {}).get("model_name", "gpt2"))
     if len(model_name) > _SOCIETY_MAX_MODEL_NAME_CHARS:
-        return {"status": "error", "error": "model_name is too long"}
-    
+        return {"status": "error", "error": f"model_name is too long"}
+    effort = _society_effort(payload)
+
     # Atomic admission check + slot reservation under one lock.
     # This eliminates the check-then-act race where concurrent requests
     # could both pass the admission check and exceed limits.
@@ -2346,15 +2943,34 @@ def society_run(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "busy", "error": reason,
                 "queue": {"active": _SOCIETY_MAX_ACTIVE_RUNS,
                           "max_queued": _SOCIETY_MAX_QUEUED_RUNS}}
-    
-    # Fill in the caller-provided fields
-    run["goal"] = goal
-    run["model_name"] = model_name
-    
+    if run is None:
+        return {"status": "error", "error": "admission failed"}
+
     worker = threading.Thread(
-        target=_society_worker, args=(run["run_id"], goal, model_name), daemon=True)
-    worker.start()
+        target=_society_worker, args=(run["run_id"], goal, model_name),
+        daemon=True)
+    try:
+        # Attach and start the worker under the lock: a reaper running
+        # between the two would see a thread that is not alive yet and could
+        # declare the run interrupted.
+        with _society_lock:
+            run["goal"] = goal
+            run["model_name"] = model_name
+            run["effort"] = effort
+            run["worker"] = worker
+            worker.start()
+    except Exception as exc:
+        message = f"could not start the run worker: {exc}"
+        with _society_lock:
+            run["goal"] = goal
+            run["model_name"] = model_name
+        _society_finalize(run["run_id"], "failed",
+                          {"status": "failed", "error": message,
+                           "reason": message, "run_id": run["run_id"]},
+                          reason=message)
+        return {"status": "error", "error": message}
     return {"runId": run["run_id"], "status": "started",
+            "effort": effort,
             "stream": f"/api/society/stream?runId={run['run_id']}"}
 
 
@@ -2370,13 +2986,25 @@ def society_run_list() -> Dict[str, Any]:
 
 @router.get("/society/runs/{run_id}")
 def society_run_status(run_id: str) -> Dict[str, Any]:
-    run = _society_runs.get(run_id)
-    if run is not None:
-        with _society_lock:
-            events = list(run["events"])
-            return {"run_id": run_id, "status": run["status"],
-                    "goal": run["goal"], "events": events,
-                    "result": run["result"]}
+    pending = []
+    body = None
+    with _society_lock:
+        # A run that can no longer progress must never be reported as
+        # running: reap it before reading the record.
+        pending = _society_reap_locked(time.time())
+        run = _society_runs.get(run_id)
+        if run is not None:
+            body = {"run_id": run_id, "status": run["status"],
+                    "goal": run["goal"], "events": list(run["events"]),
+                    "result": run["result"], "reason": run.get("reason", ""),
+                    "cancel_requested": bool(run.get("cancel_requested")),
+                    "started_at": run.get("started_at"),
+                    "finished_at": run.get("finished_at")}
+    for item in pending:
+        if not _society_persist_record(*item):
+            _society_mark_unrecorded(item[0], item[3])
+    if body is not None:
+        return body
     # Fall back to the persisted record (post-restart reads).
     try:
         from backend.core.evidence_graph import envelope_status, load_run_record
@@ -2392,6 +3020,79 @@ def society_run_status(run_id: str) -> Dict[str, Any]:
         return body
     except Exception:
         return {"status": "error", "error": f"unknown runId '{run_id}'"}
+
+
+@router.post("/society/runs/{run_id}/cancel")
+def society_run_cancel(run_id: str) -> Dict[str, Any]:
+    """Request cancellation of a Society run (cooperative, honest).
+
+    Mirrors the job queue's cancel (/api/v1/jobs/{jobId}/cancel): a finished
+    run is a 409, an unknown run is a 404, and the answer says what actually
+    happened. A run whose pipeline never started has nothing in flight, so it
+    is cancelled outright. A running run is flagged and keeps reporting
+    "running" until its worker observes the flag: the worker thread cannot be
+    killed, and this route does not pretend otherwise.
+    """
+    pending = []
+    outcome = ""
+    detail = ""
+    body: Dict[str, Any] = {}
+    with _society_lock:
+        pending = _society_reap_locked(time.time())
+        run = _society_runs.get(run_id)
+        if run is None:
+            record = None
+            try:
+                from backend.core.evidence_graph import load_run_record
+                record = load_run_record(run_id)
+            except Exception:
+                record = None
+            if isinstance(record, dict):
+                outcome = "finished"
+                detail = (f"run {run_id!r} already finished with status "
+                          f"{record.get('status', 'stored')!r}; it cannot be "
+                          f"cancelled")
+            else:
+                outcome = "unknown"
+                detail = f"unknown runId {run_id!r}"
+        elif _society_is_terminal(run.get("status")):
+            outcome = "finished"
+            detail = (f"run {run_id!r} already finished with status "
+                      f"{run.get('status')!r}; it cannot be cancelled")
+        else:
+            run["cancel_requested"] = True
+            stop = run.get("stop")
+            if stop is not None:
+                stop.set()
+            if not run.get("pipeline_started"):
+                # Nothing is in flight: the terminal state is certain.
+                reason = "cancelled before the pipeline started"
+                result = {"status": "cancelled", "run_id": run_id,
+                          "goal": run.get("goal", ""), "reason": reason}
+                _society_finalize_locked(run, "cancelled", result, reason)
+                pending.append((run_id, run.get("goal", ""),
+                                run.get("model_name", ""), "cancelled", result))
+                outcome = "cancelled"
+                detail = reason
+            else:
+                outcome = "cancel_requested"
+                detail = ("cancel requested: the run is still running until "
+                          "its worker observes the flag; an in-flight step "
+                          "runs to completion")
+            body = {"run_id": run_id, "status": run["status"],
+                    "goal": run.get("goal", ""), "result": run.get("result"),
+                    "reason": run.get("reason", ""),
+                    "cancel_requested": True,
+                    "outcome": outcome, "note": detail,
+                    "provenance": "live"}
+    for item in pending:
+        if not _society_persist_record(*item):
+            _society_mark_unrecorded(item[0], item[3])
+    if outcome == "unknown":
+        raise HTTPException(status_code=404, detail=detail)
+    if outcome == "finished":
+        raise HTTPException(status_code=409, detail=detail)
+    return body
 
 
 def _society_json_default(obj: Any) -> Any:
@@ -2427,6 +3128,8 @@ def _society_sse_frame(event: Dict[str, Any]) -> str:
 
 @router.get("/society/stream")
 def society_stream(runId: str):  # type: ignore[no-untyped-def]
+    # A run that timed out must not keep streaming forever.
+    _society_reap()
     run = _society_runs.get(runId)
 
     def gen():  # type: ignore[no-untyped-def]
@@ -2438,7 +3141,8 @@ def society_stream(runId: str):  # type: ignore[no-untyped-def]
         # Replay anything emitted before the client connected.
         with _society_lock:
             replay = list(run["events"])
-            finished = run["status"] != "running" and run["queue"].empty()
+            finished = (_society_is_terminal(run["status"])
+                        and run["queue"].empty())
         for ev in replay:
             yield _society_sse_frame(ev)
         if finished:
@@ -2453,7 +3157,8 @@ def society_stream(runId: str):  # type: ignore[no-untyped-def]
             except queue.Empty:
                 yield ": beat\n\n"
                 with _society_lock:
-                    if run["status"] != "running" and run["queue"].empty():
+                    if (_society_is_terminal(run["status"])
+                            and run["queue"].empty()):
                         break
                 continue
             if kind == "done":

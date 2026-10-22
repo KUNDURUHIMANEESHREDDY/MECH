@@ -355,7 +355,19 @@ def test_train_inspect_chain_uses_the_trained_checkpoint():
     assert body["weights_sha256"], "encoding unattributed to weights"
     assert body.get("feature_indices"), "no features decoded"
     assert all(isinstance(i, int) for i in body["feature_indices"])
-    assert body["reconstruction_measured"] is False
+    # Reconstruction fidelity is measured when the checkpoint carries a
+    # decoder. This assertion used to pin the opposite -- it required the
+    # route to report the measurement as absent -- which is how a computable
+    # quantity was kept invisible. The contract now is: measured with a
+    # number, or refused with a reason. Never silently absent.
+    if body["reconstruction_measured"]:
+        error = body.get("relative_l2_error")
+        assert isinstance(error, (int, float)), body
+        assert 0.0 <= float(error) <= 10.0, body
+        assert body.get("n_active_features") is not None, body
+    else:
+        assert body.get("reconstruction_reason"), (
+            "an unmeasured reconstruction must say why")
     assert body["evidence_level"] == "OBSERVATIONAL"
 
 

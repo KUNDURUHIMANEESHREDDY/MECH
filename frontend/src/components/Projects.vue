@@ -1,5 +1,5 @@
 <template>
-  <main class="projects-surface">
+  <section class="projects-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Workspace / Local</p>
@@ -212,7 +212,7 @@
         <p v-else class="panel-message">No local projects have been created in this browser.</p>
       </div>
     </section>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

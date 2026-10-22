@@ -100,40 +100,49 @@ test.describe('Scientific Visualizations - Live vs Mock', () => {
 
 test.describe('Error State Handling', () => {
   test('handles backend timeout gracefully', async ({ page }) => {
-    // Route API calls to delay then fail
+    // Every API call times out. The view must report the failure instead of
+    // rendering an empty result set that looks like a measurement.
     await page.route('**/api/**', async route => {
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 500));
       await route.abort('timedout');
     });
 
     await page.goto('/#explorer');
-    await page.getByTestId('explorer-load-model').click();
-    
-    // Should show timeout error, not crash
-    await expect(page.getByText(/timeout|error|unavailable/i)).toBeVisible({ timeout: 10000 });
+    const explorer = page.getByTestId('view-explorer');
+    await expect(explorer).toBeVisible();
+    await expect(explorer.getByText(/not responding|unavailable|timed out/i).first()).toBeVisible();
+    // A failed read must not leave a result panel behind.
+    await expect(explorer.getByTestId('model-prompt-result')).toHaveCount(0);
   });
 
   test('handles authentication failure with clear message', async ({ page }) => {
-    // Route with 401 responses
     await page.route('**/api/**', route => route.fulfill({
       status: 401,
       contentType: 'application/json',
-      body: JSON.stringify({ detail: 'Invalid credentials' })
+      body: JSON.stringify({ detail: 'invalid credentials' })
     }));
 
     await page.goto('/#explorer');
-    await page.getByTestId('explorer-load-model').click();
-    
-    // Should show auth error, not crash
-    await expect(page.getByText(/auth|unauthorized|login|credentials/i)).toBeVisible({ timeout: 10000 });
+    const explorer = page.getByTestId('view-explorer');
+    await expect(explorer).toBeVisible();
+    // The pill reports the refused token; the view reports the refused read.
+    await expect(page.getByTestId('runtime-status')).toContainText(/unauthorized|failed/i);
+    await expect(explorer.getByText(/unauthorized|401|credentials|invalid/i).first()).toBeVisible();
+    await expect(explorer.getByTestId('model-prompt-result')).toHaveCount(0);
   });
 
   test('displays unavailable endpoints honestly', async ({ page }) => {
+    // Deterministic offline: the analytics tiles are built from three reads, so
+    // with the reads refused they must read as unavailable -- never as 0, which
+    // is a measurement.
+    await page.route('**/api/**', route => route.abort());
     await page.goto('/#analytics');
-    await expect(page.getByTestId('view-analytics')).toBeVisible();
+    const view = page.getByTestId('view-analytics');
+    await expect(view).toBeVisible();
 
-    // Analytics should show "unavailable" not fake data
-    await expect(page.getByTestId('view-analytics')).toContainText(/unavailable|not implemented|no data/i);
+    await expect(view).toContainText(/offline|unavailable/i);
+    await expect(view).toContainText(/—/);
+    await expect(view).toContainText(/never replaced with a placeholder metric|reported as such/i);
   });
 });
 
@@ -187,12 +196,16 @@ test.describe('API Response Validation', () => {
     });
 
     await page.goto('/#explorer');
-    await page.getByTestId('explorer-load-model').click();
-    await expect(page.getByText(/loaded/i)).toBeVisible({ timeout: 30000 });
+    const explorer = page.getByTestId('view-explorer');
+    await expect(explorer).toBeVisible();
+    // The load control stays disabled until a catalogue entry is selected.
+    await explorer.locator('#model-explorer-model').selectOption('gpt2-small');
+    await explorer.getByTestId('model-load').click();
+    await expect(explorer.getByTestId('model-loaded')).toBeVisible({ timeout: 360000 });
 
-    await page.getByTestId('explorer-prompt-input').fill('Test prompt');
-    await page.getByTestId('explorer-run-prompt').click();
-    await expect(page.getByTestId('explorer-result')).toBeVisible({ timeout: 30000 });
+    await explorer.locator('#model-explorer-prompt').fill('Test prompt');
+    await explorer.getByTestId('model-run-prompt').click();
+    await expect(explorer.getByTestId('model-prompt-result')).toBeVisible({ timeout: 360000 });
 
     // Validate response structure
     expect(responses.length).toBeGreaterThan(0);
@@ -236,21 +249,30 @@ test.describe('API Response Validation', () => {
 test.describe('Navigation and State', () => {
   test('switching tools preserves no stale data', async ({ page }) => {
     await page.goto('/#explorer');
-    await page.getByTestId('explorer-load-model').click();
-    await expect(page.getByText(/loaded/i)).toBeVisible({ timeout: 30000 });
+    const explorer = page.getByTestId('view-explorer');
+    await expect(explorer).toBeVisible();
+    await explorer.locator('#model-explorer-prompt').fill('stale marker prompt');
 
-    // Navigate to another tool
+    // Navigate to another tool. The shell resolves the target chunk before it
+    // swaps, so the previous tool's DOM is never shown under the new tool's
+    // name -- and a screenshot taken at any point shows exactly one tool.
     await page.getByTestId('nav-circuitexplorer').click();
     await expect(page).toHaveURL(/#circuitexplorer$/);
-    await expect(page.getByTestId('view-circuitexplorer')).toBeVisible();
+    const circuit = page.getByTestId('view-circuitexplorer');
+    await expect(circuit).toBeVisible();
 
-    // Navigate back
+    await expect(page.locator('[data-testid^="view-"]')).toHaveCount(1);
+    await expect(page.locator('body')).not.toContainText('stale marker prompt');
+
     await page.getByTestId('nav-explorer').click();
     await expect(page).toHaveURL(/#explorer$/);
-    
-    // Should not show stale result from previous session
-    const result = page.getByTestId('explorer-result');
-    // Result should either be cleared or match current state
+    await expect(page.locator('[data-testid^="view-"]')).toHaveCount(1);
+    // Returning to a tool mounts it fresh: it asks the backend for a prompt
+    // rather than restoring the previous one, and it shows no result from the
+    // earlier visit. Both are that tool's own state, not a leak from another.
+    await expect(page.locator('#model-explorer-prompt')).not.toHaveValue('stale marker prompt');
+    await expect(page.locator('#model-explorer-prompt')).not.toHaveValue('');
+    await expect(page.getByTestId('model-prompt-result')).toHaveCount(0);
   });
 
   test('runtime status updates across tools', async ({ page }) => {

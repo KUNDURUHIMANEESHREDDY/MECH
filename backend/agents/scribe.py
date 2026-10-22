@@ -19,8 +19,9 @@ import datetime as _dt
 from typing import Any, Dict, List, Optional
 
 from backend.core.identifiers import entity_id
+from backend.core.provenance import admit_result
 
-from .evidence_policy import field_map, publication_block_reason
+from .evidence_policy import publication_block_reason
 
 
 def _first_score(result: Any, keys: Any) -> float:
@@ -42,17 +43,14 @@ def _first_score(result: Any, keys: Any) -> float:
     return 0.0
 
 
-def _blocked_report(reason: str) -> Dict[str, Any]:
-    """Uniform block envelope for a report that cannot claim live provenance."""
-    return {
-        "status": "blocked",
-        "provenance": "unavailable",
-        "field_provenance": field_map(
-            ("status", "result", "reason"), "unavailable"),
-        "validation_eligible": False,
-        "publication_eligible": False,
-        "reason": reason,
-    }
+def _blocked_report(reason: str, **admission) -> Dict[str, Any]:
+    """Uniform block envelope for a report that cannot claim live provenance.
+
+    Built by the shared admission gate, so a refusal looks the same wherever
+    it is produced: the label is derived, the eligibility is False, and the
+    reason says why.
+    """
+    return admit_result(None, stage="publication", reason=reason, **admission)
 
 
 class Scribe:
@@ -64,41 +62,28 @@ class Scribe:
                   trace: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Build an evidence graph only from an eligible live trace."""
         if trace is None:
-            return {
-                "status": "blocked",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "result", "reason"), "unavailable"
-                ),
-                "validation_eligible": False,
-                "publication_eligible": False,
-                "reason": "A run trace is required; reference/demo graphs cannot be published.",
-            }
+            return admit_result(
+                None, stage="publication",
+                reason="A run trace is required; reference/demo graphs cannot be published.",
+            )
         reason = publication_block_reason(trace)
         if reason:
-            return {
-                "status": "blocked",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "result", "reason"), "unavailable"
-                ),
-                "validation_eligible": False,
-                "publication_eligible": False,
-                "reason": reason,
-            }
+            return admit_result(None, stage="publication", trace=trace,
+                                reason=reason)
         try:
             from backend.core.evidence_graph import TraceableEvidenceGraph
             graph = TraceableEvidenceGraph.from_run(
                 run_id or "run_unknown", goal, trace)
-            return {
-                "status": "completed",
-                "provenance": "live",
-                "field_provenance": field_map(("status", "result"), "live"),
-                "result": graph.to_dict(),
-            }
+            return admit_result(
+                None, stage="publication", trace=trace,
+                extra={"result": graph.to_dict()},
+            )
         except Exception as exc:
-            return {"status": "error", "provenance": "unavailable",
-                    "error": str(exc)[:500]}
+            return admit_result(
+                None, stage="publication", trace=trace, status="error",
+                extra={"error": str(exc)[:500]},
+                reason=str(exc)[:500],
+            )
 
     def report(self, experiment_id: str, title: str,
                trace: Optional[List[Dict[str, Any]]] = None,
@@ -119,27 +104,29 @@ class Scribe:
                 "without one.")
         reason = publication_block_reason(trace, reproducibility, gate)
         if reason:
-            return _blocked_report(reason)
+            return _blocked_report(reason, trace=trace,
+                                   reproducibility=reproducibility, gate=gate)
 
         try:
             from backend.services.report_service import ReportService
             res = ReportService().generate_report(
                 experiment_id=experiment_id, title=title,
                 provenance="live")
-            return {
-                "status": "completed",
-                "provenance": "live",
-                # Propagated from the gate this report just cleared: the
-                # Scribe assembles, it does not measure.
-                "attested": gate.get("attested", False) if isinstance(gate, dict) else False,
-                "field_provenance": field_map(("status", "result"), "live"),
-                "validation_eligible": True,
-                "publication_eligible": True,
-                "result": res,
-            }
+            # The gate this report just cleared is what admits it. The
+            # Scribe assembles, it does not measure, so the label and the
+            # eligibility are derived from the chain rather than asserted.
+            return admit_result(
+                gate, stage="publication", trace=trace,
+                reproducibility=reproducibility, gate=gate,
+                extra={"result": res},
+            )
         except Exception as exc:
-            return {"status": "error", "provenance": "unavailable",
-                    "error": str(exc)[:500]}
+            return admit_result(
+                None, stage="publication", trace=trace,
+                reproducibility=reproducibility, gate=gate, status="error",
+                extra={"error": str(exc)[:500]},
+                reason=str(exc)[:500],
+            )
 
     def publish(self, goal: str, trace: List[Dict[str, Any]],
                 reflection: Dict[str, Any],
@@ -149,18 +136,15 @@ class Scribe:
         """Publish only a complete, explicitly live evidence chain."""
         reason = publication_block_reason(trace, reproducibility, gate)
         if reason:
-            return {
-                "status": "blocked",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "result", "reason"), "unavailable"
-                ),
-                "validation_eligible": False,
-                "publication_eligible": False,
-                "goal": goal,
-                "reason": reason,
-                "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
-            }
+            return admit_result(
+                None, stage="publication", trace=trace,
+                reproducibility=reproducibility, gate=gate,
+                extra={
+                    "goal": goal,
+                    "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
+                },
+                reason=reason,
+            )
 
         exp_id = entity_id("exp_")
         # Provenance is derived from the trace inside report(), not asserted here.
@@ -171,44 +155,35 @@ class Scribe:
                           gate=gate)
         ev = self.evidence(run_id=run_id or exp_id, goal=goal, trace=trace)
         if rep.get("status") != "completed" or ev.get("status") != "completed":
-            return {
-                "status": "blocked",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "result", "reason"), "unavailable"
-                ),
-                "validation_eligible": False,
-                "publication_eligible": False,
-                "goal": goal,
-                "reason": "Report or evidence generation did not return a live artifact.",
-                "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
-            }
+            return admit_result(
+                None, stage="publication", trace=trace,
+                reproducibility=reproducibility, gate=gate,
+                extra={
+                    "goal": goal,
+                    "steps_completed": f"{sum(1 for t in trace if t.get('status') in ('completed', 'ok', 'loaded'))}/{len(trace)}",
+                },
+                reason="Report or evidence generation did not return a live artifact.",
+            )
         ok_steps = sum(1 for t in trace
                        if t.get("status") in ("completed", "ok", "loaded"))
-        publication = {
-            "status": "completed",
-            "provenance": "live",
-            # Propagated from the gate: publish is reached only after
-            # publication_block_reason passes, which now requires attestation
-            # end to end.
-            "attested": gate.get("attested", False) if isinstance(gate, dict) else False,
-            "field_provenance": field_map(
-                ("status", "report", "evidence_graph", "reflection",
-                 "reproducibility", "gate", "knowledge_writeback"),
-                "live",
-            ),
-            "validation_eligible": True,
-            "publication_eligible": True,
-            "goal": goal,
-            "experiment_id": exp_id,
-            "steps_completed": f"{ok_steps}/{len(trace)}",
-            "report": rep.get("result", rep),
-            "evidence_graph": ev.get("result", ev),
-            "reflection": reflection,
-            "reproducibility": reproducibility or {},
-            "gate": gate or {},
-            "published_at": _dt.datetime.utcnow().isoformat() + "Z",
-        }
+        # Publish is reached only after publication_block_reason passes,
+        # which requires attestation end to end. The label and the
+        # eligibility are derived from that chain by the admission gate.
+        publication = admit_result(
+            gate, stage="publication", trace=trace,
+            reproducibility=reproducibility, gate=gate,
+            extra={
+                "goal": goal,
+                "experiment_id": exp_id,
+                "steps_completed": f"{ok_steps}/{len(trace)}",
+                "report": rep.get("result", rep),
+                "evidence_graph": ev.get("result", ev),
+                "reflection": reflection,
+                "reproducibility": reproducibility or {},
+                "gate": gate or {},
+                "published_at": _dt.datetime.utcnow().isoformat() + "Z",
+            },
+        )
         publication["knowledge_writeback"] = self.write_back(
             run_id or exp_id, goal, trace, reflection, publication)
         writeback = publication["knowledge_writeback"]
@@ -229,15 +204,11 @@ class Scribe:
         of stored node ids (empty when nothing measurable was found).
         """
         if not isinstance(publication, dict) or publication.get("status") != "completed":
-            return {
-                "stored": [],
-                "status": "blocked",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "stored", "reason"), "unavailable"
-                ),
-                "reason": "Knowledge write-back requires a completed live publication.",
-            }
+            return admit_result(
+                None, stage="publication",
+                extra={"stored": []},
+                reason="Knowledge write-back requires a completed live publication.",
+            )
         publication_repro = (publication.get("reproducibility")
                              if isinstance(publication, dict) else None)
         publication_gate = (publication.get("gate")
@@ -249,15 +220,12 @@ class Scribe:
         reason = publication_block_reason(trace, publication_repro,
                                           publication_gate)
         if reason:
-            return {
-                "stored": [],
-                "status": "blocked",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "stored", "reason"), "unavailable"
-                ),
-                "reason": reason,
-            }
+            return admit_result(
+                None, stage="publication", trace=trace,
+                reproducibility=publication_repro, gate=publication_gate,
+                extra={"stored": []},
+                reason=reason,
+            )
 
         stored: List[str] = []
         try:
@@ -366,16 +334,15 @@ class Scribe:
                      "fidelity_pct": gate.get("value")})
                 add_edge(exp, ev, EdgeType.VALIDATED_BY)
         except Exception as exc:
-            return {
-                "stored": stored,
-                "status": "error",
-                "provenance": "unavailable",
-                "field_provenance": field_map(("status", "stored", "error"), "unavailable"),
-                "error": str(exc)[:300],
-            }
-        return {
-            "stored": stored,
-            "status": "completed",
-            "provenance": "live",
-            "field_provenance": field_map(("status", "stored"), "live"),
-        }
+            return admit_result(
+                None, stage="publication", trace=trace,
+                reproducibility=publication_repro, gate=publication_gate,
+                status="error",
+                extra={"stored": stored, "error": str(exc)[:300]},
+                reason=str(exc)[:300],
+            )
+        return admit_result(
+            None, stage="publication", trace=trace,
+            reproducibility=publication_repro, gate=publication_gate,
+            extra={"stored": stored},
+        )

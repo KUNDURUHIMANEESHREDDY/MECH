@@ -684,3 +684,213 @@ def get_evidence_level(result: Dict[str, Any]) -> str:
     if not isinstance(result, dict):
         return "OBSERVATIONAL"
     return str(result.get("evidence_level", "OBSERVATIONAL")).upper()
+
+
+# --------------------------------------------------------------------------- #
+# Admission: the single gate a Society result passes through.
+# --------------------------------------------------------------------------- #
+
+#: The stages the admission gate rules on. Each stage has exactly one
+#: predicate, and the predicate lives in `backend.agents.evidence_policy`, so
+#: the rule is stated once and no caller can supply its own.
+ADMISSION_STAGES = ("discovery", "validation", "reproduction", "gate",
+                    "publication")
+
+#: How each stage names itself in a refusal. These are the labels
+#: `evidence_policy.publication_block_reason` already uses, so a refusal
+#: reads the same whichever path produced it.
+_ADMISSION_LABELS = {
+    "discovery": "Discovery",
+    "validation": "Validation",
+    "reproduction": "Reproduction",
+    "gate": "Validation gate",
+    "publication": "Publication",
+}
+
+
+def _evidence_policy():
+    """The policy module, imported lazily: it imports this one."""
+    try:
+        from backend.agents import evidence_policy
+    except ImportError:  # pragma: no cover - the packaged layout
+        from agents import evidence_policy
+    return evidence_policy
+
+
+def _stage_admitted(policy, stage: str, record: Dict[str, Any]) -> bool:
+    """Whether `record` clears the rule that applies to `stage`."""
+    if stage == "discovery":
+        return bool(policy.discovery_is_live(record))
+    if stage == "validation":
+        return bool(policy.validation_is_live(record))
+    if stage == "reproduction":
+        return bool(policy.reproduction_is_live(record))
+    if stage == "gate":
+        return bool(policy.gate_is_live(record))
+    return False
+
+
+def _evidence_steps(trace: Any) -> list:
+    """The evidence-bearing steps of a trace, with their results resolved.
+
+    A trace step stores the producing result under `result` when it has one
+    and spreads it over the step otherwise, so both shapes are read here --
+    the same resolution `evidence_policy.publication_block_reason` uses.
+    """
+    steps = []
+    for step in trace or ():
+        if not isinstance(step, dict):
+            continue
+        if str(step.get("node", "")) not in ("discover", "validate"):
+            continue
+        result = step.get("result")
+        if not isinstance(result, dict) or not result:
+            result = step
+        steps.append(result)
+    return steps
+
+
+def _chain_provenance(policy, trace: Any) -> str:
+    """The provenance of an evidence chain: its weakest evidence step."""
+    labels = [policy.provenance_of(result)
+              for result in _evidence_steps(trace)]
+    if not labels:
+        return UNAVAILABLE
+    if all(label == LIVE for label in labels):
+        return LIVE
+    order = {LIVE: 0, SEEDED: 1, REFERENCE: 2}
+    return max(labels, key=lambda label: order.get(label, 3))
+
+
+def _chain_attested(policy, trace: Any) -> bool:
+    """Whether every evidence-bearing step of a chain is attested."""
+    results = _evidence_steps(trace)
+    if not results:
+        return False
+    return all(policy.is_attested(result) for result in results)
+
+
+def admit_result(source: Any, *, stage: str,
+                 extra: Optional[Mapping[str, Any]] = None,
+                 fields: Optional[Iterable[str]] = None,
+                 trace: Any = None, reproducibility: Any = None,
+                 gate: Any = None, status: Optional[str] = None,
+                 reason: Optional[str] = None,
+                 refusal: Optional[str] = None) -> Dict[str, Any]:
+    """Derive a result's standing. The single admission gate.
+
+    The Society agents each built their own envelope, so three places
+    decided what "live" and "eligible" meant and a caller could assert
+    either. Here all three are *derived*:
+
+    * ``provenance`` is the label the record itself carries;
+    * ``attested`` is the answer of the cryptographic check the evidence
+      policy applies -- never the record's own boolean;
+    * ``validation_eligible`` and ``publication_eligible`` are the stage
+      predicate's answer, which requires that same cryptographic check.
+
+    ``extra`` is merged first and the derived keys are written last, so an
+    assertion inside it is overwritten rather than honoured: admission can
+    only ever downgrade a claim, never promote one.
+
+    ``status`` and ``reason`` may explain a *refusal* -- an error path, or a
+    more specific reason than the default. They are ignored when the result
+    is admitted, so they can never explain an admission.
+
+    ``refusal`` forces the result to be refused even when the stage
+    predicate would have admitted it. It is for the case where the source
+    was a real measurement but this envelope is not one -- a live run whose
+    metrics could not be mapped, say. It can only ever lower a result's
+    standing.
+    """
+    policy = _evidence_policy()
+    stage_name = str(stage or "").strip().lower()
+    if stage_name not in ADMISSION_STAGES:
+        raise ValueError(
+            f"unknown admission stage {stage!r}; expected one of "
+            f"{', '.join(ADMISSION_STAGES)}")
+
+    record = source if isinstance(source, dict) else {}
+
+    if stage_name == "publication":
+        refusal = policy.publication_block_reason(trace, reproducibility, gate)
+        admitted = not refusal
+        provenance = (_chain_provenance(policy, trace) if admitted
+                      else UNAVAILABLE)
+        attested = _chain_attested(policy, trace) if admitted else False
+        default_reason = refusal
+    else:
+        admitted = _stage_admitted(policy, stage_name, record)
+        provenance = policy.provenance_of(record)
+        attested = policy.is_attested(record)
+        default_reason = ("" if admitted else
+                          policy.blocked_reason(
+                              record, _ADMISSION_LABELS[stage_name]))
+
+    # A run chain that could not be completed is a refusal whatever the
+    # record says about itself. The measurement may well have happened, but
+    # it is not bound to a run, and an unbound chain must not be promoted.
+    if admitted and not policy.run_chain_allows(record):
+        chain = record.get("run_attestation")
+        detail = ""
+        if isinstance(chain, dict):
+            detail = str(chain.get("attestation_reason") or "").strip()
+        admitted = False
+        attested = False
+        default_reason = ("the run chain is not attested"
+                          + (f": {detail}" if detail else ""))
+
+    # A forced refusal: the source may have been a real measurement, but this
+    # envelope is not one. The label drops to unavailable, because the
+    # envelope -- not the source -- is what a reader sees.
+    if refusal:
+        admitted = False
+        attested = False
+        provenance = UNAVAILABLE
+        default_reason = str(refusal)
+
+    envelope: Dict[str, Any] = {}
+    if isinstance(extra, Mapping):
+        envelope.update(extra)
+
+    envelope["provenance"] = provenance
+    envelope["attested"] = bool(attested)
+    envelope["validation_eligible"] = bool(admitted)
+    envelope["publication_eligible"] = bool(admitted)
+    envelope["status"] = ("completed" if admitted else str(
+        status or ("blocked" if stage_name == "publication" else "unavailable")))
+    if not admitted:
+        envelope["reason"] = str(
+            reason or default_reason
+            or (f"{_ADMISSION_LABELS[stage_name]} blocked: the evidence chain "
+                "did not clear the gate."))
+
+    names = list(fields) if fields is not None else list(envelope)
+    envelope["field_provenance"] = policy.field_map(names, provenance)
+    return envelope
+
+
+def attest_run_chain(result: Dict[str, Any], *, run_id: str, dataset: Any,
+                     model_fingerprint: Any = None,
+                     repo_root: Optional[Any] = None) -> Dict[str, Any]:
+    """Bind a result to the run that produced it, and refuse it if the chain
+    cannot be completed.
+
+    The result keeps its own provenance and eligibility; the run attestation
+    is added beside them. When the chain is incomplete the result is
+    withheld rather than published beside a digest that was never computed:
+    an unattested chain is not eligible for publication.
+    """
+    from backend.science.reproducibility.run_attestation import attest_run
+
+    if not isinstance(result, dict):
+        return result
+    attestation = attest_run(run_id=run_id, dataset=dataset,
+                             model_fingerprint=model_fingerprint,
+                             repo_root=repo_root)
+    result["run_attestation"] = attestation.to_dict()
+    if not attestation.attested:
+        return withhold(result, reason=(
+            "the run chain is not attested: "
+            + (attestation.attestation_reason or "the chain is incomplete")))
+    return result

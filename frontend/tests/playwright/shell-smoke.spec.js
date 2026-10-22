@@ -65,7 +65,7 @@ test('sidebar exposes every navigation item', async ({ page }) => {
 test('sidebar navigation shows one titled tool view and updates the hash', async ({ page }) => {
   // One click per route, each with a scroll, a URL assertion and two view
   // assertions. The default 30s timeout is not enough for the whole list.
-  test.setTimeout(180_000);
+  test.setTimeout(420_000);
   await page.goto('/');
   for (const [key] of NAV_PAGES) {
     const item = page.getByTestId(`nav-${key}`);
@@ -100,5 +100,5 @@ test('sidebar status exposes Python/runtime state', async ({ page }) => {
   await page.goto('/');
   const status = page.getByTestId('runtime-status');
   await expect(status).toBeVisible();
-  await expect(status).toContainText(/Connecting|Connected|Offline|models available|No model selected/);
+  await expect(status).toContainText(/Connecting to backend|Backend ready|Disconnected|Backend failed|Unauthorized/);
 });

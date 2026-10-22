@@ -89,15 +89,15 @@
 
     <section class="metric-strip" aria-label="Observed campaign run counts">
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ runs.length }}</span>
+        <span class="metric-tile__value">{{ runsCountText }}</span>
         <span class="metric-tile__label">Recorded runs</span>
       </div>
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ activeRunCount }}</span>
+        <span class="metric-tile__value">{{ activeRunsText }}</span>
         <span class="metric-tile__label">Running now</span>
       </div>
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ completedRunCount }}</span>
+        <span class="metric-tile__value">{{ completedRunsText }}</span>
         <span class="metric-tile__label">Completed</span>
       </div>
       <div class="metric-tile metric-tile--note">
@@ -113,7 +113,7 @@
             <p class="section-kicker">Persistent backend records</p>
             <h2 id="run-ledger-title">Run ledger</h2>
           </div>
-          <span class="count-label">{{ runs.length }} {{ runs.length === 1 ? 'record' : 'records' }}</span>
+          <span class="count-label">{{ runsCountText }} {{ runs.length === 1 ? 'record' : 'records' }}</span>
         </header>
 
         <div v-if="loadingRuns" class="state-block state-block--loading" role="status" aria-live="polite">
@@ -251,7 +251,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { apiUrl, authHeaders } from '../services/api';
+import { apiFetch, apiUrl, authHeaders } from '../services/api';
 import {
   getSocietyRun,
   startSocietyRun,
@@ -341,7 +341,7 @@ async function request<T>(path: string): Promise<T> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new Error('Browser is offline');
   }
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   if (!response.ok) throw new Error(`GET ${path} returned ${response.status}`);
@@ -443,6 +443,9 @@ function eventLabel(event: SocietyEvent): string {
 const isLaunching = computed(() => phase.value === 'starting');
 const isTracking = computed(() => phase.value === 'starting' || phase.value === 'running');
 const canLaunch = computed(() => Boolean(goal.value.trim()) && !isTracking.value);
+const runsCountText = computed(() => sourceTone.value !== 'online' ? '\u2014' : String(runs.value.length));
+const activeRunsText = computed(() => sourceTone.value !== 'online' ? '\u2014' : String(activeRunCount.value));
+const completedRunsText = computed(() => sourceTone.value !== 'online' ? '\u2014' : String(completedRunCount.value));
 const activeRunCount = computed(() => runs.value.filter((run) => statusTone(run.status) === 'running').length);
 const completedRunCount = computed(() => runs.value.filter((run) => statusTone(run.status) === 'success').length);
 const sourceTone = computed<SourceTone>(() => {

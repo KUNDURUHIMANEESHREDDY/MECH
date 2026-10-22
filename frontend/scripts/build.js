@@ -15,7 +15,6 @@ const { stageBackend } = require('./backend_source_set');
 const ROOT = path.join(__dirname, '..');
 
 function run(cmd, args, opts) {
-  // eslint-disable-next-line no-console
   console.log(`[build] ${cmd} ${args.join(' ')}`);
   // Use shell mode on Windows for .cmd/.bat shims. This works from PowerShell,
   // cmd.exe, and Git Bash/MSYS without nested-quote issues.
@@ -79,13 +78,19 @@ function stageBackendForBuild() {
  * It is staged from the repository's source for `backend/` (see
  * `scripts/backend_source_set.js`) before this function runs, so the bundle
  * cannot carry the developer's bearer token or the research database.
- * `../.venv` is not. `electron/main.js:resolvePythonPath` already falls back
- * through the bundled `.venv`, the repo `.venv`, the repo `venv`, and finally
- * bare `python` -- so a build without a bundled interpreter produces an app that
- * still runs, using whatever interpreter the machine has.
+ * `build/python` is required too: the packaged app resolves its interpreter
+ * only from `resources/python` (see `scripts/python_runtime.js`), and a
+ * release that silently borrows the machine's Python is exactly the
+ * non-portability this packaging removes.
  *
- * Failing the whole build over a preference would mean no release artifact at
- * all, so the entry is dropped and the omission is reported rather than hidden.
+ * Both entries are therefore required: the build fails rather than producing
+ * an installer that cannot start.
+ *
+ * The resolved list is NOT handed to electron-builder: it reads
+ * `extraResources` from package.json itself, and re-supplying them here
+ * would copy every file twice (see `effectiveConfig`). An absent *optional*
+ * resource needs no handling here -- electron-builder skips a missing
+ * extraResource with a warning, which is what "optional" means.
  */
 function resolveExtraResources() {
   const pkg = require(path.join(ROOT, 'package.json'));
@@ -103,7 +108,7 @@ function resolveExtraResources() {
       present.push(entry);
       continue;
     }
-    const required = /backend/i.test(entry.from);
+    const required = /backend|python/i.test(entry.from);
     dropped.push({ from: entry.from, resolved, required });
   }
 
@@ -119,11 +124,6 @@ function resolveExtraResources() {
 
   for (const m of dropped) {
     console.log(`[build] skipping absent optional extraResource: ${m.from}`);
-    if (/\.venv/i.test(m.from)) {
-      console.log('[build]   the app will resolve an interpreter at runtime via');
-      console.log('[build]   electron/main.js:resolvePythonPath (bundled .venv, repo');
-      console.log('[build]   .venv, repo venv, then bare python).');
-    }
   }
 
   return present;
@@ -165,21 +165,28 @@ function windowsSigningConfig() {
 /**
  * Build the effective electron-builder config.
  *
- * The whole `build` block from package.json is reproduced here and then amended,
- * rather than passing an overlay to `builder.build()`. An overlay is not merged
- * by electron-builder -- it replaces, so `{ win: {...} }` arrives with no `files`,
- * no `extraResources` and no `directories`, and the run dies with
- * `TypeError: types is not iterable` from deep inside the packager.
+ * electron-builder reads package.json's `build` block and MERGES the config
+ * handed to `builder.build()` into it -- `deepAssign` in builder-util
+ * concatenates arrays instead of replacing them. Re-supplying `files` and
+ * `extraResources` here therefore appended a second copy of every entry, and
+ * the packager copied each file twice, concurrently, into the same
+ * destination. The second copy of a file the first copy still had open failed
+ * with `EBUSY: resource busy or locked`, so the packaging step never
+ * produced an installer. (An earlier comment here claimed the opposite --
+ * that an overlay replaces rather than merges -- and acting on it is what
+ * introduced the duplicate.)
+ *
+ * So: pass only what package.json does not already declare -- the `win`
+ * override and the output directory -- and let electron-builder read `files`
+ * and `extraResources` from the `build` block exactly once.
  */
-function effectiveConfig(extraResources) {
+function effectiveConfig() {
   const pkg = require(path.join(ROOT, 'package.json'));
   const base = pkg.build || {};
 
-  const config = Object.assign({}, base, {
-    extraResources,
+  const config = {
     directories: Object.assign({}, base.directories, { output: 'release' }),
-    files: base.files,
-  });
+  };
 
   const winOverrides = windowsSigningConfig();
   if (Object.keys(winOverrides).length) {
@@ -188,12 +195,37 @@ function effectiveConfig(extraResources) {
   return config;
 }
 
+function stagePythonRuntime() {
+  // A release ships its interpreter. `scripts/python_runtime.js` assembles a
+  // relocatable CPython + site-packages and executes the result to prove the
+  // backend's imports resolve; a failure here stops the build.
+  const { stage } = require('./python_runtime');
+  let result;
+  try {
+    result = stage({ force: false });
+  } catch (err) {
+    console.error('[build] could not stage the bundled Python runtime:', err.message);
+    console.error('[build] The installer would have no interpreter to start the backend.');
+    process.exit(1);
+  }
+  const manifest = result.manifest || {};
+  console.log(
+    `[build] python runtime ${result.skipped ? 'already staged' : 'staged'}: ` +
+    `${manifest.version || '?'} -> build/python`
+  );
+}
+
 function main() {
   stageBackendForBuild();
+  stagePythonRuntime();
   const extraResources = resolveExtraResources();
+  console.log(
+    '[build] extraResources: ' +
+    (extraResources.map((e) => `${e.from} -> ${e.to}`).join(', ') || '(none)')
+  );
   ensureRendererBuilt();
   const builder = require('electron-builder');
-  builder.build({ config: effectiveConfig(extraResources) })
+  builder.build({ config: effectiveConfig() })
     .then((paths) => {
       console.log('[build] done:', Array.isArray(paths) ? paths.join(', ') : paths);
     })

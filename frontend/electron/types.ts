@@ -608,6 +608,17 @@ export type PromptApi = {
 };
 
 export type DesktopApi = {
+  /**
+   * Authenticated control-plane proxy. The main process attaches the bearer
+   * token; the renderer never receives it.
+   */
+  apiRequest(request: {
+    method?: string;
+    path: string;
+    body?: Record<string, unknown>;
+    query?: Record<string, string | number | boolean>;
+    headers?: Record<string, string>;
+  }): Promise<{ status: number; body: unknown }>;
   ping(): Promise<{ ok: boolean; storage: string }>;
   getSettings(): Promise<Settings>;
   updateSettings(settings: Settings): Promise<Settings>;

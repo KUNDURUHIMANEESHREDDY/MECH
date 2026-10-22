@@ -1,5 +1,5 @@
 <template>
-  <main class="experiments-surface">
+  <section class="experiments-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Research / Backend records</p>
@@ -153,7 +153,7 @@
         <pre>{{ selectedRawText }}</pre>
       </details>
     </section>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

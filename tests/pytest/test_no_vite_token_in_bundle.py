@@ -1,23 +1,26 @@
-"""F-06: Frontend bundle must not contain a privileged bearer token.
+"""The frontend bundle must contain no privileged bearer token.
 
-The `apiToken()` function in `frontend/src/services/api.ts` reads the token from:
-1. `runtime.__MECH_API_TOKEN__` (global, set by Electron at runtime)
-2. `localStorage.getItem('mech_api_token')` (set at runtime after login)
-3. `import.meta.env.VITE_MECH_API_TOKEN` (Vite build-time env var)
+Superseded contract
+-------------------
+This file used to require ``api.ts`` to read ``runtime.__MECH_API_TOKEN__`` and
+``localStorage['mech_api_token']``. Both were still renderer-readable secrets,
+so "not bundled at build time" was the wrong bar: the token was delivered to
+the renderer at runtime instead. Renderer code now holds no credential at all --
+the desktop proxies through the Electron main process and the browser build uses
+an HttpOnly session cookie.
 
-The third source is the problem: Vite substitutes `import.meta.env.VITE_MECH_API_TOKEN`
-at build time, so if a shared secret token is placed there, it gets bundled
-into the frontend JS and shipped to every browser that loads the app.
-
-The fix: Remove the `VITE_MECH_API_TOKEN` fallback. The token must come from
-secure runtime sources only:
-- `runtime.__MECH_API_TOKEN__` (set by Electron main process)
-- `localStorage.getItem('mech_api_token')` (set at runtime after login)
-
-This ensures no privileged token is ever baked into the frontend bundle.
+What is pinned now
+------------------
+* No build-time env token (Vite inlines ``VITE_*`` into the shipped bundle).
+* No ``window.__MECH_API_TOKEN__`` global.
+* No persistent browser storage for the control-plane token.
+* No ``apiToken()`` accessor and no ``Authorization`` header built in the
+  renderer.
 """
-import json
-import os
+
+from __future__ import annotations
+
+import re
 import sys
 from pathlib import Path
 
@@ -27,99 +30,89 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Read the source file directly to avoid import issues
 API_FILE = REPO_ROOT / "frontend" / "src" / "services" / "api.ts"
 
 
-def _read_api_file():
+def _read_api_file() -> str:
     return API_FILE.read_text(encoding="utf-8")
 
 
-def test_no_vite_mech_api_token_in_source():
-    """The source must not contain VITE_MECH_API_TOKEN in executable code.
+def _code_only(source: str) -> str:
+    """Strip comments: they are allowed to *name* the removed mechanisms."""
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", "", source)
 
-    Comments explaining why it's removed are allowed.
-    """
+
+def test_no_vite_mech_api_token_in_source() -> None:
+    """A VITE_-prefixed token would be compiled into the shipped bundle."""
+    code = _code_only(_read_api_file())
+    assert "VITE_MECH_API_TOKEN" not in code, (
+        "VITE_MECH_API_TOKEN is referenced in executable code; Vite inlines "
+        "VITE_* into the bundle, which ships the secret to every client"
+    )
+
+
+def test_renderer_global_token_is_gone() -> None:
+    """`window.__MECH_API_TOKEN__` was renderer-readable. It must not return."""
+    code = _code_only(_read_api_file())
+    assert "__MECH_API_TOKEN__" not in code, (
+        "api.ts still reads the renderer-global token; the desktop token must "
+        "stay in the Electron main process and travel only over `api:request`"
+    )
+
+
+def test_no_persistent_browser_storage_for_the_token() -> None:
+    """Persisting the control-plane token in localStorage is not isolation."""
+    code = _code_only(_read_api_file())
+    assert "localStorage" not in code, (
+        "api.ts still touches localStorage for the control-plane token"
+    )
+    assert "mech_api_token" not in code, (
+        "api.ts still references the persisted token key"
+    )
+
+
+def test_no_token_accessor_is_exported() -> None:
+    """`apiToken()` was the seam a future caller would use to read the token."""
+    code = _code_only(_read_api_file())
+    assert "apiToken" not in code, (
+        "api.ts still exports a token accessor; renderer code has no credential "
+        "to return"
+    )
+
+
+def test_auth_headers_builds_no_authorization_header() -> None:
+    """The renderer must not construct a bearer header from local state."""
+    code = _code_only(_read_api_file())
+    headers_fn = re.search(
+        r"export function authHeaders\([^)]*\)[^{]*\{(?P<body>.*?)\n\}",
+        code,
+        flags=re.DOTALL,
+    )
+    assert headers_fn, "authHeaders() is missing from api.ts"
+    body = headers_fn.group("body")
+    assert "Authorization" not in body
+    assert "Bearer" not in body
+
+
+def test_both_credential_paths_are_present() -> None:
+    """Desktop proxies; the browser sends the session cookie."""
+    code = _code_only(_read_api_file())
+    assert "apiProxy()" in code
+    assert "apiRequest" in code, (
+        "api.ts does not call the preload's apiRequest proxy"
+    )
+    assert "credentials: 'same-origin'" in code, (
+        "the browser build does not send the session cookie"
+    )
+
+
+def test_scan_is_not_vacuous() -> None:
+    """Guard the checks above: the file must still contain what we look for."""
     source = _read_api_file()
-    # Find all occurrences that aren't in comments
-    import re
-    lines = source.split('\n')
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        # Skip comment lines
-        if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
-            continue
-        if 'VITE_MECH_API_TOKEN' in line:
-            pytest.fail(
-                f"VITE_MECH_API_TOKEN found in executable code at line {i+1}: {line.strip()}"
-            )
+    assert "export const api = {" in source
+    assert "export function authHeaders" in source
 
 
-def test_api_token_only_uses_runtime_sources():
-    """apiToken() should only read from secure runtime sources."""
-    source = _read_api_file()
-    
-    # Should read from global runtime variable
-    assert "__MECH_API_TOKEN__" in source, (
-        "apiToken() must read from runtime.__MECH_API_TOKEN__ "
-        "(set by Electron at runtime)"
-    )
-    
-    # Should read from localStorage
-    assert "localStorage.getItem('mech_api_token')" in source, (
-        "apiToken() must read from localStorage (set at runtime after login)"
-    )
-
-
-def test_no_build_time_env_fallback():
-    """No fallback to import.meta.env or process.env for the token."""
-    source = _read_api_file()
-    
-    # Should NOT use import.meta.env for the token
-    assert "import.meta.env" not in source or "VITE_MECH_API_TOKEN" not in source, (
-        "import.meta.env should not be used to read the API token"
-    )
-    
-    # Should NOT use process.env for the token (Node/SSR)
-    assert "process.env.MECH_API_TOKEN" not in source, (
-        "process.env should not be used to read the API token in frontend"
-    )
-
-
-def test_auth_headers_uses_api_token():
-    """authHeaders() must use apiToken() as the single source."""
-    source = _read_api_file()
-    assert "apiToken()" in source and "authHeaders" in source, (
-        "authHeaders() must use apiToken() as the single source of truth"
-    )
-
-
-# ── Build-time check: Vite config must not define VITE_MECH_API_TOKEN ────── #
-
-def test_vite_config_does_not_define_token():
-    """vite.config.ts must not define VITE_MECH_API_TOKEN."""
-    vite_configs = list(Path(REPO_ROOT / "frontend").glob("vite.config*.ts"))
-    for config in vite_configs:
-        content = config.read_text(encoding="utf-8")
-        assert "VITE_MECH_API_TOKEN" not in content, (
-            f"{config} defines VITE_MECH_API_TOKEN — this would bundle a "
-            "token into the build. Remove it."
-        )
-
-
-# ── Environment file checks ──────────────────────────────────────────────── #
-
-def test_env_example_does_not_define_token():
-    """Frontend .env.example/.env files must not define VITE_MECH_API_TOKEN."""
-    frontend_dir = REPO_ROOT / "frontend"
-    env_files = list(frontend_dir.glob(".env*"))
-    for env_file in env_files:
-        content = env_file.read_text(encoding="utf-8")
-        # Allow comments that mention it for documentation
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("VITE_MECH_API_TOKEN") and not stripped.startswith("#"):
-                pytest.fail(
-                    f"{env_file} defines VITE_MECH_API_TOKEN — this would bundle "
-                    "a token into the build. Remove or comment it out."
-                )
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-q"]))

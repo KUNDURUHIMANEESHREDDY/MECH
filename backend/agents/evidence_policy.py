@@ -69,6 +69,70 @@ def _is_attested(payload: Any) -> bool:
         return False
 
 
+def is_attested(payload: Any) -> bool:
+    """Public alias for `_is_attested`.
+
+    The private name reads like an implementation detail, but the check is
+    part of this module's contract with the admission gate: the gate derives
+    a result's `attested` flag from it, and a caller must not be able to
+    substitute its own boolean.
+    """
+    return _is_attested(payload)
+
+
+def run_attestation_is_live(payload: Any) -> bool:
+    """Whether the payload carries an attested run chain.
+
+    A run chain binds a result to the run that produced it: the run id, the
+    digest of the dataset actually used, the commit the working tree was on,
+    and the weights. This predicate says the chain is present and attested;
+    it does not say the chain matches the data, which is
+    `run_chain_verifies`.
+    """
+    chain = _record(payload).get("run_attestation")
+    if not isinstance(chain, dict):
+        return False
+    return chain.get("attested") is True
+
+
+def run_chain_allows(payload: Any) -> bool:
+    """Whether a payload's run chain, if it has one, is attested.
+
+    A payload with no run attestation is not refused by this rule: the chain
+    is a stronger binding, not a replacement for the measurement attestation
+    every result already needs. A payload that *carries* an unattested chain
+    is refused, because it says it was bound to a run and failed to be.
+    """
+    chain = _record(payload).get("run_attestation")
+    if not isinstance(chain, dict):
+        return True
+    return chain.get("attested") is True
+
+
+def run_chain_verifies(payload: Any, dataset: Any) -> bool:
+    """Whether the payload's run attestation matches the data it claims.
+
+    The digest is recomputed from `dataset` and compared with the recorded
+    one, so this is a check against the data rather than a restatement of
+    the claim. A payload with no run attestation does not verify.
+    """
+    chain = _record(payload).get("run_attestation")
+    if not isinstance(chain, dict):
+        return False
+    try:
+        from backend.science.reproducibility.run_attestation import (
+            verify_run_attestation,
+        )
+    except ImportError:  # pragma: no cover - the packaged layout
+        from science.reproducibility.run_attestation import (
+            verify_run_attestation,
+        )
+    try:
+        return bool(verify_run_attestation(chain, dataset).get("valid", False))
+    except Exception:
+        return False
+
+
 _COMPLETED_STATUSES = {"completed", "complete", "ok", "passed", "success"}
 _LIVE = "live"
 

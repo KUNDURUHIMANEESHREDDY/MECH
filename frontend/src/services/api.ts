@@ -6,9 +6,20 @@ import type {
 type AnyFunction = (...args: any[]) => any;
 type LocalBridge = Record<string, AnyFunction | undefined>;
 
+type ApiProxyResponse = { status: number; body: unknown };
+
+export type ApiProxyRequest = {
+  method?: string;
+  path: string;
+  body?: unknown;
+  query?: Record<string, string | number | boolean>;
+  headers?: Record<string, string>;
+};
+
+type ApiProxy = (request: ApiProxyRequest) => Promise<ApiProxyResponse>;
+
 type RuntimeGlobals = typeof globalThis & {
   __MECH_API_BASE__?: string;
-  __MECH_API_TOKEN__?: string;
   appApi?: LocalBridge;
 };
 
@@ -27,41 +38,62 @@ export function apiUrl(path: string): string {
 const BASE = API_ORIGIN;
 const REQUEST_TIMEOUT_MS = 30_000;
 
-export function apiToken(): string | null {
-  const fromGlobal = runtime.__MECH_API_TOKEN__?.trim();
-  if (fromGlobal) return fromGlobal;
-  const fromBridge = typeof runtime.appApi?.getApiToken === 'function'
-    ? (runtime.appApi.getApiToken() as string | undefined)?.trim()
-    : null;
-  if (fromBridge) return fromBridge;
-  try {
-    const fromStorage = typeof localStorage !== 'undefined'
-      ? localStorage.getItem('mech_api_token')?.trim()
-      : null;
-    if (fromStorage) return fromStorage;
-  } catch {
-    /* storage unavailable (SSR/tests) — fall through */
-  }
-  // No Vite env fallback — VITE_MECH_API_TOKEN would bundle a secret into the build.
-  // The token must come from secure runtime sources only:
-  // - runtime.__MECH_API_TOKEN__ (set by Electron at startup)
-  // - runtime.appApi.getApiToken() (provided by Electron preload)
-  // - localStorage.getItem('mech_api_token') (set at runtime after login)
-  return null;
+/**
+ * The Electron bridge, when this renderer is the desktop app.
+ *
+ * Its presence is what makes this a desktop renderer: the preload exposes
+ * `apiRequest` and nothing that returns the bearer token.
+ */
+function apiProxy(): ApiProxy | null {
+  const method = runtime.appApi?.apiRequest;
+  return typeof method === 'function' ? (method as ApiProxy) : null;
 }
 
+export function isDesktop(): boolean {
+  return apiProxy() !== null;
+}
+
+/**
+ * No credential is attached by the renderer.
+ *
+ * Desktop requests are authenticated by the Electron main process through the
+ * `api:request` proxy. The browser build is authenticated by the HttpOnly
+ * session cookie issued by `POST /session`, which page JavaScript cannot read.
+ * There is therefore no token to resolve and no header to build here; the
+ * helper stays because call sites spread it alongside their own headers.
+ */
 export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  const token = apiToken();
-  const base: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-  return { ...base, ...extra };
+  return { ...extra };
 }
 
 export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const proxy = apiProxy();
+  if (proxy) {
+    const raw = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    let url: URL | null = null;
+    try {
+      url = new URL(raw, API_ORIGIN || 'http://localhost:8000');
+    } catch {
+      url = null;
+    }
+    if (url && /^\/(?:api|health)(?:\/|$)/.test(url.pathname)) {
+      const query: Record<string, string> = {};
+      url.searchParams.forEach((value, key) => { query[key] = value; });
+      const { status, body } = await proxy({
+        method: init.method ?? 'GET',
+        path: url.pathname,
+        query: Object.keys(query).length ? query : undefined,
+        body: parseJsonBody(init.body),
+        headers: init.headers as Record<string, string> | undefined,
+      });
+      return jsonResponse(status, body);
+    }
+  }
   const headers = {
     ...authHeaders(),
     ...(init.headers as Record<string, string> | undefined),
   };
-  return fetch(input, { ...init, headers });
+  return fetch(input, { credentials: 'same-origin', ...init, headers });
 }
 
 function localBridge(): LocalBridge | null {
@@ -78,12 +110,60 @@ async function localCall<T>(name: string, ...args: any[]): Promise<T> {
   return (await method(...args)) as T;
 }
 
+function parseJsonBody(body: BodyInit | null | undefined): unknown {
+  if (typeof body !== 'string' || !body) return undefined;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body ?? null), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function splitPath(path: string): { pathname: string; query?: Record<string, string> } {
+  const [pathname, search = ''] = path.split('?');
+  if (!search) return { pathname };
+  const query: Record<string, string> = {};
+  new URLSearchParams(search).forEach((value, key) => { query[key] = value; });
+  return { pathname, query };
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const label = `${init.method ?? 'GET'} ${path}`;
+
+  // Desktop: authenticated by the main process, never by this renderer.
+  const proxy = apiProxy();
+  if (proxy) {
+    const { pathname, query } = splitPath(path);
+    const { status, body } = await proxy({
+      method: init.method ?? 'GET',
+      path: pathname,
+      query,
+      body: parseJsonBody(init.body),
+      headers: init.headers as Record<string, string> | undefined,
+    });
+    if (status === 401) throw new Error(`${label} failed: 401 (missing or invalid bearer token)`);
+    if (status < 200 || status >= 300) throw new Error(`${label} failed: ${status}`);
+    return body as T;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const headers = { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) };
-    const response = await fetch(`${BASE}${path}`, { ...init, headers, signal: controller.signal });
+    // `same-origin` is what carries the session cookie in the browser build.
+    const response = await fetch(`${BASE}${path}`, {
+      credentials: 'same-origin',
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
     if (response.status === 401) throw new Error(`${init.method ?? 'GET'} ${path} failed: 401 (missing or invalid bearer token)`);
     if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${path} failed: ${response.status}`);
     return (await response.json()) as T;

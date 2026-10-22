@@ -46,6 +46,12 @@ PUBLIC_PATHS = {
     ("OPTIONS", "/api/v1/ping"),
 }
 
+#: Routes the middleware lets through so their *handler* can decide. `POST
+#: /session` must be reachable before a credential exists, but it grants nothing
+#: without a valid token; `DELETE /session` is idempotent logout. They are
+#: neither public (they can refuse) nor middleware-protected (they are reached).
+SESSION_ROUTES = {("POST", "/session"), ("DELETE", "/session")}
+
 # Paths that are known to be under /mcp or /docs and require auth
 AUTH_REQUIRED_PREFIXES = (
     "/api/",
@@ -87,6 +93,9 @@ def test_route_authorization_matrix():
         for method, detail in methods.items():
             method = method.upper()
             if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+                continue
+
+            if (method, path) in SESSION_ROUTES:
                 continue
 
             is_public = is_public_path(path, method)
@@ -220,3 +229,26 @@ def test_cors_preflight_always_allows_options():
         })
         assert res.status_code == 200, f"OPTIONS {path}: should 200, got {res.status_code}"
         assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+def test_session_exchange_is_reachable_but_credentialed():
+    """`/session` reaches its handler anonymously and still refuses to grant.
+
+    The distinction matters: the middleware answering "missing credentials" and
+    the handler answering "invalid credentials" are different guarantees, and
+    only the second one means the route was actually reached.
+    """
+    client = _client()
+
+    anonymous = client.post("/session")
+    assert anonymous.status_code == 401
+    assert anonymous.json().get("detail") == "invalid credentials", (
+        "the middleware blocked /session before its handler ran; a browser "
+        "could never obtain a session"
+    )
+
+    wrong = client.post("/session", headers={"Authorization": "Bearer wrong"})
+    assert wrong.status_code == 401
+
+    cleared = client.delete("/session")
+    assert cleared.status_code == 200, "logout must be idempotent"

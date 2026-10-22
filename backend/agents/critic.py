@@ -30,13 +30,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from backend.core.provenance import pass_through
+from backend.core.provenance import admit_result, pass_through
 
 from .evidence_policy import (
     blocked_reason,
     discovery_is_live,
-    field_map,
-    provenance_of,
     reproduction_is_live,
     validation_is_live,
 )
@@ -64,17 +62,14 @@ class Critic:
         discovery_result: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not discovery_is_live(discovery_result):
-            return {
-                "status": "unavailable",
-                "provenance": provenance_of(discovery_result),
-                "field_provenance": field_map(
-                    ("status", "validated", "reason"), provenance_of(discovery_result)
-                ),
-                "validated": False,
-                "validation_eligible": False,
-                "publication_eligible": False,
-                "reason": blocked_reason(discovery_result, "Validation input"),
-            }
+            # The shared admission gate decides the label and the eligibility,
+            # so a caller cannot assert either. The discovery was not live,
+            # so there is nothing to validate.
+            return admit_result(
+                discovery_result, stage="validation",
+                extra={"validated": False},
+                reason=blocked_reason(discovery_result, "Validation input"),
+            )
         try:
             from backend.validation.validation_engine import (
                 ScientificValidationEngine,
@@ -83,41 +78,21 @@ class Critic:
                 discovery_id=discovery_id, hypothesis_statement=hypothesis,
                 discovery_result=discovery_result)
             if not validation_is_live(res):
-                return {
-                    "status": "unavailable",
-                    "provenance": provenance_of(res),
-                    "field_provenance": field_map(
-                        ("status", "validated", "reason"), provenance_of(res)
-                    ),
-                    "validated": False,
-                    "validation_eligible": False,
-                    "publication_eligible": False,
-                    "reason": blocked_reason(res, "Validation"),
-                }
-            return {
-                "status": "completed",
-                "provenance": "live",
-                # Propagated from the validation engine's re-measurement, never
-                # asserted: the Critic judges, it does not run forward passes.
-                "attested": res.get("attested", False),
-                "field_provenance": field_map(
-                    ("status", "validated", "result", "confidence", "peer_review"),
-                    "live",
-                ),
-                "result": res,
-            }
+                return admit_result(
+                    res, stage="validation",
+                    extra={"validated": False},
+                    reason=blocked_reason(res, "Validation"),
+                )
+            # The Critic judges, it does not run forward passes: the label
+            # and the attestation come from the validation engine's own
+            # re-measurement, and the gate derives them from it.
+            return admit_result(res, stage="validation", extra={"result": res})
         except Exception as exc:
-            return {
-                "status": "error",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "validated", "error"), "unavailable"
-                ),
-                "validated": False,
-                "validation_eligible": False,
-                "publication_eligible": False,
-                "error": str(exc)[:500],
-            }
+            return admit_result(
+                {}, stage="validation", status="error",
+                extra={"validated": False, "error": str(exc)[:500]},
+                reason=str(exc)[:500],
+            )
 
     def is_confident(self, validation_result: Dict[str, Any]) -> bool:
         """Whether a validation result clears the automated validation gate.
@@ -186,30 +161,18 @@ class Critic:
         default n keeps routes/tests tractable; n_samples is reported.
         """
         if paper_id != "ioi":
-            return {
-                "status": "unavailable",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "observed_metrics", "report", "gate", "reason"),
-                    "unavailable",
-                ),
-                "publication_eligible": False,
-                "reason": f"live reproduction for '{paper_id}' "
-                          "not implemented (ioi only)",
-            }
+            return admit_result(
+                {}, stage="reproduction",
+                reason=f"live reproduction for '{paper_id}' "
+                       "not implemented (ioi only)",
+            )
         try:
             from backend.services import gpt2_engine
             if not gpt2_engine.is_available():
-                return {
-                    "status": "unavailable",
-                    "provenance": "unavailable",
-                    "field_provenance": field_map(
-                        ("status", "observed_metrics", "report", "gate", "reason"),
-                        "unavailable",
-                    ),
-                    "publication_eligible": False,
-                    "reason": "torch/transformers not installed",
-                }
+                return admit_result(
+                    {}, stage="reproduction",
+                    reason="torch/transformers not installed",
+                )
             from backend.science.reproducibility.ioi_pipeline import (
                 IOIReproductionPipeline,
             )
@@ -219,16 +182,10 @@ class Critic:
             run = IOIReproductionPipeline(mock_mode=False).run(
                 n_prompts=n_prompts)
             if run.get("mock_mode") is not False or not reproduction_is_live(run):
-                return {
-                    "status": "unavailable",
-                    "provenance": provenance_of(run),
-                    "field_provenance": field_map(
-                        ("status", "observed_metrics", "report", "gate", "reason"),
-                        provenance_of(run),
-                    ),
-                    "publication_eligible": False,
-                    "reason": "The reproduction pipeline did not return explicit live evidence.",
-                }
+                return admit_result(
+                    run, stage="reproduction",
+                    reason="The reproduction pipeline did not return explicit live evidence.",
+                )
             observed = dict(run.get("observed_metrics", {}))
             # The pipeline reports whether each metric was actually measured
             # (e.g. circuit_minimality needs >= 10 usable prompts for its
@@ -250,16 +207,13 @@ class Critic:
                         raise ValueError(f"{observed_key} outside [0, 1]")
                     mapped[required] = value
             except (KeyError, TypeError, ValueError) as exc:
-                return {
-                    "status": "unavailable",
-                    "provenance": "unavailable",
-                    "field_provenance": field_map(
-                        ("status", "observed_metrics", "report", "gate", "reason"),
-                        "unavailable",
-                    ),
-                    "publication_eligible": False,
-                    "reason": f"Live reproduction metrics are incomplete: {exc}",
-                }
+                # The run was live; the mapping was not. The refusal is
+                # explicit, so the envelope cannot be admitted even though
+                # the run itself would have cleared the reproduction gate.
+                return admit_result(
+                    run, stage="reproduction",
+                    refusal=f"Live reproduction metrics are incomplete: {exc}",
+                )
             report_engine = ReproducibilityReportEngine()
             report = report_engine.generate_report(
                 paper_id=paper_id,
@@ -370,80 +324,70 @@ class Critic:
                 "reference_basis_is_like_for_like": False,
                 "calibrated": calibrated,
             }
-            return {
-                "status": "completed",
-                "provenance": "live",
-                # Propagated from the pipeline run above (measured or not);
-                # the Critic maps metrics, it does not re-measure them.
-                "attested": run.get("attested", False) if isinstance(run, dict) else False,
-                # The binding record travels with the attestation.
-                #
-                # `measurement_record` is cryptographically bound to the pipeline
-                # run (model_identity, input_commitment, output_commitment,
-                # execution_context). Forwarded, never invented: the Critic maps
-                # metrics and does not re-measure them; the pipeline run is the
-                # only honest source. An absent record stays absent rather than
-                # being defaulted, which preserves the fail-closed direction.
-                #
-                # The originating run travels with it as `pipeline_result` so
-                # that commitment verification can recompute the record's
-                # input/output commitments against the data they were made
-                # from. The Critic's top-level `observed_metrics` are MAPPED
-                # (unmeasured entries become None), so they must not be
-                # mistaken for the pipeline's committed outputs.
-                "measurement_record": run.get("measurement_record")
-                if isinstance(run, dict) else None,
-                "pipeline_result": run if isinstance(run, dict) else None,
-                "field_provenance": field_map(
-                    ("status", "paper_id", "n_prompts", "observed_metrics", "report", "gate",
-                     "pipeline_result"),
-                    "live",
-                ),
-                "paper_id": paper_id,
-                # The like-for-like comparison, hoisted to the top level
-                # because it is the answerable question. `report` and `gate`
-                # compare against external published constants, which for IOI
-                # are not the same measurement as this harness makes.
-                "calibrated_vs_published_circuit": calibrated,
-                "n_prompts": n_prompts,
-                "mock_mode": False,
-                "observed_metrics": mapped,
-                # Which of the above carry a real measurement. `mapped` only
-                # holds the validated metric set, so without this a caller
-                # cannot tell a measured value from a None.
-                "unmeasured_metrics": sorted(
-                    name for name, is_unmeasured in unmeasured.items()
-                    if is_unmeasured
-                ),
-                "report": report if isinstance(report, dict) else
-                {"report": report},
-                "gate": gate,
-            }
+            # The label, the attestation and the eligibility come from the
+            # shared admission gate, which derives them from the pipeline run
+            # above. The Critic maps metrics; it does not re-measure them.
+            #
+            # The binding record travels with the attestation.
+            #
+            # `measurement_record` is cryptographically bound to the pipeline
+            # run (model_identity, input_commitment, output_commitment,
+            # execution_context). Forwarded, never invented: the Critic maps
+            # metrics and does not re-measure them; the pipeline run is the
+            # only honest source. An absent record stays absent rather than
+            # being defaulted, which preserves the fail-closed direction.
+            #
+            # The originating run travels with it as `pipeline_result` so
+            # that commitment verification can recompute the record's
+            # input/output commitments against the data they were made
+            # from. The Critic's top-level `observed_metrics` are MAPPED
+            # (unmeasured entries become None), so they must not be
+            # mistaken for the pipeline's committed outputs.
+            return admit_result(
+                run, stage="reproduction",
+                extra={
+                    "measurement_record": run.get("measurement_record")
+                    if isinstance(run, dict) else None,
+                    "pipeline_result": run if isinstance(run, dict) else None,
+                    "paper_id": paper_id,
+                    # The like-for-like comparison, hoisted to the top level
+                    # because it is the answerable question. `report` and
+                    # `gate` compare against external published constants,
+                    # which for IOI are not the same measurement as this
+                    # harness makes.
+                    "calibrated_vs_published_circuit": calibrated,
+                    "n_prompts": n_prompts,
+                    "mock_mode": False,
+                    "observed_metrics": mapped,
+                    # Which of the above carry a real measurement. `mapped`
+                    # only holds the validated metric set, so without this a
+                    # caller cannot tell a measured value from a None.
+                    "unmeasured_metrics": sorted(
+                        name for name, is_unmeasured in unmeasured.items()
+                        if is_unmeasured
+                    ),
+                    "report": report if isinstance(report, dict)
+                    else {"report": report},
+                    "gate": gate,
+                },
+            )
         except Exception as exc:
-            return {
-                "status": "error",
-                "provenance": "unavailable",
-                "field_provenance": field_map(
-                    ("status", "observed_metrics", "report", "gate", "error"),
-                    "unavailable",
-                ),
-                "publication_eligible": False,
-                "error": str(exc)[:500],
-            }
+            return admit_result(
+                {}, stage="reproduction", status="error",
+                extra={"error": str(exc)[:500]},
+                reason=str(exc)[:500],
+            )
 
     def reflect(self, campaign_id: str,
                 successful: List[str], failed: List[str],
                 planner_decisions: List[str]) -> Dict[str, Any]:
-        return {
-            "status": "unavailable",
-            "provenance": "unavailable",
-            "field_provenance": field_map(
-                ("status", "campaign_id", "successful", "failed", "result"),
-                "unavailable",
-            ),
-            "campaign_id": campaign_id,
-            "successful": successful,
-            "failed": failed,
-            "planner_decisions": planner_decisions,
-            "reason": "No live reflection executor is connected.",
-        }
+        return admit_result(
+            {}, stage="validation",
+            extra={
+                "campaign_id": campaign_id,
+                "successful": successful,
+                "failed": failed,
+                "planner_decisions": planner_decisions,
+            },
+            reason="No live reflection executor is connected.",
+        )

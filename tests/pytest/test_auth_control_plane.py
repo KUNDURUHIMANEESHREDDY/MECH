@@ -159,20 +159,41 @@ def test_token_path_cannot_be_redirected_from_the_environment(monkeypatch, tmp_p
 
 
 # ---------------------------------------------------------------------------
-# Query-parameter credentials: the SSE / <img> seam
+# Query-parameter credentials: refused unless the operator opts in
 # ---------------------------------------------------------------------------
 #
 # `EventSource` (used by the Research Society live stream) and `<img src>` cannot
-# set an `Authorization` header. Ten frontend call sites were therefore sending
-# no credentials at all and receiving 401 in standalone mode. The middleware now
-# also accepts `?token=` / `?bearer_token=` for exactly those transports.
+# set an `Authorization` header, so `?token=` / `?bearer_token=` was accepted
+# for exactly those transports. uvicorn writes the full query string to its
+# access log, so the credential landed in stdout in cleartext -- and the
+# Electron app pipes backend stdout into its logger. The seam is now opt-in:
+# MECH_ALLOW_QUERY_TOKEN=1.
 #
-# These tests pin both directions: the seam works, and it is still a *verified*
-# credential rather than an authentication bypass.
+# These tests pin both directions: the seam is OFF by default, and when it is
+# switched on it is still a *verified* credential rather than an authentication
+# bypass.
 
 
-def test_query_parameter_token_is_accepted(monkeypatch):
+def test_query_parameter_token_is_refused_by_default(monkeypatch):
+    """A credential in the query string reaches the access log in cleartext."""
     monkeypatch.setenv("MECH_API_TOKEN", "query-token-abc")
+    auth_mod.reset_cache()
+    try:
+        with _client() as c:
+            r = c.get("/api/status?token=query-token-abc")
+            r2 = c.get("/api/status?bearer_token=query-token-abc")
+        assert r.status_code == 401, r.text
+        assert r2.status_code == 401, r2.text
+        assert "credentials" in r.json().get("detail", "")
+    finally:
+        auth_mod.reset_cache()
+
+
+def test_query_parameter_token_is_accepted_under_the_explicit_opt_in(monkeypatch):
+    """EventSource and <img> cannot set a header, so the seam stays reachable
+    -- but only when the operator says so."""
+    monkeypatch.setenv("MECH_API_TOKEN", "query-token-abc")
+    monkeypatch.setenv("MECH_ALLOW_QUERY_TOKEN", "1")
     auth_mod.reset_cache()
     try:
         with _client() as c:
@@ -200,6 +221,7 @@ def test_wrong_query_parameter_token_is_rejected(monkeypatch):
 def test_query_parameter_does_not_unlock_a_data_route_without_a_token(monkeypatch):
     """The seam authenticates; it does not make a protected route public."""
     monkeypatch.setenv("MECH_API_TOKEN", "query-token-abc")
+    monkeypatch.setenv("MECH_ALLOW_QUERY_TOKEN", "1")
     auth_mod.reset_cache()
     try:
         with _client() as c:

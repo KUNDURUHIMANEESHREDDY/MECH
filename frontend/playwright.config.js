@@ -5,7 +5,13 @@ const baseURL = `http://localhost:${port}`;
 
 module.exports = defineConfig({
   testDir: './tests/playwright',
-  timeout: 30_000,
+  // The suite runs against a Vite dev server, which compiles a route's chunk on
+  // first request. A cold route could take longer than the old 30s budget while
+  // seven workers hit the compiler at once, which read as a product failure.
+  timeout: 420_000,
+  // Per-assertion budget: a freshly compiled route chunk can take several
+  // seconds to mount under parallel load.
+  expect: { timeout: 15_000 },
   fullyParallel: false,
   reporter: [['list']],
   use: {

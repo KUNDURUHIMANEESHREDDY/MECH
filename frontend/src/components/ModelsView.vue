@@ -1,5 +1,5 @@
 <template>
-  <main class="models-surface">
+  <section class="models-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Backend / Model registry</p>
@@ -146,7 +146,7 @@
         <p class="help-copy">No model availability, architecture, or scientific result is assumed before the backend returns it.</p>
       </aside>
     </div>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

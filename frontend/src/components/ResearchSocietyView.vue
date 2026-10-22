@@ -55,9 +55,10 @@
             type="button"
             class="society__button society__button--stop"
             aria-describedby="society-stop-help"
+            :disabled="cancelling"
             @click="handleStop"
           >
-            Stop
+            {{ cancelling ? 'Cancelling…' : 'Cancel run' }}
           </button>
         </div>
         <p id="society-goal-help" class="society__help">
@@ -89,6 +90,11 @@
     <div v-if="offlineNotice" class="society__notice society__notice--warning" role="alert">
       <strong>Backend unavailable</strong>
       <span>{{ offlineNotice }}</span>
+    </div>
+
+    <div v-if="cancelNotice" class="society__notice society__notice--warning" role="status" data-testid="society-cancel-notice">
+      <strong>Cancellation</strong>
+      <span>{{ cancelNotice }}</span>
     </div>
 
     <div v-if="errorMessage" class="society__notice society__notice--error" role="alert" data-testid="society-error">
@@ -249,6 +255,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { apiUrl } from '../services/api';
 import {
+  cancelSocietyRun,
   getSocietyRun,
   startSocietyRun,
   streamSocietyRun,
@@ -275,6 +282,8 @@ interface TraceStep {
 const API_BASE = apiUrl('/api');
 const SOCIETY_BASE = apiUrl('/api/society');
 const POLL_INTERVAL_MS = 2000;
+/** How often the stream watchdog re-reads the run status. */
+const WATCHDOG_INTERVAL_MS = 4000;
 const runHistoryUrl = `${SOCIETY_BASE}/runs`;
 
 const goal = ref('');
@@ -282,6 +291,9 @@ const phase = ref<Phase>('idle');
 const runId = ref<string | null>(null);
 const runGoal = ref('');
 const runStatus = ref<string | null>(null);
+/** What the backend said about the last cancel request. */
+const cancelNotice = ref('');
+const cancelling = ref(false);
 const runProvenance = ref('unavailable');
 const events = ref<SocietyEvent[]>([]);
 const steps = ref<TraceStep[]>([]);
@@ -297,6 +309,18 @@ const pollingNotice = ref('');
 
 let unsubscribeSse: (() => void) | null = null;
 let pollTimer: number | null = null;
+/**
+ * Status watchdog that runs alongside a healthy SSE stream.
+ *
+ * `GET /api/society/stream` replays the trace and then holds the connection
+ * open with `: beat` keep-alives; it does not emit a terminal frame and it
+ * does not close. A run that ends `blocked` therefore left this panel reading
+ * "Society run in progress" forever -- 60s of polling the DOM showed
+ * phase=running while `GET /api/society/runs/{id}` had said `blocked` seconds
+ * earlier. The stream stays the live feed; this timer asks the authoritative
+ * run status whether the run is over, so the panel ends when the run ends.
+ */
+let watchdogTimer: number | null = null;
 let pollingInFlight = false;
 let requestGeneration = 0;
 
@@ -450,6 +474,10 @@ function stopTransport(): void {
     window.clearInterval(pollTimer);
     pollTimer = null;
   }
+  if (watchdogTimer !== null) {
+    window.clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
   transport.value = 'idle';
   pollingNotice.value = '';
 }
@@ -485,7 +513,11 @@ function applyDone(id: string, rawResult: unknown): void {
   const resultError = asText(rawResult.error)
     ?? (publication.value?.status === 'blocked' ? asText(publication.value.reason) : undefined)
     ?? asText(rawResult.reason);
-  const failedStatus = ['error', 'failed', 'cancelled', 'blocked'].includes(runStatus.value ?? '');
+  // `interrupted` is a backend status for a run whose worker died without
+  // finalizing it. It is a failure, not a completion.
+  const failedStatus = ['error', 'failed', 'cancelled', 'blocked', 'interrupted'].includes(
+    runStatus.value ?? '',
+  );
   if (failedStatus || publication.value?.status === 'blocked' || (resultError && runStatus.value !== 'completed')) {
     phase.value = 'failed';
     errorMessage.value = resultError ?? `The backend ended this run with status “${runStatus.value ?? 'unavailable'}”.`;
@@ -529,6 +561,10 @@ function beginPolling(id: string, notice = 'Live stream unavailable; polling the
   if (!isTrackingRun(id)) return;
   unsubscribeSse?.();
   unsubscribeSse = null;
+  if (watchdogTimer !== null) {
+    window.clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
   if (pollTimer !== null) return;
   transport.value = 'polling';
   pollingNotice.value = notice;
@@ -541,6 +577,12 @@ function beginPolling(id: string, notice = 'Live stream unavailable; polling the
 function attachRun(id: string): void {
   if (!isTrackingRun(id)) return;
   transport.value = 'stream';
+  // The stream carries trace events; it cannot tell us the run is over.
+  if (watchdogTimer === null) {
+    watchdogTimer = window.setInterval(() => {
+      void pollRun(id);
+    }, WATCHDOG_INTERVAL_MS);
+  }
   try {
     unsubscribeSse = streamSocietyRun(id, {
       onEvent: (event) => {
@@ -611,12 +653,66 @@ async function handleRun(): Promise<void> {
   }
 }
 
-function handleStop(): void {
-  if (!isActive.value) return;
-  requestGeneration += 1;
-  stopTransport();
-  phase.value = 'stopped';
+/**
+ * Cancel the run through the backend, then report what it actually did.
+ *
+ * This used to stop the panel's own polling and tell the user the backend had
+ * no cancellation endpoint -- the run kept going and kept its admission slot.
+ * The backend now exposes a cooperative cancel, so the button performs the
+ * operation it advertises and the panel distinguishes "cancellation
+ * requested" from "cancelled" from "already finished".
+ */
+async function handleStop(): Promise<void> {
+  if (!isActive.value || cancelling.value) return;
+  const id = runId.value;
+  cancelling.value = true;
+  cancelNotice.value = '';
   errorMessage.value = '';
+  try {
+    if (!id) {
+      // Nothing was submitted yet: only this panel's wait can be stopped.
+      requestGeneration += 1;
+      stopTransport();
+      phase.value = 'stopped';
+      cancelNotice.value = 'Stopped waiting for the run to start. Nothing was submitted.';
+      return;
+    }
+    const result = await cancelSocietyRun(id);
+    requestGeneration += 1;
+    stopTransport();
+    if (result.status === 'cancelled') {
+      phase.value = 'stopped';
+      runStatus.value = 'cancelled';
+      cancelNotice.value = 'The backend cancelled this run.';
+      return;
+    }
+    phase.value = 'stopped';
+    runStatus.value = result.status;
+    cancelNotice.value =
+      'The backend recorded the cancellation request. The run stops when its current step finishes.';
+  } catch (error) {
+    const message = errorText(error);
+    if (/already finished|could not be cancelled/i.test(message)) {
+      // The run ended on its own; show what it ended with instead of a
+      // cancellation that did not happen.
+      requestGeneration += 1;
+      stopTransport();
+      try {
+        const status = await getSocietyRun(id);
+        applyDone(id, status.result ?? {});
+      } catch {
+        phase.value = 'stopped';
+        errorMessage.value = message;
+      }
+      return;
+    }
+    requestGeneration += 1;
+    stopTransport();
+    phase.value = 'stopped';
+    errorMessage.value = `Stopped watching this run, but the backend could not be reached to cancel it: ${message}`;
+  } finally {
+    cancelling.value = false;
+  }
 }
 
 function handleOnline(): void {
@@ -647,12 +743,12 @@ const offlineNotice = computed(() => {
 
 const stopHelp = computed(() => {
   if (phase.value === 'starting') {
-    return 'Stop ends this panel’s wait. The backend has no run-cancellation endpoint, so a submitted run may continue.';
+    return 'Cancel run asks the backend to stop this run. The request is cooperative: the current step finishes first.';
   }
   if (phase.value === 'running') {
-    return 'Stop ends live updates in this panel only. The backend run may continue because this API has no cancellation endpoint.';
+    return 'Cancel run asks the backend to stop this run. The request is cooperative: the current step finishes first.';
   }
-  return 'Run starts a new backend workflow. Stop is available only while this panel is waiting or receiving events.';
+  return 'Run starts a new backend workflow. Cancel run is available only while this panel is waiting or receiving events.';
 });
 
 const statusTone = computed<StatusTone>(() => {
@@ -681,8 +777,8 @@ const statusDetail = computed(() => {
     case 'starting': return 'Submitting the goal to the Society run endpoint.';
     case 'running': return pollingNotice.value || 'Listening for real backend trace events.';
     case 'stopped': return runId.value
-      ? 'The backend run was not cancelled; this panel is no longer receiving updates.'
-      : 'This panel stopped waiting; any run created by the in-flight request was not cancelled.';
+      ? 'This panel stopped receiving updates. The cancellation outcome is reported below.'
+      : 'This panel stopped waiting; no run was submitted to cancel.';
     case 'done': return runStatus.value === 'completed' ? 'Backend result received.' : 'The backend stream ended, but no completion status was provided.';
     case 'failed': return errorMessage.value || 'No successful backend result was returned.';
     default: return `Backend status is unknown until a request reaches ${SOCIETY_BASE}.`;

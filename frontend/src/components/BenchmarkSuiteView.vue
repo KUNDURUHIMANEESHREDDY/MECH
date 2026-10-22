@@ -36,7 +36,7 @@
 
     <section class="metric-strip" aria-label="Suite session observations">
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ catalog.length }}</span>
+        <span class="metric-tile__value">{{ catalogCount }}</span>
         <span class="metric-tile__label">Catalog benchmarks</span>
       </div>
       <div class="metric-tile">
@@ -173,6 +173,7 @@ function formatFieldProvenance(value: Record<string, string>): string {
 }
 function resultTone(status: string, error: string): ResultTone { const normalized = status.toLowerCase(); if (normalized === 'unavailable') return 'neutral'; if (['completed', 'complete', 'ok', 'success', 'passed'].includes(normalized)) return 'success'; if (['error', 'failed', 'failure'].includes(normalized) || error) return 'error'; return 'neutral'; }
 
+const catalogCount = computed(() => loadingCatalog.value || offline.value || errorMessage.value ? '\u2014' : String(catalog.value.length));
 const sourceTone = computed<SourceTone>(() => loadingCatalog.value ? 'loading' : offline.value ? 'offline' : errorMessage.value ? 'partial' : 'online');
 const sourceLabel = computed(() => sourceTone.value === 'loading' ? 'Loading catalog' : sourceTone.value === 'offline' ? 'Offline / unavailable' : sourceTone.value === 'partial' ? 'Partially available' : 'Benchmark API reachable');
 

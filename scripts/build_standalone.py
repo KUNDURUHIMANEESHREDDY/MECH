@@ -172,11 +172,27 @@ def validate_build(directory: Path) -> None:
 
     _assert_backend_imports(directory)
 
+    # The import check above ran the backend FROM the staged tree, and the
+    # storage layer opens its SQLite database on import. That created a
+    # `storage/mech.db` inside the artifact that was about to be shipped --
+    # a database file with whatever the import wrote into it, in a
+    # distribution. The check is now pointed at an in-memory database, but
+    # the artifact is checked rather than assumed: if anything forbidden
+    # is in the staged tree, the build fails instead of shipping it.
+    forbidden = packaged_backend_guard.find_forbidden(directory)
+    if forbidden:
+        raise ValidationError(
+            "the assembled build carries state that must never ship: "
+            + ", ".join(forbidden))
+
 
 def _assert_backend_imports(directory: Path) -> None:
     """Import the *copied* backend, in isolation, to prove it is complete."""
     env = dict(os.environ)
     env["PYTHONPATH"] = str(directory)
+    # An in-memory database, so proving the import does not leave a
+    # `storage/mech.db` in the directory that is about to be shipped.
+    env["MECH_STORAGE_DB"] = ":memory:"
     try:
         result = subprocess.run(
             [sys.executable, "-c", "import backend.main"],

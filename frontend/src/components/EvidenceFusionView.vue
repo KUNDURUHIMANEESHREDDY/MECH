@@ -42,7 +42,7 @@
         <span class="metric-tile__label">Relationships returned</span>
       </div>
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ runs.length }}</span>
+        <span class="metric-tile__value">{{ runsCountText }}</span>
         <span class="metric-tile__label">Runs available</span>
       </div>
       <div class="metric-tile metric-tile--note">
@@ -188,7 +188,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { apiUrl, authHeaders } from '../services/api';
+import { apiFetch, apiUrl, authHeaders } from '../services/api';
 
 type JsonRecord = Record<string, unknown>;
 type SourceTone = 'online' | 'offline' | 'loading' | 'partial';
@@ -215,7 +215,7 @@ function messageOf(error: unknown): string { return error instanceof Error ? err
 function isOffline(message: string): boolean { return /offline|failed to fetch|network|load|connection|timeout/i.test(message); }
 async function request<T>(path: string): Promise<T> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Browser is offline');
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   if (!response.ok) throw new Error(`GET ${path} returned ${response.status}`);
@@ -264,6 +264,7 @@ const filteredNodes = computed(() => {
 });
 const selectedNode = computed(() => graphNodes.value.find((node) => node.id === selectedNodeId.value) ?? null);
 const relatedEdges = computed(() => graphEdges.value.filter((edge) => edge.sourceId === selectedNodeId.value || edge.targetId === selectedNodeId.value));
+const runsCountText = computed(() => loading.value || offline.value || errorMessage.value ? '\u2014' : String(runs.value.length));
 const sourceTone = computed<SourceTone>(() => loading.value ? 'loading' : offline.value ? 'offline' : errorMessage.value ? 'partial' : 'online');
 const sourceLabel = computed(() => sourceTone.value === 'loading' ? 'Loading evidence' : sourceTone.value === 'offline' ? 'Offline / unavailable' : sourceTone.value === 'partial' ? 'Partially available' : graphNodes.value.length ? 'Backend evidence available' : 'Run source reachable');
 

@@ -1,5 +1,5 @@
 <template>
-  <main class="notebook-surface">
+  <section class="notebook-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">General / Local notes</p>
@@ -132,7 +132,7 @@
         <p><strong>Not included:</strong> backend sync, shared workspaces, automatic export, or claims of scientific provenance.</p>
       </div>
     </section>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

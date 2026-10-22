@@ -1,5 +1,5 @@
 <template>
-  <main class="lens-surface" data-testid="logit-lens">
+  <section class="lens-surface" data-testid="logit-lens">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Explore / Projection</p>
@@ -264,7 +264,7 @@
         </div>
       </section>
     </template>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

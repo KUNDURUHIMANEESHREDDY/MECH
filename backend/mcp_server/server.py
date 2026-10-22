@@ -213,25 +213,23 @@ def mech_loop_stop(run_id: str) -> dict:
     this tool never claims to have killed a thread.
     """
     from backend.api import dispatcher as core
+    from fastapi import HTTPException
 
-    run = core._society_runs.get(run_id)
-    if run is None:
-        try:
-            from backend.core.evidence_graph import load_run_record
-
-            rec = load_run_record(run_id)
-            return _err(f"run {run_id} already finished "
-                        f"({rec.get('status', 'stored')}); nothing to stop")
-        except Exception:
-            return _err(f"unknown runId '{run_id}'")
-    run["cancel_requested"] = True
+    # One implementation, two surfaces. This used to set the run's
+    # `cancel_requested` flag itself, which meant the MCP tool and
+    # `POST /api/society/runs/{run_id}/cancel` could disagree about a run
+    # that had already finished or was never in flight.
+    try:
+        result = core.society_run_cancel(run_id)
+    except HTTPException as exc:
+        return _err(str(getattr(exc, "detail", exc)))
     return {
-        "status": "cancel_requested",
-        "run_id": run_id,
+        "status": result.get("outcome", "cancel_requested"),
+        "run_id": result.get("run_id", run_id),
         "provenance": "live",
-        "note": ("cooperative cancel: queued events are dropped and the run "
-                 "is reported cancelled when the in-flight step returns; an "
-                 "in-flight model call runs to completion."),
+        "note": result.get("note", ""),
+        "reason": result.get("reason", ""),
+        "cancel_requested": bool(result.get("cancel_requested")),
     }
 
 

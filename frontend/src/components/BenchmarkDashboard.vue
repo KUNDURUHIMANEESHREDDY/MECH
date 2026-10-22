@@ -38,7 +38,7 @@
 
     <section class="metric-strip" aria-label="Benchmark session observations">
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ catalog.length }}</span>
+        <span class="metric-tile__value">{{ catalogCount }}</span>
         <span class="metric-tile__label">Catalog benchmarks</span>
       </div>
       <div class="metric-tile">
@@ -362,7 +362,8 @@ const resultTone = computed<ResultTone>(() => resultToneFor(lastResult.value?.st
 const sourceTone = computed<SourceTone>(() => loadingCatalog.value ? 'loading' : offline.value ? 'offline' : errorMessage.value ? 'partial' : 'online');
 const sourceLabel = computed(() => sourceTone.value === 'loading' ? 'Loading catalog' : sourceTone.value === 'offline' ? 'Offline / unavailable' : sourceTone.value === 'partial' ? 'Partially available' : 'Benchmark API reachable');
 
-const historyCount = computed(() => loadingHistory.value ? '\u2014' : String(historyRuns.value.length));
+const catalogCount = computed(() => loadingCatalog.value || offline.value || errorMessage.value ? '\u2014' : String(catalog.value.length));
+const historyCount = computed(() => loadingHistory.value || historyError.value ? '\u2014' : String(historyRuns.value.length));
 const historyStateCaption = computed(() => loadingHistory.value
   ? 'Reading persisted runs\u2026'
   : historyError.value

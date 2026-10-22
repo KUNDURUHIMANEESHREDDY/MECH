@@ -16,6 +16,7 @@
       <span class="text-[10px] text-[var(--ink-muted-48)] uppercase tracking-widest">Prompt</span>
       <input
         id="ne-prompt-input"
+        aria-label="Prompt"
         v-model="prompt"
         @keydown.enter="handleRunPrompt"
         placeholder="Run a prompt to populate activations…"
@@ -76,6 +77,7 @@
           <div class="text-[10px] text-[var(--ink-muted-48)] mb-1.5 uppercase tracking-widest">Model</div>
           <select
             id="neural-explorer-model-select"
+            aria-label="Model"
             :value="selectedModel?.id || ''"
             @change="onModelChange"
             class="w-full bg-[var(--bg)] border border-[var(--border)] text-[var(--ink)] rounded-md px-2 py-1.5 text-xs"
@@ -375,7 +377,7 @@
               <div class="text-[11px] text-[var(--ink-muted-48)] mb-2.5 uppercase tracking-widest">Activation Patch Experiment</div>
               <div class="flex items-center gap-3 flex-wrap">
                 <div>
-                  <label class="text-[11px] text-[var(--ink-muted-48)] block mb-1">Patch Value</label>
+                  <label for="patch-value-input" class="text-[11px] text-[var(--ink-muted-48)] block mb-1">Patch Value</label>
                   <input
                     id="patch-value-input"
                     v-model.number="patchVal"

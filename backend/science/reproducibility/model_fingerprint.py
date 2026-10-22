@@ -8,6 +8,15 @@ The engine fails closed. If the adapter is running in ``mock_mode`` or never
 loaded real weights, ``capture()`` returns a fingerprint with ``attested=False``
 and an explicit reason, and ``verify()`` refuses to report a match. An
 unattested fingerprint is not evidence of anything.
+
+A fingerprint says which weights ran. It does not say which data they ran
+on, or which code ran them, so two results with byte-identical weights can
+come from different experiments entirely. ``capture_run()`` closes that gap:
+it binds the fingerprint to a run id, a digest of the dataset actually
+supplied, and the commit the working tree is on. The result is then bound to
+the whole chain -- ``run_id`` + ``dataset_sha256`` + ``code_revision`` +
+the weights -- rather than to the weights alone. See
+:mod:`backend.science.reproducibility.run_attestation`.
 """
 
 from __future__ import annotations
@@ -19,6 +28,13 @@ import weakref
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
 
+from backend.science.reproducibility.run_attestation import (
+    RunAttestation,
+    attest_run,
+    code_revision,
+    dataset_digest,
+    verify_run_attestation,
+)
 _CHUNK = 1 << 20  # 1 MiB
 
 
@@ -176,6 +192,21 @@ class ModelFingerprintEngine:
         except TypeError:
             pass  # not weak-referenceable; the next call simply re-hashes
         return fingerprint
+
+    def capture_run(self, adapter: Any, *, run_id: str, dataset: Any,
+                    repo_root: Optional[Any] = None) -> RunAttestation:
+        """Attest a whole run: the weights, the data and the code.
+
+        `dataset` is the dataset or panel the run actually used -- a file, a
+        tensor, a list of records -- and it is hashed, not described. The
+        returned attestation fails closed: if the dataset is empty, the
+        repository cannot be asked for its commit, or the weights were never
+        attested, the attestation says so and stays unattested rather than
+        carrying a plausible-looking digest.
+        """
+        fingerprint = self.capture(adapter)
+        return attest_run(run_id=run_id, dataset=dataset,
+                          model_fingerprint=fingerprint, repo_root=repo_root)
 
     def verify(self, current: ModelFingerprint,
                reference: ModelFingerprint) -> Dict[str, Any]:

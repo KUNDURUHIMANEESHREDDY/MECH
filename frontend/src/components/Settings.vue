@@ -1,5 +1,5 @@
 <template>
-  <main class="settings-surface">
+  <section class="settings-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">System / Local</p>
@@ -261,7 +261,7 @@
         </div>
       </footer>
     </form>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

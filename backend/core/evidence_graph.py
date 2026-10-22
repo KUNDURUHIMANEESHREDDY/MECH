@@ -106,6 +106,8 @@ def _step_allows_evidence(step: Dict[str, Any]) -> bool:
         return False
     if step.get("attested") is not True:
         return False
+    if not _run_chain_allows(step):
+        return False
     if _step_provenance(step) != "live":
         return False
     node = str(step.get("node", ""))
@@ -118,6 +120,25 @@ def _step_allows_evidence(step: Dict[str, Any]) -> bool:
     result = step.get("result")
     return (discovery_is_live(result) if node == "discover"
             else validation_is_live(result))
+
+
+def _run_chain_allows(step: Dict[str, Any]) -> bool:
+    """Whether a step's run chain, if it carries one, is attested.
+
+    The chain binds a step to the run that produced it: the dataset digest,
+    the commit, the weights. A step carrying a chain that could not be
+    completed is saying "I was bound to a run and failed to be", and it does
+    not become evidence by also carrying a live-looking label. A step with
+    no chain at all is not refused by this rule -- the chain is a stronger
+    binding, not a replacement for the attestation the step already needs.
+    """
+    for holder in (step.get("result"), step):
+        if not isinstance(holder, dict):
+            continue
+        chain = holder.get("run_attestation")
+        if isinstance(chain, dict) and chain.get("attested") is not True:
+            return False
+    return True
 
 
 def _step_provenance(step: Dict[str, Any]) -> str:

@@ -23,7 +23,6 @@ class Logger {
         // never let logging crash the app
       }
     }
-    // eslint-disable-next-line no-console
     const line = `[${entry.ts}] ${level.toUpperCase()} ${event}` +
       (meta ? ' ' + JSON.stringify(meta) : '');
     if (level === 'error') console.error(line);

@@ -35,15 +35,15 @@
 
     <section class="metric-strip" aria-label="Report source observations">
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ liveReports.length }}</span>
+        <span class="metric-tile__value">{{ reportCountText }}</span>
         <span class="metric-tile__label">Report payloads</span>
       </div>
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ runCount }}</span>
+        <span class="metric-tile__value">{{ runCountText }}</span>
         <span class="metric-tile__label">Runs inspected</span>
       </div>
       <div class="metric-tile">
-        <span class="metric-tile__value">{{ catalogEntries.length }}</span>
+        <span class="metric-tile__value">{{ catalogCountText }}</span>
         <span class="metric-tile__label">Reference entries</span>
       </div>
       <div class="metric-tile metric-tile--note">
@@ -59,7 +59,7 @@
             <p class="section-kicker">Returned by backend</p>
             <h2 id="live-report-list-title">Live report payloads</h2>
           </div>
-          <span class="count-label">{{ liveReports.length }} {{ liveReports.length === 1 ? 'report' : 'reports' }}</span>
+          <span class="count-label">{{ reportCountText }} {{ liveReports.length === 1 ? 'report' : 'reports' }}</span>
         </header>
 
         <div v-if="loading" class="state-block state-block--loading" role="status" aria-live="polite">
@@ -181,7 +181,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { apiUrl, authHeaders } from '../services/api';
+import { apiFetch, apiUrl, authHeaders } from '../services/api';
 
 type SourceTone = 'online' | 'offline' | 'loading' | 'partial';
 
@@ -235,7 +235,7 @@ function looksOffline(message: string): boolean {
 
 async function request<T>(path: string): Promise<T> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Browser is offline');
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   if (!response.ok) throw new Error(`GET ${path} returned ${response.status}`);
@@ -342,6 +342,9 @@ async function loadReports(): Promise<void> {
   loading.value = false;
 }
 
+const reportCountText = computed(() => loading.value || offline.value || runError.value ? '\u2014' : String(liveReports.value.length));
+const runCountText = computed(() => loading.value || offline.value || runError.value ? '\u2014' : String(runCount.value));
+const catalogCountText = computed(() => loading.value || offline.value || catalogError.value ? '\u2014' : String(catalogEntries.value.length));
 const selectedReport = computed(() => liveReports.value.find((report) => report.id === selectedReportId.value) ?? null);
 const sourceTone = computed<SourceTone>(() => {
   if (loading.value) return 'loading';

@@ -4,10 +4,10 @@
  *   GET  /api/society/stream?runId=... -> text/event-stream (live trace)
  *   GET  /api/society/runs/{runId}     -> polling fallback
  *
- * Mirrors the standalone-service pattern of inferenceService.ts.
+ * Mirrors the standalone-service pattern of the other per-tool service clients.
  */
 
-import { apiUrl, authHeaders, apiToken } from './api';
+import { apiFetch, apiUrl, authHeaders } from './api';
 
 const SOCIETY_BASE = apiUrl('/api/society');
 
@@ -32,7 +32,7 @@ export interface SocietyRunStatus {
 }
 
 export async function startSocietyRun(goal: string, modelName = 'gpt2'): Promise<SocietyRunStarted> {
-  const res = await fetch(`${SOCIETY_BASE}/run`, {
+  const res = await apiFetch(`${SOCIETY_BASE}/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ goal, model_name: modelName }),
@@ -44,11 +44,54 @@ export async function startSocietyRun(goal: string, modelName = 'gpt2'): Promise
 }
 
 export async function getSocietyRun(runId: string): Promise<SocietyRunStatus> {
-  const res = await fetch(`${SOCIETY_BASE}/runs/${encodeURIComponent(runId)}`, {
+  const res = await apiFetch(`${SOCIETY_BASE}/runs/${encodeURIComponent(runId)}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   if (!res.ok) throw new Error(`Society status failed: ${res.status} ${res.statusText}`);
   return res.json() as Promise<SocietyRunStatus>;
+}
+
+export interface SocietyCancelResult {
+  run_id: string;
+  status: string;
+  outcome: string;
+  cancel_requested: boolean;
+  error?: string;
+}
+
+/**
+ * Ask the backend to cancel a run.
+ *
+ * The backend cancels cooperatively: a run that has not started its pipeline
+ * is cancelled outright, a running run is marked `cancel_requested` and keeps
+ * running until the worker observes the flag. A finished run is refused with
+ * 409 -- the caller must not report that as a successful cancellation.
+ */
+export async function cancelSocietyRun(runId: string): Promise<SocietyCancelResult> {
+  const res = await apiFetch(`${SOCIETY_BASE}/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({}),
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (res.status === 404) {
+    throw new Error(`The backend does not know run ${runId}.`);
+  }
+  if (res.status === 409) {
+    const detail = typeof body.detail === 'string' ? body.detail : 'the run has already finished';
+    throw new Error(`The run could not be cancelled: ${detail}.`);
+  }
+  if (!res.ok) {
+    const detail = typeof body.detail === 'string' ? body.detail : `HTTP ${res.status}`;
+    throw new Error(`Cancel request failed: ${detail}.`);
+  }
+  return {
+    run_id: String(body.run_id ?? runId),
+    status: String(body.status ?? 'unknown'),
+    outcome: String(body.outcome ?? 'unknown'),
+    cancel_requested: Boolean(body.cancel_requested),
+    ...(typeof body.error === 'string' ? { error: body.error } : {}),
+  };
 }
 
 export interface SocietyStreamHandlers {
@@ -57,17 +100,17 @@ export interface SocietyStreamHandlers {
   onError: (message: string) => void;
 }
 
-/** Subscribe to a run's SSE stream. Returns an unsubscribe function.
+/**
+ * Subscribe to a run's SSE stream. Returns an unsubscribe function.
  *
- * `EventSource` cannot set request headers, so the bearer token travels as a
- * query parameter. The backend auth middleware accepts `?token=` for exactly
- * this case: without it every SSE subscribe is rejected with 401 and the panel
- * silently degrades to polling.
+ * `EventSource` cannot set request headers, so this used to append the bearer
+ * token as a query parameter -- a credential in a URL, in browser history and
+ * in server logs. The browser build authenticates with the HttpOnly session
+ * cookie instead: `EventSource` sends cookies for same-origin requests, and
+ * page JavaScript cannot read the cookie.
  */
 export function streamSocietyRun(runId: string, handlers: SocietyStreamHandlers): () => void {
-  const token = apiToken();
-  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-  const url = `${SOCIETY_BASE}/stream?runId=${encodeURIComponent(runId)}${tokenParam}`;
+  const url = `${SOCIETY_BASE}/stream?runId=${encodeURIComponent(runId)}`;
   let closed = false;
   let source: EventSource | null = null;
   try {

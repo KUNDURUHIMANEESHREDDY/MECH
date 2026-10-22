@@ -7,5 +7,9 @@ test('status indicator reports an unavailable backend without fabricating data',
   await page.goto('/');
   const status = page.getByTestId('runtime-status');
   await expect(status).toBeVisible({ timeout: 15000 });
-  await expect(status).toContainText(/Offline/);
+  // Four-state vocabulary (src/services/runtimeStatus.ts): a backend that never
+  // answered is `failed`, and the pill offers a retry instead of guessing.
+  await expect(status).toContainText(/Backend failed/i);
+  await expect(status.getByTestId('runtime-retry')).toBeVisible();
+  await expect(status).not.toContainText(/models available/i);
 });

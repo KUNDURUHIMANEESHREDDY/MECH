@@ -1,5 +1,5 @@
 <template>
-  <main class="debugger-surface">
+  <section class="debugger-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">Develop / Runtime diagnostics</p>
@@ -157,7 +157,7 @@
         <p v-else class="panel-message">Select a model and inspect its backend metadata.</p>
       </section>
     </div>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

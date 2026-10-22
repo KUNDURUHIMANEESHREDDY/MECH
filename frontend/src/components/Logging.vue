@@ -1,5 +1,5 @@
 <template>
-  <main class="logging-surface">
+  <section class="logging-surface">
     <header class="surface-header">
       <div class="header-copy">
         <p class="surface-kicker">System / Diagnostics</p>
@@ -143,7 +143,7 @@
         </p>
       </aside>
     </div>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">

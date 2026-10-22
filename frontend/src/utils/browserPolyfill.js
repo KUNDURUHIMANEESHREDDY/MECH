@@ -1,37 +1,30 @@
 /**
  * Browser Polyfill for window.appApi & window.electronAPI
- * Runs immediately on module import to bridge web frontend with Python Backend HTTP API Server on port 8000.
  *
- * Every request carries the bearer token when one is available: the backend
- * protects all of /api/* (backend/core/auth.py:207-208), so an unauthenticated
- * polyfill call would return 401 rather than data.
+ * Runs on import to bridge the web build to the Python backend on port 8000.
+ *
+ * No credential lives here. The browser build authenticates with the HttpOnly
+ * session cookie issued by `POST /session`: JavaScript cannot read that cookie,
+ * and every request is sent with `credentials: 'include'` so the browser
+ * attaches it. `include` (not `same-origin`) is deliberate: the dev server runs
+ * on :5173 and talks to :8000, and the backend's CORS config allows credentials
+ * for loopback origins. An earlier version resolved a bearer token from
+ * `localStorage` and attached it as a header, which put the control-plane
+ * credential in reach of any script on the page.
  */
 
 if (typeof window !== 'undefined') {
   const BACKEND_URL = 'http://localhost:8000';
 
-  const resolveToken = () => {
-    try {
-      const fromGlobal = window.__MECH_API_TOKEN__;
-      if (fromGlobal) return String(fromGlobal).trim();
-      const fromStorage = window.localStorage?.getItem('mech_api_token');
-      if (fromStorage) return String(fromStorage).trim();
-    } catch {
-      /* storage unavailable — no token */
-    }
-    return '';
-  };
-
   const makeBackendCall = async (method, payload = {}) => {
     try {
-      const token = resolveToken();
-      const res = await fetch(`${BACKEND_URL}/api/v1/${method}`, {
+      const res = await fetch(`${BACKEND_URL}/api/${method}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ method, payload }),
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        // The dispatcher binds `payload: Dict` as the request body, so the body
+        // is the payload itself -- not a {method, payload} envelope.
+        body: JSON.stringify(payload ?? {}),
       });
       const json = await res.json();
       return json.result !== undefined ? json.result : json;
@@ -43,7 +36,6 @@ if (typeof window !== 'undefined') {
 
   if (!window.appApi) {
     window.appApi = {
-      getApiToken: () => resolveToken(),
       getSettings: async () => ({ theme: 'dark' }),
       setSettings: async (s) => s,
       pythonPing: async () => makeBackendCall('ping', {}),

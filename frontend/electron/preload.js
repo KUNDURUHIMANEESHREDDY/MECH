@@ -1,46 +1,31 @@
 'use strict';
 
+/**
+ * Renderer bridge.
+ *
+ * Deliberately token-free. The bearer token lives in the main process only;
+ * `apiRequest` is the renderer's single route to the control plane and the
+ * main process attaches the credential. A preload that could return the token
+ * would make the IPC proxy pointless -- any script in the page could ask for
+ * it.
+ *
+ * This file runs in a sandboxed renderer, so it may only require `electron`.
+ */
+
 const { contextBridge, ipcRenderer } = require('electron');
-const path = require('node:path');
-const fs = require('node:fs');
 
-function resolveApiToken() {
-  if (process.env.MECH_API_TOKEN) return process.env.MECH_API_TOKEN.trim();
-  const repoRoot = path.join(__dirname, '..', '..');
-  const resourcesPath = process.resourcesPath || path.join(__dirname, '..');
-  const candidates = [
-    path.join(repoRoot, 'backend', 'storage', '.mech_api_token'),
-    path.join(resourcesPath, 'backend', 'storage', '.mech_api_token'),
-    path.join(process.cwd(), 'backend', 'storage', '.mech_api_token'),
-  ];
-  for (const c of candidates) {
-    try {
-      if (fs.existsSync(c)) {
-        const val = fs.readFileSync(c, 'utf8').trim();
-        if (val) return val;
-      }
-    } catch {}
-  }
-  return '';
-}
+// Fixed loopback origin: the backend is spawned on this port by the main
+// process. A sandboxed preload has no `process.env`, and the value is not a
+// secret, so it is a literal.
+const apiBaseValue = 'http://127.0.0.1:8000';
 
-const apiTokenValue = resolveApiToken();
-const apiBaseValue = process.env.MECH_API_BASE || 'http://127.0.0.1:8000';
-
-try {
-  contextBridge.exposeInMainWorld('__MECH_API_TOKEN__', apiTokenValue);
-  contextBridge.exposeInMainWorld('__MECH_API_BASE__', apiBaseValue);
-} catch {
-  // If running in a context where contextBridge is unavailable
-  window.__MECH_API_TOKEN__ = apiTokenValue;
-  window.__MECH_API_BASE__ = apiBaseValue;
-}
+contextBridge.exposeInMainWorld('__MECH_API_BASE__', apiBaseValue);
 
 // Expose a safe, minimal API to the renderer via contextBridge.
 contextBridge.exposeInMainWorld('appApi', {
-  // Auth & Token
-  getApiToken: () => apiTokenValue,
-  getApiBase: () => apiBaseValue,
+  // Authenticated control-plane proxy. The token never crosses this boundary.
+  apiRequest: (request) => ipcRenderer.invoke('api:request', request),
+
   // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),

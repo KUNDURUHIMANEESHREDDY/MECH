@@ -166,6 +166,74 @@ is cut; nothing here is invented to fill a released-version heading.
   (`frontend/electron/preload.js`, `main.js:61-70`) as stated limits, not
   incidents.
 
+- **The control plane no longer accepts the bearer token in the query
+  string.** `?token=` / `?bearer_token=` was accepted by the auth
+  middleware and by `POST /session`, and uvicorn's access log writes the
+  full query string -- so the credential reached stdout in cleartext, and
+  the Electron app pipes backend stdout into its logger. The seam is now
+  opt-in: `MECH_ALLOW_QUERY_TOKEN=1` (default off) keeps it reachable for
+  the transports that cannot set a header (`EventSource`, `<img src>`).
+  `tests/pytest/test_auth_control_plane.py` pinned the old behaviour as a
+  feature; it now pins the new one, in both directions.
+  (`backend/main.py`, `backend/core/auth.py`, `docs/auth.md`)
+
+- **A cookie-authenticated request is now checked against its `Origin`.**
+  `SameSite=Strict` does not stop a *same-site* request, and a site is
+  (scheme, registrable domain) -- the port is not part of it. A page on
+  `http://localhost:3000` is therefore same-site with
+  `http://localhost:8000`: the browser attached the session cookie to its
+  credentialed requests, and the CORS allowlist (which accepted every
+  loopback port) made the responses readable. Any page on any loopback
+  port had the operator's full control plane. The server now refuses a
+  cookie-authenticated request whose origin it does not trust: the
+  server's own origin, an origin listed in `MECH_TRUSTED_ORIGINS`, or --
+  with `MECH_TRUST_LOOPBACK_ORIGINS=1` -- any loopback origin. The opaque
+  `null` origin is refused. (`backend/main.py`, `backend/core/auth.py`,
+  `docs/auth.md`)
+
+- **`MECH_CORS_ORIGINS` entries are validated, and an added origin no
+  longer carries credentials.** An entry that is not a well-formed origin
+  (a path, a query string, a fragment, a wildcard, credentials in the
+  URL) is refused with a warning, and an origin added to the allowlist no
+  longer receives `Access-Control-Allow-Credentials` unless it is also
+  listed in `MECH_TRUSTED_ORIGINS`. (`backend/main.py`,
+  `backend/core/auth.py`)
+
+- **The body-size ceiling sits behind the auth gate, and every response
+  carries CORS headers.** The middleware stack is stated once and asserted
+  by the tests: CORS outermost, then the auth gate, then the body
+  ceiling, then the request log. An anonymous oversized POST is answered
+  with 401 before its body is read (it used to be answered with 413 after
+  the server had buffered megabytes for an anonymous caller), and a 401
+  now carries the CORS headers a browser client needs in order to read
+  the refusal. (`backend/main.py`)
+
+- **The MCP HTTP transport at `/mcp` works.** It was mounted, but every
+  authenticated request 500'd with "Task group is not initialized":
+  FastMCP's streamable-HTTP app only serves requests from inside its
+  session manager's task group, and a mounted sub-application never
+  receives a lifespan of its own. The transport is now built and started
+  by the application's lifespan. (`backend/main.py`)
+
+- **One FastAPI application in the tree.** `backend/interpretability/api.py`
+  built a second one, with no bearer gate, no CORS policy and no
+  body-size ceiling. Nothing mounted it, nothing outside its own package
+  imported it, and the endpoints it served were mock data, so it was
+  deleted rather than re-mounted. (`backend/interpretability/`)
+
+- **A failed evidence write no longer reports a plain success.** A
+  Society run whose durable evidence record could not be written is
+  reported as `completed_unrecorded`, with the reason, instead of
+  `completed`: the work ran, the proof of it did not, and the two must
+  not be confused. The exception is logged, not swallowed.
+  (`backend/api/dispatcher.py`)
+
+- **The dead in-process plugin loader is gone.**
+  `PluginManager.load_active_plugins` executed plugin code inside the
+  backend process and had zero callers anywhere in the tree; the
+  production path is `PluginService.enable` -> `start_remote_plugin`, a
+  separate worker process. (`backend/plugins/plugin_manager.py`)
+
 ### Fixed (this branch, described because they change documented behaviour)
 
 - Logit lens no longer applies `ln_f` twice to the final layer. Probabilities,
@@ -191,6 +259,152 @@ is cut; nothing here is invented to fill a released-version heading.
 - Plugin install confined to trusted roots; plugin `name`/`entry` validated;
   sandbox escape via `collections._sys` closed at the dynamic capability layer.
 
+### Frontend verification pass (desktop shell, all 36 tools)
+
+The redesign was verified against a running backend rather than rebuilt. Every
+change below was found by a check that could fail, and is pinned by one.
+
+- **The sidebar status pill lied about readiness.** It probed
+  `GET /api/models`, which serves a static reference catalogue
+  (`provenance: "reference"`) that answers even when no weights are cached, and
+  it rendered that catalogue's length as "N models available" - a catalogue
+  length presented as research capability. The shell now probes
+  `GET /api/status` and reports the four documented states
+  (connecting / ready / disconnected / failed) from
+  `frontend/src/services/runtimeStatus.ts`, which existed but was never
+  imported. A refused token is reported as unauthorized, a backend that
+  answers and then stops is reported as disconnected rather than as a backend
+  that never existed, and a Retry control re-probes. Pinned by
+  `frontend/tests/playwright/runtime-status.spec.js` (6 specs) and
+  `frontend/tests/playwright/trust.spec.js`.
+- **Clicking a tool could show the previous tool's results.** Vue's
+  `<Suspense>` keeps the last resolved subtree on screen while the next async
+  component loads, so the address bar and the panel label said "Circuit
+  Explorer" while Model Explorer's neurons were still rendered underneath. The
+  shell now resolves a route's chunk before switching, and shows an explicit
+  busy state while it does. Pinned by the rewritten "switching tools preserves
+  no stale data" spec.
+- **The dev server reloaded the page 648 times a minute.** Vite watched
+  `frontend/build/python/**` (a bundled CPython with thousands of
+  site-package files), so any pip install or app build reloaded the app per
+  file and reset the active route mid-click - every navigation looked broken.
+  `frontend/vite.config.mts` now ignores `build/`, `release/`, `dist/`,
+  `.venv/`, `test-results/` and `*.log`.
+- **A browser could not authenticate at all.** The renderer holds no token by
+  design (the Electron main process signs requests), so every `/api` call from
+  `npm run dev:renderer` answered 401 and the Playwright specs could never see
+  live data. The dev proxy now signs with `MECH_API_TOKEN` or the backend's own
+  token file, read in the dev-server process. The token is not in the bundle:
+  `tests/pytest/test_no_vite_token_in_bundle.py` still passes.
+- **Counts derived from failed reads were rendered as 0.** Ten views
+  (reports, analytics, benchmark, reasoning, evidence fusion, campaigns,
+  circuit explorer and others) showed "0" next to an offline or failed read -
+  a zero is a measurement, and there was none. They now show an em dash while
+  loading, offline or partial.
+- **Every tool rendered its own `<main>` inside the shell's `<main>`** (17
+  views), giving screen-reader users duplicate main landmarks. The roots are
+  now `<section>`; the shell keeps the single landmark.
+- **The Research Society panel could not end.** `GET /api/society/stream`
+  replays the trace and then holds the connection open with keep-alives: it
+  never emits a terminal frame and never closes. A run that ended `blocked`
+  left the panel reading "Society run in progress" indefinitely - measured at
+  70s of a panel that spun while the backend had already reported the run
+  finished. The view now runs a status watchdog alongside the stream and ends
+  on the backend's own terminal status, with the backend's reason and no
+  publication claim. Verified by `frontend/tests/e2e/live-society-check.mjs`.
+- **The backend's persisted job queue had no interface at all.** The Jobs
+  tool (`frontend/src/services/jobs.ts`, `frontend/src/components/JobsView.vue`)
+  now lists the real queue, shows the backend's own bounds, kinds, statuses,
+  errors and results, submits the two kinds the backend implements, and
+  cancels a live job - a 409 (already finished) is reported, never turned into
+  a successful cancellation. It displays no progress percentage, ETA or stage
+  list, because the backend sends none.
+- **Verification harnesses** were added under `frontend/tests/e2e/`:
+  `route-sweep.mjs` clicks all 36 sidebar entries in both a live and an
+  offline backend and reports mounted views, failed API calls, duplicate
+  landmarks and fabricated values; `live-research-check.mjs`,
+  `live-neuron-check.mjs` and `live-society-check.mjs` compare what the screen
+  shows against what the API returned.
+- **The e2e suite no longer asserts claims the system must not make.** The
+  Society spec required `Backend status: completed` from every run, and the
+  analytics spec required an "unavailable" string from a view that has live
+  records; both now follow the run and the data. Stale selectors
+  (`explorer-load-model`, `explorer-prompt-input`) were repaired against the
+  current controls, and the Playwright budget was raised because a cold route
+  chunk can take longer than the old 30s timeout to compile.
+
+### Gaps closed after the frontend verification pass
+
+Four gaps the verification pass reported were open. All four are closed, each
+with a check that can fail.
+
+- **A hung Society run locked the tool out until the backend restarted.**
+  `_society_runs` was the only admission ledger: admission counted
+  `status == "running"`, and nothing checked the worker thread or a deadline,
+  so a run whose pipeline hung held one of the two admission slots forever and
+  every later `POST /api/society/run` was refused with `active run limit
+  reached (2/2)`. `backend/api/dispatcher.py` now gives every admitted run a
+  deadline (`MECH_SOCIETY_RUN_TIMEOUT_S`, default 600s) after which it is
+  finalized as a failure naming the timeout; a run whose worker thread is
+  gone without a result is finalized `interrupted`; the admission counter
+  reaps before it counts, and `GET /api/society/runs/{run_id}` never reports
+  `running` for a run that can no longer progress. The 2-run limit itself is
+  unchanged - it was deliberate. New route `POST /api/society/runs/{run_id}/cancel`
+  (404 unknown, 409 already finished, cooperative otherwise), mirroring
+  `cancel_job` in `backend/api/runtime_api.py`. Covered by
+  `tests/pytest/test_society_run_lifecycle.py`.
+- **The Society panel's Stop button did not stop anything.** It stopped the
+  panel's own polling and told the user the backend had no cancellation
+  endpoint, while the run kept going and kept its slot. It is now "Cancel run"
+  and calls the new endpoint, distinguishing "cancellation requested" from
+  "cancelled" from "already finished" (a finished run is re-read and shown
+  with its real result instead of a cancellation that did not happen). The new
+  backend status `interrupted` is treated as a failure, not a completion.
+- **The Society lifecycle is back in the standard suite.**
+  `frontend/tests/playwright/society-lifecycle.spec.js` submits a run and
+  checks the parts that must hold on every run: the panel shows the run the
+  backend created, the panel's status is the backend's status, no report, gate
+  or publication appears while the run is in flight, and "Cancel run" performs
+  the operation it advertises - the backend records the cancellation request,
+  and the panel never claims the run was cancelled while the backend still
+  reports it as running. A run the backend refuses (it admits two at once) is
+  skipped with a visible reason instead of failing on back-pressure. The
+  *completion* path -- a run that ends `blocked`, with the backend's reason --
+  takes two minutes on an idle CPU and eight or more on a loaded one, so it
+  is owned by `frontend/tests/e2e/live-society-check.mjs`, which has that
+  budget. The duplicate Society spec in `trust-online.spec.js` was removed:
+  two specs starting a run each would race for the same two admission slots.
+- **SAE was only verifiable in its "no checkpoint configured" state.** The
+  platform now inventories the checkpoints that exist
+  (`backend/interpretability/sae/local_checkpoints.py`), `GET /api/sae/status`
+  reports `checkpoint_identifier`, `checkpoint_dir` and `available_checkpoints`,
+  and the SAE Lab view offers the real files as a labelled select and sends
+  the chosen one. `MECH_SAE_CHECKPOINT=<file name>` now resolves inside the
+  checkpoint directory the way the variable name implies, instead of against
+  the server's working directory. Reconstruction fidelity is measured when the
+  checkpoint carries a decoder - it was hardcoded to `False`, which reported a
+  computable quantity as absent - and the route states when a checkpoint
+  records no hook point, so the loader cannot refuse a layer mismatch and the
+  reader can see that the number refers to a tensor that may not be the one
+  the dictionary was trained on. `docs/sae.md` and
+  `frontend/tests/e2e/live-sae-check.mjs` cover it; the harness asserts that
+  every rendered feature and activation is the value the API returned, and
+  that nothing is rendered that the API did not return.
+- **Forty-five dead files were removed** from `frontend/src/`: the four
+  pre-redesign shell components (`Sidebar.vue`, `Topbar.vue`, `StatusBar.vue`,
+  `ActivityBar.vue`) and the legacy service/util/domain modules that nothing
+  imported after the rebuild. Reachability was established from
+  `frontend/src/main.ts` and cross-checked against the tests, the Electron
+  preload and the docs before deletion.
+
+- The locally trained SAE checkpoints under
+  `backend/storage/sae_checkpoints/` record no hook point, and they were
+  trained on a block-0 MLP contribution plus the residual stream, while
+  `POST /api/sae/inspect` encodes the residual stream at the requested layer.
+  The loader cannot refuse that mismatch, and the measured reconstruction
+  error is correspondingly poor (relative L2 0.97 for the layer-8 sample
+  checkpoint). The response carries that caveat; the numbers are real
+  measurements of a dictionary applied to a tensor it was not trained on.
 ### Known incomplete in this tree
 
 - `SAEInspector.inspect_feature` remains unimplemented and returns

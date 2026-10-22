@@ -1,12 +1,16 @@
 'use strict';
 
 // The Python backend is an HTTP FastAPI server on :8000. All handlers proxy to
-// it; the old JSON-lines stdio sidecar no longer exists.
+// it through `apiProxy.apiRequest`, which is the only code that holds the
+// bearer token -- a raw fetch here would 401 against the authenticated control
+// plane.
 //
 // The prefix is /api. It was /api/v1, which the backend never served: main.py
 // mounts the dispatcher at /api (and an optional v2 at /api/v2), so every
 // proxied call 404'd. electron/main.js uses 127.0.0.1 rather than localhost to
 // avoid IPv6 name resolution failing on Windows.
+
+const { apiRequest } = require('../apiProxy');
 
 const BACKEND = 'http://127.0.0.1:8000/api';
 
@@ -16,14 +20,16 @@ async function callBackend(method, payload = {}) {
   // request body, so a wrapped envelope made payload.get("prompt") return ""
   // and every field silently fall back to its default. Endpoints that take no
   // body (ping, runtime/status) ignore it either way.
-  const res = await fetch(`${BACKEND}/${method}`, {
+  const res = await apiRequest({
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload ?? {}),
+    path: `/api/${method}`,
+    body: payload ?? {},
   });
-  if (!res.ok) throw new Error(`backend ${method} -> HTTP ${res.status}`);
-  const json = await res.json();
-  return json.result !== undefined ? json.result : json;
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`backend ${method} -> HTTP ${res.status}`);
+  }
+  const json = res.body;
+  return json && json.result !== undefined ? json.result : json;
 }
 
 function registerRuntimeHandlers({ ipcMain, logger }) {

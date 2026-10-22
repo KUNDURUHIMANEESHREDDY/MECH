@@ -100,19 +100,24 @@ def test_every_proxied_method_exists_on_the_backend():
     )
 
 
-def test_request_body_is_the_payload_not_an_envelope():
-    """The dispatcher binds `payload: Dict` as the request body.
+def test_runtime_js_goes_through_the_authenticated_proxy():
+    """The control plane requires a bearer token; a raw fetch cannot supply one.
 
-    Sending {"method": ..., "payload": {...}} made payload.get("prompt") return
-    "" and every field fall back to its default — silently, with no error.
+    runtime.js used to `fetch` the backend directly. Once /api became
+    authenticated that call would 401 on every request, so the handler must go
+    through `apiProxy.apiRequest`, which is the only code holding the token.
     """
     source = _source()
-    envelope = re.search(r"body:\s*JSON\.stringify\(\s*\{\s*method", source)
-    assert envelope is None, (
-        "callBackend wraps the payload in a {method, payload} envelope; the "
-        "dispatcher expects the payload as the body, so fields are dropped"
+    assert "require('../apiProxy')" in source, (
+        "runtime.js does not use the authenticated proxy"
     )
-    assert re.search(r"body:\s*JSON\.stringify\(\s*payload", source), (
+    assert "apiRequest(" in source
+    assert not re.search(r"(?<![.\w])fetch\s*\(", source), (
+        "runtime.js issues a raw fetch; the control plane requires a bearer "
+        "token, so this request would 401"
+    )
+    # The payload is still the request body, not a {method, payload} envelope.
+    assert re.search(r"body:\s*payload", source), (
         "callBackend should send the payload as the request body"
     )
 

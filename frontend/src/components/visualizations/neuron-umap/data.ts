@@ -1,4 +1,4 @@
-import { HeadData, LayerData, NeuronData } from '../../types';
+import { HeadData, LayerData, NeuronData } from '../../../types';
 import { NeuronPoint } from './types';
 
 export function weightStatsOf(values: number[] | undefined): { mean: number; std: number; min: number; max: number } | undefined {
