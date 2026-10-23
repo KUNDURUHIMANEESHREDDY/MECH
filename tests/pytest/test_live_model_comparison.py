@@ -39,6 +39,24 @@ class TinyTokenizer:
         return "".join(tokens)
 
 
+class TinyMLP(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.c_proj = torch.nn.Identity()
+
+
+class TinyBlock(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mlp = TinyMLP()
+
+
+class TinyTransformer(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.h = torch.nn.ModuleList([TinyBlock(), TinyBlock()])
+
+
 class TinyCausalModel(torch.nn.Module):
     """Minimal parameterized forward pass that behaves like a HF causal LM."""
 
@@ -46,6 +64,7 @@ class TinyCausalModel(torch.nn.Module):
         super().__init__()
         self.scale = torch.nn.Parameter(torch.tensor(float(scale)))
         self.bias = torch.nn.Parameter(torch.arange(5, dtype=torch.float32) * scale)
+        self.transformer = TinyTransformer()
         self.config = SimpleNamespace(
             model_type="gpt2",
             architectures=["GPT2LMHeadModel"],
@@ -62,7 +81,10 @@ class TinyCausalModel(torch.nn.Module):
         batch, sequence = input_ids.shape
         width = self.config.hidden_size
         base = input_ids.float().unsqueeze(-1).expand(batch, sequence, width) * self.scale
-        hidden = tuple(base + self.scale * index for index in range(3))
+        hidden_states = [base]
+        for block in self.transformer.h:
+            base = block.mlp.c_proj(base + self.scale)
+            hidden_states.append(base)
         logits = (self.bias + self.scale).reshape(1, 1, -1).expand(batch, sequence, -1)
         attention_logits = torch.ones(
             batch, self.config.num_attention_heads, sequence, sequence,
@@ -71,7 +93,7 @@ class TinyCausalModel(torch.nn.Module):
         attention = torch.softmax(attention_logits, dim=-1)
         return SimpleNamespace(
             logits=logits,
-            hidden_states=hidden if output_hidden_states else None,
+            hidden_states=tuple(hidden_states) if output_hidden_states else None,
             attentions=(attention, attention) if output_attentions else None,
         )
 
@@ -123,6 +145,8 @@ def test_success_uses_two_loaded_models_and_measured_tensors(monkeypatch):
     assert result["predictions"]["model_a_top"]["token"]
     assert isinstance(result["predictions"]["top_token_match"], bool)
     assert isinstance(result["logits"]["kl_divergence_a_to_b"], float)
+    assert result["activations"]["layers"]
+    assert result["activations"]["layers"][0]["activation_kind"] == "input_to_c_proj"
     assert result["residuals"]["layers"]
     assert result["attention"]["layers"]
 
@@ -146,6 +170,8 @@ def test_incompatible_residual_shapes_are_not_coerced_or_zero_filled(monkeypatch
     result = run_compare()
 
     assert result["status"] == "completed"
+    assert result["activations"]["layers"] == []
+    assert result["activations"]["comparable"] is False
     assert result["residuals"]["layers"] == []
     assert result["residuals"]["comparable"] is False
     assert "hidden dimensions" in result["residuals"]["not_comparable_reason"]
