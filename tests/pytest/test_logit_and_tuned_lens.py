@@ -662,7 +662,7 @@ def test_the_readme_quotes_the_measured_tuned_lens_result():
     assert report["model_id"] is None
 
     flat = re.sub(r"\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8")).lower()
-    assert "experimental trained affine translators" in flat
+    assert "experimental, unverified affine translators" in flat
     assert "model_id: null" in flat
     assert "publication_eligible: false" in flat
     assert "not a paper reproduction" in flat
