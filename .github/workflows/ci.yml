@@ -184,7 +184,7 @@ jobs:
   required:
     name: required
     if: ${{ always() }}
-    needs: [lint, frontend, backend-fast, backend, live-evidence, e2e]
+    needs: [lint, frontend, backend-fast, backend, live-evidence, e2e, security]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -204,7 +204,8 @@ jobs:
             "backend-fast=$BACKEND_FAST_RESULT" \
             "backend=$BACKEND_RESULT" \
             "live-evidence=$LIVE_EVIDENCE_RESULT" \
-            "e2e=$E2E_RESULT"
+            "e2e=$E2E_RESULT" \
+            "security=$SECURITY_RESULT"
           for result in \
             "$LINT_RESULT" \
             "$FRONTEND_RESULT" \
