@@ -35,10 +35,6 @@ _cache: Dict[str, Any] = {}
 #: actually produced it.
 SUPPORTED_MODEL = "gpt2"
 
-#: The prompt an intervention measures on when the caller named none and no
-#: prompt is cached. Fixed rather than sampled: see `patch_neuron`.
-_DEFAULT_MEASURE_PROMPT = "The capital of France is"
-
 
 def _loaded_model_id() -> Optional[str]:
     """Identity of the weights currently loaded, or None if nothing is.
@@ -665,7 +661,11 @@ def generate_text(primer: str, max_new_tokens: int = 12,
     err = _ensure_loaded()
     if err:
         return err
-    primer = (primer or "").strip() or "The"
+    # An empty primer is a deliberate model-only generation request. Seed the
+    # model with its own special token, then return only newly sampled text;
+    # never sneak a canned English prefix into a user's prompt.
+    primer = (primer or "").strip()
+    model_only = not primer
     max_new_tokens = max(1, min(48, int(max_new_tokens)))
     # temperature=0 means greedy. The floor used to be 0.1, which made greedy
     # unreachable: a caller asking for deterministic output got 0.1 and kept
@@ -681,9 +681,22 @@ def generate_text(primer: str, max_new_tokens: int = 12,
     top_k = max(1, min(200, int(top_k)))
     device = next(_model.parameters()).device
     with torch.no_grad():
-        inputs = _tokenizer(primer, return_tensors="pt")
-        input_ids = inputs["input_ids"].to(device)
+        if model_only:
+            seed_id = getattr(_tokenizer, "bos_token_id", None)
+            if seed_id is None:
+                seed_id = getattr(_tokenizer, "eos_token_id", None)
+            if seed_id is None:
+                return {
+                    "status": "unavailable",
+                    "error": "Tokenizer has no BOS/EOS token for model-only generation.",
+                    "provenance": "unavailable",
+                }
+            input_ids = torch.tensor([[int(seed_id)]], device=device)
+        else:
+            inputs = _tokenizer(primer, return_tensors="pt")
+            input_ids = inputs["input_ids"].to(device)
         generated = input_ids[0].tolist()
+        prefix_length = len(generated)
         for _ in range(max_new_tokens):
             # The forward is under the lock because the shared model may
             # carry another thread's hook; generating into it would sample
@@ -705,16 +718,32 @@ def generate_text(primer: str, max_new_tokens: int = 12,
             if next_id == _tokenizer.eos_token_id:
                 break
             input_ids = torch.tensor([generated], device=device)
-    text = _tokenizer.decode(generated)
-    return {
+    sampled_ids = generated[prefix_length:]
+    text = (
+        _tokenizer.decode(sampled_ids, skip_special_tokens=True).strip()
+        if model_only else _tokenizer.decode(generated)
+    )
+    if model_only and not text:
+        return {
+            "status": "unavailable",
+            "error": "GPT-2 produced no usable text tokens.",
+            "provenance": "unavailable",
+        }
+    result = {
         "status": "ok",
         "primer": primer,
+        "model_only": model_only,
         "text": text,
-        "token_ids": generated,
-        "tokens_added": len(generated) - len(_tokenizer.encode(primer)),
+        "token_ids": sampled_ids if model_only else generated,
+        "tokens_added": len(sampled_ids),
         "temperature": temperature,
         "top_k": top_k,
     }
+    # Put the prompt alias on the measurement-layer result, before
+    # @_measured attests it. API wrappers must not add unsealed output fields.
+    if model_only:
+        result["prompt"] = text
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1445,7 +1474,19 @@ def patch_neuron(
         prompt_defaulted = not prompt
         prompt = prompt or (_cache.get("prompt") if _cache else None)
         if not prompt:
-            prompt = _DEFAULT_MEASURE_PROMPT
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "measured": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "layer": layer,
+                "neuron_index": neuron_index,
+                "reason": (
+                    "No input prompt was supplied or cached. The intervention "
+                    "was not run and no hardcoded prompt was substituted."
+                ),
+            }
 
         before = run(False)
         after = run(True)
