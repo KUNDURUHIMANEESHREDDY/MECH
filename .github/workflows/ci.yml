@@ -7,10 +7,9 @@ on:
     branches: [master]
   pull_request:
 
-# A required status check cannot pass if one of its dependencies is skipped,
-# which is how the live-weight job below is made mandatory rather than
-# optional. The evidence invariants in docs/roadmap.md depend on real weights,
-# so a run that cannot execute GPT-2 must not report success.
+# Live evidence and browser E2E are explicit dependencies of the aggregate
+# release gate. The gate runs even after a failure or skip and rejects anything
+# other than success, so a green aggregate result requires all configured checks.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -181,12 +180,12 @@ jobs:
           LIVE_EVIDENCE_RESULT: ${{ needs.live-evidence.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
         run: |
-          printf 'lint=%s\\nfrontend=%s\\nbackend=%s\\nlive-evidence=%s\\ne2e=%s\\n' \\
+          printf 'lint=%s\nfrontend=%s\nbackend=%s\nlive-evidence=%s\ne2e=%s\n' \
             "$LINT_RESULT" "$FRONTEND_RESULT" "$BACKEND_RESULT" "$LIVE_EVIDENCE_RESULT" "$E2E_RESULT"
-          if [ "$LINT_RESULT" != success ] || \\
-             [ "$FRONTEND_RESULT" != success ] || \\
-             [ "$BACKEND_RESULT" != success ] || \\
-             [ "$LIVE_EVIDENCE_RESULT" != success ] || \\
+          if [ "$LINT_RESULT" != success ] || \
+             [ "$FRONTEND_RESULT" != success ] || \
+             [ "$BACKEND_RESULT" != success ] || \
+             [ "$LIVE_EVIDENCE_RESULT" != success ] || \
              [ "$E2E_RESULT" != success ]; then
             echo "::error::Release gate failed: every required check must succeed."
             exit 1
