@@ -99,7 +99,7 @@ function fmt(v:number|null|undefined){return v==null||!Number.isFinite(v)?'—':
 
 async function createGpt2Prompt():Promise<string>{
   const response=await api.gpt2FreshPrompt();
-  if(!isRecord(response)||response.status!=='ok'||response.provenance!=='live') {
+  if(!isRecord(response)||response.status!=='ok'||response.provenance!=='live'||response.attested!==true) {
     throw new Error(isRecord(response)?asString(response.error)||asString(response.reason)||'GPT-2 prompt generation is unavailable.':'GPT-2 returned an unreadable response.');
   }
   const text=asString(response.prompt)?.trim();
