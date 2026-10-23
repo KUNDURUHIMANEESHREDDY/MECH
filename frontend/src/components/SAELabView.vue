@@ -406,6 +406,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { takeResearchSelection } from '../services/researchSelectionContext';
 import {
   asArray,
   asBoolean,
@@ -464,11 +465,13 @@ const statusRecord = ref<JsonRecord | null>(null);
 const statusLoading = ref(false);
 const statusFailure = ref<Failure | null>(null);
 
-const prompt = ref('The capital of France is');
-const layerInput = ref('');
-const sourceInput = ref('');
-const identifierInput = ref('');
-const versionInput = ref('');
+const linkedContext = takeResearchSelection();
+const pendingFeature = linkedContext?.feature;
+const prompt = ref(linkedContext?.prompt || 'The capital of France is');
+const layerInput = ref(linkedContext?.layer == null ? '' : String(linkedContext.layer));
+const sourceInput = ref(linkedContext?.source || '');
+const identifierInput = ref(linkedContext?.checkpoint || '');
+const versionInput = ref(linkedContext?.version || '');
 
 const isInspecting = ref(false);
 const inspectFailure = ref<Failure | null>(null);
@@ -738,6 +741,10 @@ async function inspect() {
     };
     currentRun.value = run;
     runHistory.value = [run, ...runHistory.value].slice(0, 20);
+    selectedFeature.value = pendingFeature != null && run.features.some((item) => item.index === pendingFeature) ? pendingFeature : null;
+    if (pendingFeature != null && !run.features.some((item) => item.index === pendingFeature)) {
+      inspectFailure.value = { kind: 'error', message: `Linked feature F${pendingFeature} was not present in this backend response. The result is shown without substituting another feature.` };
+    }
   } catch (error) {
     currentRun.value = null;
     inspectFailure.value = {
