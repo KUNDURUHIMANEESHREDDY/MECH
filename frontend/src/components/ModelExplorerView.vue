@@ -1882,7 +1882,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .model-explorer {
   min-height: 100%;
-  background: var(--surface, #ffffff);
+  background: var(--bg, #f4f6f8);
   color: var(--text, #182230);
   color-scheme: light;
   font-family: var(--font, "IBM Plex Sans", "Segoe UI", sans-serif);
@@ -1892,7 +1892,7 @@ onBeforeUnmount(() => {
 .model-explorer__frame {
   width: min(1480px, 100%);
   margin: 0 auto;
-  padding: 18px;
+  padding: clamp(14px, 2vw, 24px);
 }
 
 .explorer-header,
