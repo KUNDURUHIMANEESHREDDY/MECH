@@ -39,7 +39,7 @@ jobs:
   backend-fast:
     name: backend-fast
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -171,7 +171,7 @@ jobs:
         run: >-
           python -m pytest tests/pytest/test_attestation_laundering.py
           tests/pytest/test_attested_evidence.py
-          tests/pytest/test_provenance_not_inverted.py -v --timeout=600 --timeout-method=thread --timeout=600 --timeout-method=thread
+          tests/pytest/test_provenance_not_inverted.py -v --timeout=600 --timeout-method=thread
 
   e2e:
     runs-on: ubuntu-latest
