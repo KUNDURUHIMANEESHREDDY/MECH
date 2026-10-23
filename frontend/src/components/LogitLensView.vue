@@ -269,6 +269,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { takeResearchSelection } from '../services/researchSelectionContext';
 import {
   asArray,
   asBoolean,
@@ -309,7 +310,8 @@ interface Failure {
   message: string;
 }
 
-const prompt = ref('The capital of France is');
+const linkedContext = takeResearchSelection();
+const prompt = ref(linkedContext?.prompt || 'The capital of France is');
 const isRunning = ref(false);
 const result = ref<JsonRecord | null>(null);
 const failure = ref<Failure | null>(null);
