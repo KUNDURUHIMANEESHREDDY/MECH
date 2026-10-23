@@ -198,9 +198,10 @@ const graphNodes = computed<GraphNode[]>(() => {
       const hPos = positions['head-'+layer.index+'-'+selected.value.index] || {x:headX,y:headY};
       result.push({id:'head-'+layer.index+'-'+selected.value.index,label:'Head '+selected.value.index,kind:'Attention head',layer:layer.index,index:selected.value.index,x:hPos.x,y:hPos.y,width:142,height:70,meta:'Attention head',activation:null,mlpWidth:null});
     }
-    if (selected.value?.layer === layer.index && selected.value.kind === 'MLP') {
+    if (selected.value?.layer === layer.index && (selected.value.kind === 'MLP' || selected.value.kind === 'MLP neuron')) {
       const mPos = positions['mlp-'+layer.index] || {x:pos.x,y:pos.y+125};
-      result.push({id:'mlp-'+layer.index,label:'MLP neurons',kind:'MLP',layer:layer.index,index:0,x:mPos.x,y:mPos.y,width:142,height:70,meta:layer.mlpWidth === null ? 'Width unavailable' : layer.mlpWidth+' neurons',activation:null,mlpWidth:layer.mlpWidth});
+      const isNeuron = selected.value.kind === 'MLP neuron';
+      result.push({id:isNeuron?'neuron-'+layer.index+'-'+selected.value.index:'mlp-'+layer.index,label:isNeuron?'Neuron '+selected.value.index:'MLP neurons',kind:isNeuron?'MLP neuron':'MLP',layer:layer.index,index:isNeuron?selected.value.index:0,x:mPos.x,y:mPos.y,width:142,height:70,meta:isNeuron?'MLP activation dimension':layer.mlpWidth === null ? 'Width unavailable' : layer.mlpWidth+' neurons',activation:isNeuron?mlpNeuronActivation(layer.index,selected.value.index):layerActivation(layer.index,'MLP'),mlpWidth:layer.mlpWidth});
     }
   });
   return result;
