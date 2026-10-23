@@ -18,6 +18,8 @@ TO_COMPUTE = (
     "predictions.top_token_match",
     "predictions.model_a_top",
     "predictions.model_b_top",
+    "activations.mlp_layer_cosine_similarity",
+    "activations.mlp_mean_absolute_difference",
     "logits.kl_divergence_a_to_b",
     "residuals.layer_cosine_similarity",
     "residuals.mean_absolute_difference",
