@@ -96,15 +96,15 @@
         <div class="panel-title"><div><span class="eyebrow">INSPECTOR</span><h2>{{ selected?.label || 'Selection details' }}</h2></div><span class="count">{{ selected?.kind || '—' }}</span></div>
         <div v-if="!selected" class="empty-state">Select a layer, attention head, or MLP node to inspect its available data.</div>
         <template v-else>
-          <div class="selection-card"><span class="selection-icon">{{ selected.kind === 'Attention head' ? 'A' : selected.kind === 'MLP' ? 'ƒ' : 'L' }}</span><div><b>{{ selected.label }}</b><small>{{ selected.kind }} · layer {{ selected.layer }}</small></div></div>
+          <div class="selection-card"><span class="selection-icon">{{ selected.kind === 'Attention head' ? 'A' : selected.kind.startsWith('MLP') ? 'ƒ' : 'L' }}</span><div><b>{{ selected.label }}</b><small>{{ selected.kind }} · layer {{ selected.layer }}</small></div></div>
           <div class="detail-tabs"><button :class="{active: detailTab==='overview'}" @click="detailTab='overview'">Overview</button><button :class="{active: detailTab==='path'}" @click="detailTab='path'">Pathway</button></div>
           <template v-if="detailTab==='overview'">
             <div class="detail-row"><span>Activation</span><b>{{ selectedActivation === null ? 'Not captured' : formatNumber(selectedActivation) }}</b></div>
             <div v-if="selectedActivation !== null" class="activation-meter"><span :style="{width: activationPercent + '%'}"></span></div>
             <div class="detail-row"><span>Data source</span><b>{{ activationSource }}</b></div>
             <div class="detail-row"><span>Model layer index</span><b>{{ selected.layer }}</b></div>
-            <div v-if="selected.kind==='Attention head'" class="detail-row"><span>Head index</span><b>{{ selected.index }}</b></div>
-            <div v-if="selected.kind==='MLP'" class="detail-row"><span>MLP width</span><b>{{ selected.mlpWidth === null ? 'Not returned' : selected.mlpWidth.toLocaleString() }}</b></div>
+            <div v-if="selected.kind==='Attention head'" class="detail-row"><span>Head index</span><b>{{ selected.index }}</b></div>\n            <div v-if="selected.kind==='MLP neuron'" class="detail-row"><span>Neuron index</span><b>{{ selected.index }}</b></div>
+            <div v-if="selected.kind==='MLP' || selected.kind==='MLP neuron'" class="detail-row"><span>MLP width</span><b>{{ selected.mlpWidth === null ? 'Not returned' : selected.mlpWidth.toLocaleString() }}</b></div>
             <div class="inspector-note">Unavailable values remain unavailable; this panel does not estimate or fabricate measurements.</div>
           </template>
           <template v-else>
@@ -141,7 +141,7 @@ const capture = ref<{ prompt: string; provenance: string; tokens: string[]; laye
 const layers = ref<LayerInfo[]>([]);
 const selected = ref<Selection | null>(null);
 const expanded = ref(new Set<number>());
-const expandedAll = ref(true);
+const expandedAll = ref(true);\nconst expandedMlp = ref(new Set<number>());
 const showConnections = ref(true);
 const detailTab = ref<'overview' | 'path'>('overview');
 const highlightMode = ref<'none' | 'upstream' | 'downstream' | 'both'>('none');
@@ -158,15 +158,15 @@ const activationSource = computed(() => capture.value ? (capture.value.provenanc
 const selectedActivation = computed(() => {
   if (!capture.value || !selected.value) return null;
   const layer = selected.value.layer;
-  const record = layer === 0 ? capture.value.layerRecord : capture.value.matrices[layer - 1];
+  const record = layer === 0 ? capture.value.layerRecord : capture.value.matrices[layer];
   if (!isRecord(record)) return null;
-  const keys = selected.value.kind === 'Attention head' ? ['attention_activations','attn_activations','head_activations'] : selected.value.kind === 'MLP' ? ['mlp_activations','post_mlp','mlp_post','activations'] : ['resid_post','residual_activations','activations'];
+  const keys = selected.value.kind === 'Attention head' ? ['attention_activations','attn_activations','head_activations'] : (selected.value.kind === 'MLP' || selected.value.kind === 'MLP neuron') ? ['mlp_activations','post_mlp','mlp_post','activations'] : ['resid_post','residual_activations','activations'];
   for (const key of keys) {
     const matrix = numberMatrix(record[key]);
     if (matrix.length) {
       const row = matrix[Math.min(selectedTokenIndex.value, matrix.length - 1)];
       if (!row?.length) continue;
-      const index = selected.value.kind === 'Attention head' ? selected.value.index : selected.value.kind === 'MLP' ? 0 : 0;
+      const index = selected.value.kind === 'Attention head' || selected.value.kind === 'MLP neuron' ? selected.value.index : 0;
       const value = row[Math.min(index, row.length - 1)];
       if (typeof value === 'number') return value;
       const numbers = row.filter((v): v is number => typeof v === 'number');
@@ -176,7 +176,7 @@ const selectedActivation = computed(() => {
   return null;
 });
 const selectedTokenIndex = ref(0);
-const activationPercent = computed(() => selectedActivation.value === null ? 0 : Math.min(100, Math.abs(selectedActivation.value) / Math.max(1, Math.abs(selectedActivation.value)) * 100));
+const activationPercent = computed(() => selectedActivation.value === null ? 0 : Math.min(100, Math.abs(selectedActivation.value) / (1 + Math.abs(selectedActivation.value)) * 100));
 const canvasWidth = 1280;
 const canvasHeight = 650;
 const expandedSet = computed(() => expanded.value);
@@ -191,7 +191,7 @@ const graphNodes = computed<GraphNode[]>(() => {
     const baseX = startX + index * spacing;
     const baseY = 170;
     const pos = positions[id] || {x:baseX,y:baseY};
-    result.push({id,label:'Layer '+layer.index,kind:'Layer',layer:layer.index,index:layer.index,x:pos.x,y:pos.y,width:152,height:78,meta:(layer.heads === null ? 'Heads —' : layer.heads+' heads')+' · MLP '+(layer.mlpWidth === null ? '—' : layer.mlpWidth),activation:null,mlpWidth:layer.mlpWidth});
+    result.push({id,label:'Layer '+layer.index,kind:'Layer',layer:layer.index,index:layer.index,x:pos.x,y:pos.y,width:152,height:78,meta:(layer.heads === null ? 'Heads —' : layer.heads+' heads')+' · MLP '+(layer.mlpWidth === null ? '—' : layer.mlpWidth),activation:layerActivation(layer.index),mlpWidth:layer.mlpWidth});
     if (selected.value?.layer === layer.index && selected.value.kind === 'Attention head') {
       const headX = pos.x;
       const headY = pos.y + 125;
@@ -232,7 +232,7 @@ const relatedIds = computed(() => {
 });
 
 function isExpanded(index:number):boolean { return expandedSet.value.has(index); }
-function headIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.heads ?? 0, 16)},(_,i)=>i); }
+function headIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.heads ?? 0, 16)},(_,i)=>i); }\nfunction neuronIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.mlpWidth ?? 0, 16)},(_,i)=>i); }\nfunction toggleMlp(layer:number) { const next=new Set(expandedMlp.value); if(next.has(layer)) next.delete(layer); else next.add(layer); expandedMlp.value=next; selectMlp(layer); }\nfunction selectNeuron(layer:number,index:number) { expandedAll.value=true; expanded.value=new Set([...expanded.value,layer]); expandedMlp.value=new Set([...expandedMlp.value,layer]); selected.value={id:'neuron-'+layer+'-'+index,label:'Neuron '+index,kind:'MLP neuron',layer,index,mlpWidth:layers.value.find(l=>l.index===layer)?.mlpWidth ?? null}; highlightMode.value='both'; }
 function toggleLayer(index:number) {
   const next=new Set(expanded.value);
   if(next.has(index)) next.delete(index); else next.add(index);
@@ -323,7 +323,7 @@ async function captureActivations() {
     errorMessage.value=describeError(error);
   } finally { capturing.value=false; }
 }
-function formatNumber(value:number):string { return Number.isFinite(value)?value.toFixed(4):'—'; }
+function tensorMean(record: unknown, keys: string[], dimension = 0): number | null {\n  if (!isRecord(record)) return null;\n  for (const key of keys) {\n    const matrix=numberMatrix(record[key]);\n    const row=matrix[Math.min(selectedTokenIndex.value,Math.max(0,matrix.length-1))];\n    if (!row?.length) continue;\n    const value=row[dimension];\n    if (typeof value==='number') return value;\n    const nums=row.filter((v):v is number=>typeof v==='number');\n    if(nums.length) return nums.reduce((sum,v)=>sum+v,0)/nums.length;\n  }\n  return null;\n}\nfunction layerActivation(index:number, kind='Layer'):number|null {\n  if(!capture.value) return null;\n  const record=index===0?capture.value.layerRecord:capture.value.matrices[index];\n  const keys=kind==='MLP'?['mlp_activations','post_mlp','mlp_post','activations']:['resid_post','residual_activations','activations'];\n  return tensorMean(record,keys);\n}\nfunction mlpNeuronActivation(layer:number,index:number):number|null {\n  if(!capture.value) return null;\n  return tensorMean(capture.value.matrices[layer],['mlp_activations','post_mlp','mlp_post','activations'],index);\n}\nfunction formatNumber(value:number):string { return Number.isFinite(value)?value.toFixed(4):'—'; }
 onMounted(()=>{ void loadArchitecture(); });
 onBeforeUnmount(()=>{ drag.value=null; });
 </script>
