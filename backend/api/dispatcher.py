@@ -1402,7 +1402,14 @@ def _generate_fresh_prompt(engine: Any, max_new_tokens: int = 12) -> str:
         return ""
     try:
         result = engine.generate_text("", max_new_tokens=max_new_tokens)
-        text = str(result.get("text", "")).strip() if isinstance(result, dict) else ""
+        text = (
+            str(result.get("prompt", "")).strip()
+            if isinstance(result, dict)
+            and result.get("status") == "ok"
+            and result.get("provenance") == "live"
+            and result.get("attested") is True
+            else ""
+        )
         return text[:_MAX_PROMPT_CHARS] if text else ""
     except Exception as exc:
         logger.warning("GPT-2 prompt generation failed: %s", exc)
