@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from transformers.masking_utils import create_causal_mask
 
 from _weight_guard import skip_reason, weights_available
 
@@ -77,10 +78,13 @@ def _decompose(engine, texts, pad: bool = False, dtype=None):
     try:
         if pad:
             tokenizer.padding_side = "right"
-        ids = tokenizer(texts, return_tensors="pt", padding=pad)["input_ids"]
+        encoded = tokenizer(texts, return_tensors="pt", padding=pad)
     finally:
         tokenizer.padding_side = original_padding_side
-    ids = ids.to(model.device)
+    ids = encoded["input_ids"].to(model.device)
+    attention_mask = encoded.get("attention_mask")
+    if attention_mask is not None:
+        attention_mask = attention_mask.to(model.device)
     batch, seq = ids.shape
 
     previous = model
@@ -88,13 +92,29 @@ def _decompose(engine, texts, pad: bool = False, dtype=None):
         previous = model.float() if dtype == torch.float32 else model.to(dtype)
 
     with torch.no_grad():
-        h = (previous.transformer.wte(ids)
-             + previous.transformer.wpe(torch.arange(seq)).unsqueeze(0))
+        token_embeddings = previous.transformer.wte(ids)
+        position_ids = torch.arange(seq, device=ids.device).unsqueeze(0).expand(batch, -1)
+        position_embeddings = previous.transformer.wpe(position_ids)
+        # GPT2Attention called as a standalone submodule has no parent GPT2Model
+        # to construct the causal/padding mask. Without this, it attends to
+        # future positions and right-padding changes the real tokens' residuals.
+        causal_mask = create_causal_mask(
+            config=previous.config,
+            inputs_embeds=token_embeddings,
+            attention_mask=attention_mask,
+            past_key_values=None,
+            position_ids=position_ids,
+            allow_is_causal_skip=False,
+        )
+        h = token_embeddings + position_embeddings
         rows = []
         for layer in range(engine._n_layers()):
             block = previous.transformer.h[layer]
             resid_pre = h
-            attn_out = block.attn(block.ln_1(resid_pre))[0]
+            attn_out = block.attn(
+                block.ln_1(resid_pre),
+                attention_mask=causal_mask,
+            )[0]
             resid_mid = resid_pre + attn_out
             mlp_out = block.mlp(block.ln_2(resid_mid))
             resid_post = resid_mid + mlp_out
