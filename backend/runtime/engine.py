@@ -10,7 +10,7 @@ import datetime as _dt
 from typing import Any, Dict, List, Optional
 
 from .batch_runner import BatchRunnerEngine
-from .comparison import ModelComparisonEngine
+from .comparison import HuggingFaceComparisonBackend, ModelComparisonEngine
 from .execution.distributed import DistributedExecutionTarget, ExecutionTarget
 from .execution.multi_gpu import MultiGPUPlacementPlanner
 from .execution.streaming import ModelStreamingEngine
@@ -29,7 +29,7 @@ class ExecutionEngine:
     def __init__(self) -> None:
         self.context = ExecutionContext()
         self.patch_set = PatchSet()
-        self.comparison_engine = ModelComparisonEngine()
+        self.comparison_engine = ModelComparisonEngine(backend=HuggingFaceComparisonBackend())
         self.logits_engine = IntermediateLogitsEngine()
         self.batch_runner = BatchRunnerEngine()
         self.distributed_target = DistributedExecutionTarget()

@@ -3,7 +3,37 @@
 <header class="hero"><div><p class="eyebrow">MECH / RESEARCH OPERATIONS</p><h1>Research Workflow</h1><p>Compare prompts, inspect SAE features and logit lens projections, save reproducible experiments, and link results to existing tools.</p></div><button class="button secondary" :disabled="!hasFindings" @click="exportFindings">Export findings ↓</button></header>
 <section class="panel"><div class="heading"><div><p class="eyebrow">01 / EXPERIMENT DESIGN</p><h2>Define a controlled comparison</h2></div><span class="tag">{{backendLabel}}</span></div>
 <div class="fields"><label>Experiment title<input v-model="title" maxlength="120"></label><label>Model / SAE checkpoint A<input v-model="checkpoint" placeholder="gpt2 or SAE checkpoint ID"></label><label>SAE checkpoint B (optional)<input v-model="checkpointB" placeholder="Blank = same as checkpoint A"></label><label class="wide">Prompt A<textarea v-model="promptA" rows="2" maxlength="512"></textarea></label><label class="wide">Prompt B<textarea v-model="promptB" rows="2" maxlength="512"></textarea></label><label>SAE layer (optional)<input v-model="layer" type="number" min="0" step="1" placeholder="Backend default"></label><label>SAE source<select v-model="source"><option value="">Server default</option><option value="local">local</option><option value="configured">configured</option></select></label></div>
-<div class="actions"><button class="button primary" :disabled="running||!promptA.trim()||!promptB.trim()" @click="runLens">{{running?'Running…':'Compare prompts · Logit Lens'}}</button><button class="button secondary" :disabled="running||!promptA.trim()||!promptB.trim()" @click="runSae">{{running?'Working…':'Inspect SAE features'}}</button></div><p class="hint">SAE checkpoint identifiers are request metadata interpreted by the SAE backend; they do not switch GPT-2 weights. Residual-stream comparisons use the backend’s active GPT-2 checkpoint only and require matching weight-derived fingerprints. Cross-checkpoint tensor comparison remains unavailable until the backend actually loads and attests both sets of weights.</p><p v-if="error" class="error" role="alert">{{error}}</p><p v-if="notice" class="notice" role="status">{{notice}}</p></section>
+<div class="actions"><button class="button primary" :disabled="running||!promptA.trim()||!promptB.trim()" @click="runLens">{{running?'Running…':'Compare prompts · Logit Lens'}}</button><button class="button secondary" :disabled="running||!promptA.trim()||!promptB.trim()" @click="runSae">{{running?'Working…':'Inspect SAE features'}}</button></div><p class="hint">SAE checkpoint identifiers are request metadata interpreted by the SAE backend; they do not switch GPT-2 weights. Residual-stream comparisons use the backend’s active GPT-2 checkpoint only and require matching weight-derived fingerprints. Cross-checkpoint tensor comparison remains unavailable until the backend actually loads and attests both sets of weights.</p><p class="hint">Prompt A and B are filled by live GPT-2 generation on open and rotate automatically every 2 minutes. If GPT-2 is unavailable, no prewritten prompt is substituted.</p><p v-if="promptRotationNote" class="notice" role="status">{{promptRotationNote}}</p><p v-if="error" class="error" role="alert">{{error}}</p><p v-if="notice" class="notice" role="status">{{notice}}</p></section>
+<section class="panel" data-testid="live-cross-model-comparison">
+<div class="heading"><div><p class="eyebrow">01B / LIVE MULTI-MODEL EXECUTION</p><h2>Cross-checkpoint comparison</h2></div><span class="tag">{{crossModelBusy?'LOADING REAL WEIGHTS':crossModelResult?'LIVE MEASUREMENT':'NO RUN YET'}}</span></div>
+<p class="hint">Enter two real Hugging Face checkpoint IDs and revisions. MECH loads each independently, records resolved revisions and content fingerprints, compares only aligned tensor shapes, and stores completed live runs. Missing weights, incompatible shapes, or unavailable dependencies produce an explicit unavailable result—not a made-up metric.</p>
+<div class="fields">
+<label>Checkpoint A · Hugging Face repo ID<input v-model="compareModelA" placeholder="Enter checkpoint A (required)" autocomplete="off"></label>
+<label>Checkpoint B · Hugging Face repo ID<input v-model="compareModelB" placeholder="Enter checkpoint B (required)" autocomplete="off"></label>
+<label>Requested revision A<input v-model="compareRevisionA" placeholder="Commit hash, tag, or branch"></label>
+<label>Requested revision B<input v-model="compareRevisionB" placeholder="Commit hash, tag, or branch"></label>
+</div>
+<div class="actions"><button class="button primary" :disabled="crossModelBusy||!promptA.trim()||!compareModelA.trim()||!compareModelB.trim()" @click="runCrossModelComparison">{{crossModelBusy?'Loading and measuring…':'Run live cross-model comparison'}}</button></div>
+<p class="hint">Input prompt commitment: {{promptA.trim() ? promptA.trim().slice(0,160) : 'Waiting for generated prompt'}}{{promptA.trim().length>160?'…':''}}</p>
+<p v-if="crossModelError" class="error" role="alert">{{crossModelError}}</p>
+<div v-if="crossModelResult" class="comparison-results" data-testid="cross-model-result">
+<div class="fields">
+<div class="analysis-card"><h3>Checkpoint A</h3><p><strong>{{nestedText(crossModelModels.a,'repo_id_requested')||'—'}}</strong></p><p>Resolved revision: <code>{{nestedText(crossModelModels.a,'resolved_revision')||'not supplied by loader'}}</code></p><p>Weights: <code>{{nestedText(crossModelModels.a,'weights_sha256')||'unavailable'}}</code></p></div>
+<div class="analysis-card"><h3>Checkpoint B</h3><p><strong>{{nestedText(crossModelModels.b,'repo_id_requested')||'—'}}</strong></p><p>Resolved revision: <code>{{nestedText(crossModelModels.b,'resolved_revision')||'not supplied by loader'}}</code></p><p>Weights: <code>{{nestedText(crossModelModels.b,'weights_sha256')||'unavailable'}}</code></p></div>
+</div>
+<div class="analysis-grid">
+<div class="analysis-card"><h3>Next-token prediction</h3><p>A: <code>{{nestedText(crossModelPredictions.model_a_top,'token')||'—'}}</code> · p={{fmt(nestedNumber(crossModelPredictions.model_a_top,'probability')??null)}}</p><p>B: <code>{{nestedText(crossModelPredictions.model_b_top,'token')||'—'}}</code> · p={{fmt(nestedNumber(crossModelPredictions.model_b_top,'probability')??null)}}</p><p>Decoded top token match: <strong>{{crossModelPredictions.top_token_match===true?'yes':crossModelPredictions.top_token_match===false?'no':'not measured'}}</strong></p></div>
+<div class="analysis-card"><h3>Logit distribution</h3><p>KL divergence A → B: <strong>{{fmt(asNumber(crossModelLogits.kl_divergence_a_to_b)??null)}}</strong></p><p class="hint">{{asString(crossModelLogits.not_comparable_reason)||'Computed from real next-token logits where tokenizer and vocabulary identities match.'}}</p></div>
+</div>
+<h3>Aligned MLP activation tensors ({{crossModelActivationRows.length}})</h3>
+<div v-if="crossModelActivationRows.length" class="table-wrap"><table><thead><tr><th>Layer A/B</th><th>Activation captured</th><th>Tensor shape</th><th>Cosine similarity</th><th>Mean absolute difference</th></tr></thead><tbody><tr v-for="r in crossModelActivationRows" :key="'cross-mlp-'+r.layer_a"><td>{{r.layer_a}} / {{r.layer_b}}</td><td><code>{{asString(r.activation_kind)||'MLP activation'}}</code></td><td><code>{{asArray(r.shape).join(' × ')}}</code></td><td>{{fmt(asNumber(r.cosine_similarity)??null)}}</td><td>{{fmt(asNumber(r.mean_absolute_difference)??null)}}</td></tr></tbody></table></div><p v-else class="hint">{{asString(crossModelActivations.not_comparable_reason)||'No MLP activation tensors aligned for this pair.'}}</p>
+<h3>Aligned residual layers ({{crossModelResidualRows.length}})</h3>
+<div v-if="crossModelResidualRows.length" class="table-wrap"><table><thead><tr><th>Layer A/B</th><th>Tensor shape</th><th>Cosine similarity</th><th>Mean absolute difference</th></tr></thead><tbody><tr v-for="r in crossModelResidualRows" :key="'cross-resid-'+r.layer_a"><td>{{r.layer_a}} / {{r.layer_b}}</td><td><code>{{asArray(r.shape).join(' × ')}}</code></td><td>{{fmt(asNumber(r.cosine_similarity)??null)}}</td><td>{{fmt(asNumber(r.mean_absolute_difference)??null)}}</td></tr></tbody></table></div><p v-else class="hint">{{asString(crossModelResiduals.not_comparable_reason)||'No residual tensors aligned for this pair.'}}</p>
+<h3>Aligned attention layers ({{crossModelAttentionRows.length}})</h3>
+<div v-if="crossModelAttentionRows.length" class="table-wrap"><table><thead><tr><th>Layer A/B</th><th>Tensor shape</th><th>Tensor cosine</th><th>Mean absolute difference</th></tr></thead><tbody><tr v-for="r in crossModelAttentionRows" :key="'cross-attn-'+r.layer_a"><td>{{r.layer_a}} / {{r.layer_b}}</td><td><code>{{asArray(r.shape).join(' × ')}}</code></td><td>{{fmt(asNumber(r.tensor_cosine_similarity)??null)}}</td><td>{{fmt(asNumber(r.mean_absolute_difference)??null)}}</td></tr></tbody></table></div><p v-else class="hint">{{asString(crossModelAttention.not_comparable_reason)||'No attention tensors aligned for this pair.'}}</p>
+<p class="hint">Input SHA-256: <code>{{nestedText(crossModelResult.input,'sha256')||'not supplied'}}</code> · Experiment record: <code>{{asString(crossModelResult.experiment_id)||'not supplied'}}</code> · Stored: {{crossModelResult.stored===true?'yes':crossModelResult.stored===false?'no':'not reported'}}</p>
+</div>
+</section>
 <div class="results"><section class="panel"><div class="heading"><div><p class="eyebrow">02 / LAYER PROJECTIONS</p><h2>Logit Lens comparison</h2></div><span class="tag">{{lens.length}} / 2</span></div><p class="hint">Top returned token and probability per layer. These are intermediate projections, not final model predictions.</p><div v-if="!lens.length" class="empty">Run the prompt comparison to request live layer projections.</div><div v-else class="table-wrap"><table><thead><tr><th>Layer</th><th>A token</th><th>A p</th><th>B token</th><th>B p</th></tr></thead><tbody><tr v-for="r in lensRows" :key="r.layer" :class="{selected:selectedLayer===r.layer}" @click="selectedLayer=r.layer"><th>L{{r.layer}}</th><td><code>{{r.a}}</code></td><td>{{fmt(r.ap)}}</td><td><code>{{r.b}}</code></td><td>{{fmt(r.bp)}}</td></tr></tbody></table></div></section>
 <section class="panel"><div class="heading"><div><p class="eyebrow">03 / SPARSE FEATURES</p><h2>SAE feature comparison</h2></div><span class="tag">{{sae.length}} / 2</span></div><p class="hint">Only returned feature indices and activations are displayed. Select a row to link to SAE Lab.</p><div v-if="!sae.length" class="empty">Run SAE inspection to compare feature activations.</div><div v-else class="table-wrap"><table><thead><tr><th>Feature</th><th>A activation</th><th>B activation</th><th>Δ B − A</th></tr></thead><tbody><tr v-for="r in saeRows" :key="r.index" :class="{selected:feature===r.index}" @click="feature=r.index"><th>F{{r.index}}</th><td>{{fmt(r.a)}}</td><td>{{fmt(r.b)}}</td><td>{{fmt(r.delta)}}</td></tr></tbody></table></div><button v-if="feature!==null" class="text-link" @click="openTool('saelab')">Inspect feature F{{feature}} in SAE Lab →</button></section></div>
 <section class="panel"><div class="heading"><div><p class="eyebrow">04 / DIFFERENCE ANALYSIS</p><h2>Quantitative comparison</h2></div><span class="tag">{{differenceSummary}}</span></div>
@@ -19,12 +49,30 @@
 </section>
 </template>
 <script setup lang="ts">
-import {computed,ref} from 'vue';
+import {computed,onBeforeUnmount,onMounted,ref} from 'vue';
 import {api} from '../services/api';
 import {asArray,asNumber,asString,gpt2LayerActivations,gpt2LogitLensAll,isRecord,numberMatrix,saeInspect,statusOf,type JsonRecord} from '../services/interpretabilityClient';
 import {setResearchSelection} from '../services/researchSelectionContext';
-const title=ref('Prompt and checkpoint comparison'),checkpoint=ref('gpt2'),checkpointB=ref(''),promptA=ref('The capital of France is'),promptB=ref('The capital of Germany is'),layer=ref(''),source=ref(''),notes=ref(''),lens=ref<Array<{prompt:string;record:JsonRecord}>>([]),sae=ref<Array<{prompt:string;record:JsonRecord;features:Array<{index:number;value:number|null}>}>>([]),running=ref(false),saving=ref(false),error=ref(''),notice=ref(''),saved=ref(''),backendLabel=ref('READY TO RUN'),feature=ref<number|null>(null),selectedLayer=ref<number|null>(null);
+const title=ref('Prompt and checkpoint comparison'),checkpoint=ref('gpt2'),checkpointB=ref(''),promptA=ref(''),promptB=ref(''),layer=ref(''),source=ref(''),notes=ref(''),lens=ref<Array<{prompt:string;record:JsonRecord}>>([]),sae=ref<Array<{prompt:string;record:JsonRecord;features:Array<{index:number;value:number|null}>}>>([]),running=ref(false),saving=ref(false),error=ref(''),notice=ref(''),saved=ref(''),backendLabel=ref('READY TO RUN'),feature=ref<number|null>(null),selectedLayer=ref<number|null>(null);
 const activationLayer=ref(0),activationDimensionStart=ref(0),activationLoading=ref(false),activationError=ref(''),activationComparison=ref<{a:JsonRecord;b:JsonRecord;model:string;fingerprint:string}|null>(null);
+const promptRotationNote=ref('Waiting for live GPT-2 prompt generation…'),promptRotationBusy=ref(false);
+let promptRotationTimer:ReturnType<typeof setInterval>|null=null;
+const compareModelA=ref(''),compareModelB=ref(''),compareRevisionA=ref('main'),compareRevisionB=ref('main');
+const crossModelBusy=ref(false),crossModelError=ref(''),crossModelResult=ref<JsonRecord|null>(null);
+const crossModelModels=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.models)?crossModelResult.value!.models as JsonRecord:{});
+const crossModelPredictions=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.predictions)?crossModelResult.value!.predictions as JsonRecord:{});
+const crossModelLogits=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.logits)?crossModelResult.value!.logits as JsonRecord:{});
+const crossModelActivations=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.activations)?crossModelResult.value!.activations as JsonRecord:{});
+const crossModelActivationRows=computed(()=>asArray(crossModelActivations.value.layers).filter(isRecord));
+
+const crossModelResiduals=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.residuals)?crossModelResult.value!.residuals as JsonRecord:{});
+const crossModelAttention=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.attention)?crossModelResult.value!.attention as JsonRecord:{});
+const crossModelResidualRows=computed(()=>asArray(crossModelResiduals.value.layers).filter(isRecord));
+const crossModelAttentionRows=computed(()=>asArray(crossModelAttention.value.layers).filter(isRecord));
+function nestedText(value:unknown,key:string):string{return (isRecord(value)?asString(value[key]):undefined)??''}
+function nestedNumber(value:unknown,key:string):number|null{return isRecord(value)?asNumber(value[key])??null:null}
+
+
 const hasFindings=computed(()=>lens.value.length>0||sae.value.length>0||activationComparison.value!==null);
 const activationDimensionCount=computed(()=>Math.max(0,numberMatrix(activationComparison.value?.a.resid_post).reduce((max,row)=>Math.max(max,row.length),0)));
 const visibleDimensions=computed(()=>Array.from({length:Math.min(32,Math.max(0,activationDimensionCount.value-activationDimensionStart.value))},(_,i)=>activationDimensionStart.value+i));
@@ -48,6 +96,68 @@ async function save(){saving.value=true;saved.value='';try{const result=await ap
 function exportFindings(){const url=URL.createObjectURL(new Blob([JSON.stringify(snapshot(),null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='mech-research-findings.json';a.click();URL.revokeObjectURL(url)}
 function openTool(id:string){setResearchSelection({prompt:promptA.value.trim(),checkpoint:feature.value!==null&&checkpointB.value.trim()?checkpointB.value.trim():checkpoint.value.trim(),source:source.value.trim()||undefined,layer:selectedLayer.value ?? (layer.value.trim()?Number(layer.value):undefined),feature:feature.value??undefined,origin:'research-workflow'});window.location.hash=id}
 function fmt(v:number|null|undefined){return v==null||!Number.isFinite(v)?'—':v.toLocaleString(undefined,{maximumFractionDigits:5})}
+
+async function createGpt2Prompt():Promise<string>{
+  const response=await api.gpt2FreshPrompt();
+  if(!isRecord(response)||response.status!=='ok'||response.provenance!=='live'||response.attested!==true) {
+    throw new Error(isRecord(response)?asString(response.error)||asString(response.reason)||'GPT-2 prompt generation is unavailable.':'GPT-2 returned an unreadable response.');
+  }
+  const text=asString(response.prompt)?.trim();
+  if(!text) throw new Error('GPT-2 returned no prompt text; no canned prompt was substituted.');
+  return text;
+}
+async function rotateResearchPrompts():Promise<void>{
+  if(promptRotationBusy.value)return;
+  promptRotationBusy.value=true;
+  const previous=[promptA.value.trim(),promptB.value.trim()].filter(Boolean);
+  try{
+    let nextA=await createGpt2Prompt();
+    for(let attempt=0;previous.includes(nextA)&&attempt<3;attempt++) nextA=await createGpt2Prompt();
+    let nextB=await createGpt2Prompt();
+    for(let attempt=0;(nextB===nextA||previous.includes(nextB))&&attempt<3;attempt++) nextB=await createGpt2Prompt();
+    if(previous.includes(nextA)||nextB===nextA||previous.includes(nextB)){
+      promptRotationNote.value='GPT-2 could not generate two distinct new prompts in this cycle; the current inputs were kept.';
+      return;
+    }
+    promptA.value=nextA;
+    promptB.value=nextB;
+    promptRotationNote.value='Both prompts were generated by live GPT-2 · '+new Date().toLocaleTimeString();
+  }catch(e){
+    promptRotationNote.value='GPT-2 prompt generation unavailable: '+(e instanceof Error?e.message:String(e));
+  }finally{promptRotationBusy.value=false}
+}
+async function runCrossModelComparison():Promise<void>{
+  crossModelError.value='';
+  crossModelResult.value=null;
+  const prompt=promptA.value.trim(),modelA=compareModelA.value.trim(),modelB=compareModelB.value.trim();
+  if(!prompt){crossModelError.value='Waiting for a prompt generated by live GPT-2.';return}
+  if(!modelA||!modelB){crossModelError.value='Enter two Hugging Face checkpoint IDs. No default checkpoints are silently selected.';return}
+  if(modelA===modelB&&compareRevisionA.value.trim()===compareRevisionB.value.trim()){
+    crossModelError.value='Choose two distinct checkpoint/revision selections for an independent comparison.';return
+  }
+  crossModelBusy.value=true;
+  try{
+    const result=await api.compareModels({
+      prompt,model_a:modelA,model_b:modelB,
+      revision_a:compareRevisionA.value.trim()||'main',
+      revision_b:compareRevisionB.value.trim()||'main',
+    });
+    if(!isRecord(result))throw new Error('The comparison API returned an unreadable response.');
+    if(result.status!=='completed'||result.provenance!=='live'||result.measured!==true){
+      throw new Error(asString(result.reason)||asString(result.error)||'The two live checkpoints could not be compared. No synthetic results were returned.');
+    }
+    crossModelResult.value=result;
+    notice.value=result.stored===true?'Live comparison measured and stored in MECH experiments.':'Live comparison measured; persistence needs attention.';
+  }catch(e){crossModelError.value=e instanceof Error?e.message:String(e)}
+  finally{crossModelBusy.value=false}
+}
+onMounted(()=>{
+  void rotateResearchPrompts();
+  promptRotationTimer=setInterval(()=>{void rotateResearchPrompts()},120_000);
+});
+onBeforeUnmount(()=>{
+  if(promptRotationTimer!==null)clearInterval(promptRotationTimer);
+});
 </script>
 <style scoped>
 .research-workflow{max-width:1500px;margin:auto;padding:28px clamp(16px,3vw,38px) 56px;display:grid;gap:18px;color:var(--text)}.hero{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}.hero h1{font-size:clamp(28px,3vw,40px);letter-spacing:-.04em;margin:5px 0 8px}.hero p:not(.eyebrow){max-width:760px;color:var(--text-muted);font-size:13px;line-height:1.7}.eyebrow{font-size:10px;font-weight:750;letter-spacing:.14em;color:var(--primary);margin:0}.panel{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:clamp(14px,2vw,22px);min-width:0}.heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:15px}.heading h2{font-size:17px;margin:5px 0}.tag{font-size:9px;font-weight:800;padding:6px 8px;border:1px solid var(--border);border-radius:5px;white-space:nowrap}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.fields label,.notes{display:grid;gap:7px;font-size:11px;font-weight:650;color:var(--text-muted)}input,textarea,select{width:100%;border:1px solid var(--border);border-radius:7px;padding:10px 11px;background:var(--surface-2);color:var(--text);font:inherit;font-size:12px}.wide{grid-column:1/-1}.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}.button{border:1px solid var(--border);border-radius:7px;padding:9px 13px;font-size:11px;font-weight:750;cursor:pointer}.button:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--primary);color:white;border-color:var(--primary)}.secondary{background:var(--surface);color:var(--text)}.hint,.description{color:var(--text-muted);font-size:11px;line-height:1.6}.error{padding:10px;background:#fff1f0;color:#b42318;border-radius:7px;font-size:12px}.notice{padding:10px;background:var(--surface-2);border-radius:7px;font-size:12px}.results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.analysis-card{min-width:0;border:1px solid var(--border);border-radius:9px;padding:13px;background:var(--surface-2)}.analysis-card h3{margin:0 0 6px;font-size:13px}.heatmap-scroll{max-width:100%;overflow:auto}.heatmap-table{font-variant-numeric:tabular-nums}.heatmap-table td{min-width:55px}.residual-heatmap td{min-width:68px;text-align:right;font-variant-numeric:tabular-nums}.residual-heatmap td:nth-child(2),.residual-heatmap td:nth-child(3){text-align:left;min-width:95px}.activation-result{display:grid;gap:10px}.token-pair{display:flex;gap:6px;align-items:center}.delta-track{width:72px;height:5px;border-radius:8px;background:var(--border);overflow:hidden}.delta-track span{display:block;height:100%;background:var(--primary)}.missing{color:var(--text-muted);font-style:italic}.delta-positive{color:#2563eb}.delta-negative{color:#b45309}.delta-neutral{color:var(--text-muted)}.empty{padding:22px 12px;border:1px dashed var(--border);border-radius:8px;color:var(--text-muted);font-size:12px}.table-wrap{max-width:100%;overflow:auto}table{width:100%;border-collapse:collapse;font-size:11px}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--border);white-space:nowrap}th{color:var(--text-muted);font-size:10px}.selected{background:var(--surface-2);cursor:pointer}.tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.tool{display:grid;gap:7px;text-align:left;padding:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer}.tool strong{font-size:12px}.tool span{font-size:10px;color:var(--text-muted)}.tool b,.text-link{font-size:10px;color:var(--primary)}.text-link{margin-top:12px;border:0;background:transparent;cursor:pointer}.status-idle{color:var(--text-muted)}.status-ok{color:#087f5b}.status-error{color:#b42318}@media(max-width:850px){.hero{flex-direction:column}.results,.analysis-grid{grid-template-columns:1fr}.tools{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.fields{grid-template-columns:1fr}.wide{grid-column:auto}.tools{grid-template-columns:1fr}}
