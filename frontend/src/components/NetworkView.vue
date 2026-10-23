@@ -739,8 +739,14 @@ function stopFreshPromptTimer(): void {
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  max-width: 1120px;
+  max-width: none;
+  min-height: 100%;
+  padding: clamp(14px, 2vw, 24px);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
   color: var(--text);
+  color-scheme: light;
+  font-family: var(--font);
   font-size: 13px;
 }
 
@@ -1217,6 +1223,27 @@ function stopFreshPromptTimer(): void {
 
   .ledger-row span {
     display: none;
+  }
+}
+
+/* Shared MECH interaction contract: visible keyboard focus and restrained motion. */
+.network-tool :is(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.network-tool button,
+.network-tool input,
+.network-tool select {
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .network-tool *,
+  .network-tool *::before,
+  .network-tool *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
 </style>
