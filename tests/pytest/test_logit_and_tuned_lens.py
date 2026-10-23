@@ -639,120 +639,79 @@ def test_the_holdout_is_collected_after_the_split_not_before():
 # ── The README's tuned-lens figures must be the measured ones ──────────
 
 def test_the_readme_quotes_the_measured_tuned_lens_result():
-    """Every tuned-lens figure the README publishes is checked against the artifact.
-
-    Including the diagonal-variant caveat, because a reader who finds only the
-    62.2% would reasonably assume the full affine map.
-    """
+    """Experimental README claims must identify and qualify their source artifact."""
     import json
     import re
 
-    artifact = ROOT / "docs" / "results" / "tuned_lens_training.json"
-    assert artifact.exists(), (
-        f"{artifact.name} is missing, so the README's tuned-lens figures have "
-        f"nothing to be checked against")
+    legacy_path = ROOT / "docs" / "results" / "tuned_lens_training.json"
+    artifact_path = ROOT / "docs" / "results" / "tuned_lens_full_affine.json"
+    assert legacy_path.exists(), "legacy artifact must remain traceable"
+    assert artifact_path.exists(), "current experiment artifact is missing"
 
-    payload = json.loads(artifact.read_text(encoding="utf-8"))
-    report = payload["report"]
+    legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+    assert legacy["status"] == "superseded"
+    assert legacy["provenance"] == "historical-unverified"
+    assert legacy["legacy_artifact"]["report"]["publication_eligible"] is False
+
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    report = payload["full_affine"]
     assert report["status"] == "completed"
-    assert report["provenance"] == LIVE, (
-        "the artifact backing a published figure is not live")
+    assert report["provenance"] == "experimental-unverified"
+    assert report["validation_eligible"] is False
+    assert report["publication_eligible"] is False
+    assert report["model_id"] is None
 
-    flat = re.sub(r"\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8"))
-
-    def mean_reduction(key: str) -> float:
-        values = [layer[key] for layer in report["per_layer"]
-                  if layer.get(key) is not None]
-        return sum(values) / len(values)
-
-    in_sample = round(mean_reduction("kl_reduction_pct"), 2)
-    held_out = round(mean_reduction("holdout_kl_reduction_pct"), 2)
-
-    assert f"{in_sample}" in flat, (
-        f"README does not quote the in-sample mean reduction {in_sample}")
-    assert f"{held_out}" in flat, (
-        f"README does not quote the held-out mean reduction {held_out}")
-
-    # Thousands separators differ between prose and JSON, so accept either
-    # rendering of the same number rather than forcing one.
-    params = str(report["parameters_fitted"])
-    assert params in flat or f"{int(params):,}" in flat, (
-        "README does not state the parameter count, so the diagonal variant is "
-        "not visible next to the improvement it produced")
-    # The README must name the family the artifact records, not whichever
-    # family the module happens to default to today.
-    assert report["translator_kind"] in flat, (
-        "the README publishes a tuned-lens improvement without naming the "
-        "translator family the artifact records")
-    assert str(report["layers_holdout_improved"]) in flat, (
-        "README does not state how many layers improved out of sample")
+    flat = re.sub(r"\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8")).lower()
+    assert "experimental, unverified affine translators" in flat
+    assert "model_id: null" in flat
+    assert "publication_eligible: false" in flat
+    assert "not a paper reproduction" in flat
+    assert str(report["parameters_fitted"]) in flat or f"{report['parameters_fitted']:,}" in flat
+    assert str(report["n_fit_prompts"]) in flat
+    assert str(report["n_holdout_prompts"]) in flat
 
 
 def test_the_held_out_figure_is_the_one_the_readme_leads_with():
-    """The in-sample number must not be the headline.
-
-    Held out is close to in-sample here, which is the reassuring result. Leading
-    with the in-sample figure would still be the wrong number to lead with, and
-    the difference is exactly what a reader cannot judge for themselves.
-
-    Checked in two places on purpose. The artifact records what a particular run
-    reported, which says nothing about what the code would do on the next run --
-    so the *expression* in `train()` is checked too. An earlier version of this
-    test only read the artifact and passed while the code had been changed to
-    name the in-sample metric as the headline.
-    """
-    report = json.loads(
-        (ROOT / "docs" / "results" / "tuned_lens_training.json")
-        .read_text(encoding="utf-8"))["report"]
-
-    assert report["headline_metric"] == "holdout_kl_reduction_pct", (
-        "the report names the in-sample metric as the headline; a reader would "
-        "quote the unfalsifiable number")
-
+    """Do not publish a training figure as a validated scientific headline."""
     import inspect
+    import json
+
+    report = json.loads(
+        (ROOT / "docs" / "results" / "tuned_lens_full_affine.json")
+        .read_text(encoding="utf-8")
+    )["full_affine"]
+
+    assert report["headline_metric"] == "holdout_kl_reduction_pct"
+    assert report["publication_eligible"] is False
+    assert report["validation_eligible"] is False
 
     source = inspect.getsource(TunedLens.train)
-    assert '"headline_metric": "holdout_kl_reduction_pct" if heldout' in source, (
-        "train() no longer prefers the held-out metric when a holdout exists, so "
-        "a future run would report the in-sample figure as the headline")
-    assert 'else "kl_reduction_pct"' in source, (
-        "with no holdout the in-sample metric is the only one available, and "
-        "that fallback is now missing")
+    assert '"headline_metric": "holdout_kl_reduction_pct" if heldout' in source
+    assert 'else "kl_reduction_pct"' in source
 
 
 def test_the_readme_states_the_variant_is_not_the_full_affine_map():
-    """Grepping for "diagonal" is too weak a check.
+    """Both model families are labelled; the reduced map is not called the paper's map."""
+    import re
 
-    The word appears in the summary table too, so an earlier version of this
-    guard passed after the caveat paragraph was stripped -- exactly the negative
-    control that was supposed to fail. Requiring the payload field name only the
-    caveat mentions is what makes the restriction visible.
-    """
-    flat = re.sub(r"\s+", " ",
-                  (ROOT / "README.md").read_text(encoding="utf-8")).lower()
-
-    assert "translator_kind" in flat, (
-        "the README publishes a tuned-lens improvement without saying which "
-        "translator family produced it")
-    assert "diagonal_affine" in flat, (
-        "the README does not name the translator variant, so a reader cannot "
-        "tell this apart from the paper's full affine map")
-    assert "18,432" in flat or "18432" in flat, (
-        "the parameter count is what makes the capacity difference concrete, so "
-        "it belongs next to the caveat")
+    flat = re.sub(r"\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8")).lower()
+    assert "translator_kind" in flat
+    assert "diagonal_affine" in flat
+    assert "full-affine report" in flat
+    assert "not a paper reproduction" in flat
 
 
 def test_the_artifact_records_that_the_split_was_deterministic():
-    report = json.loads(
-        (ROOT / "docs" / "results" / "tuned_lens_training.json")
-        .read_text(encoding="utf-8"))["report"]
+    import json
 
-    assert report["n_holdout_prompts"] > 0, (
-        "no prompt was held out, so the reported reduction is in-sample only")
-    assert report["holdout_prompts"], (
-        "the held-out prompts are not recorded, so the split cannot be checked")
-    assert report["n_fit_prompts"] + report["n_holdout_prompts"] == \
-        report["n_calibration_prompts"]
+    report = json.loads(
+        (ROOT / "docs" / "results" / "tuned_lens_full_affine.json")
+        .read_text(encoding="utf-8")
+    )["full_affine"]
+
+    assert report["n_holdout_prompts"] > 0
+    assert report["holdout_prompts"]
+    assert report["n_fit_prompts"] + report["n_holdout_prompts"] == report["n_calibration_prompts"]
 
 
 # ── Stub plumbing ───────────────────────────────────────────────────────

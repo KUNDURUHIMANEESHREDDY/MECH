@@ -1,7 +1,7 @@
 {
   "full_affine": {
     "status": "completed",
-    "provenance": "live",
+    "provenance": "experimental-unverified",
     "translator_kind": "full_affine",
     "parameters_per_layer": 590592,
     "identity_decay": 0.001,
@@ -17,20 +17,20 @@
       "no longer reports `eval_samples: 6`; `n` resolves as `n_samples or task.dataset_size` and no",
       "`GET /api/models` lists eight models; only GPT-2 is ever loaded.",
       "`huggingface-hub` is pinned directly because `transformers` and `transformer-lens`",
-      "the IOI reproduction passes at \u226585% fidelity, which live gpt2-small does not do.",
+      "the IOI reproduction passes at ≥85% fidelity, which live gpt2-small does not do.",
       "injecting one module with a bad import makes it fail, and removing it restores green.",
       "number by more than any within-draw interval would suggest.",
-      "Cross-model comparisons built on those \u2014 \"causal similarity",
+      "Cross-model comparisons built on those — \"causal similarity",
       "`rng.sample` over a 19-word list, `mono` from `betavariate(3.0, 1.5)`, `is_absorbed` from a coin",
       "`translator_kind: \"diagonal_affine\"` precisely so these figures cannot be quoted as \"the",
-      "\"verified\" it could only pass \u2014 `l0_sparsity > 0.50` was guaranteed by `betavariate(0.5,",
+      "\"verified\" it could only pass — `l0_sparsity > 0.50` was guaranteed by `betavariate(0.5,",
       "induction-heads pipeline already measures the same behaviour properly.",
       "zero is a true statement about a claim that has just been written down.",
       "All four now default to `None` and route to the existing missing-evidence",
       "validated the IOI Name Mover circuit at 0.962 confidence.",
       "Also removed from `benchmark_runner.py`, which was fabricating alongside the pipelines:",
       "`run_reproducibility_audit.py` was named *audit*, described itself as *\"the high-fidelity validation",
-      "\"solved\" this by catching the exception and reloading under a different id \u2014 which is how the old",
+      "\"solved\" this by catching the exception and reloading under a different id — which is how the old",
       "which *every* record is stamped `\"fixture\": true, \"measured\": false,",
       "seed-to-seed spread**, and neither output says so: each reports a bare point",
       "a dependency, but **none of the three CSS files imported it**, so no utility class resolved."
@@ -219,11 +219,11 @@
     "headline_metric": "holdout_kl_reduction_pct",
     "validation_eligible": false,
     "publication_eligible": false,
-    "reason": "Fitted 7087104 full_affine parameters (590592 per layer) over 12 layers on 96 calibration prompts (1845 tokens), scored on 24 held-out prompts. 12 of 12 layers improved in sample; 12 of 12 improved out of sample. Full-affine translators match the published modified architecture, but the calibration set is orders of magnitude smaller than a published tuned lens uses, and the identity penalty (0.001) is this module's addition, so these figures are not a reproduction of the paper's numbers."
+    "reason": "Fitted 7087104 full_affine parameters (590592 per layer) over 12 layers on 96 calibration prompts (1845 tokens), scored on 24 held-out prompts. 12 of 12 layers improved in sample; 12 of 12 improved out of sample. Full-affine translators match the published modified architecture, but the calibration set is orders of magnitude smaller than a published tuned lens uses, and the identity penalty (0.001) is this module's addition, so these figures are not a reproduction of the paper's numbers. The checked-in artifact does not bind its results to a non-null model identifier or checkpoint/weight fingerprint, so its live provenance cannot be independently verified from this report; retain as experimental-only."
   },
   "diagonal_affine": {
     "status": "completed",
-    "provenance": "live",
+    "provenance": "experimental-unverified",
     "translator_kind": "diagonal_affine",
     "parameters_per_layer": 1536,
     "identity_decay": 0.001,
@@ -239,20 +239,20 @@
       "no longer reports `eval_samples: 6`; `n` resolves as `n_samples or task.dataset_size` and no",
       "`GET /api/models` lists eight models; only GPT-2 is ever loaded.",
       "`huggingface-hub` is pinned directly because `transformers` and `transformer-lens`",
-      "the IOI reproduction passes at \u226585% fidelity, which live gpt2-small does not do.",
+      "the IOI reproduction passes at ≥85% fidelity, which live gpt2-small does not do.",
       "injecting one module with a bad import makes it fail, and removing it restores green.",
       "number by more than any within-draw interval would suggest.",
-      "Cross-model comparisons built on those \u2014 \"causal similarity",
+      "Cross-model comparisons built on those — \"causal similarity",
       "`rng.sample` over a 19-word list, `mono` from `betavariate(3.0, 1.5)`, `is_absorbed` from a coin",
       "`translator_kind: \"diagonal_affine\"` precisely so these figures cannot be quoted as \"the",
-      "\"verified\" it could only pass \u2014 `l0_sparsity > 0.50` was guaranteed by `betavariate(0.5,",
+      "\"verified\" it could only pass — `l0_sparsity > 0.50` was guaranteed by `betavariate(0.5,",
       "induction-heads pipeline already measures the same behaviour properly.",
       "zero is a true statement about a claim that has just been written down.",
       "All four now default to `None` and route to the existing missing-evidence",
       "validated the IOI Name Mover circuit at 0.962 confidence.",
       "Also removed from `benchmark_runner.py`, which was fabricating alongside the pipelines:",
       "`run_reproducibility_audit.py` was named *audit*, described itself as *\"the high-fidelity validation",
-      "\"solved\" this by catching the exception and reloading under a different id \u2014 which is how the old",
+      "\"solved\" this by catching the exception and reloading under a different id — which is how the old",
       "which *every* record is stamped `\"fixture\": true, \"measured\": false,",
       "seed-to-seed spread**, and neither output says so: each reports a bare point",
       "a dependency, but **none of the three CSS files imported it**, so no utility class resolved."
@@ -441,7 +441,7 @@
     "headline_metric": "holdout_kl_reduction_pct",
     "validation_eligible": false,
     "publication_eligible": false,
-    "reason": "Fitted 18432 diagonal_affine parameters (1536 per layer) over 12 layers on 96 calibration prompts (1845 tokens), scored on 24 held-out prompts. 12 of 12 layers improved in sample; 12 of 12 improved out of sample. Published-restricted: this is the diagonal_affine variant, not the full affine translator, so these figures must not be quoted as 'the tuned lens'.",
+    "reason": "Fitted 18432 diagonal_affine parameters (1536 per layer) over 12 layers on 96 calibration prompts (1845 tokens), scored on 24 held-out prompts. 12 of 12 layers improved in sample; 12 of 12 improved out of sample. Published-restricted: this is the diagonal_affine variant, not the full affine translator, so these figures must not be quoted as 'the tuned lens'. The checked-in artifact does not bind its results to a non-null model identifier or checkpoint/weight fingerprint, so its live provenance cannot be independently verified from this report; retain as experimental-only.",
     "artifact": {
       "status": "saved",
       "provenance": "live",
@@ -455,5 +455,8 @@
       "source": "README.md + docs/**/*.md",
       "chunks": 120
     }
-  }
+  },
+  "schema_version": 1,
+  "status": "experimental-not-publication-eligible",
+  "reproducibility_note": "Legacy generated report normalized during release hardening. This does not regenerate measurements; it downgrades unverifiable provenance labels and eligibility so consumers cannot mistake stored metrics for verified scientific evidence."
 }
