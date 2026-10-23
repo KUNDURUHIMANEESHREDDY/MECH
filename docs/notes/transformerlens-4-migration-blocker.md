@@ -11,8 +11,11 @@ Status: **the legacy API is intentionally retained on TransformerLens 3.9.x whil
 | `huggingface-hub` | `>=1.31.0,<3.0` | Transformers 5.20.2 requires this Hub line |
 | `setuptools` | `>=83.0.0` | Fixes PYSEC-2026-3447 detected in the hosted runner's preinstalled 79.0.1 |
 
-The audited metadata for TransformerLens 3.9 declares `transformers>=5.9.0` and still exports
-`HookedTransformer`. Transformers 5.20.2's dependency metadata requires
+The audited metadata shows that TransformerLens releases starting at **3.6.0**
+already require `transformers>=5.9.0`; 3.6.0 is the first version in that floor
+change (the repository selects 3.9.0, which has the same declared floor and retains
+the API needed here). TransformerLens 3.9 declares `transformers>=5.9.0` and still
+exports `HookedTransformer`. Transformers 5.20.2's dependency metadata requires
 `huggingface-hub>=1.31.0,<3.0`. Thus the 3.9 + 5.20.2 combination avoids the
 old TransformerLens 2.x / Transformers 5 incompatibility without prematurely
 moving the repository's 33 legacy hook call sites onto the 4.x bridge surface.
