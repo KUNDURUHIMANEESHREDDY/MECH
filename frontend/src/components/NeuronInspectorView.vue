@@ -1,57 +1,350 @@
 <template>
-<section class="ni">
-<header class="top"><div><small>MECH / ANALYSIS</small><h1>Neuron Inspector</h1><p>Explore information flow through transformer layers and neurons.</p></div><div class="actions"><select v-model="model"><option>GPT-2 Small</option><option>Qwen3.5-4B</option></select><button @click="run" :disabled="running">{{running?'Analyzing…':'Run analysis ↗'}}</button></div></header>
-<div class="metrics"><div><small>MODEL</small><strong>{{model}}</strong><span>Decoder-only transformer</span></div><div><small>LAYERS VISIBLE</small><strong>{{visibleLayers}} <i>/ 4</i></strong><span>Interactive topology</span></div><div><small>SELECTED NEURON</small><strong>{{selectedNode}}</strong><span>Click a node to inspect</span></div><div><small>VISIBLE CONNECTIONS</small><strong>{{visibleEdges}}</strong><span>Illustrative preview data</span></div></div>
-<div class="work">
-<aside class="left pane"><h3>MODEL & LAYERS</h3><div class="model"><b>M</b><div><strong>{{model}}</strong><small>Transformer · decoder only</small></div></div><label v-for="l in layers" :key="l.id" class="layer"><input type="checkbox" v-model="l.on"><i :style="{background:l.color}"></i><span>{{l.name}}</span><small>{{l.count}}</small></label><h3 class="section">TOKEN EMBEDDINGS <button @click="showEmbedding=!showEmbedding">−</button></h3><div v-if="showEmbedding" class="embed"><i v-for="p in dots" :key="p.id" :style="{left:p.x+'%',top:p.y+'%',background:p.c,width:p.s+'px',height:p.s+'px'}"></i></div><h3 class="section">INPUT TOKENS <small>8 tokens</small></h3><button v-for="(t,i) in tokens" :key="t" class="token" :class="{chosen:i===selectedToken}" @click="selectedToken=i"><span>{{i}}</span>{{t}}<small>{{(0.82-i*.073).toFixed(2)}}</small></button></aside>
-<main class="graph pane"><div class="toolbar"><div class="tabs"><button v-for="t in tabs" :key="t" :class="{active:tab===t}" @click="tab=t">{{t}}</button></div><label>Color by <select v-model="colorBy"><option>Activation</option><option>Weight</option><option>Layer</option></select></label></div><div class="legend"><span><i class="pink"></i>Positive activation</span><span><i class="cyan"></i>Negative activation</span><span><i class="green"></i>Selected pathway</span><b>PREVIEW DATA</b></div><div class="stage"><svg viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Interactive neural network graph"><defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#8d98ad" stroke-opacity=".09"/></pattern><filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><rect width="900" height="560" fill="url(#grid)"/><g v-for="l in layers" :key="l.id"><text :x="l.x" y="31" text-anchor="middle" class="layer-title">{{l.name}}</text><text :x="l.x" y="47" text-anchor="middle" class="sub">{{l.id===0?'tokens':'12 neurons'}}</text></g><g><path v-for="e in edges" :key="e.id" :d="e.d" fill="none" :stroke="edgeColor(e)" :stroke-width="e.active?1.6:.65" :opacity="e.active?.85:.18"/></g><g v-for="n in nodes" :key="n.id" v-show="n.layer===0 || n.layer===5 || layers[n.layer]?.on"><circle :cx="n.x" :cy="n.y" r="12" fill="none" stroke="#4ade80" stroke-width="1.4" v-if="n.id===selectedNode"/><rect :x="n.x-5.5" :y="n.y-5.5" width="11" height="11" rx="2.5" :fill="n.id===selectedNode?'#4ade80':nodeColor(n)" stroke="#e2e8f0" stroke-opacity=".28" :filter="n.id===selectedNode?'url(#glow)':undefined" class="node" tabindex="0" @click="select(n)" @keydown.enter="select(n)"/><text v-if="n.id===selectedNode" :x="n.x+10" :y="n.y-10" class="node-label">{{n.id}}</text></g><g class="tok"><text v-for="(t,i) in tokens" :key="t" x="22" :y="117+i*49" :class="{picked:selectedToken===i}">{{t}}</text><text v-for="(t,i) in outputs" :key="t" x="878" :y="154+i*73" text-anchor="end">{{t}}</text></g><path d="M 172 73 H 224 l -7 -5 m7 5 l -7 5" fill="none" stroke="#8490a5"/><text x="190" y="65" class="sub">forward pass</text></svg><div class="float topfloat"><i class="green-dot"></i> NETWORK TOPOLOGY · {{tab.toUpperCase()}}</div><div class="float bottomfloat"><button @click="progress=Math.max(0,progress-10)">−</button><span>{{progress}}%</span><button @click="progress=Math.min(100,progress+10)">+</button><button @click="progress=60">Fit</button></div></div><div class="graph-footer"><button class="play" @click="playing=!playing">{{playing?'Ⅱ':'▶'}}</button><input type="range" min="0" max="100" v-model.number="progress"><button @click="progress=Math.max(0,progress-20)">‹</button><span>Layer {{Math.max(1,Math.ceil(progress/25))}} / 4</span><button @click="progress=Math.min(100,progress+20)">›</button><label><input type="checkbox" v-model="showValues"> Show values</label></div></main>
-<aside class="right"><section class="pane details"><h3>NEURON DETAILS <span>↗</span></h3><div class="selected"><b>◈</b><div><strong>{{selectedNode}}</strong><small>MLP neuron · layer output</small></div></div><div class="detail-tabs"><button v-for="t in detailTabs" :key="t" :class="{active:detailTab===t}" @click="detailTab=t">{{t}}</button></div><div v-if="detailTab==='Overview'" class="detail-body"><div class="row"><span>Activation strength</span><strong>{{activation.toFixed(3)}}</strong></div><div class="meter"><i :style="{width:activation*100+'%'}"></i></div><div class="specs"><div><small>FEATURE TYPE</small><b>Residual MLP</b><small>SPARSITY</small><b>12.4%</b><small>L2 NORM</small><b>8.31</b></div><div><small>POSITION</small><b>{{selectedToken+1}} / 8</b><small>MEAN ACT</small><b>0.042</b><small>MAX ACT</small><b>2.67</b></div></div></div><div v-else class="ranked"><div v-for="(t,i) in (detailTab==='Top tokens'?['dog','animal','pet','cat','</s>']:['L2 · N14','L3 · N02','L1 · N09'])" :key="t"><span>{{i+1}}</span>{{t}}<b>{{(0.91-i*.12).toFixed(2)}}</b></div></div></section><section class="pane chart-card"><h3>Activation across tokens</h3><p>Normalized response · preview data</p><svg viewBox="0 0 300 130"><g class="chartgrid"><path v-for="i in 4" :key="i" :d="'M 20 '+(i*25)+' H 296'"/></g><path v-for="(s,i) in chartSeries" :key="i" :d="s" fill="none" :stroke="['#f15bb5','#55d6d0','#a78bfa'][i]" stroke-width="2"/><text v-for="(t,i) in tokens" :key="t" :x="24+i*38" y="124">{{t.slice(0,4)}}</text></svg><div class="chartlegend"><span>● Selected</span><span>● Residual</span><span>● Baseline</span></div></section><section class="pane chart-card output"><h3>Neuron output</h3><p>Layer response profile</p><svg viewBox="0 0 300 100"><g class="chartgrid"><path v-for="i in 3" :key="i" :d="'M 20 '+(i*25)+' H 296'"/></g><path v-for="(s,i) in outputSeries" :key="i" :d="s" fill="none" :stroke="['#f15bb5','#55d6d0','#a78bfa','#f59e0b'][i]" stroke-width="1.6"/></svg></section></aside></div>
-<footer><span><i class="green-dot"></i> UI READY</span><span>MECH · Mechanistic Interpretability IDE</span><span>{{model}} · Topology preview</span></footer><div v-if="notice" class="notice">{{notice}}</div>
-</section>
-</template>
-<script setup lang="ts">
-import {computed,ref,watch,onBeforeUnmount} from 'vue';
-const model=ref('GPT-2 Small'),running=ref(false),notice=ref(''),showEmbedding=ref(true),selectedToken=ref(0),selectedNode=ref('L3 · N08'),tab=ref('Model view'),colorBy=ref('Activation'),detailTab=ref('Overview'),showValues=ref(false),playing=ref(false),progress=ref(60);
-const tokens=['The','quick','brown','fox','jumps','over','lazy','dog'],outputs=['dog','</s>','a','the','it','</s>'],tabs=['Model view','Token flow','Attention flow','Feature activation','Comparison'],detailTabs=['Overview','Top tokens','Similar'];
-const layers=ref([{id:0,name:'Input',x:110,count:'8 tokens',color:'#60a5fa',on:true},{id:1,name:'Layer 1',x:265,count:'12',color:'#f15bb5',on:true},{id:2,name:'Layer 2',x:430,count:'12',color:'#55d6d0',on:true},{id:3,name:'Layer 3',x:590,count:'12',color:'#a78bfa',on:true},{id:4,name:'Layer 4',x:750,count:'12',color:'#4ade80',on:true},{id:5,name:'Output',x:870,count:'6 tokens',color:'#60a5fa',on:true}]);
-const visibleLayers=computed(()=>layers.value.filter(l=>l.id>0&&l.id<5&&l.on).length);
-const nodes=computed(()=>{const a:any[]=[];tokens.forEach((t,i)=>a.push({id:'T'+i,layer:0,x:110,y:117+i*49}));for(let l=1;l<=4;l++)for(let n=0;n<10;n++)a.push({id:'L'+l+' · N'+String(n).padStart(2,'0'),layer:l,x:layers.value[l].x,y:85+n*43+(l%2)*5});outputs.forEach((t,i)=>a.push({id:'O'+i,layer:5,x:870,y:154+i*73}));return a});
-const edges=computed(()=>{const a:any[]=[];let id=0;for(let l=0;l<5;l++){const from=nodes.value.filter(n=>n.layer===l),to=nodes.value.filter(n=>n.layer===l+1);from.forEach((f,i)=>to.forEach((t,j)=>{const v=(i*7+j*11+l*13)%17/17;if(v>.35||i===selectedToken.value%from.length||j===2||j===6)a.push({id:id++,from:f.id,to:t.id,fromLayer:l,toLayer:l+1,v,positive:(i+j+l)%3!==0,active:f.id===selectedNode.value||t.id===selectedNode.value,d:'M '+f.x+' '+f.y+' C '+(f.x+(t.x-f.x)*.48)+' '+f.y+', '+(t.x-(t.x-f.x)*.48)+' '+t.y+', '+t.x+' '+t.y})}));}return a});
-const visibleEdges=computed(()=>edges.value.filter(e=>layers.value[e.fromLayer]?.on!==false&&layers.value[e.toLayer]?.on!==false).length);
-const dots=Array.from({length:70},(_,i)=>({id:i,x:8+(i*37%83),y:8+(i*53%83),s:3+i%4,c:['#a78bfa','#55d6d0','#f15bb5','#4ade80','#fbbf24'][i%5]}));
-const activation=computed(()=>Math.min(.99,.42+(selectedNode.value.charCodeAt(selectedNode.value.length-1)%48)/100));
-const chartSeries=computed(()=>Array.from({length:3},(_,j)=>'M '+Array.from({length:8},(_,i)=>(24+i*38)+' '+(75-Math.sin(i*1.2+j*.8)*27-Math.cos(i*.8+j)*11)).join(' L ')));
-const outputSeries=computed(()=>Array.from({length:4},(_,j)=>'M '+Array.from({length:18},(_,i)=>(20+i*16)+' '+(55-Math.sin(i*.92+j*.65)*21-Math.cos(i*1.4+j)*8)).join(' L ')));
-function edgeColor(e:any){if(e.active)return '#4ade80';if(colorBy.value==='Layer')return layers.value[e.toLayer]?.color||'#55d6d0';return e.positive?'#e85ba9':'#4bc6c2'}
-function nodeColor(n:any){return n.layer===0?['#f15bb5','#fbbf24','#60a5fa','#4ade80'][Number(n.id.slice(1))%4]:layers.value[n.layer]?.color||'#f15bb5'}
-function select(n:any){selectedNode.value=n.id;notice.value='Selected '+n.id+' · preview activation';setTimeout(()=>notice.value='',1800)}
-async function run(){running.value=true;await new Promise(r=>setTimeout(r,450));progress.value=Math.min(100,progress.value+10);running.value=false;notice.value='Preview refreshed. Connect a loaded model for measured activations.';setTimeout(()=>notice.value='',3000)}
-let timer:ReturnType<typeof setInterval>|undefined;
-watch(playing,v=>{if(v)timer=setInterval(()=>progress.value=progress.value>=100?0:progress.value+2,240);else if(timer){clearInterval(timer);timer=undefined}});
-onBeforeUnmount(()=>{if(timer)clearInterval(timer)});
-</script>
-<style scoped>
-.ni{height:100%;min-height:0;display:flex;flex-direction:column;overflow:auto;background:#0b0e14;color:#e7eaf1;font:12px/1.45 Inter,system-ui,sans-serif;--line:#252b36;--muted:#8d97a9}.ni *{box-sizing:border-box}.ni button,.ni select{font:inherit;color:inherit;cursor:pointer}.ni button:focus-visible,.ni select:focus-visible{outline:2px solid #818cf8;outline-offset:2px}.top{padding:18px 22px 15px;display:flex;justify-content:space-between;align-items:center;gap:15px;border-bottom:1px solid var(--line)}.top small{color:#9ca8bc;letter-spacing:1.3px;font-size:9px}.top h1{font-size:24px;letter-spacing:-.6px;margin:6px 0 2px}.top p{margin:0;color:var(--muted);font-size:11px}.actions{display:flex;gap:8px}.ni select{background:#121720;border:1px solid #303747;border-radius:6px;padding:9px}.actions button{background:#5365f0;border:1px solid #7480ff;border-radius:6px;padding:9px 13px;font-weight:600}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border-bottom:1px solid var(--line)}.metrics>div{background:#0e1219;padding:10px 17px;display:grid;gap:3px}.metrics small{font-size:9px;letter-spacing:.7px;color:#8994a7}.metrics strong{font-size:18px}.metrics strong i{font-size:11px;color:#8792a5;font-style:normal}.metrics span{font-size:9px;color:#7f899c}.work{display:grid;grid-template-columns:190px minmax(370px,1fr) 260px;gap:8px;padding:9px;flex:1;min-height:610px}.pane{border:1px solid var(--line);border-radius:8px;background:#0e1219;overflow:hidden;min-width:0}.left{padding:12px 10px}.ni h3{margin:0;font-size:10px;letter-spacing:.65px;font-weight:700;color:#c4ccda}.model{display:flex;align-items:center;gap:8px;padding:13px 2px 10px}.model>b{display:grid;place-items:center;width:29px;height:29px;background:#1b2232;border:1px solid #39445e;color:#a5b4fc;border-radius:7px}.model div{display:grid;gap:2px}.model strong{font-size:10px}.model small{font-size:9px;color:var(--muted)}.layer{display:flex;align-items:center;gap:7px;padding:7px 2px;color:#c6cedd;font-size:10px;cursor:pointer}.layer input{accent-color:#818cf8}.layer i{width:7px;height:7px;border-radius:2px}.layer small{margin-left:auto;color:#7f899b;font-size:9px}.section{margin-top:15px;padding-top:12px;border-top:1px solid #252b36;display:flex;justify-content:space-between;align-items:center}.section button{border:0;background:none}.section small{color:#7f899b;font-weight:400;letter-spacing:0}.embed{height:105px;margin:10px 0;position:relative;background:radial-gradient(ellipse,#171e2a,#0d1118 70%);border:1px solid #222a37;border-radius:5px}.embed i{position:absolute;border-radius:50%;opacity:.9;box-shadow:0 0 6px #a78bfa33}.token{display:flex;align-items:center;gap:7px;width:100%;border:1px solid transparent;border-radius:4px;padding:5px 4px;text-align:left;background:transparent;font-size:10px}.token span{color:#778398;font-size:9px;width:10px}.token small{margin-left:auto;color:#8994a9;font-size:9px}.token.chosen{background:#1b2e53;border-color:#31589c}.graph{display:flex;flex-direction:column}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:8px;border-bottom:1px solid var(--line)}.tabs{display:flex;overflow:auto;gap:2px}.tabs button{white-space:nowrap;background:transparent;border:0;padding:7px 8px;color:#8d97a9;font-size:9px;border-radius:4px}.tabs button.active{background:#20283a;color:#f0f2fa;box-shadow:inset 0 -2px #818cf8}.toolbar label{font-size:9px;color:#8d97a9;white-space:nowrap}.toolbar select{padding:5px}.legend{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #1e2430;color:#929db0;font-size:8px;flex-wrap:wrap}.legend span{display:flex;align-items:center;gap:5px}.legend i{width:7px;height:7px;border-radius:50%}.pink{background:#f15bb5}.cyan{background:#55d6d0}.green{background:#4ade80}.legend b{margin-left:auto;color:#f0b86a;background:#2a2116;border:1px solid #5b4627;border-radius:3px;padding:3px 5px;font-size:7px;letter-spacing:.5px}.stage{position:relative;flex:1;min-height:400px;background:#0b0e14}.stage svg{width:100%;height:100%;min-height:400px;display:block}.layer-title{fill:#b9c2d3;font-size:13px;font-weight:600}.sub{fill:#78849a;font-size:9px}.node{cursor:pointer;transition:filter .15s}.node:hover{stroke:#fff;stroke-width:2;filter:url(#glow)}.node-label{fill:#fff;font-size:10px;font-weight:600}.tok text{fill:#9aa5b7;font-size:11px}.tok text.picked{fill:#fff;font-weight:700}.float{position:absolute;display:flex;align-items:center;gap:7px;padding:7px 9px;background:#121722df;border:1px solid #303746;border-radius:5px;color:#aeb8c9;font-size:8px;backdrop-filter:blur(7px)}.topfloat{left:10px;top:10px;letter-spacing:.5px}.green-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;box-shadow:0 0 7px #4ade8070}.bottomfloat{bottom:10px;left:10px}.bottomfloat button{border:0;background:transparent;padding:0 3px}.graph-footer{display:flex;align-items:center;gap:8px;padding:9px;border-top:1px solid var(--line);font-size:10px;color:#aab4c5}.graph-footer input[type=range]{flex:1;min-width:35px;accent-color:#818cf8}.graph-footer button{border:1px solid #303849;background:#171d28;border-radius:4px;padding:3px 8px}.graph-footer .play{border:0;background:#5365f0;border-radius:50%;width:28px;height:28px}.graph-footer label{white-space:nowrap;font-size:9px}.graph-footer label input{accent-color:#818cf8}.right{display:flex;flex-direction:column;gap:8px;min-width:0}.details h3{display:flex;justify-content:space-between;padding:12px;border-bottom:1px solid var(--line)}.details h3 span{color:#7f899c}.selected{display:flex;align-items:center;gap:9px;padding:11px}.selected>b{display:grid;place-items:center;width:28px;height:28px;border:1px solid #77426f;background:#38203a;color:#f472d0;border-radius:7px;font-size:17px}.selected div{display:grid;gap:3px}.selected strong{font-size:10px}.selected small{font-size:9px;color:#8b96a9}.detail-tabs{display:flex;padding:0 7px;border-bottom:1px solid var(--line)}.detail-tabs button{flex:1;background:transparent;border:0;border-bottom:2px solid transparent;padding:8px 1px;color:#818ca0;font-size:8px}.detail-tabs button.active{border-color:#818cf8;color:#dfe4f2}.detail-body{padding:11px}.row{display:flex;justify-content:space-between;color:#9ba6b8;font-size:9px}.row strong{color:#f1c8e4}.meter{height:7px;border-radius:8px;background:#252b36;margin:9px 0 13px;overflow:hidden}.meter i{display:block;height:100%;background:linear-gradient(90deg,#a855f7,#f15bb5)}.specs{display:grid;grid-template-columns:1fr 1fr;gap:12px}.specs div{display:grid;gap:5px}.specs small{color:#7f8a9d;font-size:8px;letter-spacing:.5px;margin-top:3px}.specs b{font-size:10px;font-weight:500}.ranked{padding:7px 11px}.ranked div{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #202631;font-size:10px}.ranked span{color:#8e98aa}.ranked b{margin-left:auto;color:#b7c2d4}.chart-card{padding:11px 10px}.chart-card h3{font-size:11px;letter-spacing:0;color:#e0e5ef}.chart-card p{margin:4px 0;color:#7e899d;font-size:9px}.chart-card svg{width:100%;display:block;margin-top:6px}.chartgrid path{stroke:#6c7688;stroke-opacity:.2;stroke-width:1}.chart-card svg text{font-size:8px;fill:#758196}.chartlegend{display:flex;justify-content:space-between;color:#8d97a9;font-size:8px}.chartlegend span:first-child{color:#f15bb5}.chartlegend span:nth-child(2){color:#55d6d0}.chartlegend span:nth-child(3){color:#a78bfa}.output{flex:1}footer{display:flex;justify-content:space-between;gap:12px;padding:8px 14px;border-top:1px solid var(--line);font-size:9px;color:#778296}footer span:first-child{color:#a8b3c4}.notice{position:fixed;bottom:35px;left:50%;transform:translateX(-50%);background:#1d2736;border:1px solid #43506a;padding:10px 14px;border-radius:7px;box-shadow:0 10px 40px #0008;z-index:5}@media(max-width:1200px){.work{grid-template-columns:170px minmax(350px,1fr)}.right{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr}.work{min-height:900px}.ni{overflow:auto}}@media(max-width:760px){.top{align-items:flex-start;flex-direction:column}.actions{width:100%}.actions select{flex:1;min-width:0}.metrics{grid-template-columns:1fr 1fr}.work{display:flex;flex-direction:column;min-height:0}.graph{order:1;min-height:620px}.right{order:2;display:flex}.left{order:3}.toolbar{align-items:flex-start;flex-direction:column}.legend{height:auto}.stage,.stage svg{min-height:420px}footer{flex-wrap:wrap}}
+  <section class="workspace" aria-labelledby="workspace-title">
+    <header class="workspace-header">
+      <div class="heading">
+        <span class="eyebrow">MECH / MECHANISTIC INTERPRETABILITY</span>
+        <h1 id="workspace-title">Neural Network Workspace</h1>
+        <p>Explore transformer layers, attention heads, MLP neurons, and measured model activations.</p>
+      </div>
+      <div class="header-actions">
+        <span class="status" :class="'status--' + runtimeState"><i></i>{{ runtimeLabel }}</span>
+        <button class="button button--quiet" :disabled="architectureLoading" @click="loadArchitecture">{{ architectureLoading ? 'Connecting…' : 'Refresh model' }}</button>
+      </div>
+    </header>
 
-/* Light scientific IDE surface; retain the dark graph canvas for activation contrast. */
-.ni{background:#f4f6fa!important;color:#172033!important;--line:#dce2eb;--muted:#64748b}
-.ni .top,.ni .metrics>div,.ni .left,.ni .details,.ni .chart-card,.ni .pane:not(.graph){background:#fff!important}
-.ni .top,.ni .metrics,.ni .metrics>div,.ni .pane,.ni .section,.ni .details h3,.ni .detail-tabs,.ni .graph-footer{border-color:#dce2eb!important}
-.ni .top h1,.ni .metrics strong,.ni .model strong,.ni .layer,.ni .token,.ni .ni-status,.ni .chart-card h3,.ni .details h3,.ni .selected strong,.ni .specs b{color:#172033}
-.ni .top p,.ni .metrics span,.ni .metrics small,.ni .model small,.ni .layer small,.ni .section small,.ni .selected small,.ni .chart-card p,.ni .specs small,.ni .detail-tabs button,.ni .row span{color:#64748b}
-.ni .model>b{background:#eef2ff;border-color:#c7d2fe;color:#4338ca}
-.ni .layer:hover,.ni .token:hover{background:#f1f5f9}
-.ni .token.chosen{background:#eaf1ff;border-color:#9bbcff;color:#1d4ed8}
-.ni .section{border-color:#e2e8f0}
-.ni .embed{background:radial-gradient(ellipse,#eef2ff,#f8fafc 70%);border-color:#e2e8f0}
-.ni .details .selected{background:#fff}
-.ni .selected>b{background:#fdf2f8;border-color:#f5b5df;color:#be185d}
-.ni .detail-tabs button.active{color:#1d4ed8;border-color:#2563eb}
-.ni .ranked div{border-color:#e2e8f0;color:#334155}
-.ni .ranked b{color:#334155}
-.ni .chartgrid path{stroke:#94a3b8;stroke-opacity:.35}
-.ni footer{background:#fff;border-color:#dce2eb;color:#64748b}
-.ni .graph{background:#0b0e14!important;border-color:#dce2eb!important}
-.ni .actions select,.ni .toolbar select{background:#fff;color:#172033;border-color:#cbd5e1}
-.ni .graph-footer{background:#fff;color:#475569}
+    <div class="command-bar">
+      <label class="prompt-field"><span>INPUT PROMPT</span><input v-model="prompt" :disabled="capturing" placeholder="The capital of France is" @keydown.enter.prevent="captureActivations" /></label>
+      <button class="button button--primary" :disabled="capturing || !prompt.trim()" @click="captureActivations">{{ capturing ? 'Capturing activations…' : 'Capture activations' }}</button>
+      <span class="command-note">Runs a real forward pass on the loaded GPT-2 model.</span>
+    </div>
+
+    <div v-if="errorMessage" class="notice notice--error" role="alert">{{ errorMessage }}</div>
+    <div v-if="captureMessage" class="notice" role="status">{{ captureMessage }}</div>
+
+    <div class="metrics">
+      <div><span>MODEL</span><strong>{{ modelName }}</strong><small>{{ architecture ? 'Runtime architecture' : 'Awaiting model metadata' }}</small></div>
+      <div><span>TRANSFORMER LAYERS</span><strong>{{ layerCount || '—' }}</strong><small>Returned by backend</small></div>
+      <div><span>SELECTED ELEMENT</span><strong>{{ selected?.label || 'None' }}</strong><small>{{ selected?.kind || 'Select a node in the workspace' }}</small></div>
+      <div><span>ACTIVATION</span><strong>{{ selectedActivation === null ? '—' : formatNumber(selectedActivation) }}</strong><small>{{ activationSource }}</small></div>
+    </div>
+
+    <div class="workspace-grid">
+      <aside class="side-panel layers-panel">
+        <div class="panel-title"><div><span class="eyebrow">MODEL TREE</span><h2>Architecture</h2></div><span class="count">{{ layerCount || 0 }}</span></div>
+        <div v-if="architectureLoading && !architecture" class="empty-state">Reading model architecture…</div>
+        <div v-else-if="!architecture" class="empty-state">No architecture data returned. Connect the MECH backend and load GPT-2 to populate the workspace.</div>
+        <template v-else>
+          <button class="tree-row root-row" @click="expandedAll = !expandedAll"><span class="chevron">{{ expandedAll ? '▾' : '▸' }}</span><span class="tree-icon">M</span><span class="tree-label"><b>{{ modelName }}</b><small>Decoder-only transformer</small></span></button>
+          <div v-for="layer in layers" :key="layer.index" class="tree-group">
+            <button class="tree-row" :class="{ 'tree-row--active': selected?.layer === layer.index && selected?.kind === 'Layer' }" @click="toggleLayer(layer.index)">
+              <span class="chevron">{{ isExpanded(layer.index) ? '▾' : '▸' }}</span><span class="tree-icon tree-icon--layer">{{ layer.index + 1 }}</span><span class="tree-label"><b>Layer {{ layer.index }}</b><small>{{ layer.heads === null ? 'Head count not supplied' : layer.heads + ' attention heads' }}</small></span>
+            </button>
+            <div v-if="isExpanded(layer.index) && expandedAll" class="tree-children">
+              <button v-for="head in headIndices(layer)" :key="'h'+head" class="tree-row tree-row--child" :class="{ 'tree-row--selected': selected?.layer === layer.index && selected?.kind === 'Attention head' && selected?.index === head }" @click="selectHead(layer.index, head)">
+                <span class="tree-icon tree-icon--head">A</span><span class="tree-label"><b>Attention head {{ head }}</b><small>Layer {{ layer.index }} · head {{ head }}</small></span>
+              </button>
+              <button class="tree-row tree-row--child" :class="{ 'tree-row--selected': selected?.layer === layer.index && selected?.kind === 'MLP' }" @click="selectMlp(layer.index)">
+                <span class="tree-icon tree-icon--mlp">ƒ</span><span class="tree-label"><b>MLP neurons</b><small>{{ layer.mlpWidth === null ? 'Width not supplied' : layer.mlpWidth.toLocaleString() + ' neurons' }}</small></span>
+              </button>
+            </div>
+          </div>
+        </template>
+        <div class="tree-legend"><span><i class="dot dot--blue"></i>Layer</span><span><i class="dot dot--purple"></i>Attention</span><span><i class="dot dot--green"></i>MLP</span></div>
+      </aside>
+
+      <main class="graph-panel">
+        <div class="graph-toolbar">
+          <div><span class="eyebrow">LIVE GRAPH</span><h2>Information flow</h2></div>
+          <div class="graph-actions">
+            <label class="toggle"><input v-model="showConnections" type="checkbox" /> Connections</label>
+            <button class="icon-button" title="Zoom out" aria-label="Zoom out" @click="zoom = Math.max(.45, zoom - .15)">−</button>
+            <span class="zoom-label">{{ Math.round(zoom * 100) }}%</span>
+            <button class="icon-button" title="Zoom in" aria-label="Zoom in" @click="zoom = Math.min(2.5, zoom + .15)">+</button>
+            <button class="button button--quiet button--small" @click="resetView">Fit view</button>
+          </div>
+        </div>
+        <div ref="stage" class="graph-stage" @wheel.prevent="onWheel" @pointerdown="onStagePointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp" @pointerleave="onPointerUp">
+          <div class="canvas-hint"><span>DRAG</span> pan canvas <span>SCROLL</span> zoom <span>CLICK</span> select</div>
+          <svg v-if="layers.length" class="network-svg" :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`" role="img" aria-label="Interactive transformer layer graph">
+            <defs><pattern id="workspace-grid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M 28 0 L 0 0 0 28" fill="none" stroke="#cbd5e1" stroke-opacity=".36" stroke-width=".7" /></pattern><filter id="node-shadow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#64748b" flood-opacity=".18" /></filter></defs>
+            <rect :width="canvasWidth" :height="canvasHeight" fill="url(#workspace-grid)" />
+            <g :transform="`translate(${pan.x} ${pan.y}) scale(${zoom})`">
+              <g v-if="showConnections">
+                <path v-for="edge in graphEdges" :key="edge.id" :d="edge.d" class="connection" :class="{ 'connection--highlight': edge.highlight, 'connection--dim': selected && !edge.highlight }" />
+              </g>
+              <g v-for="node in graphNodes" :key="node.id" class="graph-node" :class="{ 'graph-node--selected': selected?.id === node.id, 'graph-node--related': relatedIds.has(node.id) }" :transform="`translate(${node.x} ${node.y})`" tabindex="0" role="button" :aria-label="'Select ' + node.label" @pointerdown.stop="onNodePointerDown($event,node)" @click.stop="selectNode(node)" @keydown.enter.prevent="selectNode(node)" @keydown.space.prevent="selectNode(node)">
+                <rect class="node-card" :width="node.width" :height="node.height" rx="9" filter="url(#node-shadow)" />
+                <rect class="node-accent" width="4" :height="node.height" rx="2" />
+                <circle class="node-indicator" cx="19" cy="19" r="4" />
+                <text x="31" y="18" class="node-kicker">{{ node.kind.toUpperCase() }}</text>
+                <text x="14" y="39" class="node-name">{{ node.label }}</text>
+                <text x="14" y="56" class="node-meta">{{ node.meta }}</text>
+                <text v-if="node.activation !== null" :x="node.width-10" y="18" text-anchor="end" class="node-value">{{ formatNumber(node.activation) }}</text>
+                <g v-if="node.kind === 'Layer'">
+                  <text x="14" y="node.height-10" class="node-expand">Select to inspect · expand in tree</text>
+                </g>
+              </g>
+              <g v-if="!graphNodes.length"><text x="500" y="170" text-anchor="middle" class="empty-svg">Connect a model to render its architecture</text></g>
+            </g>
+          </svg>
+          <div v-if="!layers.length && !architectureLoading" class="graph-empty"><div class="empty-glyph">⌘</div><h3>Waiting for model architecture</h3><p>The graph is populated from the backend response; no synthetic layer topology is drawn.</p><button class="button button--primary" @click="loadArchitecture">Retry connection</button></div>
+        </div>
+        <div class="graph-footer"><span><i class="dot dot--blue"></i> Model topology</span><span><i class="dot dot--green"></i> Selected pathway</span><span class="footer-spacer"></span><span>Pan: drag empty canvas · Zoom: wheel or controls</span></div>
+      </main>
+
+      <aside class="side-panel inspector-panel">
+        <div class="panel-title"><div><span class="eyebrow">INSPECTOR</span><h2>{{ selected?.label || 'Selection details' }}</h2></div><span class="count">{{ selected?.kind || '—' }}</span></div>
+        <div v-if="!selected" class="empty-state">Select a layer, attention head, or MLP node to inspect its available data.</div>
+        <template v-else>
+          <div class="selection-card"><span class="selection-icon">{{ selected.kind === 'Attention head' ? 'A' : selected.kind === 'MLP' ? 'ƒ' : 'L' }}</span><div><b>{{ selected.label }}</b><small>{{ selected.kind }} · layer {{ selected.layer }}</small></div></div>
+          <div class="detail-tabs"><button :class="{active: detailTab==='overview'}" @click="detailTab='overview'">Overview</button><button :class="{active: detailTab==='path'}" @click="detailTab='path'">Pathway</button></div>
+          <template v-if="detailTab==='overview'">
+            <div class="detail-row"><span>Activation</span><b>{{ selectedActivation === null ? 'Not captured' : formatNumber(selectedActivation) }}</b></div>
+            <div v-if="selectedActivation !== null" class="activation-meter"><span :style="{width: activationPercent + '%'}"></span></div>
+            <div class="detail-row"><span>Data source</span><b>{{ activationSource }}</b></div>
+            <div class="detail-row"><span>Model layer index</span><b>{{ selected.layer }}</b></div>
+            <div v-if="selected.kind==='Attention head'" class="detail-row"><span>Head index</span><b>{{ selected.index }}</b></div>
+            <div v-if="selected.kind==='MLP'" class="detail-row"><span>MLP width</span><b>{{ selected.mlpWidth === null ? 'Not returned' : selected.mlpWidth.toLocaleString() }}</b></div>
+            <div class="inspector-note">Unavailable values remain unavailable; this panel does not estimate or fabricate measurements.</div>
+          </template>
+          <template v-else>
+            <div class="pathway-actions"><button class="button button--quiet" @click="highlightDirection('upstream')">Highlight upstream</button><button class="button button--quiet" @click="highlightDirection('downstream')">Highlight downstream</button><button class="button button--quiet" @click="highlightDirection('both')">Show both</button><button class="button button--quiet" @click="clearPathway">Clear highlight</button></div>
+            <div class="inspector-note">Pathway highlighting follows the displayed layer graph. It does not claim causal attribution without a supported intervention result.</div>
+          </template>
+        </template>
+        <div class="inspector-bottom"><span class="eyebrow">ACTIVATION CAPTURE</span><p>{{ capture ? 'Measured values from the latest backend response.' : 'No activation capture yet.' }}</p><button class="button button--primary button--full" :disabled="capturing || !prompt.trim()" @click="captureActivations">{{ capturing ? 'Capturing…' : 'Run forward pass' }}</button><small v-if="captureProvenance">Provenance: {{ captureProvenance }}</small></div>
+      </aside>
+    </div>
+    <footer class="workspace-footer"><span><i class="status-dot" :class="'status-dot--' + runtimeState"></i>{{ runtimeLabel }}</span><span>{{ modelName }} · {{ capture ? 'Measured activations available' : 'Activation data not captured' }}</span><span class="footer-spacer"></span><span>MECH / Neural Network Workspace</span></footer>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import {
+  asArray, asNumber, asString, describeError, fieldProvenanceSummary,
+  gpt2Activations, gpt2Architecture, gpt2LayerActivations, isRecord,
+  numberMatrix, provenanceOf, statusOf, tokenLabels, type JsonRecord,
+} from '../services/interpretabilityClient';
+
+type LayerInfo = { index: number; heads: number | null; mlpWidth: number | null; label: string };
+type GraphNode = { id: string; label: string; kind: string; layer: number; index: number; x: number; y: number; width: number; height: number; meta: string; activation: number | null; mlpWidth: number | null };
+type GraphEdge = { id: string; d: string; from: string; to: string; highlight: boolean };
+type Selection = { id: string; label: string; kind: string; layer: number; index: number; mlpWidth: number | null };
+const prompt = ref('The capital of France is');
+const architecture = ref<JsonRecord | null>(null);
+const architectureLoading = ref(false);
+const capturing = ref(false);
+const errorMessage = ref('');
+const captureMessage = ref('');
+const capture = ref<{ prompt: string; provenance: string; tokens: string[]; layerRecord: JsonRecord; matrices: unknown[] } | null>(null);
+const layers = ref<LayerInfo[]>([]);
+const selected = ref<Selection | null>(null);
+const expanded = ref(new Set<number>());
+const expandedAll = ref(true);
+const showConnections = ref(true);
+const detailTab = ref<'overview' | 'path'>('overview');
+const highlightMode = ref<'none' | 'upstream' | 'downstream' | 'both'>('none');
+const zoom = ref(1);
+const pan = ref({ x: 24, y: 28 });
+const stage = ref<HTMLElement | null>(null);
+const nodePositions = ref<Record<string, {x:number;y:number}>>({});
+const drag = ref<{kind:'pan'|'node'; pointerId:number; startX:number; startY:number; originX:number; originY:number; nodeId?:string} | null>(null);
+const layerCount = computed(() => layers.value.length);
+const modelName = computed(() => asString(architecture.value?.model_name) || asString(architecture.value?.model) || 'GPT-2');
+const runtimeState = computed(() => architectureLoading.value ? 'loading' : architecture.value ? 'online' : 'offline');
+const runtimeLabel = computed(() => architectureLoading.value ? 'Connecting' : architecture.value ? 'Backend connected' : 'Backend unavailable');
+const activationSource = computed(() => capture.value ? (capture.value.provenance || 'Backend response; provenance not supplied') : 'Not captured');
+const selectedActivation = computed(() => {
+  if (!capture.value || !selected.value) return null;
+  const layer = selected.value.layer;
+  const record = layer === 0 ? capture.value.layerRecord : capture.value.matrices[layer - 1];
+  if (!isRecord(record)) return null;
+  const keys = selected.value.kind === 'Attention head' ? ['attention_activations','attn_activations','head_activations'] : selected.value.kind === 'MLP' ? ['mlp_activations','post_mlp','mlp_post','activations'] : ['resid_post','residual_activations','activations'];
+  for (const key of keys) {
+    const matrix = numberMatrix(record[key]);
+    if (matrix.length) {
+      const row = matrix[Math.min(selectedTokenIndex.value, matrix.length - 1)];
+      if (!row?.length) continue;
+      const index = selected.value.kind === 'Attention head' ? selected.value.index : selected.value.kind === 'MLP' ? 0 : 0;
+      const value = row[Math.min(index, row.length - 1)];
+      if (typeof value === 'number') return value;
+      const numbers = row.filter((v): v is number => typeof v === 'number');
+      if (numbers.length) return numbers.reduce((sum, v) => sum + v, 0) / numbers.length;
+    }
+  }
+  return null;
+});
+const selectedTokenIndex = ref(0);
+const activationPercent = computed(() => selectedActivation.value === null ? 0 : Math.min(100, Math.abs(selectedActivation.value) / Math.max(1, Math.abs(selectedActivation.value)) * 100));
+const canvasWidth = 1280;
+const canvasHeight = 650;
+const expandedSet = computed(() => expanded.value);
+const graphNodes = computed<GraphNode[]>(() => {
+  const result: GraphNode[] = [];
+  const positions = nodePositions.value;
+  const total = Math.max(layers.value.length, 1);
+  const startX = 72;
+  const spacing = Math.max(155, Math.min(220, (canvasWidth - 180) / Math.max(total - 1, 1)));
+  layers.value.forEach((layer, index) => {
+    const id = 'layer-' + layer.index;
+    const baseX = startX + index * spacing;
+    const baseY = 170;
+    const pos = positions[id] || {x:baseX,y:baseY};
+    result.push({id,label:'Layer '+layer.index,kind:'Layer',layer:layer.index,index:layer.index,x:pos.x,y:pos.y,width:152,height:78,meta:(layer.heads === null ? 'Heads —' : layer.heads+' heads')+' · MLP '+(layer.mlpWidth === null ? '—' : layer.mlpWidth),activation:null,mlpWidth:layer.mlpWidth});
+    if (selected.value?.layer === layer.index && selected.value.kind === 'Attention head') {
+      const headX = pos.x;
+      const headY = pos.y + 125;
+      const hPos = positions['head-'+layer.index+'-'+selected.value.index] || {x:headX,y:headY};
+      result.push({id:'head-'+layer.index+'-'+selected.value.index,label:'Head '+selected.value.index,kind:'Attention head',layer:layer.index,index:selected.value.index,x:hPos.x,y:hPos.y,width:142,height:70,meta:'Attention head',activation:null,mlpWidth:null});
+    }
+    if (selected.value?.layer === layer.index && selected.value.kind === 'MLP') {
+      const mPos = positions['mlp-'+layer.index] || {x:pos.x,y:pos.y+125};
+      result.push({id:'mlp-'+layer.index,label:'MLP neurons',kind:'MLP',layer:layer.index,index:0,x:mPos.x,y:mPos.y,width:142,height:70,meta:layer.mlpWidth === null ? 'Width unavailable' : layer.mlpWidth+' neurons',activation:null,mlpWidth:layer.mlpWidth});
+    }
+  });
+  return result;
+});
+const graphEdges = computed<GraphEdge[]>(() => {
+  const result: GraphEdge[] = [];
+  const byLayer = [...graphNodes.value].filter(n => n.kind === 'Layer').sort((a,b)=>a.layer-b.layer);
+  for (let i=0;i<byLayer.length-1;i++) {
+    const a=byLayer[i], b=byLayer[i+1];
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const id='edge-'+a.id+'-'+b.id;
+    const related = relatedIds.value.has(a.id) && relatedIds.value.has(b.id);
+    result.push({id,from:a.id,to:b.id,highlight:related,d:`M ${a.x+a.width} ${a.y+a.height/2} C ${a.x+a.width+dx*.38} ${a.y+a.height/2}, ${b.x-dx*.38} ${b.y+b.height/2}, ${b.x} ${b.y+b.height/2}`});
+  }
+  for (const node of graphNodes.value.filter(n=>n.kind!=='Layer')) {
+    const parent=byLayer.find(n=>n.layer===node.layer);
+    if (!parent) continue;
+    result.push({id:'edge-'+parent.id+'-'+node.id,from:parent.id,to:node.id,highlight:relatedIds.value.has(parent.id)&&relatedIds.value.has(node.id),d:`M ${parent.x+parent.width/2} ${parent.y+parent.height} C ${parent.x+parent.width/2} ${parent.y+parent.height+38}, ${node.x+node.width/2} ${node.y-38}, ${node.x+node.width/2} ${node.y}`});
+  }
+  return result;
+});
+const relatedIds = computed(() => {
+  const ids = new Set<string>();
+  if (!selected.value || highlightMode.value === 'none') return ids;
+  for (const node of graphNodes.value) {
+    if (highlightMode.value === 'both' || (highlightMode.value === 'upstream' && node.layer <= selected.value.layer) || (highlightMode.value === 'downstream' && node.layer >= selected.value.layer)) ids.add(node.id);
+  }
+  return ids;
+});
+
+function isExpanded(index:number):boolean { return expandedSet.value.has(index); }
+function headIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.heads ?? 0, 16)},(_,i)=>i); }
+function toggleLayer(index:number) {
+  const next=new Set(expanded.value);
+  if(next.has(index)) next.delete(index); else next.add(index);
+  expanded.value=next;
+  selected.value={id:'layer-'+index,label:'Layer '+index,kind:'Layer',layer:index,index,mlpWidth:layers.value.find(l=>l.index===index)?.mlpWidth ?? null};
+}
+function selectNode(node:GraphNode) {
+  selected.value={id:node.id,label:node.label,kind:node.kind,layer:node.layer,index:node.index,mlpWidth:node.mlpWidth};
+  detailTab.value='overview';
+  highlightMode.value='both';
+}
+function selectHead(layer:number,head:number) {
+  expandedAll.value=true;
+  expanded.value=new Set([...expanded.value,layer]);
+  selected.value={id:'head-'+layer+'-'+head,label:'Attention head '+head,kind:'Attention head',layer,index:head,mlpWidth:null};
+  highlightMode.value='both';
+}
+function selectMlp(layer:number) {
+  expandedAll.value=true;
+  expanded.value=new Set([...expanded.value,layer]);
+  selected.value={id:'mlp-'+layer,label:'MLP neurons',kind:'MLP',layer,index:0,mlpWidth:layers.value.find(l=>l.index===layer)?.mlpWidth ?? null};
+  highlightMode.value='both';
+}
+function highlightDirection(mode:'upstream'|'downstream'|'both') { highlightMode.value=mode; }
+function clearPathway() { highlightMode.value='none'; }
+function resetView() { zoom.value=1; pan.value={x:24,y:28}; nodePositions.value={}; }
+function onWheel(event:WheelEvent) { zoom.value=Math.max(.45,Math.min(2.5,zoom.value+(event.deltaY<0?.08:-.08))); }
+function onStagePointerDown(event:PointerEvent) {
+  if ((event.target as HTMLElement).closest('.graph-node')) return;
+  drag.value={kind:'pan',pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,originX:pan.value.x,originY:pan.value.y};
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+}
+function onNodePointerDown(event:PointerEvent,node:GraphNode) {
+  drag.value={kind:'node',pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,originX:node.x,originY:node.y,nodeId:node.id};
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+}
+function onPointerMove(event:PointerEvent) {
+  if(!drag.value || drag.value.pointerId!==event.pointerId) return;
+  const dx=(event.clientX-drag.value.startX)/zoom.value, dy=(event.clientY-drag.value.startY)/zoom.value;
+  if(drag.value.kind==='pan') pan.value={x:drag.value.originX+(event.clientX-drag.value.startX),y:drag.value.originY+(event.clientY-drag.value.startY)};
+  else if(drag.value.nodeId) nodePositions.value={...nodePositions.value,[drag.value.nodeId]:{x:drag.value.originX+dx,y:drag.value.originY+dy}};
+}
+function onPointerUp(event:PointerEvent) { if(drag.value?.pointerId===event.pointerId) drag.value=null; }
+
+function architectureLayerCount(record:JsonRecord):number {
+  const rows=asArray(record.layers);
+  return rows.length || asNumber(record.n_layers) || asNumber(record.num_layers) || 0;
+}
+function readLayers(record:JsonRecord):LayerInfo[] {
+  return asArray(record.layers).map((item,index)=>{
+    const row=isRecord(item)?item:{};
+    const heads=asNumber(row.num_attention_heads) ?? asNumber(row.n_heads) ?? asNumber(row.num_heads) ?? asNumber(record.num_attention_heads) ?? asNumber(record.n_heads);
+    const mlp=asNumber(row.num_mlp_neurons) ?? asNumber(row.mlp_width) ?? asNumber(row.intermediate_size) ?? asNumber(row.mlp_dim) ?? asNumber(record.mlp_width);
+    return {index:asNumber(row.layer_index) ?? asNumber(row.index) ?? index,heads,mlpWidth:mlp,label:asString(row.name)||'Layer '+index};
+  });
+}
+async function loadArchitecture() {
+  architectureLoading.value=true; errorMessage.value=''; captureMessage.value='';
+  try {
+    const result=await gpt2Architecture();
+    if(statusOf(result)!=='ok') throw new Error(asString(result.error)||asString(result.reason)||'The backend did not return a usable architecture (status: '+(statusOf(result)||'not supplied')+').');
+    const parsed=readLayers(result);
+    if(!parsed.length) throw new Error('The backend responded but supplied no transformer layer list.');
+    architecture.value=result; layers.value=parsed; expanded.value=new Set(parsed.slice(0,3).map(l=>l.index));
+    if(!selected.value) selected.value={id:'layer-0',label:'Layer 0',kind:'Layer',layer:parsed[0].index,index:parsed[0].index,mlpWidth:parsed[0].mlpWidth};
+    captureMessage.value='Architecture loaded from backend · '+parsed.length+' layers.';
+  } catch(error) {
+    architecture.value=null; layers.value=[];
+    errorMessage.value=describeError(error);
+  } finally { architectureLoading.value=false; }
+}
+async function captureActivations() {
+  if(!prompt.value.trim()||capturing.value)return;
+  capturing.value=true; errorMessage.value=''; captureMessage.value='Running forward pass and requesting layer activations…';
+  try {
+    const probe=await gpt2Activations({prompt:prompt.value.trim(),layer:0});
+    if(statusOf(probe)!=='ok') throw new Error(asString(probe.error)||asString(probe.reason)||'Activation probe was not successful (status: '+(statusOf(probe)||'not supplied')+').');
+    const records:unknown[]=[];
+    for(const layer of layers.value) {
+      const result=await gpt2LayerActivations({prompt:prompt.value.trim(),layer:layer.index});
+      records[layer.index]=statusOf(result)==='ok'?result:null;
+    }
+    const first=records.find(isRecord) as JsonRecord|undefined;
+    capture.value={prompt:prompt.value.trim(),provenance:provenanceOf(first||probe)||fieldProvenanceSummary(first||probe)||'Backend response; provenance not supplied',tokens:tokenLabels(probe),layerRecord:probe,matrices:records};
+    captureMessage.value='Forward pass completed. Activation values will appear only where the backend returned numeric tensors.';
+  } catch(error) {
+    capture.value=null; captureMessage.value='';
+    errorMessage.value=describeError(error);
+  } finally { capturing.value=false; }
+}
+function formatNumber(value:number):string { return Number.isFinite(value)?value.toFixed(4):'—'; }
+onMounted(()=>{ void loadArchitecture(); });
+onBeforeUnmount(()=>{ drag.value=null; });
+</script>
+
+<style scoped>
+.workspace{display:flex;flex-direction:column;gap:14px;min-width:0;min-height:100%;padding:clamp(14px,2vw,24px);background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;color-scheme:light}
+.workspace *{box-sizing:border-box}.workspace button,.workspace input{font:inherit}.workspace button{cursor:pointer}.workspace button:focus-visible,.workspace input:focus-visible,.graph-node:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.workspace-header,.header-actions,.command-bar,.metrics,.panel-title,.graph-toolbar,.graph-actions,.graph-footer,.workspace-footer,.selection-card,.detail-row,.tree-row{display:flex;align-items:center}
+.workspace-header{justify-content:space-between;gap:18px}.heading{min-width:0}.eyebrow{display:block;color:var(--text-muted);font:700 9px/1.4 var(--font-mono);letter-spacing:.09em;text-transform:uppercase}.heading h1{margin:4px 0 3px;font-size:clamp(22px,2.4vw,30px);letter-spacing:-.04em;line-height:1.1}.heading p{margin:0;color:var(--text-muted);font-size:12px;line-height:1.5}.header-actions{gap:8px;flex-wrap:wrap}
+.status{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid var(--border);border-radius:99px;background:var(--surface);color:var(--text-muted);font:700 10px var(--font-mono)}.status i,.status-dot{width:6px;height:6px;border-radius:50%;background:currentColor}.status--online{color:var(--success);border-color:#b9dfd3;background:var(--success-soft)}.status--offline{color:var(--danger);background:var(--danger-soft)}.status--loading{color:var(--warning)}
+.button{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:11px;font-weight:650;white-space:nowrap}.button:hover:not(:disabled){background:var(--surface-2);border-color:var(--border-light)}.button:disabled{opacity:.5;cursor:not-allowed}.button--primary{background:var(--primary);border-color:var(--primary);color:white}.button--primary:hover:not(:disabled){background:var(--primary-focus);border-color:var(--primary-focus)}.button--small{min-height:28px;padding:0 8px}
+.command-bar{gap:9px;flex-wrap:wrap;padding:10px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface)}.prompt-field{display:grid;flex:1 1 280px;gap:5px;min-width:180px}.prompt-field span{color:var(--text-muted);font:700 9px var(--font-mono);letter-spacing:.06em}.prompt-field input{width:100%;min-height:32px;padding:0 9px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)}.command-note{color:var(--text-muted);font-size:10px}
+.notice{padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-muted);line-height:1.5}.notice--error{border-color:#efc2c7;background:var(--danger-soft);color:var(--danger)}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.metrics>div{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}.metrics span{color:var(--text-muted);font:700 9px var(--font-mono);letter-spacing:.05em}.metrics strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}.metrics small{color:var(--text-muted);font-size:10px}
+.workspace-grid{display:grid;grid-template-columns:minmax(190px,235px) minmax(380px,1fr) minmax(220px,270px);gap:10px;min-height:600px;flex:1}.side-panel,.graph-panel{min-width:0;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);overflow:hidden}.side-panel{display:flex;flex-direction:column}.panel-title{justify-content:space-between;gap:8px;padding:13px 12px;border-bottom:1px solid var(--border)}.panel-title h2,.graph-toolbar h2{margin:3px 0 0;font-size:14px;letter-spacing:-.02em}.count{max-width:100px;padding:4px 6px;border:1px solid var(--border);border-radius:5px;color:var(--text-muted);font:700 9px var(--font-mono);overflow-wrap:anywhere}
+.tree-row{width:100%;gap:7px;min-height:42px;padding:6px 10px;border:0;border-bottom:1px solid #eef1f5;background:transparent;color:var(--text);text-align:left}.tree-row:hover,.tree-row--active{background:var(--bg-hover)}.tree-row--selected{background:var(--accent-soft)}.root-row{padding:10px}.chevron{width:10px;color:var(--text-muted);font-size:12px}.tree-icon{display:grid;place-items:center;flex:0 0 24px;width:24px;height:24px;border:1px solid #c7d2fe;border-radius:6px;background:#eef2ff;color:#4338ca;font:700 10px var(--font-mono)}.tree-icon--layer{background:#eaf1ff;color:#1d4ed8}.tree-icon--head{border-color:#ddd6fe;background:#f5f3ff;color:#7c3aed}.tree-icon--mlp{border-color:#bbf7d0;background:#f0fdf4;color:#15803d}.tree-label{display:flex;flex-direction:column;gap:2px;min-width:0}.tree-label b{font-size:11px;font-weight:650}.tree-label small{color:var(--text-muted);font-size:9px}.tree-children{padding-left:15px;border-left:1px solid var(--border);margin-left:18px}.tree-row--child{min-height:36px;padding-left:6px}.tree-legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding:12px;border-top:1px solid var(--border);color:var(--text-muted);font-size:9px}.tree-legend span,.graph-footer span{display:flex;align-items:center;gap:5px}.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--primary)}.dot--purple{background:#8b5cf6}.dot--green{background:#16a34a}
+.graph-panel{display:flex;flex-direction:column}.graph-toolbar{justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid var(--border);flex-wrap:wrap}.graph-actions{gap:6px;flex-wrap:wrap}.toggle{display:flex;align-items:center;gap:5px;color:var(--text-muted);font-size:10px}.toggle input{accent-color:var(--primary)}.icon-button{display:grid;place-items:center;width:27px;height:27px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:16px}.zoom-label{min-width:34px;text-align:center;color:var(--text-muted);font:10px var(--font-mono)}
+.graph-stage{position:relative;flex:1;min-height:480px;overflow:hidden;background:#f8fafc;touch-action:none;cursor:grab}.graph-stage:active{cursor:grabbing}.network-svg{display:block;width:100%;height:100%;min-height:480px;user-select:none;overflow:visible}.canvas-hint{position:absolute;z-index:2;top:10px;left:12px;display:flex;gap:6px;align-items:center;color:#64748b;font-size:9px;pointer-events:none}.canvas-hint span{padding:3px 4px;border:1px solid #dbe2ec;border-radius:3px;background:#fff;color:#475569;font:700 8px var(--font-mono)}.connection{fill:none;stroke:#94a3b8;stroke-width:1.2;stroke-opacity:.42;pointer-events:none}.connection--highlight{stroke:#16a34a;stroke-width:2.2;stroke-opacity:.9}.connection--dim{stroke-opacity:.08}.graph-node{cursor:pointer;outline:none}.node-card{fill:#fff;stroke:#cbd5e1;stroke-width:1}.graph-node--selected .node-card{stroke:#2563eb;stroke-width:2;fill:#eff6ff}.graph-node--related .node-card{stroke:#16a34a}.node-accent{fill:#2563eb}.graph-node--selected .node-accent{fill:#16a34a}.node-indicator{fill:#3b82f6}.graph-node--selected .node-indicator{fill:#16a34a}.node-kicker{fill:#64748b;font:700 8px var(--font-mono);letter-spacing:.06em}.node-name{fill:#172033;font:650 11px var(--font)}.node-meta{fill:#64748b;font:9px var(--font)}.node-value{fill:#047857;font:700 9px var(--font-mono)}.node-expand{fill:#64748b;font:8px var(--font)}.empty-svg{fill:#64748b;font:13px var(--font)}.graph-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;pointer-events:none}.graph-empty>*{pointer-events:auto}.empty-glyph{display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--border);border-radius:12px;background:#fff;color:var(--primary);font-size:23px}.graph-empty h3{margin:12px 0 4px;font-size:15px}.graph-empty p{max-width:280px;margin:0 0 12px;color:var(--text-muted);font-size:11px;line-height:1.5}
+.graph-footer{gap:12px;flex-wrap:wrap;padding:9px 12px;border-top:1px solid var(--border);color:var(--text-muted);font-size:9px}.footer-spacer{flex:1}
+.inspector-panel{padding-bottom:12px}.selection-card{gap:9px;margin:12px;padding:10px;border:1px solid var(--border);border-radius:7px;background:var(--surface-2)}.selection-icon{display:grid;place-items:center;width:30px;height:30px;border:1px solid #c7d2fe;border-radius:7px;background:#eef2ff;color:#4338ca;font:700 12px var(--font-mono)}.selection-card div{display:flex;flex-direction:column;gap:3px;min-width:0}.selection-card b{font-size:11px}.selection-card small{color:var(--text-muted);font-size:9px}.detail-tabs{display:flex;gap:4px;padding:0 12px 10px;border-bottom:1px solid var(--border)}.detail-tabs button{padding:6px 8px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--text-muted);font-size:10px}.detail-tabs button.active{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8}.detail-row{justify-content:space-between;gap:8px;margin:0 12px;padding:9px 0;border-bottom:1px solid #eef1f5;color:var(--text-muted);font-size:10px}.detail-row b{max-width:60%;color:var(--text);font:650 10px var(--font-mono);text-align:right;overflow-wrap:anywhere}.activation-meter{height:5px;margin:0 12px 5px;border-radius:9px;background:#e2e8f0;overflow:hidden}.activation-meter span{display:block;height:100%;border-radius:9px;background:#16a34a}.inspector-note{margin:12px;padding:9px;border:1px dashed var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;line-height:1.5}.pathway-actions{display:grid;gap:6px;padding:12px}.pathway-actions .button{justify-content:flex-start}.inspector-bottom{display:grid;gap:7px;margin:12px 12px 0;padding-top:12px;border-top:1px solid var(--border)}.inspector-bottom p{margin:0;color:var(--text-muted);font-size:10px;line-height:1.5}.button--full{width:100%}.inspector-bottom small{color:var(--text-muted);font-size:9px;line-height:1.4}.empty-state{padding:18px 12px;color:var(--text-muted);font-size:11px;line-height:1.5}.workspace-footer{gap:14px;flex-wrap:wrap;color:var(--text-muted);font-size:9px}.workspace-footer>span{display:flex;align-items:center;gap:6px}.status-dot--online{background:var(--success)}.status-dot--offline{background:var(--danger)}.status-dot--loading{background:var(--warning)}
+@media(max-width:1120px){.workspace-grid{grid-template-columns:minmax(170px,220px) minmax(0,1fr)}.inspector-panel{grid-column:1/-1}.inspector-panel .panel-title{padding:10px 12px}.inspector-panel .detail-row{display:inline-flex;width:calc(50% - 26px);vertical-align:top}.inspector-bottom{margin-top:10px}}
+@media(max-width:760px){.workspace{padding:12px}.workspace-header{align-items:flex-start;flex-direction:column}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-grid{grid-template-columns:1fr;min-height:0}.layers-panel{max-height:360px}.graph-stage{min-height:420px}.network-svg{min-height:420px}.inspector-panel{grid-column:auto}.command-note{width:100%}.graph-toolbar{align-items:flex-start;flex-direction:column}.graph-actions{width:100%}.workspace-footer{gap:8px}}
+@media(prefers-reduced-motion:reduce){.workspace *{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
 </style>
