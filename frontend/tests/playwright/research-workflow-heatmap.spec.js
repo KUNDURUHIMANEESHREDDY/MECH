@@ -20,6 +20,20 @@ function capture({ prompt = 'A', fingerprintValue = fingerprint, attested = true
 
 async function openHeatmap(page, responses) {
   let call = 0;
+  let promptCall = 0;
+  await page.route('**/api/gpt2/fresh_prompt', async route => {
+    promptCall += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'ok',
+        provenance: 'live',
+        prompt: 'GPT-2 generated test prompt ' + promptCall,
+        method: 'test fixture for the live GPT-2 prompt endpoint',
+      }),
+    });
+  });
   await page.route('**/api/gpt2/layer_activations', async route => {
     const response = responses[call++];
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(response) });
