@@ -386,7 +386,7 @@ const progress = reactive({ done: 0, total: 0 });
 const failure = ref<Failure | null>(null);
 const metric = ref<Metric>('resid_l2');
 const selected = ref<{ token: number; layer: number } | null>(null);
-const page = ref(0);
+const page = ref(0);\nconst comparisonPrompt = ref('The capital of Germany is');\nconst comparison = ref<Capture | null>(null);\nconst isComparing = ref(false);\nconst comparisonError = ref('');\nconst selectedDimension = ref<number | null>(null);
 
 /** A newer capture invalidates the older loop's remaining requests. */
 let captureSequence = 0;
@@ -467,7 +467,29 @@ const gridMax = computed(() => {
   return max;
 });
 
-const pageCount = computed(() => Math.max(1, Math.ceil(tokens.value.length / PAGE_SIZE)));
+
+const selectedNeuronValue = computed(() => selectedDimension.value === null ? null : selectedMlp.value[selectedDimension.value] ?? null);
+const mlpDistribution = computed(() => selectedMlp.value.map((value, index) => ({ index, value })).filter(item => item.value !== null).slice(0, 64));
+const distributionStats = computed(() => {
+  const values = selectedMlp.value.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (!values.length) return { count: 0, mean: null as number | null, min: null as number | null, max: null as number | null, std: null as number | null, positive: 0, zero: 0, negative: 0 };
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+  return { count: values.length, mean, min: Math.min(...values), max: Math.max(...values), std: Math.sqrt(variance), positive: values.filter(v => v > 0).length, zero: values.filter(v => v === 0).length, negative: values.filter(v => v < 0).length };
+});
+const comparisonGrid = computed(() => {
+  if (!capture.value || !comparison.value) return [] as Array<{token:number; text:string; values:Array<{layer:number; base:number|null; compare:number|null; delta:number|null}>}>;
+  const baseTokens = tokens.value;
+  const compareTokens = (() => { for (const entry of comparison.value!.layers) { if (entry.record && statusOf(entry.record)==='ok') { const labels=tokenLabels(entry.record); if(labels.length) return labels; } } return []; })();
+  return baseTokens.map((text, token) => ({ token, text, values: columns.value.map(layer => {
+    const baseRecord = capture.value!.layers.find(entry=>entry.layer===layer)?.record ?? null;
+    const compareRecord = comparison.value!.layers.find(entry=>entry.layer===layer)?.record ?? null;
+    const base = metricValue(baseRecord, token, metric.value);
+    const other = metricValue(compareRecord, token, metric.value);
+    return { layer, base, compare: other, delta: base !== null && other !== null ? other-base : null };
+  }).filter(item=>item.layer!==undefined) }));
+});
+\nconst pageCount = computed(() => Math.max(1, Math.ceil(tokens.value.length / PAGE_SIZE)));
 const pageStart = computed(() => (tokens.value.length === 0 ? 0 : page.value * PAGE_SIZE));
 const pageEnd = computed(() => Math.min(tokens.value.length - 1, pageStart.value + PAGE_SIZE - 1));
 
@@ -604,7 +626,7 @@ function describeStatusRecord(record: JsonRecord): string {
   );
 }
 
-function meanOf(row: NumberRow): number | null {
+function metricValue(record: JsonRecord | null, token: number, selectedMetric: Metric): number | null {\n  if (!record || statusOf(record)!=='ok') return null;\n  const matrix=numberMatrix(record[selectedMetric==='resid_l2'?'resid_post':'mlp_post']);\n  const row=matrix[token];\n  if(!row?.length) return null;\n  return selectedMetric==='resid_l2'?rowL2(row):meanOf(row);\n}\n\nasync function runComparison() {\n  const target=comparisonPrompt.value.trim();\n  if(!target || isComparing.value || !capture.value) return;\n  isComparing.value=true; comparisonError.value=''; comparison.value=null;\n  try {\n    const probe=await gpt2Activations({prompt:target,layer:0});\n    if(statusOf(probe)!=='ok') throw new Error(describeStatusRecord(probe));\n    const architecture=await gpt2Architecture();\n    const count=asArray(architecture.layers).filter(isRecord).length;\n    if(statusOf(architecture)!=='ok'||!count) throw new Error('The backend did not return the model layer list for comparison.');\n    const layers:LayerEntry[]=[];\n    for(let layer=0;layer<count;layer+=1) {\n      try { const record=await gpt2LayerActivations({prompt:target,layer}); layers.push(statusOf(record)==='ok'?{layer,record,error:''}:{layer,record:null,error:describeStatusRecord(record)}); }\n      catch(error) { layers.push({layer,record:null,error:describeError(error)}); }\n    }\n    comparison.value={prompt:target,probe,architecture,layers};\n  } catch(error) { comparisonError.value=describeError(error); }\n  finally { isComparing.value=false; }\n}\n\nfunction locateNeuron(dimension:number) {\n  selectedDimension.value=dimension;\n  if (selected.value) {\n    // Keep the exact token and layer selected while identifying the MLP dimension.\n    selected.value={...selected.value};\n  }\n}\n\nfunction meanOf(row: NumberRow): number | null {
   if (!row.length) return null;
   let total = 0;
   for (const cell of row) {
@@ -621,7 +643,7 @@ function stepPage(delta: number) {
 function selectCell(token: number, layer: number) {
   // The details pane resolves the layer from the capture, so a failed layer
   // renders "no data" instead of whatever layer was selected before it.
-  selected.value = { token, layer };
+  selected.value = { token, layer };\n  selectedDimension.value = null;
 }
 
 function isSelected(token: number, layer: number): boolean {
@@ -1129,4 +1151,7 @@ function previewCount(available: number): number {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+.comparison-form{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}.comparison-form .field-label{display:grid;flex:1 1 260px;gap:5px;color:var(--text-muted);font-size:10px}.comparison-form .text-input{min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)}.comparison-table-wrap{max-width:100%;overflow:auto}.comparison-table{min-width:540px}.comparison-table .row-head small{display:block;color:var(--text-muted);font-size:9px;font-weight:400}.distribution-stats{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.neuron-bars{display:flex;align-items:stretch;gap:3px;min-height:130px;max-height:180px;padding:10px 6px 4px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);overflow-x:auto}.neuron-bar{display:flex;flex-direction:column;align-items:center;gap:4px;flex:0 0 22px;min-width:22px;padding:0 1px;border:1px solid transparent;border-radius:4px;background:transparent}.neuron-bar:hover,.neuron-bar--selected{border-color:var(--primary);background:var(--accent-soft)}.bar-track{display:flex;align-items:flex-end;justify-content:center;width:100%;height:112px;border-bottom:1px solid var(--border)}.bar-track i{display:block;width:9px;min-height:2px;border-radius:3px 3px 0 0}.bar-index{color:var(--text-muted);font:9px var(--font-mono)}.neuron-locator{display:grid;gap:6px;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}.neuron-locator strong{font-size:13px}.neuron-locator>span:not(.source-badge){color:var(--text-muted);font-size:11px}.neuron-locator p{margin:0}
 </style>
