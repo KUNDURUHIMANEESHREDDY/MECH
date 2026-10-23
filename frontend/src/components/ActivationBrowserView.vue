@@ -590,7 +590,7 @@ function openLinkedTool(route:string) { setResearchSelection({prompt:capture.val
 async function fetchGeneratedPrompt(): Promise<string> {
   const response = await api.gpt2FreshPrompt();
   const generated = isRecord(response) ? asString(response.prompt)?.trim() : undefined;
-  if (!isRecord(response) || response.status !== 'ok' || response.provenance !== 'live' || !generated) {
+  if (!isRecord(response) || response.status !== 'ok' || response.provenance !== 'live' || response.attested !== true || !generated) {
     throw new Error(isRecord(response) ? asString(response.error) || 'GPT-2 did not return an attested, live prompt.' : 'GPT-2 returned an unreadable response.');
   }
   return generated;
