@@ -1,9 +1,9 @@
 """Dependency-drift gate for the interpretability stack.
 
-The neuron-inspection path silently stopped working because requirements.txt
-allowed transformer-lens>=2.0.0, which now resolves to 4.0, where
-HookedTransformer was removed. Nothing in the suite imported the stack, and the
-one test that touched it accepted an ImportError as a pass.
+The neuron-inspection path depends on the legacy HookedTransformer API, removed
+in TransformerLens 4.0. The security upgrade now uses TransformerLens 3.9 with
+patched Transformers 5.x, and these tests verify the compatible range rather
+than encode the older, vulnerable TransformerLens 2.x / Transformers 4.x stack.
 
 This closes that gap. The rule it encodes:
 
@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -115,35 +117,31 @@ def test_requirements_pin_transformer_lens_below_4():
     assert lines, "transformer-lens is missing from requirements.txt"
     spec = lines[0]
 
-    # Parse the upper bound rather than grepping for a literal. "<3.0",
-    # "<3.0.0" and "<3" are the same constraint; the original assertion
-    # rejected two of the three on formatting alone, so a correct, stricter pin
-    # could fail this test.
-    upper = re.search(r"<\s*([0-9]+(?:\.[0-9]+)*)", spec)
-    assert upper, f"no upper bound in {spec!r}; it is unbounded"
-    # The strict operator is what excludes 4.x; the bound itself may
-    # correctly be written as exactly 4.0 (for example, "<4.0").
-    upper_parts = [int(part) for part in upper.group(1).split(".")]
-    while len(upper_parts) > 1 and upper_parts[-1] == 0:
-        upper_parts.pop()
-    assert tuple(upper_parts) <= (4, 0), (
-        f"transformer-lens must be capped below 4.0, got: {spec!r}. "
-        f"4.0 removed HookedTransformer, which backend/ depends on."
+    constraints = spec.split("transformer-lens", 1)[1].strip()
+    try:
+        accepted = SpecifierSet(constraints)
+    except Exception as exc:
+        pytest.fail(f"invalid transformer-lens specifier {constraints!r}: {exc}")
+
+    assert Version("3.9.0") in accepted, (
+        f"the secure compatible TransformerLens 3.9 line must be allowed: {spec!r}"
+    )
+    assert Version("4.0.0") not in accepted, (
+        f"TransformerLens 4.0 removed HookedTransformer, which backend/ depends on: {spec!r}"
     )
 
 
 def test_requirements_pin_transformers_floor_matches_transformer_lens():
-    """transformer-lens 2.x needs transformers>=4.43; keep the floors coherent."""
+    """Require patched Transformers 5.20.2+ for the TransformerLens 3.9 stack."""
     text = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
     floor = None
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("transformers"):
-            # Form is "transformers>=4.43.0" or "transformers>=4.43,<5".
             spec = line[len("transformers"):]
             if spec.startswith(">="):
                 floor = spec[2:].split(",")[0].strip()
     assert floor is not None, "no transformers floor in requirements.txt"
-    assert tuple(int(p) for p in floor.split(".")[:2]) >= (4, 43), (
-        f"transformers floor is {floor}; transformer-lens 2.x requires >=4.43"
+    assert Version(floor) >= Version("5.20.2"), (
+        f"transformers floor is {floor}; the audited stack requires >=5.20.2"
     )
