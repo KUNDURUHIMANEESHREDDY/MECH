@@ -230,6 +230,8 @@ export const api = {
     post<Record<string, unknown>>('/api/gpt2/run_prompt', { prompt }),
   gpt2FreshPrompt: () =>
     post<Record<string, unknown>>('/api/gpt2/fresh_prompt', {}),
+  compareModels: (payload: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/runtime/compare', payload),
   gpt2GetActivations: (layer?: number) =>
     post<Record<string, unknown>>('/api/gpt2/activations', { layer }),
   gpt2LayerActivations: (payload: Record<string, unknown>) =>
