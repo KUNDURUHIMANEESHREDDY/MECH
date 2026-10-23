@@ -111,6 +111,11 @@ async def lifespan(application: FastAPI):
         yield
     finally:
         logger.info("MECH shutting down (lifespan).")
+        try:
+            from backend.plugins.service import get_service
+            get_service().shutdown()
+        except Exception as exc:
+            logger.warning("Plugin worker shutdown incomplete: %s", exc)
         if _mcp_session_cm is not None:
             try:
                 await _mcp_session_cm.__aexit__(None, None, None)
