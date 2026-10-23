@@ -186,5 +186,5 @@ def test_missing_input_is_rejected_without_synthesizing_text():
         prompt="", model_a="fixture/a", model_b="fixture/b",
     )
     assert result["status"] == "unavailable"
-    assert result["input"] if "input" in result else True
+    assert "input" not in result
     assert "non-empty input prompt" in result["reason"]
