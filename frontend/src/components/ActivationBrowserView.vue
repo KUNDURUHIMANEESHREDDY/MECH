@@ -326,6 +326,24 @@
           </template>
         </section>
       </div>
+
+      <section class="panel compare-panel" aria-labelledby="activation-compare-title" data-testid="activation-comparison">
+        <header class="panel-heading"><div><p class="panel-kicker">Prompt comparison</p><h3 id="activation-compare-title">Compare layer activations</h3><p class="panel-description">Capture a second prompt on the same loaded model. Deltas are comparison prompt minus original prompt, aligned by token position and layer index.</p></div></header>
+        <form class="comparison-form" @submit.prevent="runComparison"><label class="field-label" for="activation-compare-prompt">Comparison prompt</label><input id="activation-compare-prompt" v-model="comparisonPrompt" class="text-input" :disabled="isComparing" /><button class="primary-button" type="submit" :disabled="isComparing || !comparisonPrompt.trim()">{{ isComparing ? 'Capturing comparison…' : comparison ? 'Recapture comparison' : 'Capture comparison prompt' }}</button></form>
+        <p v-if="comparisonError" class="notice notice-error" role="alert">{{ comparisonError }}</p>
+        <p v-else-if="comparison" class="help-copy">Comparing “{{ capture.prompt }}” with “{{ comparison.prompt }}”. Token positions are aligned by index, not by matching token text; differing tokenization is shown below.</p>
+        <div v-if="comparison" class="comparison-table-wrap"><table class="grid comparison-table"><thead><tr><th scope="col">Token index</th><th v-for="layer in columns" :key="layer" scope="col">L{{ layer }} Δ</th></tr></thead><tbody><tr v-for="row in comparisonGrid.slice(0, PAGE_SIZE)" :key="row.token"><th scope="row" class="row-head"><span class="token-pos">#{{ row.token }}</span><code>{{ row.text }}</code><small>vs {{ tokenLabels(comparison?.layers.find(entry=>entry.record)?.record ?? null)[row.token] || 'token not returned' }}</small></th><td v-for="cell in row.values" :key="cell.layer"><button type="button" class="cell" :class="{ 'is-missing': cell.delta===null }" :style="cell.delta===null?{}:{background: 'color-mix(in srgb, ' + (cell.delta >= 0 ? '#0f9f75' : '#d97757') + ' ' + Math.round(8+Math.min(1,Math.abs(cell.delta)/(Math.abs(cell.base||0)+Math.abs(cell.compare||0)+1))*60) + '%, transparent)'}" :aria-label="'Token '+row.token+', layer '+cell.layer+', delta '+formatNumber(cell.delta,4)" @click="selectCell(row.token,cell.layer)">{{ formatNumber(cell.delta,4) }}</button></td></tr></tbody></table></div>
+      </section>
+
+      <section class="panel distribution-panel" aria-labelledby="activation-distribution-title" data-testid="activation-distribution">
+        <header class="panel-heading"><div><p class="panel-kicker">Neuron-level statistics</p><h3 id="activation-distribution-title">MLP activation distribution</h3><p class="panel-description">Values from the selected token’s returned <code>mlp_post</code> vector. Select a bar to identify its neuron dimension.</p></div><span class="source-badge">{{ selected ? 'TOKEN #'+selected.token+' · L'+selected.layer : 'NO SELECTION' }}</span></header>
+        <div v-if="!selectedRecord || !selectedMlp.length" class="panel-message">Select a captured token × layer cell with MLP values to inspect its neuron distribution.</div>
+        <template v-else>
+          <dl class="fact-grid distribution-stats"><div><dt>Components returned</dt><dd>{{ distributionStats.count }}</dd></div><div><dt>Mean</dt><dd class="mono">{{ formatNumber(distributionStats.mean,6) }}</dd></div><div><dt>Standard deviation</dt><dd class="mono">{{ formatNumber(distributionStats.std,6) }}</dd></div><div><dt>Minimum / maximum</dt><dd class="mono">{{ formatNumber(distributionStats.min,4) }} / {{ formatNumber(distributionStats.max,4) }}</dd></div><div><dt>Positive / zero / negative</dt><dd>{{ distributionStats.positive }} / {{ distributionStats.zero }} / {{ distributionStats.negative }}</dd></div></dl>
+          <div class="neuron-bars" role="group" aria-label="MLP neuron activation dimensions"><button v-for="item in mlpDistribution" :key="item.index" type="button" class="neuron-bar" :class="{ 'neuron-bar--selected': selectedDimension===item.index }" :title="'Neuron '+item.index+': '+formatNumber(item.value,6)" :aria-label="'Select MLP neuron '+item.index+', activation '+formatNumber(item.value,6)" @click="locateNeuron(item.index)"><span class="bar-track"><i :style="{height: Math.max(2, Math.abs(item.value ?? 0)/(Math.max(Math.abs(distributionStats.min ?? 0),Math.abs(distributionStats.max ?? 0),1e-9))*100)+'%',background:(item.value ?? 0)>=0?'#2563eb':'#d97757'}"></i></span><span class="bar-index">{{ item.index }}</span></button></div>
+          <div v-if="selectedDimension!==null" class="neuron-locator" role="status"><span class="source-badge">NEURON LOCATED</span><strong>Layer {{ selected.layer }} · MLP neuron {{ selectedDimension }}</strong><span>Token #{{ selected.token }} ({{ tokens[selected.token] }}) · activation {{ selectedNeuronValue===null?'not returned':formatNumber(selectedNeuronValue,6) }}</span><p class="help-copy">This identifies the activation vector dimension for the selected token and layer. It does not claim a named semantic feature unless a feature-mapping endpoint provides one.</p></div>
+        </template>
+      </section>
     </template>
   </section>
 </template>
@@ -386,7 +404,12 @@ const progress = reactive({ done: 0, total: 0 });
 const failure = ref<Failure | null>(null);
 const metric = ref<Metric>('resid_l2');
 const selected = ref<{ token: number; layer: number } | null>(null);
-const page = ref(0);\nconst comparisonPrompt = ref('The capital of Germany is');\nconst comparison = ref<Capture | null>(null);\nconst isComparing = ref(false);\nconst comparisonError = ref('');\nconst selectedDimension = ref<number | null>(null);
+const page = ref(0);
+const comparisonPrompt = ref('The capital of Germany is');
+const comparison = ref<Capture | null>(null);
+const isComparing = ref(false);
+const comparisonError = ref('');
+const selectedDimension = ref<number | null>(null);
 
 /** A newer capture invalidates the older loop's remaining requests. */
 let captureSequence = 0;
@@ -489,7 +512,8 @@ const comparisonGrid = computed(() => {
     return { layer, base, compare: other, delta: base !== null && other !== null ? other-base : null };
   }).filter(item=>item.layer!==undefined) }));
 });
-\nconst pageCount = computed(() => Math.max(1, Math.ceil(tokens.value.length / PAGE_SIZE)));
+
+const pageCount = computed(() => Math.max(1, Math.ceil(tokens.value.length / PAGE_SIZE)));
 const pageStart = computed(() => (tokens.value.length === 0 ? 0 : page.value * PAGE_SIZE));
 const pageEnd = computed(() => Math.min(tokens.value.length - 1, pageStart.value + PAGE_SIZE - 1));
 
@@ -626,7 +650,43 @@ function describeStatusRecord(record: JsonRecord): string {
   );
 }
 
-function metricValue(record: JsonRecord | null, token: number, selectedMetric: Metric): number | null {\n  if (!record || statusOf(record)!=='ok') return null;\n  const matrix=numberMatrix(record[selectedMetric==='resid_l2'?'resid_post':'mlp_post']);\n  const row=matrix[token];\n  if(!row?.length) return null;\n  return selectedMetric==='resid_l2'?rowL2(row):meanOf(row);\n}\n\nasync function runComparison() {\n  const target=comparisonPrompt.value.trim();\n  if(!target || isComparing.value || !capture.value) return;\n  isComparing.value=true; comparisonError.value=''; comparison.value=null;\n  try {\n    const probe=await gpt2Activations({prompt:target,layer:0});\n    if(statusOf(probe)!=='ok') throw new Error(describeStatusRecord(probe));\n    const architecture=await gpt2Architecture();\n    const count=asArray(architecture.layers).filter(isRecord).length;\n    if(statusOf(architecture)!=='ok'||!count) throw new Error('The backend did not return the model layer list for comparison.');\n    const layers:LayerEntry[]=[];\n    for(let layer=0;layer<count;layer+=1) {\n      try { const record=await gpt2LayerActivations({prompt:target,layer}); layers.push(statusOf(record)==='ok'?{layer,record,error:''}:{layer,record:null,error:describeStatusRecord(record)}); }\n      catch(error) { layers.push({layer,record:null,error:describeError(error)}); }\n    }\n    comparison.value={prompt:target,probe,architecture,layers};\n  } catch(error) { comparisonError.value=describeError(error); }\n  finally { isComparing.value=false; }\n}\n\nfunction locateNeuron(dimension:number) {\n  selectedDimension.value=dimension;\n  if (selected.value) {\n    // Keep the exact token and layer selected while identifying the MLP dimension.\n    selected.value={...selected.value};\n  }\n}\n\nfunction meanOf(row: NumberRow): number | null {
+function metricValue(record: JsonRecord | null, token: number, selectedMetric: Metric): number | null {
+  if (!record || statusOf(record)!=='ok') return null;
+  const matrix=numberMatrix(record[selectedMetric==='resid_l2'?'resid_post':'mlp_post']);
+  const row=matrix[token];
+  if(!row?.length) return null;
+  return selectedMetric==='resid_l2'?rowL2(row):meanOf(row);
+}
+
+async function runComparison() {
+  const target=comparisonPrompt.value.trim();
+  if(!target || isComparing.value || !capture.value) return;
+  isComparing.value=true; comparisonError.value=''; comparison.value=null;
+  try {
+    const probe=await gpt2Activations({prompt:target,layer:0});
+    if(statusOf(probe)!=='ok') throw new Error(describeStatusRecord(probe));
+    const architecture=await gpt2Architecture();
+    const count=asArray(architecture.layers).filter(isRecord).length;
+    if(statusOf(architecture)!=='ok'||!count) throw new Error('The backend did not return the model layer list for comparison.');
+    const layers:LayerEntry[]=[];
+    for(let layer=0;layer<count;layer+=1) {
+      try { const record=await gpt2LayerActivations({prompt:target,layer}); layers.push(statusOf(record)==='ok'?{layer,record,error:''}:{layer,record:null,error:describeStatusRecord(record)}); }
+      catch(error) { layers.push({layer,record:null,error:describeError(error)}); }
+    }
+    comparison.value={prompt:target,probe,architecture,layers};
+  } catch(error) { comparisonError.value=describeError(error); }
+  finally { isComparing.value=false; }
+}
+
+function locateNeuron(dimension:number) {
+  selectedDimension.value=dimension;
+  if (selected.value) {
+    // Keep the exact token and layer selected while identifying the MLP dimension.
+    selected.value={...selected.value};
+  }
+}
+
+function meanOf(row: NumberRow): number | null {
   if (!row.length) return null;
   let total = 0;
   for (const cell of row) {
@@ -643,7 +703,8 @@ function stepPage(delta: number) {
 function selectCell(token: number, layer: number) {
   // The details pane resolves the layer from the capture, so a failed layer
   // renders "no data" instead of whatever layer was selected before it.
-  selected.value = { token, layer };\n  selectedDimension.value = null;
+  selected.value = { token, layer };
+  selectedDimension.value = null;
 }
 
 function isSelected(token: number, layer: number): boolean {
@@ -1151,6 +1212,9 @@ function previewCount(available: number): number {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+.comparison-form{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}.comparison-form .field-label{display:grid;flex:1 1 260px;gap:5px;color:var(--text-muted);font-size:10px}.comparison-form .text-input{min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)}.comparison-table-wrap{max-width:100%;overflow:auto}.comparison-table{min-width:540px}.comparison-table .row-head small{display:block;color:var(--text-muted);font-size:9px;font-weight:400}.distribution-stats{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.neuron-bars{display:flex;align-items:stretch;gap:3px;min-height:130px;max-height:180px;padding:10px 6px 4px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);overflow-x:auto}.neuron-bar{display:flex;flex-direction:column;align-items:center;gap:4px;flex:0 0 22px;min-width:22px;padding:0 1px;border:1px solid transparent;border-radius:4px;background:transparent}.neuron-bar:hover,.neuron-bar--selected{border-color:var(--primary);background:var(--accent-soft)}.bar-track{display:flex;align-items:flex-end;justify-content:center;width:100%;height:112px;border-bottom:1px solid var(--border)}.bar-track i{display:block;width:9px;min-height:2px;border-radius:3px 3px 0 0}.bar-index{color:var(--text-muted);font:9px var(--font-mono)}.neuron-locator{display:grid;gap:6px;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}.neuron-locator strong{font-size:13px}.neuron-locator>span:not(.source-badge){color:var(--text-muted);font-size:11px}.neuron-locator p{margin:0}
 
 
 .comparison-form{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}.comparison-form .field-label{display:grid;flex:1 1 260px;gap:5px;color:var(--text-muted);font-size:10px}.comparison-form .text-input{min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)}.comparison-table-wrap{max-width:100%;overflow:auto}.comparison-table{min-width:540px}.comparison-table .row-head small{display:block;color:var(--text-muted);font-size:9px;font-weight:400}.distribution-stats{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.neuron-bars{display:flex;align-items:stretch;gap:3px;min-height:130px;max-height:180px;padding:10px 6px 4px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);overflow-x:auto}.neuron-bar{display:flex;flex-direction:column;align-items:center;gap:4px;flex:0 0 22px;min-width:22px;padding:0 1px;border:1px solid transparent;border-radius:4px;background:transparent}.neuron-bar:hover,.neuron-bar--selected{border-color:var(--primary);background:var(--accent-soft)}.bar-track{display:flex;align-items:flex-end;justify-content:center;width:100%;height:112px;border-bottom:1px solid var(--border)}.bar-track i{display:block;width:9px;min-height:2px;border-radius:3px 3px 0 0}.bar-index{color:var(--text-muted);font:9px var(--font-mono)}.neuron-locator{display:grid;gap:6px;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}.neuron-locator strong{font-size:13px}.neuron-locator>span:not(.source-badge){color:var(--text-muted);font-size:11px}.neuron-locator p{margin:0}
