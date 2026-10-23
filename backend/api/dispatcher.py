@@ -1235,8 +1235,8 @@ def runtime_analyze_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
 # NOTE: the seeded per-input stand-ins (`_seed`, `_seeded_tokens`,
 # `TOKEN_POOLS`, `_random_token_sequence`) were deleted. They produced
 # deterministic fake measurements; every route now fails closed instead.
-# `PROMPT_POOL`/`_random_prompt` survive only as *input* defaults for live
-# runs (a prompt to measure, never a measurement).
+# Prompts that aren't supplied by a caller are sampled from live GPT-2
+# weights; there is no fixed prompt pool or canned input fallback.
 
 
 # ── Payload coercion ────────────────────────────────────────────────────────
@@ -1700,10 +1700,19 @@ def gpt2_layer_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         try:
-            return _mark(engine.layer_activations(
+            prompt = _as_text(payload, "prompt", "").strip()
+            if not prompt:
+                prompt = _default_prompt(engine)
+            if not prompt:
+                return _mark({
+                    "status": "unavailable",
+                    "error": "No prompt supplied and GPT-2 could not generate a live prompt. No fallback input was substituted.",
+                }, "unavailable")
+            _check_prompt(prompt)
+            return pass_through(engine.layer_activations(
                 layer=_as_int(payload, "layer", 0),
-                prompt=_as_text(payload, "prompt", "") or "The capital of France is",
-            ), "live")
+                prompt=prompt,
+            ))
         except Exception as exc:
             return _mark({"status": "error", "error": str(exc)[:300]}, "unavailable")
     return _mark({"status": "unavailable",
@@ -1715,9 +1724,16 @@ def gpt2_logit_lens_all(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         try:
-            return _mark(engine.logit_lens_all(
-                prompt=_as_text(payload, "prompt", "") or "The capital of France is",
-            ), "live")
+            prompt = _as_text(payload, "prompt", "").strip()
+            if not prompt:
+                prompt = _default_prompt(engine)
+            if not prompt:
+                return _mark({
+                    "status": "unavailable",
+                    "error": "No prompt supplied and GPT-2 could not generate a live prompt. No fallback input was substituted.",
+                }, "unavailable")
+            _check_prompt(prompt)
+            return pass_through(engine.logit_lens_all(prompt=prompt))
         except Exception as exc:
             return _mark({"status": "error", "error": str(exc)[:300]}, "unavailable")
     return _mark({"status": "unavailable",
@@ -1969,7 +1985,16 @@ def sae_inspect(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     from backend.agents.evidence_policy import field_map
 
-    prompt = _as_text(payload, "prompt", "") or "The capital of France is"
+    prompt = _as_text(payload, "prompt", "").strip()
+    if not prompt:
+        prompt = _default_prompt(get_engine())
+    if not prompt:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": field_map(("status", "prompt"), "unavailable"),
+            "reason": "No prompt supplied and live GPT-2 could not generate one. No fallback input was substituted.",
+        }
     _check_prompt(prompt)
     source, identifier, version = _sae_checkpoint_ref(payload)
     from_payload = bool((_as_text(payload, "identifier", "") or "").strip())
@@ -2450,11 +2475,20 @@ def get_circuit(circuit_id: str) -> Dict[str, Any]:
 
 
 @router.get("/figures/attention")
-def figure_attention(prompt: str = "The capital of France is",
+def figure_attention(prompt: str = "",
                      layer: int = 10, head: int = 7):
     """Publication-ready attention heatmap PNG from live weights."""
     from fastapi.responses import Response
     engine = get_engine()
+    prompt = (prompt or "").strip()
+    if not prompt:
+        prompt = _default_prompt(engine)
+    if not prompt:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "error": "No prompt supplied and live GPT-2 could not generate one. No fallback input was substituted.",
+        }
     _check_prompt(prompt)
     if not (engine and engine.is_available()):
         return {"status": "error",
