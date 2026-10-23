@@ -16,16 +16,18 @@ def test_fresh_prompt_endpoint_uses_only_gpt2_generated_text(monkeypatch):
             return {
                 "status": "ok",
                 "text": "generated tokens from the fixture model",
+                "prompt": "generated tokens from the fixture model",
+                "primer": "",
                 "temperature": 0.9,
                 "top_k": 40,
                 "tokens_added": 6,
+                "provenance": "live",
+                "attested": True,
             }
 
     engine = LiveEngine()
     monkeypatch.setattr(dispatcher, "get_engine", lambda: engine)
-    # The stub verifies handler inputs/output shaping only; it is not being
-    # presented as a real measurement or used to bypass runtime attestation.
-    monkeypatch.setattr(dispatcher, "_mark", lambda body, provenance: {**body, "provenance": provenance})
+    # The stub exercises response plumbing only; production uses @_measured.
     response = dispatcher.gpt2_fresh_prompt({
         # A client-provided prefix must be ignored by the model-only endpoint.
         "primer": "this must never appear in generated output",
