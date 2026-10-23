@@ -266,7 +266,7 @@ class HuggingFaceComparisonBackend:
             same_tokenizer = tokenizer_hash_a == tokenizer_hash_b
             same_tokenization = ids_a == ids_b and tokens_a == tokens_b
             vocab_shape_matches = logits_a.shape == logits_b.shape
-            logits_comparable = same_tokenizer and vocab_shape_matches
+            logits_comparable = same_tokenizer and same_tokenization and vocab_shape_matches
             kl_ab = None
             kl_reason = None
             if logits_comparable:
@@ -286,7 +286,8 @@ class HuggingFaceComparisonBackend:
             else:
                 kl_reason = (
                     "KL is only comparable when tokenizer vocabulary/special-token "
-                    "fingerprints match and both output logits have identical shapes."
+                    "fingerprints match, the current prompt tokenizes identically, and "
+                    "both output logits have identical shapes."
                 )
 
             config_a = model_a_obj.config
@@ -439,6 +440,18 @@ class HuggingFaceComparisonBackend:
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "metrics_measured": True,
+                "field_provenance": {
+                    "status": "live",
+                    "prompt": "live",
+                    "input": "live",
+                    "models": "live",
+                    "settings": "reference",
+                    "predictions": "live",
+                    "logits": "live" if kl_ab is not None else "unavailable",
+                    "activations": "live" if activation_layers else "unavailable",
+                    "residuals": "live" if residual_layers else "unavailable",
+                    "attention": "live" if attention_layers else "unavailable",
+                },
                 "activations": {
                     "comparable": bool(activation_layers),
                     "layers": activation_layers,
