@@ -71,7 +71,18 @@ def is_public_path(path: str, method: str) -> bool:
     return (method.upper(), path) in PUBLIC_PATHS
 
 
-def test_route_authorization_matrix():
+def _is_streaming_route(path: str, detail: dict) -> bool:
+    """Identify streaming endpoints whose body does not end until the stream closes."""
+    if path.rstrip("/").endswith("/stream"):
+        return True
+    for response in detail.get("responses", {}).values():
+        media_types = response.get("content", {}) if isinstance(response, dict) else {}
+        if "text/event-stream" in media_types:
+            return True
+    return False
+
+
+def test_route_authorization_matrix(monkeypatch):
     """
     Verify authentication behavior for every registered route.
 
@@ -132,7 +143,14 @@ def test_route_authorization_matrix():
                     f"{method} {path}: expected 401 for invalid token, got {invalid_res.status_code}"
                 )
 
-            # 3. Valid token - must not 500
+            # 3. Valid token - must not 500.
+            # An SSE response intentionally stays open. Bound the event-stream
+            # lifetime in this matrix test so the authorization check measures
+            # the HTTP contract rather than waiting for an interactive client
+            # to disconnect. Dedicated stream tests cover event delivery.
+            streaming = _is_streaming_route(path, detail)
+            if streaming:
+                monkeypatch.setenv("MECH_EVENT_STREAM_MAX_SECONDS", "1")
             try:
                 valid_res = client.request(method, path, headers=AUTH_HEADERS)
             except Exception as e:
