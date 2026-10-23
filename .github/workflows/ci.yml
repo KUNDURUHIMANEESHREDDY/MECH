@@ -152,12 +152,34 @@ jobs:
           tests/pytest/test_attested_evidence.py
           tests/pytest/test_provenance_not_inverted.py -v
 
-  # Every other job must have passed before this one reports success.
+  # This gate must execute even if a dependency fails or is skipped.
+  # A skipped GitHub Actions job can be treated as neutral by branch protection,
+  # so relying on the default needs() behavior can accidentally make a failed
+  # dependency non-blocking when only this aggregate check is required.
   required:
-    needs: [lint, frontend, backend, live-evidence]
+    if: ${{ always() }}
+    needs: [lint, frontend, backend, live-evidence, e2e]
     runs-on: ubuntu-latest
     steps:
-      - run: echo "frontend, backend, and live-evidence all passed"
+      - name: Enforce every release check
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          LIVE_EVIDENCE_RESULT: ${{ needs.live-evidence.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+        run: |
+          printf 'lint=%s\\nfrontend=%s\\nbackend=%s\\nlive-evidence=%s\\ne2e=%s\\n' \\
+            "$LINT_RESULT" "$FRONTEND_RESULT" "$BACKEND_RESULT" "$LIVE_EVIDENCE_RESULT" "$E2E_RESULT"
+          if [ "$LINT_RESULT" != success ] || \\
+             [ "$FRONTEND_RESULT" != success ] || \\
+             [ "$BACKEND_RESULT" != success ] || \\
+             [ "$LIVE_EVIDENCE_RESULT" != success ] || \\
+             [ "$E2E_RESULT" != success ]; then
+            echo "::error::Release gate failed: every required check must succeed."
+            exit 1
+          fi
+          echo "All required release checks passed."
 
   e2e:
     runs-on: ubuntu-latest
