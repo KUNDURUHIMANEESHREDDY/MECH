@@ -18,6 +18,7 @@ concurrency:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
@@ -41,6 +42,7 @@ jobs:
   # a session spent entirely without running Python.
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/ruff-action@v3
@@ -52,6 +54,7 @@ jobs:
 
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -88,6 +91,7 @@ jobs:
   # real weights, which is not the same failure as a broken unit test.
   live-evidence:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -167,6 +171,7 @@ jobs:
     if: ${{ always() }}
     needs: [lint, frontend, backend, live-evidence, e2e]
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
       - name: Enforce every release check
         env:
@@ -190,6 +195,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [frontend]
     defaults:
       run:
