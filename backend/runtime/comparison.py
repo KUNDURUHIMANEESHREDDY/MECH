@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import threading
+import weakref
 from typing import Any, Dict, Optional
 
 
@@ -105,16 +106,44 @@ def _finite_number(value: Any) -> Optional[float]:
 
 
 _MODEL_LOCKS_GUARD = threading.Lock()
-_MODEL_LOCKS: Dict[int, Any] = {}
+_MODEL_LOCKS: Dict[int, tuple[weakref.ReferenceType[Any], Any]] = {}
+
+
+def _discard_model_lock(key: int, reference: weakref.ReferenceType[Any]) -> None:
+    """Drop a lock when its model is collected, without deleting a reused id."""
+    with _MODEL_LOCKS_GUARD:
+        current = _MODEL_LOCKS.get(key)
+        if current is not None and current[0] is reference:
+            del _MODEL_LOCKS[key]
 
 
 def _model_lock(model: Any) -> Any:
-    """Serialize temporary forward hooks on a shared cached model instance."""
+    """Serialize temporary hooks without retaining every model ever compared.
+
+    The model manager may evict cached checkpoints over a long-running session.
+    A registry keyed only by id() would keep every RLock forever and could hand
+    a stale lock to a later object that reuses the same id. Real Hugging Face
+    modules support weak references; fail explicitly if a nonstandard model
+    cannot participate in this lifecycle-safe registry.
+    """
     key = id(model)
     with _MODEL_LOCKS_GUARD:
-        if key not in _MODEL_LOCKS:
-            _MODEL_LOCKS[key] = threading.RLock()
-        return _MODEL_LOCKS[key]
+        current = _MODEL_LOCKS.get(key)
+        if current is not None and current[0]() is model:
+            return current[1]
+
+        lock = threading.RLock()
+        try:
+            reference = weakref.ref(
+                model,
+                lambda ref, model_id=key: _discard_model_lock(model_id, ref),
+            )
+        except TypeError as exc:
+            raise TypeError(
+                "comparison model must support weak references for safe lock lifecycle"
+            ) from exc
+        _MODEL_LOCKS[key] = (reference, lock)
+        return lock
 
 
 def _layer_sequence(model: Any) -> Any:
