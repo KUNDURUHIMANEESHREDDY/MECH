@@ -67,7 +67,19 @@ def _decompose(engine, texts, pad: bool = False, dtype=None):
     """
     model = engine._model
     tokenizer = engine._tokenizer
-    ids = tokenizer(texts, return_tensors="pt", padding=pad)["input_ids"]
+    # Use right padding explicitly for this GPT-2 block-replay contract. The
+    # tokenizer configuration may default to left padding for generation; this
+    # helper replays block modules directly and derives position embeddings by
+    # sequence index, so left padding would intentionally shift every real
+    # token's absolute position and measure a different prompt. This is a test
+    # fixture choice, not a change to production tokenization.
+    original_padding_side = tokenizer.padding_side
+    try:
+        if pad:
+            tokenizer.padding_side = "right"
+        ids = tokenizer(texts, return_tensors="pt", padding=pad)["input_ids"]
+    finally:
+        tokenizer.padding_side = original_padding_side
     ids = ids.to(model.device)
     batch, seq = ids.shape
 
