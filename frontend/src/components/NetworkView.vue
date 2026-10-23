@@ -691,21 +691,27 @@ function freshPromptTimestamp(): string {
 
 async function fetchFreshPrompt(manual: boolean): Promise<void> {
   if (freshPromptState.value === 'loading') return;
-  if (wiringLoading.value) {
-    if (manual) freshPromptNote.value = 'Wait for the wiring run to finish, then try again.';
-    return;
-  }
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     freshPromptNote.value = 'Reconnect this browser before requesting a model-created prompt.';
     return;
   }
   freshPromptState.value = 'loading';
   try {
-    const res = await api.gpt2FreshPrompt();
-    const text = isRecord(res) && typeof res.prompt === 'string' ? res.prompt.trim() : '';
-    const provenance = isRecord(res) && typeof res.provenance === 'string' ? res.provenance : 'unavailable';
-    if (!text || provenance !== 'live') {
-      freshPromptNote.value = 'The model did not return a usable prompt; the previous text was kept.';
+    const previousPrompt = wirePrompt.value.trim();
+    let text = '';
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const res = await api.gpt2FreshPrompt();
+      const generated = isRecord(res) && typeof res.prompt === 'string' ? res.prompt.trim() : '';
+      const provenance = isRecord(res) && typeof res.provenance === 'string' ? res.provenance : 'unavailable';
+      if (!generated || provenance !== 'live') {
+        freshPromptNote.value = 'GPT-2 did not return a live prompt; no canned text was substituted.';
+        return;
+      }
+      text = generated;
+      if (text !== previousPrompt) break;
+    }
+    if (!text || text === previousPrompt) {
+      freshPromptNote.value = 'GPT-2 did not produce a distinct prompt after three live samples; the current prompt was kept.';
       return;
     }
     wirePrompt.value = text;
