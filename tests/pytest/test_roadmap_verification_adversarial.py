@@ -464,7 +464,7 @@ def test_frontend_control_plane_fetches_use_authenticated_transports():
     for path in files:
         rel = path.relative_to(FRONTEND_SRC).as_posix()
         code = _strip_comments(_read(path))
-        for match in re.finditer(r"(?<![.\\w])fetch\\s*\\(", code):
+        for match in re.finditer(r"(?<![.\w])fetch\s*\(", code):
             if rel == "services/api.ts":
                 # The central transport is the one place allowed to call fetch
                 # directly; its cookie and desktop-IPC guarantees were checked above.
@@ -476,7 +476,7 @@ def test_frontend_control_plane_fetches_use_authenticated_transports():
                 else:
                     polyfill_fetches += 1
                 continue
-            line = code.count("\\n", 0, match.start()) + 1
+            line = code.count("\n", 0, match.start()) + 1
             unapproved.append(f"{rel}:{line}")
 
     assert polyfill_fetches == 1, (
