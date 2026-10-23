@@ -178,7 +178,7 @@ const selectedActivation = computed(() => {
   }
   return null;
 });
-const selectedTokenIndex = ref(0);
+
 const activationPercent = computed(() => selectedActivation.value === null ? 0 : Math.min(100, Math.abs(selectedActivation.value) / (1 + Math.abs(selectedActivation.value)) * 100));
 const canvasWidth = 1280;
 const canvasHeight = 650;
