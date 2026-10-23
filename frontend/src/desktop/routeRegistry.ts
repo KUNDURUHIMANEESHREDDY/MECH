@@ -125,6 +125,15 @@ export const ROUTES: DesktopRoute[] = [
     load: () => import('../components/DebuggerView.vue'),
   },
   {
+    id: 'researchworkflow',
+    label: 'Research Workflow',
+    group: 'Research',
+    requirement: 'model',
+    legacy: false,
+    aliases: ['research-workflow'],
+    load: () => import('../components/ResearchWorkflowView.vue'),
+  },
+  {
     id: 'experiments',
     label: 'Experiments',
     group: 'Research',
