@@ -411,7 +411,7 @@ class HuggingFaceComparisonBackend:
             metadata_a = _model_metadata(model_a_obj, model_a, revision_a, fingerprint_a, tokenizer_hash_a)
             metadata_b = _model_metadata(model_b_obj, model_b, revision_b, fingerprint_b, tokenizer_hash_b)
             comparable_token = top_token_a == top_token_b
-            return {
+            result = {
                 "status": "completed",
                 "implemented": True,
                 "prompt": prompt,
@@ -434,8 +434,6 @@ class HuggingFaceComparisonBackend:
                     "residual_alignment": "same tokenization, model family, hidden width, layer index and tensor shape",
                     "attention_alignment": "same tokenization, model family, head count, layer index and tensor shape",
                 },
-                "provenance": "live",
-                "attested": True,
                 "measured": True,
                 "validation_eligible": False,
                 "publication_eligible": False,
@@ -487,6 +485,26 @@ class HuggingFaceComparisonBackend:
                 },
                 "metrics_required": list(TO_COMPUTE),
             }
+            # Only the central MECH measurement boundary may issue the
+            # attested flag. Bind this paired run to both content fingerprints,
+            # the complete input record, and every measured output family.
+            from backend.core.provenance import attest_measurement
+            paired_fingerprint = "sha256:" + hashlib.sha256(
+                (fingerprint_a + "|" + fingerprint_b).encode("utf-8")
+            ).hexdigest()
+            return attest_measurement(
+                result,
+                model_loaded=(
+                    f"{model_a}@{metadata_a.get('resolved_revision') or revision_a}|"
+                    f"{model_b}@{metadata_b.get('resolved_revision') or revision_b}"
+                ),
+                model_content_hash=paired_fingerprint,
+                input_fields=["input"],
+                output_fields=[
+                    "models", "settings", "predictions", "logits",
+                    "activations", "residuals", "attention",
+                ],
+            )
         except Exception as exc:
             return _unavailable(prompt, model_a, model_b, revision_a, revision_b,
                                 f"Real checkpoint comparison failed: {type(exc).__name__}: {exc}")
