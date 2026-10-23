@@ -375,16 +375,20 @@ def test_docs_openapi_and_mcp_are_not_public(control_plane):
         assert response.status_code == 401, (path, response.status_code)
 
 
-def test_query_parameter_token_is_accepted_only_when_correct(control_plane):
-    """EventSource cannot set headers, so the query path exists -- and must still
-    be a real check, not an open door."""
+def test_query_parameter_token_is_opt_in_and_still_validated(control_plane, monkeypatch):
+    """URL credentials stay disabled by default because access logs retain them."""
     from backend.core import auth as auth_mod
 
+    monkeypatch.delenv(auth_mod.ALLOW_QUERY_TOKEN_ENV, raising=False)
     token = auth_mod.get_bearer_token()
+    assert control_plane.get(f"/api/status?token={token}").status_code == 401
+
+    # EventSource-like transports may opt in explicitly; the token is still
+    # compared against the active credential and a wrong value must fail closed.
+    monkeypatch.setenv(auth_mod.ALLOW_QUERY_TOKEN_ENV, "1")
     assert control_plane.get(f"/api/status?token={token}").status_code == 200
     assert control_plane.get("/api/status?token=wrong").status_code == 401
     assert control_plane.get("/api/status?token=").status_code == 401
-
 
 @pytest.mark.parametrize("path", [
     "/api/status",
@@ -435,37 +439,52 @@ def test_options_preflight_is_public_but_never_implies_trust():
     assert auth_mod.is_public_path("/api/status", "GET") is False
 
 
-def test_no_frontend_source_issues_an_unauthenticated_control_plane_fetch():
-    """Independent scan: every ``fetch(`` must attach a bearer credential."""
-    markers = ("authHeaders", "Authorization", "apiToken(", "getApiToken(")
-    #: Files whose job is to attach the credential.
-    exemptions = {"services/api.ts"}
+def test_frontend_control_plane_fetches_use_authenticated_transports():
+    """Raw fetch calls may exist only in the central client or cookie-backed polyfill."""
+    api_path = FRONTEND_SRC / "services" / "api.ts"
+    api = _strip_comments(_read(api_path))
+    assert "apiProxy()" in api and "apiRequest" in api, (
+        "the central client must route desktop requests through the authenticated IPC proxy"
+    )
+    assert "credentials: 'same-origin'" in api, (
+        "browser requests must carry the HttpOnly session cookie"
+    )
+
+    polyfill_path = FRONTEND_SRC / "utils" / "browserPolyfill.js"
+    polyfill = _strip_comments(_read(polyfill_path))
+    assert "credentials: 'include'" in polyfill, (
+        "the browser polyfill must use the HttpOnly session cookie"
+    )
 
     files = [p for p in FRONTEND_SRC.rglob("*")
              if p.is_file() and p.suffix in {".ts", ".js", ".vue"}]
-    assert len(files) >= 20, f"frontend scan collapsed to {len(files)} files"
+    assert len(files) >= 20, f"the frontend scan collapsed to {len(files)} files"
 
-    offenders, total = [], 0
+    unapproved, polyfill_fetches = [], 0
     for path in files:
         rel = path.relative_to(FRONTEND_SRC).as_posix()
-        text = _read(path)
-        if rel in exemptions:
-            assert any(m in text for m in markers), (
-                f"{rel} is exempted as the authenticated client but has no "
-                f"credential logic")
-            continue
-        code = _strip_comments(text)
+        code = _strip_comments(_read(path))
         for match in re.finditer(r"(?<![.\w])fetch\s*\(", code):
-            total += 1
-            window = code[match.start():match.start() + 500]
-            if not any(m in window for m in markers):
-                line = code.count("\n", 0, match.start()) + 1
-                offenders.append(f"{rel}:{line}")
-    assert total >= 8, f"the scan found only {total} fetch() call(s)"
-    assert not offenders, (
-        f"{len(offenders)} fetch() call site(s) carry no bearer credential, so "
-        f"the request 401s or is silently anonymous: {offenders}")
+            if rel == "services/api.ts":
+                # The central transport is the one place allowed to call fetch
+                # directly; its cookie and desktop-IPC guarantees were checked above.
+                continue
+            if rel == "utils/browserPolyfill.js":
+                window = code[match.start():match.start() + 500]
+                if "credentials: 'include'" not in window and 'credentials: "include"' not in window:
+                    unapproved.append(f"{rel}:{code.count(chr(10), 0, match.start()) + 1}")
+                else:
+                    polyfill_fetches += 1
+                continue
+            line = code.count("\n", 0, match.start()) + 1
+            unapproved.append(f"{rel}:{line}")
 
+    assert polyfill_fetches == 1, (
+        f"expected one cookie-authenticated compatibility transport, found {polyfill_fetches}"
+    )
+    assert not unapproved, (
+        f"raw fetch call(s) bypass the approved authenticated transports: {unapproved}"
+    )
 
 def test_no_vite_prefixed_token_is_referenced():
     """Vite inlines VITE_* into the shipped bundle, token included."""
@@ -478,13 +497,19 @@ def test_no_vite_prefixed_token_is_referenced():
     assert not offenders, offenders
 
 
-def test_sse_stream_carries_the_token_in_its_url():
-    """EventSource cannot set headers; without the query token every stream 401s."""
+def test_sse_stream_does_not_leak_bearer_credentials_in_its_url():
+    """Browser EventSource uses same-origin session cookies, never URL tokens."""
     text = _read(FRONTEND_SRC / "services" / "societyService.ts")
-    assert "EventSource" in text, "expected an EventSource-based stream"
-    assert "apiToken()" in text, "the stream must resolve the token"
-    assert re.search(r"token=\$\{encodeURIComponent\(token\)\}", text), text
-
+    assert "new EventSource(url)" in text, "expected an EventSource-based stream"
+    assert "const url = `${SOCIETY_BASE}/stream?runId=${encodeURIComponent(runId)}`;" in text, (
+        "the stream URL should contain only the run identifier"
+    )
+    assert "apiToken()" not in text, "the renderer must not expose or resolve the bearer token"
+    assert "token=${encodeURIComponent(token)}" not in text
+    assert "bearer_token=" not in text, "bearer credentials must not be placed in an EventSource URL"
+    assert "HttpOnly session cookie" in text, (
+        "document the cookie-backed browser transport so URL-token auth is not reintroduced"
+    )
 
 # ===================================================================== #
 # Claim 3 -- paper_generator

@@ -121,8 +121,8 @@ export interface SocietyStreamHandlers {
  *
  * `EventSource` cannot set request headers, so this used to append the bearer
  * token as a query parameter -- a credential in a URL, in browser history and
- * in server logs. The browser build authenticates with the HttpOnly session
- * cookie instead: `EventSource` sends cookies for same-origin requests, and
+ * in server logs. The browser build authenticates with the HttpOnly session cookie
+ * instead: `EventSource` sends cookies for same-origin requests, and
  * page JavaScript cannot read the cookie.
  */
 export function streamSocietyRun(runId: string, handlers: SocietyStreamHandlers): () => void {

@@ -390,7 +390,10 @@ def test_acdc_no_longer_uses_the_neuron_api():
         "dimension, not a head"
     )
     assert "capture_head_outputs(" in src
-    assert "patch_head_output(" in src
+    # The implementation obtains the batched primitive dynamically so adapters
+    # without multi-head support fail closed rather than patching heads one by one.
+    assert "patch_head_outputs" in src
+    assert "patcher(corrupted_prompt, patches, score_token_id=target_id)" in src
 
 
 def test_acdc_emits_no_hardcoded_confidences_or_injected_heads():

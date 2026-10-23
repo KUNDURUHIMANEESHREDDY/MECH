@@ -31,6 +31,7 @@ Two defects, one of them in code added earlier in this same effort.
 
 from __future__ import annotations
 
+import math
 import re
 
 import pytest
@@ -227,8 +228,14 @@ def test_live_run_is_marked_live_in_a_form_the_policy_can_read():
 
 
 @needs_weights
-def test_live_edge_confidences_are_measured_not_constant():
-    """The fabricated fallback used one confidence on every edge."""
+def test_live_edge_contributions_are_measured_and_confidence_is_not_invented():
+    """Output-edge weights are measured ablation effects, not confidence scores.
+
+    ACDC measures the change in target-logit recovery when a head is removed.
+    That contribution may be negative or exceed one, so it must not be relabelled
+    as a probability-like confidence. Confidence remains unavailable until it is
+    separately calibrated from uncertainty evidence.
+    """
     from backend.interpretability.discovery.circuit_discovery import (
         CircuitDiscoveryEngine,
     )
@@ -238,14 +245,23 @@ def test_live_edge_confidences_are_measured_not_constant():
         GPT2Adapter(variant="small", mock_mode=False)
     ).discover_circuit()
 
-    confidences = {
-        e["confidence"] for e in result["graph"]["edges"]
-        if e.get("confidence") is not None
-    }
-    assert len(confidences) > 1, (
-        f"every edge carries the same confidence {confidences}"
+    assert result["status"] == "completed"
+    assert result["measured"] is True
+    output_edges = [
+        edge for edge in result["graph"]["edges"] if edge.get("target") == "P_0"
+    ]
+    contributions = [
+        edge["weight"] for edge in output_edges
+        if isinstance(edge.get("weight"), (int, float))
+    ]
+    assert contributions, "live ACDC emitted no measured head contributions"
+    assert all(math.isfinite(value) for value in contributions), contributions
+    assert len(set(contributions)) > 1, (
+        f"measured head contributions unexpectedly collapsed to {set(contributions)}"
     )
-
+    assert all(edge.get("confidence") is None for edge in result["graph"]["edges"]), (
+        "un-calibrated contribution weights must not be emitted as confidence"
+    )
 
 @needs_weights
 def test_eligibility_is_not_asserted_without_an_explicit_opt_in():
