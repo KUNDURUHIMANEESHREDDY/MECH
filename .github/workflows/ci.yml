@@ -81,7 +81,10 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund --prefix frontend
-      - run: python -m pytest tests/pytest -q
+      # Stop at the first failure so a long suite reports an actionable traceback
+      # instead of consuming the entire timeout before showing the failure summary.
+      # On a passing run, pytest still executes the complete suite.
+      - run: python -m pytest tests/pytest -q --maxfail=1 --tb=short --durations=25
         env:
           MECH_REQUIRE_JS_LINT: '1'
 
