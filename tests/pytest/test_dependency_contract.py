@@ -76,19 +76,41 @@ def test_requirements_pin_transformer_lens_below_4():
     )
 
 
-def test_requirements_pin_transformers_below_5():
-    """transformer-lens 2.x declares transformers>=4.57 with no ceiling, so
-    transformers must be capped here or pip pairs them with an incompatible 5.x."""
+def test_requirements_select_the_patched_transformers_stack():
+    """Keep model-loading deps on the audited Transformers 5 / Lens 3 combination."""
     text = REQUIREMENTS.read_text(encoding="utf-8")
-    line = _requirement(text, "transformers")
-    assert line is not None, "transformers missing from requirements.txt"
 
-    bound = _upper_bound(line, "transformers")
-    assert bound is not None, f"transformers has no upper bound: {line!r}"
-    assert bound <= 5, (
-        f"transformers upper bound {bound} allows 5.x, which is not compatible "
-        f"with transformer-lens 2.x: {line!r}"
+    transformers_line = _requirement(text, "transformers")
+    assert transformers_line is not None, "transformers missing from requirements.txt"
+    assert re.search(r">=\s*5\.20\.2(?:\s*[,;\s]|$)", transformers_line), (
+        f"transformers must exclude releases with the currently reported advisories: "
+        f"{transformers_line!r}"
     )
+    transformers_bound = _upper_bound(transformers_line, "transformers")
+    assert transformers_bound is not None and transformers_bound <= 6, (
+        f"transformers must stay on the tested 5.x generation: {transformers_line!r}"
+    )
+
+    lens_line = _requirement(text, "transformer-lens")
+    assert lens_line is not None, "transformer-lens missing from requirements.txt"
+    assert re.search(r">=\s*3\.9\.0(?:\s*[,;\s]|$)", lens_line), (
+        f"transformer-lens must support Transformers 5 and retain HookedTransformer: "
+        f"{lens_line!r}"
+    )
+    assert _upper_bound(lens_line, "transformer-lens") == 4, (
+        f"transformer-lens 4.x removes HookedTransformer: {lens_line!r}"
+    )
+
+    hub_line = _requirement(text, "huggingface-hub")
+    assert hub_line is not None and re.search(r">=\s*1\.31\.0(?:\s*[,;\s]|$)", hub_line), (
+        f"Transformers 5.20.2 needs the patched Hub 1.x line: {hub_line!r}"
+    )
+    assert _upper_bound(hub_line, "huggingface-hub") == 3
+
+    setuptools_line = _requirement(text, "setuptools")
+    assert setuptools_line is not None and re.search(
+        r">=\s*83\.0\.0(?:\s*[,;\s]|$)", setuptools_line
+    ), f"setuptools must be at least the PYSEC-2026-3447 fix: {setuptools_line!r}"
 
 
 def test_supported_range_matches_requirements_pin():
