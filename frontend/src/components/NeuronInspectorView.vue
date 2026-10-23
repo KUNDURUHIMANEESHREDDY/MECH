@@ -103,7 +103,8 @@
             <div v-if="selectedActivation !== null" class="activation-meter"><span :style="{width: activationPercent + '%'}"></span></div>
             <div class="detail-row"><span>Data source</span><b>{{ activationSource }}</b></div>
             <div class="detail-row"><span>Model layer index</span><b>{{ selected.layer }}</b></div>
-            <div v-if="selected.kind==='Attention head'" class="detail-row"><span>Head index</span><b>{{ selected.index }}</b></div>\n            <div v-if="selected.kind==='MLP neuron'" class="detail-row"><span>Neuron index</span><b>{{ selected.index }}</b></div>
+            <div v-if="selected.kind==='Attention head'" class="detail-row"><span>Head index</span><b>{{ selected.index }}</b></div>
+            <div v-if="selected.kind==='MLP neuron'" class="detail-row"><span>Neuron index</span><b>{{ selected.index }}</b></div>
             <div v-if="selected.kind==='MLP' || selected.kind==='MLP neuron'" class="detail-row"><span>MLP width</span><b>{{ selected.mlpWidth === null ? 'Not returned' : selected.mlpWidth.toLocaleString() }}</b></div>
             <div class="inspector-note">Unavailable values remain unavailable; this panel does not estimate or fabricate measurements.</div>
           </template>
@@ -139,9 +140,11 @@ const errorMessage = ref('');
 const captureMessage = ref('');
 const capture = ref<{ prompt: string; provenance: string; tokens: string[]; layerRecord: JsonRecord; matrices: unknown[] } | null>(null);
 const layers = ref<LayerInfo[]>([]);
-const selected = ref<Selection | null>(null);\nconst selectedTokenIndex = ref(0);
+const selected = ref<Selection | null>(null);
+const selectedTokenIndex = ref(0);
 const expanded = ref(new Set<number>());
-const expandedAll = ref(true);\nconst expandedMlp = ref(new Set<number>());
+const expandedAll = ref(true);
+const expandedMlp = ref(new Set<number>());
 const showConnections = ref(true);
 const detailTab = ref<'overview' | 'path'>('overview');
 const highlightMode = ref<'none' | 'upstream' | 'downstream' | 'both'>('none');
@@ -233,7 +236,10 @@ const relatedIds = computed(() => {
 });
 
 function isExpanded(index:number):boolean { return expandedSet.value.has(index); }
-function headIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.heads ?? 0, 16)},(_,i)=>i); }\nfunction neuronIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.mlpWidth ?? 0, 16)},(_,i)=>i); }\nfunction toggleMlp(layer:number) { const next=new Set(expandedMlp.value); if(next.has(layer)) next.delete(layer); else next.add(layer); expandedMlp.value=next; selectMlp(layer); }\nfunction selectNeuron(layer:number,index:number) { expandedAll.value=true; expanded.value=new Set([...expanded.value,layer]); expandedMlp.value=new Set([...expandedMlp.value,layer]); selected.value={id:'neuron-'+layer+'-'+index,label:'Neuron '+index,kind:'MLP neuron',layer,index,mlpWidth:layers.value.find(l=>l.index===layer)?.mlpWidth ?? null}; highlightMode.value='both'; }
+function headIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.heads ?? 0, 16)},(_,i)=>i); }
+function neuronIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.mlpWidth ?? 0, 16)},(_,i)=>i); }
+function toggleMlp(layer:number) { const next=new Set(expandedMlp.value); if(next.has(layer)) next.delete(layer); else next.add(layer); expandedMlp.value=next; selectMlp(layer); }
+function selectNeuron(layer:number,index:number) { expandedAll.value=true; expanded.value=new Set([...expanded.value,layer]); expandedMlp.value=new Set([...expandedMlp.value,layer]); selected.value={id:'neuron-'+layer+'-'+index,label:'Neuron '+index,kind:'MLP neuron',layer,index,mlpWidth:layers.value.find(l=>l.index===layer)?.mlpWidth ?? null}; highlightMode.value='both'; }
 function toggleLayer(index:number) {
   const next=new Set(expanded.value);
   if(next.has(index)) next.delete(index); else next.add(index);
@@ -324,7 +330,30 @@ async function captureActivations() {
     errorMessage.value=describeError(error);
   } finally { capturing.value=false; }
 }
-function tensorMean(record: unknown, keys: string[], dimension = 0): number | null {\n  if (!isRecord(record)) return null;\n  for (const key of keys) {\n    const matrix=numberMatrix(record[key]);\n    const row=matrix[Math.min(selectedTokenIndex.value,Math.max(0,matrix.length-1))];\n    if (!row?.length) continue;\n    const value=row[dimension];\n    if (typeof value==='number') return value;\n    const nums=row.filter((v):v is number=>typeof v==='number');\n    if(nums.length) return nums.reduce((sum,v)=>sum+v,0)/nums.length;\n  }\n  return null;\n}\nfunction layerActivation(index:number, kind='Layer'):number|null {\n  if(!capture.value) return null;\n  const record=index===0?capture.value.layerRecord:capture.value.matrices[index];\n  const keys=kind==='MLP'?['mlp_activations','post_mlp','mlp_post','activations']:['resid_post','residual_activations','activations'];\n  return tensorMean(record,keys);\n}\nfunction mlpNeuronActivation(layer:number,index:number):number|null {\n  if(!capture.value) return null;\n  return tensorMean(capture.value.matrices[layer],['mlp_activations','post_mlp','mlp_post','activations'],index);\n}\nfunction formatNumber(value:number):string { return Number.isFinite(value)?value.toFixed(4):'—'; }
+function tensorMean(record: unknown, keys: string[], dimension = 0): number | null {
+  if (!isRecord(record)) return null;
+  for (const key of keys) {
+    const matrix=numberMatrix(record[key]);
+    const row=matrix[Math.min(selectedTokenIndex.value,Math.max(0,matrix.length-1))];
+    if (!row?.length) continue;
+    const value=row[dimension];
+    if (typeof value==='number') return value;
+    const nums=row.filter((v):v is number=>typeof v==='number');
+    if(nums.length) return nums.reduce((sum,v)=>sum+v,0)/nums.length;
+  }
+  return null;
+}
+function layerActivation(index:number, kind='Layer'):number|null {
+  if(!capture.value) return null;
+  const record=index===0?capture.value.layerRecord:capture.value.matrices[index];
+  const keys=kind==='MLP'?['mlp_activations','post_mlp','mlp_post','activations']:['resid_post','residual_activations','activations'];
+  return tensorMean(record,keys);
+}
+function mlpNeuronActivation(layer:number,index:number):number|null {
+  if(!capture.value) return null;
+  return tensorMean(capture.value.matrices[layer],['mlp_activations','post_mlp','mlp_post','activations'],index);
+}
+function formatNumber(value:number):string { return Number.isFinite(value)?value.toFixed(4):'—'; }
 onMounted(()=>{ void loadArchitecture(); });
 onBeforeUnmount(()=>{ drag.value=null; });
 </script>
