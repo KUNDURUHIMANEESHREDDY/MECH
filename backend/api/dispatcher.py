@@ -1431,13 +1431,13 @@ def gpt2_fresh_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
             "status": "unavailable",
             "error": "torch/transformers not available — the model cannot create a prompt",
         }, "unavailable")
-    # Empty primer asks GPT-2 to sample from its own BOS/EOS seed. The
-    # returned input text is the model's generated continuation, not a prompt
-    # chosen from a fixed list or a rotating hardcoded opener.
-    primer = _as_text(payload, "primer", "")
+    # Fresh prompts are generated from GPT-2's own special-token context.
+    # Ignore caller text primers: the final prompt must contain model-sampled
+    # tokens only, not an arbitrary or hardcoded text prefix.
+    primer = ""
     max_new_tokens = max(1, min(48, _as_int(payload, "max_new_tokens", 12)))
     try:
-        res = engine.generate_text(primer, max_new_tokens=max_new_tokens)
+        res = engine.generate_text("", max_new_tokens=max_new_tokens)
     except Exception as exc:
         return _mark({
             "status": "error",
@@ -1454,9 +1454,8 @@ def gpt2_fresh_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
         "status": "ok",
         "prompt": str(res["text"]).strip(),
         "primer": primer,
-        "method": ("sampled continuation (temperature "
-                   f"{res.get('temperature')}, top-k {res.get('top_k')}) "
-                   "from live GPT-2 weights"),
+        "method": ("sampled GPT-2 tokens from live weights with no text primer "
+                   f"(temperature {res.get('temperature')}, top-k {res.get('top_k')})"),
         "tokens_added": res.get("tokens_added"),
     }, "live")
 
