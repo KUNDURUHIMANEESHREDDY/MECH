@@ -51,6 +51,24 @@ jobs:
           # files nobody is touching, and a gate people disable is not a gate.
           args: check --isolated --no-cache --select E9,F821 --output-format concise backend tests scripts
 
+  # Run non-scientific backend checks independently from the aggregate suite.
+  # This gives fast feedback for comparison API regressions without weakening
+  # the mandatory full-suite job.
+  backend-fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-fast-${{ runner.os }}-py311-v1
+      - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m pytest tests/pytest -q --maxfail=1 --tb=short --durations=25 -k 'comparison or model_lock or tuned_lens'
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
