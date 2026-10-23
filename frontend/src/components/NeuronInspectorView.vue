@@ -113,7 +113,7 @@
             <div class="inspector-note">Pathway highlighting follows the displayed layer graph. It does not claim causal attribution without a supported intervention result.</div>
           </template>
         </template>
-        <div class="inspector-bottom"><span class="eyebrow">ACTIVATION CAPTURE</span><p>{{ capture ? 'Measured values from the latest backend response.' : 'No activation capture yet.' }}</p><button class="button button--primary button--full" :disabled="capturing || !prompt.trim()" @click="captureActivations">{{ capturing ? 'Capturing…' : 'Run forward pass' }}</button><small v-if="captureProvenance">Provenance: {{ captureProvenance }}</small></div>
+        <div class="inspector-bottom"><span class="eyebrow">ACTIVATION CAPTURE</span><p>{{ capture ? 'Measured values from the latest backend response.' : 'No activation capture yet.' }}</p><button class="button button--primary button--full" :disabled="capturing || !prompt.trim()" @click="captureActivations">{{ capturing ? 'Capturing…' : 'Run forward pass' }}</button><small v-if="captureProvenance">Provenance: {{ captureProvenance }}</small><div class="pathway-actions"><button class="button button--quiet" @click="openResearchTool('activations')">Open activation at this layer/token →</button><button class="button button--quiet" @click="openResearchTool('saelab')">Inspect SAE at this layer →</button><button class="button button--quiet" @click="openResearchTool('logitlens')">Open Logit Lens →</button></div></div>
       </aside>
     </div>
     <footer class="workspace-footer"><span><i class="status-dot" :class="'status-dot--' + runtimeState"></i>{{ runtimeLabel }}</span><span>{{ modelName }} · {{ capture ? 'Measured activations available' : 'Activation data not captured' }}</span><span class="footer-spacer"></span><span>MECH / Neural Network Workspace</span></footer>
@@ -122,7 +122,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { takeResearchSelection } from '../services/researchSelectionContext';
+import { setResearchSelection, takeResearchSelection } from '../services/researchSelectionContext';
 import {
   asArray, asNumber, asString, describeError, fieldProvenanceSummary,
   gpt2Activations, gpt2Architecture, gpt2LayerActivations, isRecord,
@@ -237,6 +237,7 @@ const relatedIds = computed(() => {
   return ids;
 });
 
+function openResearchTool(route:string) { setResearchSelection({prompt:prompt.value.trim(),layer:selected.value?.layer,neuron:selected.value?.kind==='MLP neuron'?selected.value.index:undefined,token:selectedTokenIndex.value,origin:'neuron-inspector'}); window.location.hash=route; }
 function isExpanded(index:number):boolean { return expandedSet.value.has(index); }
 function headIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.heads ?? 0, 16)},(_,i)=>i); }
 function neuronIndices(layer:LayerInfo):number[] { return Array.from({length:Math.min(layer.mlpWidth ?? 0, 16)},(_,i)=>i); }
