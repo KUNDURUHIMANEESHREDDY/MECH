@@ -269,10 +269,16 @@ class HuggingFaceComparisonBackend:
             kl_reason = None
             if logits_comparable:
                 # KL(P_A || P_B), computed from the two live next-token distributions.
-                p_a = prob_a.clamp_min(torch.finfo(prob_a.dtype).tiny)
-                log_p_a = torch.log_softmax(logits_a, dim=-1)
-                log_p_b = torch.log_softmax(logits_b, dim=-1)
-                kl_ab = _finite_number(torch.sum(p_a * (log_p_a - log_p_b)).item())
+                # Promote before normalization to reduce underflow for large
+                # vocabularies; probabilities and log probabilities come from
+                # each model's actual last-position logits.
+                log_p_a = torch.log_softmax(logits_a.double(), dim=-1)
+                log_p_b = torch.log_softmax(logits_b.double(), dim=-1)
+                p_a = log_p_a.exp()
+                raw_kl = _finite_number(torch.sum(p_a * (log_p_a - log_p_b)).item())
+                # KL is non-negative analytically; clamp only tiny negative
+                # floating-point roundoff, never an unavailable measurement.
+                kl_ab = max(0.0, raw_kl) if raw_kl is not None else None
                 if kl_ab is None:
                     kl_reason = "KL reduction returned a non-finite value."
             else:
