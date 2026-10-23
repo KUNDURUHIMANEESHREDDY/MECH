@@ -201,3 +201,35 @@ pip-modern-metadata-*/
 /gs_*.txt
 /.deps-dryrun.json
 /frontend/release-build.log
+
+# Additional local credentials and runtime state from the legacy branch audit.
+# Keep API keys, tokens, generated databases, and local caches out of Git.
+storage/api_key.txt
+**/api_key.txt
+tokens/
+storage/activations_cache/
+storage/mech.db*
+backend/storage/storage/
+backend/storage/artifacts/
+
+# Local environment overrides. Preserve explicitly named example templates.
+.env.local
+.env.*
+!.env.example
+!**/.env.example
+!**/.env.*.example
+
+# Local developer tooling and transient command output.
+.vscode/
+.idea/
+*.tmp
+*.swp
+*-out.txt
+*-err.txt
+frontend/audit_*
+.codegraph/
+.freebuff/
+.hermes/
+.opencode/
+.pytest-tmp/
+vite.config.mts.timestamp-*
