@@ -1235,8 +1235,8 @@ def runtime_analyze_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
 # NOTE: the seeded per-input stand-ins (`_seed`, `_seeded_tokens`,
 # `TOKEN_POOLS`, `_random_token_sequence`) were deleted. They produced
 # deterministic fake measurements; every route now fails closed instead.
-# `PROMPT_POOL`/`_random_prompt` survive only as *input* defaults for live
-# runs (a prompt to measure, never a measurement).
+# Prompts that aren't supplied by a caller are sampled from live GPT-2
+# weights; there is no fixed prompt pool or canned input fallback.
 
 
 # ── Payload coercion ────────────────────────────────────────────────────────
@@ -1332,73 +1332,104 @@ def gpt2_load(payload: Dict[str, Any]) -> Dict[str, Any]:
         "error": "torch/transformers not available — cannot load real GPT-2",
     }, "unavailable")
 
+@router.post("/runtime/compare")
+def compare_model_checkpoints(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Compare two independently loaded checkpoints and persist live evidence.
+
+    The route accepts caller-provided model IDs/revisions and a prompt; it
+    invents neither a checkpoint, an input, nor a numeric result. Only the
+    trusted built-in Hugging Face backend can return an attested measurement.
+    """
+    from datetime import datetime, timezone
+    from backend.runtime.comparison import (
+        HuggingFaceComparisonBackend,
+        ModelComparisonEngine,
+    )
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Request body must be an object.")
+    prompt = _as_text(payload, "prompt", "")
+    if not prompt.strip():
+        raise HTTPException(status_code=422, detail="Provide a non-empty input prompt.")
+    _check_prompt(prompt)
+    model_a = _as_text(payload, "model_a", "").strip()
+    model_b = _as_text(payload, "model_b", "").strip()
+    revision_a = _as_text(payload, "revision_a", "main").strip() or "main"
+    revision_b = _as_text(payload, "revision_b", "main").strip() or "main"
+    if not model_a or not model_b:
+        raise HTTPException(status_code=422, detail="Provide independent model_a and model_b Hugging Face checkpoint IDs.")
+
+    result = ModelComparisonEngine(backend=HuggingFaceComparisonBackend()).compare(
+        prompt=prompt, model_a=model_a, model_b=model_b,
+        revision_a=revision_a, revision_b=revision_b,
+    )
+    if result.get("status") != "completed" or result.get("provenance") != "live" or result.get("measured") is not True:
+        return result
+
+    experiment_id = "cross-model-" + uuid.uuid4().hex
+    experiment = {
+        "id": experiment_id,
+        "name": f"Cross-model comparison: {model_a} vs {model_b}",
+        "experiment_type": "cross_model_comparison",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "provenance": "live",
+        "measured": True,
+        "parameters": {
+            "prompt": prompt,
+            "model_a": model_a,
+            "model_b": model_b,
+            "revision_a": revision_a,
+            "revision_b": revision_b,
+        },
+        "results": result,
+    }
+    try:
+        stored = _store.add_experiment(experiment)
+        result["experiment_id"] = stored.get("id")
+        result["stored"] = bool(stored.get("id"))
+    except Exception as exc:
+        result["stored"] = False
+        result["recording_error"] = f"{type(exc).__name__}: {exc}"[:300]
+    return result
+
 
 NAMES = ["John", "Alice", "Bob", "Emma", "David", "Sophia", "Michael", "Olivia", "James", "Emily"]
 
-PROMPT_POOL = [
-    "The capital of France is",
-    "The quick brown fox jumps over",
-    "In a world where artificial intelligence",
-    "The meaning of life is",
-    "Once upon a time there was a",
-    "The largest planet in our solar system is",
-    "Machine learning models can",
-    "The future of technology looks like",
-    "Scientists recently discovered that",
-    "The best way to learn programming is",
-    "In the year 2050, humans will",
-    "The most important invention in history",
-    "When you mix red and blue paint",
-    "The theory of relativity states that",
-    "A well-trained neural network can",
-]
-
-
-def _random_prompt() -> str:
-    return random.choice(PROMPT_POOL)
-
-
-# Short openers used only to seed live generation. The returned prompt text
-# itself is always sampled from the model, never taken from a pool.
-PRIMER_OPENERS = [
-    "The", "When", "In", "Scientists", "Once", "Deep",
-    "After", "A", "Researchers", "The future",
-]
-
-
-def _fresh_primer() -> str:
-    return PRIMER_OPENERS[int(time.time() // 60) % len(PRIMER_OPENERS)]
-
 
 def _generate_fresh_prompt(engine: Any, max_new_tokens: int = 12) -> str:
-    """Ask the live model for a brand-new prompt; pool fallback on failure."""
+    """Return only model-sampled text; failure produces no substitute input."""
+    if not (engine is not None and engine.is_available()):
+        return ""
     try:
-        res = engine.generate_text(_fresh_primer(),
-                                   max_new_tokens=max_new_tokens)
-        text = str(res.get("text", "")).strip()
-        if text:
-            return text
-    except Exception:
-        pass
-    return _random_prompt()
+        result = engine.generate_text("", max_new_tokens=max_new_tokens)
+        text = (
+            str(result.get("prompt", "")).strip()
+            if isinstance(result, dict)
+            and result.get("status") == "ok"
+            and result.get("provenance") == "live"
+            and result.get("attested") is True
+            else ""
+        )
+        return text[:_MAX_PROMPT_CHARS] if text else ""
+    except Exception as exc:
+        logger.warning("GPT-2 prompt generation failed: %s", exc)
+        return ""
 
 
 def _default_prompt(engine: Any) -> str:
-    """Prompt default: live generation when the model is up, pool otherwise."""
-    if engine is not None and engine.is_available():
-        generated = _generate_fresh_prompt(engine, max_new_tokens=8)
+    """Generate an input from live GPT-2 weights, or return no input."""
+    generated = _generate_fresh_prompt(engine, max_new_tokens=12)
+    if generated:
         _check_prompt(generated)
-        return generated[:_MAX_PROMPT_CHARS]
-    return _random_prompt()
+    return generated
 
 
 @router.post("/gpt2/fresh_prompt")
 def gpt2_fresh_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate a brand-new prompt from the live model (never from a pool).
+    """Return a prompt generated and attested by the live GPT-2 measurement layer.
 
-    Samples a continuation from a rotating opener using the loaded weights.
-    Fails closed when the engine is unavailable: no seeded or pooled text is
-    ever substituted, since the whole point is model-created prompts.
+    There is no text primer, prompt pool, or wrapper-created measurement.
+    Fail closed if the model fails to attest the generated prompt.
     """
     engine = get_engine()
     if not (engine and engine.is_available()):
@@ -1406,37 +1437,47 @@ def gpt2_fresh_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
             "status": "unavailable",
             "error": "torch/transformers not available — the model cannot create a prompt",
         }, "unavailable")
-    primer = _as_text(payload, "primer", "") or _fresh_primer()
+    # Fresh prompts are generated from GPT-2's own special-token context.
+    # Ignore caller text primers: the final prompt must contain model-sampled
+    # tokens only, not an arbitrary or hardcoded text prefix.
+    primer = ""
     max_new_tokens = max(1, min(48, _as_int(payload, "max_new_tokens", 12)))
     try:
-        res = engine.generate_text(primer, max_new_tokens=max_new_tokens)
+        res = engine.generate_text("", max_new_tokens=max_new_tokens)
     except Exception as exc:
         return _mark({
             "status": "error",
             "primer": primer,
             "error": str(exc)[:300],
         }, "unavailable")
-    if not isinstance(res, dict) or res.get("status") != "ok" or not str(res.get("text", "")).strip():
+    if (
+        not isinstance(res, dict)
+        or res.get("status") != "ok"
+        or res.get("provenance") != "live"
+        or res.get("attested") is not True
+        or not str(res.get("prompt", "")).strip()
+    ):
         return _mark({
             "status": "unavailable",
             "primer": primer,
-            "error": "The model did not return usable prompt text.",
+            "error": "The model did not return an attested, usable GPT-2 prompt.",
         }, "unavailable")
-    return _mark({
-        "status": "ok",
-        "prompt": str(res["text"]).strip(),
-        "primer": primer,
-        "method": ("sampled continuation (temperature "
-                   f"{res.get('temperature')}, top-k {res.get('top_k')}) "
-                   "from live GPT-2 weights"),
-        "tokens_added": res.get("tokens_added"),
-    }, "live")
+    # The measurement layer has already attested the exact prompt field.
+    # Return that record unchanged; wrapping it in a new dict would lose scope.
+    return pass_through(res)
 
 
 @router.post("/gpt2/run_prompt")
 def gpt2_run_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
-    prompt = payload.get("prompt") or _default_prompt(engine)
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        prompt = _default_prompt(engine)
+    if not prompt:
+        return _mark({
+            "status": "unavailable",
+            "error": "No prompt was supplied and live GPT-2 could not generate one. No fallback input was substituted.",
+        }, "unavailable")
     _check_prompt(prompt)
     if engine and engine.is_available():
         return _mark(engine.run_prompt(prompt), "live")
@@ -1666,10 +1707,19 @@ def gpt2_layer_activations(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         try:
-            return _mark(engine.layer_activations(
+            prompt = _as_text(payload, "prompt", "").strip()
+            if not prompt:
+                prompt = _default_prompt(engine)
+            if not prompt:
+                return _mark({
+                    "status": "unavailable",
+                    "error": "No prompt supplied and GPT-2 could not generate a live prompt. No fallback input was substituted.",
+                }, "unavailable")
+            _check_prompt(prompt)
+            return pass_through(engine.layer_activations(
                 layer=_as_int(payload, "layer", 0),
-                prompt=_as_text(payload, "prompt", "") or "The capital of France is",
-            ), "live")
+                prompt=prompt,
+            ))
         except Exception as exc:
             return _mark({"status": "error", "error": str(exc)[:300]}, "unavailable")
     return _mark({"status": "unavailable",
@@ -1681,9 +1731,16 @@ def gpt2_logit_lens_all(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_engine()
     if engine and engine.is_available():
         try:
-            return _mark(engine.logit_lens_all(
-                prompt=_as_text(payload, "prompt", "") or "The capital of France is",
-            ), "live")
+            prompt = _as_text(payload, "prompt", "").strip()
+            if not prompt:
+                prompt = _default_prompt(engine)
+            if not prompt:
+                return _mark({
+                    "status": "unavailable",
+                    "error": "No prompt supplied and GPT-2 could not generate a live prompt. No fallback input was substituted.",
+                }, "unavailable")
+            _check_prompt(prompt)
+            return pass_through(engine.logit_lens_all(prompt=prompt))
         except Exception as exc:
             return _mark({"status": "error", "error": str(exc)[:300]}, "unavailable")
     return _mark({"status": "unavailable",
@@ -1935,7 +1992,16 @@ def sae_inspect(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     from backend.agents.evidence_policy import field_map
 
-    prompt = _as_text(payload, "prompt", "") or "The capital of France is"
+    prompt = _as_text(payload, "prompt", "").strip()
+    if not prompt:
+        prompt = _default_prompt(get_engine())
+    if not prompt:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "field_provenance": field_map(("status", "prompt"), "unavailable"),
+            "reason": "No prompt supplied and live GPT-2 could not generate one. No fallback input was substituted.",
+        }
     _check_prompt(prompt)
     source, identifier, version = _sae_checkpoint_ref(payload)
     from_payload = bool((_as_text(payload, "identifier", "") or "").strip())
@@ -2416,11 +2482,20 @@ def get_circuit(circuit_id: str) -> Dict[str, Any]:
 
 
 @router.get("/figures/attention")
-def figure_attention(prompt: str = "The capital of France is",
+def figure_attention(prompt: str = "",
                      layer: int = 10, head: int = 7):
     """Publication-ready attention heatmap PNG from live weights."""
     from fastapi.responses import Response
     engine = get_engine()
+    prompt = (prompt or "").strip()
+    if not prompt:
+        prompt = _default_prompt(engine)
+    if not prompt:
+        return {
+            "status": "unavailable",
+            "provenance": "unavailable",
+            "error": "No prompt supplied and live GPT-2 could not generate one. No fallback input was substituted.",
+        }
     _check_prompt(prompt)
     if not (engine and engine.is_available()):
         return {"status": "error",
