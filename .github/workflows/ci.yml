@@ -133,6 +133,15 @@ jobs:
               raise SystemExit(completed.returncode)
           PY
 
+      - name: Preserve backend shard report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pytest-shard-${{ matrix.shard }}
+          path: pytest-shard.xml
+          if-no-files-found: warn
+          retention-days: 7
+
   live-evidence:
     runs-on: ubuntu-latest
     timeout-minutes: 45
