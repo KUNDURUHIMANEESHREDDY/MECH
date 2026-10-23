@@ -661,11 +661,11 @@ def test_the_readme_quotes_the_measured_tuned_lens_result():
     assert report["publication_eligible"] is False
     assert report["model_id"] is None
 
-    flat = re.sub(r"\\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8")).lower()
+    flat = re.sub(r"\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8")).lower()
     assert "experimental trained affine translators" in flat
     assert "model_id: null" in flat
     assert "publication_eligible: false" in flat
-    assert "not a reproduction" in flat
+    assert "not a paper reproduction" in flat
     assert str(report["parameters_fitted"]) in flat or f"{report['parameters_fitted']:,}" in flat
     assert str(report["n_fit_prompts"]) in flat
     assert str(report["n_holdout_prompts"]) in flat
@@ -694,7 +694,7 @@ def test_the_readme_states_the_variant_is_not_the_full_affine_map():
     """Both model families are labelled; the reduced map is not called the paper's map."""
     import re
 
-    flat = re.sub(r"\\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8")).lower()
+    flat = re.sub(r"\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8")).lower()
     assert "translator_kind" in flat
     assert "diagonal_affine" in flat
     assert "full-affine report" in flat
