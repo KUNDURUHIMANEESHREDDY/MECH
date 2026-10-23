@@ -105,7 +105,7 @@
       <form class="wire-form" data-testid="network-wire-form" @submit.prevent="runWiringPrompt">
         <label class="wire-field">
           <span>Prompt</span>
-          <input v-model="wirePrompt" type="text" class="control" data-testid="network-wire-prompt" placeholder="The capital of France is" />
+          <input v-model="wirePrompt" type="text" class="control" data-testid="network-wire-prompt" placeholder="Generated automatically by GPT-2" />
         </label>
         <button class="tool-button tool-button--primary" type="submit" data-testid="network-wire-run" :disabled="wiringLoading">
           {{ wiringLoading ? 'Running…' : 'Light up wires' }}
