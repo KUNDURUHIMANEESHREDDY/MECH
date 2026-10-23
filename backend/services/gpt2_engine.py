@@ -684,11 +684,14 @@ def generate_text(primer: str, max_new_tokens: int = 12,
     greedy = temperature == 0.0
     top_k = max(1, min(200, int(top_k)))
     device = next(_model.parameters()).device
+    reported_primer = primer
     with torch.no_grad():
         if model_only:
             seed_id = getattr(_tokenizer, "bos_token_id", None)
+            seed_token = getattr(_tokenizer, "bos_token", None)
             if seed_id is None:
                 seed_id = getattr(_tokenizer, "eos_token_id", None)
+                seed_token = getattr(_tokenizer, "eos_token", None)
             if seed_id is None:
                 return {
                     "status": "unavailable",
@@ -696,6 +699,13 @@ def generate_text(primer: str, max_new_tokens: int = 12,
                     "provenance": "unavailable",
                 }
             input_ids = torch.tensor([[int(seed_id)]], device=device)
+            # Echo the actual seed used instead of returning a misleading blank
+            # primer. GPT-2 commonly shares BOS/EOS as <|endoftext|>; decoding
+            # the id is the source of truth if a tokenizer does not expose the
+            # symbolic token string.
+            if not seed_token:
+                seed_token = _tokenizer.decode([int(seed_id)], skip_special_tokens=False)
+            reported_primer = str(seed_token or f"[special-token-id:{seed_id}]").strip()
         else:
             inputs = _tokenizer(primer, return_tensors="pt")
             input_ids = inputs["input_ids"].to(device)
@@ -735,7 +745,7 @@ def generate_text(primer: str, max_new_tokens: int = 12,
         }
     result = {
         "status": "ok",
-        "primer": primer,
+        "primer": reported_primer,
         "model_only": model_only,
         "text": text,
         "token_ids": sampled_ids if model_only else generated,
