@@ -278,8 +278,13 @@ def test_identity_is_held_for_every_intervention_type(adapter):
     captured = adapter.capture_head_outputs(PROMPT)[LAYER][HEAD]
     hook_write = adapter.patch_head_output(
         PROMPT, LAYER, HEAD, patch_vector=captured, position=-1)
-    assert hook_write.delta == 0.0, (
-        f"writing a head's own captured value back moved the logit by "
-        f"{hook_write.delta:.6f}"
+    # Captured and patched runs are separate floating-point forwards.
+    # Under Transformers 5's eager attention path, identical writes can differ
+    # by one float32 rounding step (about 1e-5 for this logit). Keep the no-op
+    # contract strict enough to catch an actual misplaced/value-changing patch,
+    # but do not demand bitwise equality across distinct forwards.
+    assert abs(hook_write.delta) < 1e-4, (
+        f"writing a head's own captured value back moved the logit beyond "
+        f"float32 round-off tolerance: {hook_write.delta:.8g}"
     )
     del identity, plain
