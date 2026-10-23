@@ -1,13 +1,20 @@
 name: CI
 
 on:
+  # Direct pushes need CI on the release branch; feature branches are verified
+  # by pull_request to avoid running the expensive GPT-2 and browser jobs twice.
   push:
+    branches: [master]
   pull_request:
 
 # A required status check cannot pass if one of its dependencies is skipped,
 # which is how the live-weight job below is made mandatory rather than
 # optional. The evidence invariants in docs/roadmap.md depend on real weights,
 # so a run that cannot execute GPT-2 must not report success.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     runs-on: ubuntu-latest
