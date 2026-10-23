@@ -383,9 +383,13 @@ onMounted(async () => {
 <style scoped>
 .circuit-tool {
   min-height: 100%;
-  padding: 22px;
-  background: var(--surface);
+  min-width: 0;
+  padding: clamp(14px, 2vw, 24px);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
   color: var(--text);
+  color-scheme: light;
+  font-family: var(--font);
 }
 
 .tool-header,
@@ -520,5 +524,26 @@ onMounted(async () => {
   .tool-layout { grid-template-columns: 1fr; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .detail-footer { flex-direction: column; }
+}
+
+/* Shared MECH interaction contract: visible keyboard focus and restrained motion. */
+.circuit-tool :is(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.circuit-tool button,
+.circuit-tool input,
+.circuit-tool select {
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .circuit-tool *,
+  .circuit-tool *::before,
+  .circuit-tool *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 </style>
