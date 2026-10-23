@@ -183,16 +183,23 @@ jobs:
           LIVE_EVIDENCE_RESULT: ${{ needs.live-evidence.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
         run: |
-          printf 'lint=%s\nfrontend=%s\nbackend=%s\nlive-evidence=%s\ne2e=%s\n' \
-            "$LINT_RESULT" "$FRONTEND_RESULT" "$BACKEND_RESULT" "$LIVE_EVIDENCE_RESULT" "$E2E_RESULT"
-          if [ "$LINT_RESULT" != success ] || \
-             [ "$FRONTEND_RESULT" != success ] || \
-             [ "$BACKEND_RESULT" != success ] || \
-             [ "$LIVE_EVIDENCE_RESULT" != success ] || \
-             [ "$E2E_RESULT" != success ]; then
-            echo "::error::Release gate failed: every required check must succeed."
-            exit 1
-          fi
+          printf '%s\n' \
+            "lint=$LINT_RESULT" \
+            "frontend=$FRONTEND_RESULT" \
+            "backend=$BACKEND_RESULT" \
+            "live-evidence=$LIVE_EVIDENCE_RESULT" \
+            "e2e=$E2E_RESULT"
+          for result in \
+            "$LINT_RESULT" \
+            "$FRONTEND_RESULT" \
+            "$BACKEND_RESULT" \
+            "$LIVE_EVIDENCE_RESULT" \
+            "$E2E_RESULT"; do
+            if [ "$result" != success ]; then
+              echo "::error::Release gate failed: every required check must succeed (got $result)."
+              exit 1
+            fi
+          done
           echo "All required release checks passed."
 
   e2e:
