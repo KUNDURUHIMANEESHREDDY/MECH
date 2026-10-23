@@ -350,6 +350,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
+import { takeResearchSelection } from '../services/researchSelectionContext';
 import {
   asArray,
   asNumber,
@@ -397,7 +398,8 @@ interface Failure {
 const DIM_PREVIEW = 8;
 const PAGE_SIZE = 8;
 
-const prompt = ref('The capital of France is');
+const linkedContext = takeResearchSelection();
+const prompt = ref(linkedContext?.prompt || 'The capital of France is');
 const capture = ref<Capture | null>(null);
 const isCapturing = ref(false);
 const progress = reactive({ done: 0, total: 0 });
@@ -630,8 +632,12 @@ async function runCapture() {
     capture.value = { prompt: targetPrompt, probe, architecture, layers };
     const firstOk = layers.find((entry) => entry.record);
     const firstTokenCount = firstOk?.record ? tokenLabels(firstOk.record).length : 0;
-    selected.value = firstOk && firstTokenCount > 0 ? { token: 0, layer: firstOk.layer } : null;
-    page.value = 0;
+    const requestedLayer = linkedContext?.layer;
+    const chosenLayer = requestedLayer != null && layers.some((entry) => entry.layer === requestedLayer && entry.record) ? requestedLayer : firstOk?.layer;
+    const tokenCount = chosenLayer == null ? 0 : tokenLabels(layers.find((entry) => entry.layer === chosenLayer)?.record || {}).length;
+    const requestedToken = linkedContext?.token ?? 0;
+    selected.value = chosenLayer != null && tokenCount > 0 ? { token: Math.max(0, Math.min(requestedToken, tokenCount - 1)), layer: chosenLayer } : firstOk && firstTokenCount > 0 ? { token: 0, layer: firstOk.layer } : null;
+    page.value = selected.value ? Math.floor(selected.value.token / PAGE_SIZE) : 0;
   } catch (error) {
     if (sequence !== captureSequence) return;
     failure.value = {
