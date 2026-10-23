@@ -73,3 +73,35 @@ def test_omitted_run_prompt_does_not_fall_back_to_a_canned_prompt(monkeypatch):
     assert response["status"] == "unavailable"
     assert not response.get("prompt")
     assert "no fallback input was substituted" in response["error"].lower()
+
+
+
+def test_layer_activation_route_uses_generated_gpt2_input_when_prompt_is_omitted(monkeypatch):
+    from backend.api import dispatcher
+
+    class LiveEngine:
+        observed_prompt = None
+
+        def is_available(self):
+            return True
+
+        def generate_text(self, primer, max_new_tokens=12):
+            assert primer == ""
+            return {
+                "status": "ok",
+                "text": "A fresh continuation sampled by GPT-2",
+                "tokens_added": 7,
+            }
+
+        def layer_activations(self, layer, prompt):
+            self.observed_prompt = prompt
+            return {"status": "ok", "prompt": prompt, "layer": layer}
+
+    engine = LiveEngine()
+    monkeypatch.setattr(dispatcher, "get_engine", lambda: engine)
+    monkeypatch.setattr(dispatcher, "pass_through", lambda body: body)
+    response = dispatcher.gpt2_layer_activations({"layer": 3})
+
+    assert engine.observed_prompt == "A fresh continuation sampled by GPT-2"
+    assert response["prompt"] == engine.observed_prompt
+    assert response["layer"] == 3
