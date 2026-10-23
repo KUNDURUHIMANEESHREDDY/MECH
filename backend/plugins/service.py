@@ -206,6 +206,34 @@ class PluginService:
                 continue
         return restored
 
+    def shutdown(self) -> None:
+        """Stop runtime workers without changing their persisted enabled flags.
+
+        The manager's registry is durable configuration: enabled plugins should
+        be restored on the next startup. Runtime worker processes are not durable
+        and must be reaped before the HTTP server exits.
+        """
+        failures: List[str] = []
+        with _lock:
+            for name in list(self._workers):
+                worker = self._workers.get(name)
+                try:
+                    self._unregister_runtime(name)
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"{name}: {type(exc).__name__}")
+                    # Keep shutdown best-effort even if a plugin's unload hook
+                    # or registry cleanup failed. Reap the process independently.
+                    self._workers.pop(name, None)
+                    if worker is not None:
+                        try:
+                            stop_remote_plugin(worker[0], worker[1])
+                        except Exception:  # noqa: BLE001
+                            pass
+        if failures:
+            raise RuntimeError(
+                "Plugin worker shutdown was incomplete: " + ", ".join(failures)
+            )
+
     # -- catalog ------------------------------------------------------
     def _live_by_plugin_id(self) -> Dict[str, Any]:
         return {plugin.manifest.plugin_id: plugin
