@@ -459,37 +459,36 @@ used to append to it has been deleted; see §6e.
 
 ### Pinned ML stack
 
-The ML dependencies carry **load-bearing upper bounds**. Verified working set:
+The ML dependency constraints are a compatibility and security contract, not just resolver hints. The strict October 2026 CI audit found advisories in the old `transformers 4.57.6` / `setuptools 79.0.1` environment. The current intended constraints move to the patched Transformers 5 line while retaining the legacy TransformerLens API through version 3.x.
 
-| Package | Constraint | Verified on |
-|---------|-----------|--------------|
-| `torch` | `>=2.6` | 2.14.0+cu126 |
-| `transformers` | `>=4.57,<5.0` | 4.57.6 |
-| `transformer-lens` | `>=2.18.0,<3.0` | 2.18.0 |
-| `numpy` | `>=1.24.0,<2` | 1.26.4 |
-| `pandas` | `>=2.0.0,<2.1` | 2.0.3 |
-| `huggingface-hub` | `>=0.23.2,<1.0` | 0.36.2 |
+| Package | Constraint | Reason |
+|---------|-----------|--------|
+| `torch` | `>=2.6` | Runtime needed by model paths |
+| `transformers` | `>=5.20.2,<6.0` | Excludes the versions flagged by the current strict audit |
+| `transformer-lens` | `>=3.9.0,<4.0` | 3.x retains `HookedTransformer`; 4.0 removes it |
+| `huggingface-hub` | `>=1.31.0,<3.0` | Compatible with the patched Transformers 5 line |
+| `setuptools` | `>=83.0.0` | Minimum version containing the fix for PYSEC-2026-3447 |
+| `numpy` | `>=1.24.0,<2` | Prevents the existing NumPy ABI break |
+| `pandas` | `>=2.0.0,<2.1` | Preserves the tested scientific dependency range |
 
-`transformer-lens` 4.0 **removed `HookedTransformer`**, which three code paths depend on
-(`backend/interpretability/gpt2_model.py`, `gpt2_steps.py`,
-`backend/science/models/transformer_lens_adapter.py`). Compounding it, `transformer-lens` 2.x
-declares `transformers>=4.57` with **no ceiling**, so pip will happily pair it with an
-incompatible transformers 5.x — which is why *both* need capping.
+TransformerLens 3.0 introduced `TransformerBridge` but retained the legacy
+`HookedTransformer` classes for compatibility. TransformerLens 4.0 removed those
+legacy classes; this repository's load, cache, and hook-patching paths still use
+them, so the `<4.0` bound is intentional until the separate Bridge migration is
+completed and its live-weight results are re-validated.
 
-The numpy and pandas bounds are load-bearing for the same reason. `transformer-lens`
-2.18 declares `numpy>=1.24,<2` and `pandas>=1.1.5,<2.1`; with no ceiling here, an
-unrelated install can pull numpy up to 2.x and break the stack with a binary-ABI
-error (`numpy.dtype size changed, may indicate binary incompatibility`) raised on
-`import pandas` / `import sklearn` / `import transformer_lens` while `import numpy`
-alone still works — which reads as a broken install rather than a pinning problem.
-`huggingface-hub` is pinned directly because `transformers` and `transformer-lens`
-disagree about it: 5.x imports `ResolvedRevision`, removed in hub 1.0, while
-`transformer-lens` 2.18 requires `<1.0`.
+The direct ML constraints must move together: TransformerLens 3.9 declares
+`transformers>=5.9.0`, and Transformers 5.20.2 requires
+`huggingface-hub>=1.31.0,<3.0`. Keeping the older Lens 2.x / Transformers 4.x
+combination fails the strict audit; moving to Lens 4.x would remove the API MECH
+still uses. The NumPy, pandas, and PyArrow bounds remain load-bearing for the
+project's scientific stack and NumPy/PyArrow binary compatibility.
 
-All three call sites now resolve the class through `backend/interpretability/tl_compat.py`,
-so an unsupported install fails with the supported range and the exact fix rather than a bare
-`ImportError`. `tests/pytest/test_dependency_contract.py` guards the pins, including a
-negative control that proves the check rejects a simulated 4.x install.
+All three legacy call sites resolve the class through
+`backend/interpretability/tl_compat.py`, so an unsupported install fails with
+the supported range and install command instead of a bare `ImportError`.
+`tests/pytest/test_dependency_contract.py` guards the dependency contract,
+including a negative control proving the check rejects a simulated 4.x install.
 
 > **Resolved:** `backend/datasets/` was renamed to `backend/research_datasets/`. The package
 > no longer shadows HuggingFace `datasets` when `backend/` is on `sys.path`, and
@@ -526,16 +525,19 @@ MECH/
 
 Ordered by what actually blocks trustworthy use, not by what is most exciting.
 
-### 1. ~~Make a fresh install work~~ ✅ fixed
+### 1. Secure the ML dependency stack — current CI gate
 
-`requirements.txt` had no upper bounds, so a clean install pulled `transformers` 5.x and
-`transformer-lens` 4.x — and TransformerLens 4.0 **removed `HookedTransformer`**, which
-breaks `gpt2_steps.py` and the desktop sidecar.
+The previous `transformers 4.57.6` / `setuptools 79.0.1` environment failed
+the strict dependency audit with known advisories. The updated constraints select
+Transformers 5.20.2 or later, TransformerLens 3.9.x (which retains
+`HookedTransformer`), a compatible Hub 1.x dependency, and setuptools 83.0.0 or
+later. The dependency and provenance-test changes are awaiting a fresh full CI
+run; the stack is not marked release-verified until the strict audit, all backend
+shards, live evidence, frontend, and Playwright checks finish successfully.
 
-**Done.** The ML stack is now pinned to a verified combination
-(`torch 2.14` / `transformers 4.57.6` / `transformer-lens 2.18.0`), all three call sites resolve
-through `backend/interpretability/tl_compat.py`, and
-`tests/pytest/test_dependency_contract.py` guards it with a negative control.
+TransformerLens 4.x `TransformerBridge` migration remains a separate task. The
+`<4.0` pin is intentional until its changed hook names and tensor shapes can be
+migrated and measured against real model weights.
 
 Remaining in this area:
 
