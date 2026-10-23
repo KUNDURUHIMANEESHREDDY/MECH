@@ -220,10 +220,11 @@ class HuggingFaceComparisonBackend:
             elif hidden_states_a is None or hidden_states_b is None:
                 residual_reason = "At least one model did not return hidden states."
             else:
-                for layer_a, tensor_a in enumerate(hidden_states_a):
-                    if layer_a >= len(hidden_states_b):
-                        break
-                    tensor_b = hidden_states_b[layer_a]
+                # HF hidden_states[0] is the embedding output, not a
+                # transformer residual block. Compare post-block states only.
+                for state_index in range(1, min(len(hidden_states_a), len(hidden_states_b))):
+                    tensor_a = hidden_states_a[state_index]
+                    tensor_b = hidden_states_b[state_index]
                     a = tensor_a.detach().float().cpu()
                     b = tensor_b.detach().float().cpu()
                     if a.shape != b.shape:
@@ -232,8 +233,9 @@ class HuggingFaceComparisonBackend:
                     cosine = _finite_number(F.cosine_similarity(flat_a, flat_b, dim=0).item())
                     mae = _finite_number(torch.mean(torch.abs(flat_a - flat_b)).item())
                     if cosine is not None and mae is not None:
+                        layer_index = state_index - 1
                         residual_layers.append({
-                            "layer_a": layer_a, "layer_b": layer_a,
+                            "layer_a": layer_index, "layer_b": layer_index,
                             "shape": list(a.shape),
                             "cosine_similarity": cosine,
                             "mean_absolute_difference": mae,
