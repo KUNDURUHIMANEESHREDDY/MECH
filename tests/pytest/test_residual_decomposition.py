@@ -190,10 +190,14 @@ def test_the_decomposition_terms_sum_to_the_block_output(engine, snapshot):
         lambda m, i: captured.__setitem__(
             "resid_pre", i[0].detach().clone())
     )
-    post_hook = model.transformer.h[layer].register_forward_hook(
-        lambda m, i, o: captured.__setitem__(
-            "resid_post", o[0].detach().clone())
-    )
+    def capture_block_output(_module, _inputs, output):
+        # Transformers 4 returned a tuple from GPT2Block in this path;
+        # Transformers 5 may return the hidden-state tensor directly. Normalize
+        # only the wrapper shape, not the batch/sequence dimensions.
+        hidden_states = output[0] if isinstance(output, (tuple, list)) else output
+        captured["resid_post"] = hidden_states.detach().clone()
+
+    post_hook = model.transformer.h[layer].register_forward_hook(capture_block_output)
     try:
         with torch.no_grad():
             model(ids, output_attentions=True, use_cache=False)
@@ -209,7 +213,20 @@ def test_the_decomposition_terms_sum_to_the_block_output(engine, snapshot):
         hidden[layer], dtype=torch.float32
     ).unsqueeze(0)
     with torch.no_grad():
-        attn_out = block.attn(block.ln_1(resid_pre_from_cache))[0]
+        token_embeddings = model.transformer.wte(ids)
+        position_ids = torch.arange(ids.shape[1], device=ids.device).unsqueeze(0)
+        causal_mask = create_causal_mask(
+            config=model.config,
+            inputs_embeds=token_embeddings,
+            attention_mask=None,
+            past_key_values=None,
+            position_ids=position_ids,
+            allow_is_causal_skip=False,
+        )
+        attn_out = block.attn(
+            block.ln_1(resid_pre_from_cache),
+            attention_mask=causal_mask,
+        )[0]
         resid_mid = resid_pre_from_cache + attn_out
         mlp_out = block.mlp(block.ln_2(resid_mid))
 
