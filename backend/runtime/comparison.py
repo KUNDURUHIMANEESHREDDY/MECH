@@ -486,11 +486,11 @@ class ModelComparisonEngine:
     def compare_available(self) -> bool:
         # A protocol-compatible object may still return fabricated dictionaries.
         # Only the built-in implementation is permitted to attest live results.
-        return isinstance(self.backend, HuggingFaceComparisonBackend)
+        return type(self.backend) is HuggingFaceComparisonBackend
 
     def compare(self, prompt: str, model_a: str, model_b: str,
                 revision_a: str = "main", revision_b: str = "main") -> Dict[str, Any]:
-        if not isinstance(self.backend, HuggingFaceComparisonBackend):
+        if type(self.backend) is not HuggingFaceComparisonBackend:
             return _unavailable(
                 prompt, model_a, model_b, revision_a, revision_b,
                 "No trusted Hugging Face comparison backend is configured; "
