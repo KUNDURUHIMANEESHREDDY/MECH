@@ -37,7 +37,7 @@ test('Research Workflow captures both prompts and renders finite residual deltas
     capture({ prompt: 'B', matrix: [[1.5, 1], [5, 2]] }),
   ]);
 
-  await expect(panel.getByText(/weight fingerprints matched/i)).toBeVisible();
+  await expect(page.getByText(/weight fingerprints matched/i)).toBeVisible();
   await expect(panel.getByText(/gpt2/).first()).toBeVisible();
   await expect(panel.getByRole('cell', { name: '0.5' })).toBeVisible();
   await expect(panel.getByRole('cell', { name: '-1' })).toBeVisible();
