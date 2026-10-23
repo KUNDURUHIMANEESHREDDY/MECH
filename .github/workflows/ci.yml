@@ -1,4 +1,4 @@
-name: CI
+name: MECH CI
 
 on:
   push:
