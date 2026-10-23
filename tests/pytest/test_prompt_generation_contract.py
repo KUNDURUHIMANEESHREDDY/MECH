@@ -92,7 +92,10 @@ def test_layer_activation_route_uses_generated_gpt2_input_when_prompt_is_omitted
             return {
                 "status": "ok",
                 "text": "A fresh continuation sampled by GPT-2",
+                "prompt": "A fresh continuation sampled by GPT-2",
                 "tokens_added": 7,
+                "provenance": "live",
+                "attested": True,
             }
 
         def layer_activations(self, layer, prompt):
