@@ -34,6 +34,7 @@ _cache: Dict[str, Any] = {}
 #: label rather than a request. Recorded so a response can name the weights that
 #: actually produced it.
 SUPPORTED_MODEL = "gpt2"
+DEFAULT_INTERVENTION_PROMPT = "The capital of France is"
 
 
 def _loaded_model_id() -> Optional[str]:
@@ -573,6 +574,9 @@ def _forward(prompt: str) -> Dict[str, Any]:
 
 def _forward_locked(prompt: str) -> Dict[str, Any]:
     global _cache
+    # This service is inference-only. Reassert eval mode under MODEL_LOCK so
+    # an earlier caller cannot leave dropout active and poison cached evidence.
+    _model.eval()
     inputs = _tokenizer(prompt, return_tensors="pt")
     device = next(_model.parameters()).device
     inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -1465,14 +1469,14 @@ def patch_neuron(
                 h.remove()
 
     with MODEL_LOCK:
-        # `prompt_defaulted` records that the engine chose this prompt rather
-        # than the caller naming it: the cache's last prompt, or the fixed
-        # default below. The previous `random.choice` made that choice
-        # unreproducible as well -- two identical requests measured different
-        # prompts, and only a careful caller reading the echoed prompt could
-        # tell what they had got.
+        # This intervention is inference-only; keep it deterministic even if
+        # another in-process caller changed the shared model's training mode.
+        _model.eval()
+        # `prompt_defaulted` records that the engine chose the cached prompt
+        # when available, otherwise the stable default below. Never sample a
+        # prompt randomly: identical requests must be reproducible.
         prompt_defaulted = not prompt
-        prompt = prompt or (_cache.get("prompt") if _cache else None)
+        prompt = prompt or (_cache.get("prompt") if _cache else None) or DEFAULT_INTERVENTION_PROMPT
         if not prompt:
             return {
                 "status": "unavailable",

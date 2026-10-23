@@ -121,7 +121,12 @@ def test_requirements_pin_transformer_lens_below_4():
     # could fail this test.
     upper = re.search(r"<\s*([0-9]+(?:\.[0-9]+)*)", spec)
     assert upper, f"no upper bound in {spec!r}; it is unbounded"
-    assert float(upper.group(1)) < 4.0, (
+    # The strict operator is what excludes 4.x; the bound itself may
+    # correctly be written as exactly 4.0 (for example, "<4.0").
+    upper_parts = [int(part) for part in upper.group(1).split(".")]
+    while len(upper_parts) > 1 and upper_parts[-1] == 0:
+        upper_parts.pop()
+    assert tuple(upper_parts) <= (4, 0), (
         f"transformer-lens must be capped below 4.0, got: {spec!r}. "
         f"4.0 removed HookedTransformer, which backend/ depends on."
     )
