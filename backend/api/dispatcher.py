@@ -1419,11 +1419,10 @@ def _default_prompt(engine: Any) -> str:
 
 @router.post("/gpt2/fresh_prompt")
 def gpt2_fresh_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate a brand-new prompt from the live model (never from a pool).
+    """Return a prompt generated and attested by the live GPT-2 measurement layer.
 
-    Samples a continuation from a rotating opener using the loaded weights.
-    Fails closed when the engine is unavailable: no seeded or pooled text is
-    ever substituted, since the whole point is model-created prompts.
+    There is no text primer, prompt pool, or wrapper-created measurement.
+    Fail closed if the model fails to attest the generated prompt.
     """
     engine = get_engine()
     if not (engine and engine.is_available()):
@@ -1444,20 +1443,21 @@ def gpt2_fresh_prompt(payload: Dict[str, Any]) -> Dict[str, Any]:
             "primer": primer,
             "error": str(exc)[:300],
         }, "unavailable")
-    if not isinstance(res, dict) or res.get("status") != "ok" or not str(res.get("text", "")).strip():
+    if (
+        not isinstance(res, dict)
+        or res.get("status") != "ok"
+        or res.get("provenance") != "live"
+        or res.get("attested") is not True
+        or not str(res.get("prompt", "")).strip()
+    ):
         return _mark({
             "status": "unavailable",
             "primer": primer,
-            "error": "The model did not return usable prompt text.",
+            "error": "The model did not return an attested, usable GPT-2 prompt.",
         }, "unavailable")
-    return _mark({
-        "status": "ok",
-        "prompt": str(res["text"]).strip(),
-        "primer": primer,
-        "method": ("sampled GPT-2 tokens from live weights with no text primer "
-                   f"(temperature {res.get('temperature')}, top-k {res.get('top_k')})"),
-        "tokens_added": res.get("tokens_added"),
-    }, "live")
+    # The measurement layer has already attested the exact prompt field.
+    # Return that record unchanged; wrapping it in a new dict would lose scope.
+    return pass_through(res)
 
 
 @router.post("/gpt2/run_prompt")
