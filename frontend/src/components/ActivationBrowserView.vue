@@ -341,7 +341,7 @@
         <template v-else>
           <dl class="fact-grid distribution-stats"><div><dt>Components returned</dt><dd>{{ distributionStats.count }}</dd></div><div><dt>Mean</dt><dd class="mono">{{ formatNumber(distributionStats.mean,6) }}</dd></div><div><dt>Standard deviation</dt><dd class="mono">{{ formatNumber(distributionStats.std,6) }}</dd></div><div><dt>Minimum / maximum</dt><dd class="mono">{{ formatNumber(distributionStats.min,4) }} / {{ formatNumber(distributionStats.max,4) }}</dd></div><div><dt>Positive / zero / negative</dt><dd>{{ distributionStats.positive }} / {{ distributionStats.zero }} / {{ distributionStats.negative }}</dd></div></dl>
           <div class="neuron-bars" role="group" aria-label="MLP neuron activation dimensions"><button v-for="item in mlpDistribution" :key="item.index" type="button" class="neuron-bar" :class="{ 'neuron-bar--selected': selectedDimension===item.index }" :title="'Neuron '+item.index+': '+formatNumber(item.value,6)" :aria-label="'Select MLP neuron '+item.index+', activation '+formatNumber(item.value,6)" @click="locateNeuron(item.index)"><span class="bar-track"><i :style="{height: Math.max(2, Math.abs(item.value ?? 0)/(Math.max(Math.abs(distributionStats.min ?? 0),Math.abs(distributionStats.max ?? 0),1e-9))*100)+'%',background:(item.value ?? 0)>=0?'#2563eb':'#d97757'}"></i></span><span class="bar-index">{{ item.index }}</span></button></div>
-          <div v-if="selectedDimension!==null" class="neuron-locator" role="status"><span class="source-badge">NEURON LOCATED</span><strong>Layer {{ selected.layer }} · MLP neuron {{ selectedDimension }}</strong><span>Token #{{ selected.token }} ({{ tokens[selected.token] }}) · activation {{ selectedNeuronValue===null?'not returned':formatNumber(selectedNeuronValue,6) }}</span><p class="help-copy">This identifies the activation vector dimension for the selected token and layer. It does not claim a named semantic feature unless a feature-mapping endpoint provides one.</p></div>
+          <div v-if="selectedDimension!==null" class="neuron-locator" role="status"><span class="source-badge">NEURON LOCATED</span><strong>Layer {{ selected.layer }} · MLP neuron {{ selectedDimension }}</strong><span>Token #{{ selected.token }} ({{ tokens[selected.token] }}) · activation {{ selectedNeuronValue===null?'not returned':formatNumber(selectedNeuronValue,6) }}</span><p class="help-copy">This identifies the activation vector dimension for the selected token and layer. It does not claim a named semantic feature unless a feature-mapping endpoint provides one.</p><div class="actions"><button type="button" class="primary-button" @click="openLinkedTool('neuroninspector')">Open neuron in workspace →</button><button type="button" class="primary-button" @click="openLinkedTool('saelab')">Inspect SAE at this layer →</button></div></div>
         </template>
       </section>
     </template>
@@ -350,7 +350,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
-import { takeResearchSelection } from '../services/researchSelectionContext';
+import { setResearchSelection, takeResearchSelection } from '../services/researchSelectionContext';
 import {
   asArray,
   asNumber,
@@ -578,6 +578,8 @@ const sitePath = computed(() => {
   const mlp = components.find((component) => asString(component.id) === 'mlp');
   return mlp ? asString(mlp.path) : asString(layer.path);
 });
+
+function openLinkedTool(route:string) { setResearchSelection({prompt:capture.value?.prompt || prompt.value.trim(),layer:selected.value?.layer,token:selected.value?.token,neuron:selectedDimension.value ?? undefined,origin:'activation-browser'}); window.location.hash=route; }
 
 async function runCapture() {
   const targetPrompt = prompt.value.trim();
