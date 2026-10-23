@@ -64,9 +64,8 @@ const crossModelResiduals=computed(()=>isRecord(crossModelResult.value?.residual
 const crossModelAttention=computed(()=>isRecord(crossModelResult.value?.attention)?crossModelResult.value!.attention as JsonRecord:{});
 const crossModelResidualRows=computed(()=>asArray(crossModelResiduals.value.layers).filter(isRecord));
 const crossModelAttentionRows=computed(()=>asArray(crossModelAttention.value.layers).filter(isRecord));
-function nestedRecord(value:unknown,key:string):JsonRecord|null{return isRecord(value)&&isRecord(value[key])?value[key] as JsonRecord:null}
-function nestedText(value:unknown,key:string):string{return asString(nestedRecord(value,key)?.[key])}
-function nestedNumber(value:unknown,key:string):number|null{return asNumber(nestedRecord(value,key)?.[key])??null}
+function nestedText(value:unknown,key:string):string{return isRecord(value)?asString(value[key]):''}
+function nestedNumber(value:unknown,key:string):number|null{return isRecord(value)?asNumber(value[key])??null:null}
 
 
 const hasFindings=computed(()=>lens.value.length>0||sae.value.length>0||activationComparison.value!==null);
