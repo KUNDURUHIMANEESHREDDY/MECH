@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   frontend:
@@ -51,7 +51,7 @@ jobs:
           key: pip-fast-${{ runner.os }}-py311-v1
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: python -m pytest tests/pytest -q --maxfail=1 --tb=short --durations=25 --timeout=600 --timeout-method=thread -k 'comparison or model_lock or tuned_lens'
+      - run: python -m pytest tests/pytest -vv --maxfail=1 --tb=short --durations=25 --timeout=600 --timeout-method=thread -k 'comparison or model_lock or tuned_lens'
 
   backend:
     name: backend shard ${{ matrix.shard }}/8
@@ -114,7 +114,7 @@ jobs:
           junit_path = Path("pytest-shard.xml")
           command = [
               sys.executable, "-m", "pytest", *selected,
-              "-q", "--maxfail=1", "--tb=short", "--durations=25",
+              "-vv", "--maxfail=1", "--tb=short", "--durations=25",
               "--timeout=600", "--timeout-method=thread",
               "--show-capture=all", "--junitxml", str(junit_path),
           ]
@@ -171,7 +171,7 @@ jobs:
         run: >-
           python -m pytest tests/pytest/test_attestation_laundering.py
           tests/pytest/test_attested_evidence.py
-          tests/pytest/test_provenance_not_inverted.py -v --timeout=600 --timeout-method=thread
+          tests/pytest/test_provenance_not_inverted.py -v --timeout=600 --timeout-method=thread --timeout=600 --timeout-method=thread
 
   e2e:
     runs-on: ubuntu-latest
