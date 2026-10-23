@@ -1,15 +1,10 @@
 name: CI
 
 on:
-  # Direct pushes need CI on the release branch; feature branches are verified
-  # by pull_request to avoid running the expensive GPT-2 and browser jobs twice.
   push:
     branches: [master]
   pull_request:
 
-# Live evidence and browser E2E are explicit dependencies of the aggregate
-# release gate. The gate runs even after a failure or skip and rejects anything
-# other than success, so a green aggregate result requires all configured checks.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -28,17 +23,10 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      # better-sqlite3 postinstall needs node-gyp; vitest does not need it.
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run test:js
       - run: npm run build:renderer
 
-  # Seconds, not minutes, and no dependencies installed. Syntax errors and
-  # undefined names are what make a tree unrunnable, and pytest cannot report
-  # them usefully: a SyntaxError shows up as a collection error attributed to
-  # the file, and an F821 inside an assert *message* surfaces only once the
-  # assertion it was reporting has already failed. Both were found by hand after
-  # a session spent entirely without running Python.
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -46,15 +34,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/ruff-action@v4.1.0
         with:
-          # E9 = syntax errors. F821 = undefined names. Deliberately not the
-          # full default rule set: F401 unused-import noise would fail CI on
-          # files nobody is touching, and a gate people disable is not a gate.
           args: check --isolated --no-cache --select E9,F821 --output-format concise backend tests scripts
 
-  # Run non-scientific backend checks independently from the aggregate suite.
-  # This gives fast feedback for comparison API regressions without weakening
-  # the mandatory full-suite job.
   backend-fast:
+    name: backend-fast
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -69,6 +52,7 @@ jobs:
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m pytest tests/pytest -q --maxfail=1 --tb=short --durations=25 -k 'comparison or model_lock or tuned_lens'
+
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -82,33 +66,20 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: hf-gpt2-${{ runner.os }}-v1
-      # CPU torch first so requirements.txt keeps it (no CUDA wheels on CI).
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      # Import smoke test: catches the /api/v2 and namespace-collision class of
-      # defect, where a broken import used to be swallowed at startup.
       - run: python -c "import backend.main; print('backend.main imports')"
       - run: python -c "import sys; sys.path.insert(0,'backend'); import datasets; assert 'site-packages' in datasets.__file__, datasets.__file__"
-      # The capture-screenshot checks analyse scripts/capture_screenshots.cjs
-      # with @babel/parser out of frontend/node_modules. Without the toolchain
-      # they skip, which in CI is a check going missing unnoticed -- so install
-      # it and let MECH_REQUIRE_JS_LINT turn that skip into a hard failure.
       - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund --prefix frontend
-      # Stop at the first failure so a long suite reports an actionable traceback
-      # instead of consuming the entire timeout before showing the failure summary.
-      # On a passing run, pytest still executes the complete suite.
       - run: python -m pytest tests/pytest -q --maxfail=1 --tb=short --durations=25
         env:
           MECH_REQUIRE_JS_LINT: '1'
 
-  # Mandatory live-weight evidence. Separated from `backend` so that a failure
-  # here is legible: it means the platform cannot reproduce its own science on
-  # real weights, which is not the same failure as a broken unit test.
   live-evidence:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -124,9 +95,6 @@ jobs:
           key: hf-gpt2-${{ runner.os }}-v1
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
       - run: pip install -r requirements.txt -r requirements-dev.txt
-
-      # Prove the weights really load. Without this the "live" tests below can
-      # pass vacuously against a seeded fallback.
       - name: Verify GPT-2 weights load
         run: |
           python - <<'PY'
@@ -134,28 +102,18 @@ jobs:
           assert gpt2_engine.is_available(), "GPT-2 stack unavailable"
           status = gpt2_engine.load()
           assert status.get("status") == "loaded", status
-          # A real forward pass, so a stubbed engine cannot satisfy this.
           result = gpt2_engine.run_prompt("The capital of France is")
           assert result.get("status") in ("completed", "ok"), result
           assert result.get("str_tokens"), result
           print("gpt2 weights loaded:", status)
           PY
-
-      # The closed validation loop end to end: live pipeline, reproducibility
-      # report, then the 0.85 fidelity gate.
       - name: Live validation loop
         run: python -m pytest tests/pytest/test_validation_loop.py -v
-
-      # The model fingerprint must hash real weights, and drift detection must
-      # actually be able to fail.
       - name: Attestation must hash real weights
         run: |
           python - <<'PY'
-          from backend.science.reproducibility.model_fingerprint import (
-              ModelFingerprintEngine,
-          )
+          from backend.science.reproducibility.model_fingerprint import ModelFingerprintEngine
           from backend.science.models.gpt2_adapter import GPT2Adapter
-
           adapter = GPT2Adapter(variant="small", mock_mode=False)
           fp = ModelFingerprintEngine().capture(adapter)
           assert fp.attested, fp.attestation_reason
@@ -165,60 +123,11 @@ jobs:
           print("weights sha256:", fp.weights_sha256)
           print("parameters:", fp.parameter_count)
           PY
-
       - name: Evidence boundary refuses unproven live claims
-        # The guarantee lives in these three files. This step used to name
-        # tests/pytest/test_evidence_boundary.py, which does not exist: that spec
-        # was removed with backend/core/evidence_boundary.py (docs/roadmap.md
-        # 2.6), and the step was never repointed, so the job failed on a missing
-        # path rather than on the boundary it exists to check. What holds the
-        # guarantee now: the laundering tests (a `live` label the measurement
-        # layer did not issue is refused, a failure status is never attested, a
-        # forged `attested` flag cannot satisfy the evidence gate), the
-        # evidence-gate tests (the predicates and the validation and replication
-        # gates require an attestation), and the not-inverted tests (the engine
-        # attests what it measured and does not attest a refusal).
         run: >-
           python -m pytest tests/pytest/test_attestation_laundering.py
           tests/pytest/test_attested_evidence.py
           tests/pytest/test_provenance_not_inverted.py -v
-
-  # This gate must execute even if a dependency fails or is skipped.
-  # A skipped GitHub Actions job can be treated as neutral by branch protection,
-  # so relying on the default needs() behavior can accidentally make a failed
-  # dependency non-blocking when only this aggregate check is required.
-  required:
-    if: ${{ always() }}
-    needs: [lint, frontend, backend, live-evidence, e2e]
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - name: Enforce every release check
-        env:
-          LINT_RESULT: ${{ needs.lint.result }}
-          FRONTEND_RESULT: ${{ needs.frontend.result }}
-          BACKEND_RESULT: ${{ needs.backend.result }}
-          LIVE_EVIDENCE_RESULT: ${{ needs.live-evidence.result }}
-          E2E_RESULT: ${{ needs.e2e.result }}
-        run: |
-          printf '%s\n' \
-            "lint=$LINT_RESULT" \
-            "frontend=$FRONTEND_RESULT" \
-            "backend=$BACKEND_RESULT" \
-            "live-evidence=$LIVE_EVIDENCE_RESULT" \
-            "e2e=$E2E_RESULT"
-          for result in \
-            "$LINT_RESULT" \
-            "$FRONTEND_RESULT" \
-            "$BACKEND_RESULT" \
-            "$LIVE_EVIDENCE_RESULT" \
-            "$E2E_RESULT"; do
-            if [ "$result" != success ]; then
-              echo "::error::Release gate failed: every required check must succeed (got $result)."
-              exit 1
-            fi
-          done
-          echo "All required release checks passed."
 
   e2e:
     runs-on: ubuntu-latest
@@ -236,5 +145,41 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
-      # Offline specs only (Desktop OS shell, directory, status): no Python backend on CI.
       - run: npx playwright test tests/playwright/desktop-os-shell.spec.js tests/playwright/desktop-tool-pages.spec.js tests/playwright/research-workflow-heatmap.spec.js tests/playwright/shell-smoke.spec.js tests/playwright/trust.spec.js
+
+  required:
+    name: required
+    if: ${{ always() }}
+    needs: [lint, frontend, backend-fast, backend, live-evidence, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Enforce every release check
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          BACKEND_FAST_RESULT: ${{ needs.backend-fast.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          LIVE_EVIDENCE_RESULT: ${{ needs.live-evidence.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+        run: |
+          printf '%s\n' \
+            "lint=$LINT_RESULT" \
+            "frontend=$FRONTEND_RESULT" \
+            "backend-fast=$BACKEND_FAST_RESULT" \
+            "backend=$BACKEND_RESULT" \
+            "live-evidence=$LIVE_EVIDENCE_RESULT" \
+            "e2e=$E2E_RESULT"
+          for result in \
+            "$LINT_RESULT" \
+            "$FRONTEND_RESULT" \
+            "$BACKEND_FAST_RESULT" \
+            "$BACKEND_RESULT" \
+            "$LIVE_EVIDENCE_RESULT" \
+            "$E2E_RESULT"; do
+            if [ "$result" != success ]; then
+              echo "::error::Release gate failed: every required check must succeed (got $result)."
+              exit 1
+            fi
+          done
+          echo "All required release checks passed."
