@@ -139,7 +139,7 @@ const errorMessage = ref('');
 const captureMessage = ref('');
 const capture = ref<{ prompt: string; provenance: string; tokens: string[]; layerRecord: JsonRecord; matrices: unknown[] } | null>(null);
 const layers = ref<LayerInfo[]>([]);
-const selected = ref<Selection | null>(null);
+const selected = ref<Selection | null>(null);\nconst selectedTokenIndex = ref(0);
 const expanded = ref(new Set<number>());
 const expandedAll = ref(true);\nconst expandedMlp = ref(new Set<number>());
 const showConnections = ref(true);
@@ -196,7 +196,7 @@ const graphNodes = computed<GraphNode[]>(() => {
       const headX = pos.x;
       const headY = pos.y + 125;
       const hPos = positions['head-'+layer.index+'-'+selected.value.index] || {x:headX,y:headY};
-      result.push({id:'head-'+layer.index+'-'+selected.value.index,label:'Head '+selected.value.index,kind:'Attention head',layer:layer.index,index:selected.value.index,x:hPos.x,y:hPos.y,width:142,height:70,meta:'Attention head',activation:null,mlpWidth:null});
+      result.push({id:'head-'+layer.index+'-'+selected.value.index,label:'Head '+selected.value.index,kind:'Attention head',layer:layer.index,index:selected.value.index,x:hPos.x,y:hPos.y,width:142,height:70,meta:'Attention head',activation:selectedActivation.value,mlpWidth:null});
     }
     if (selected.value?.layer === layer.index && (selected.value.kind === 'MLP' || selected.value.kind === 'MLP neuron')) {
       const mPos = positions['mlp-'+layer.index] || {x:pos.x,y:pos.y+125};
