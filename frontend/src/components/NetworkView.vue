@@ -105,7 +105,7 @@
       <form class="wire-form" data-testid="network-wire-form" @submit.prevent="runWiringPrompt">
         <label class="wire-field">
           <span>Prompt</span>
-          <input v-model="wirePrompt" type="text" class="control" data-testid="network-wire-prompt" placeholder="The capital of France is" />
+          <input v-model="wirePrompt" type="text" class="control" data-testid="network-wire-prompt" placeholder="Generated automatically by GPT-2" />
         </label>
         <button class="tool-button tool-button--primary" type="submit" data-testid="network-wire-run" :disabled="wiringLoading">
           {{ wiringLoading ? 'Running…' : 'Light up wires' }}
@@ -121,7 +121,7 @@
       </form>
       <label class="auto-prompt-toggle">
         <input v-model="autoPrompt" type="checkbox" />
-        <span>New model-created prompt every minute</span>
+        <span>New GPT-2 model-created prompt every 2 minutes</span>
       </label>
       <p v-if="freshPromptNote" class="wire-note">{{ freshPromptNote }}</p>
       <div v-if="wiringError" class="tool-notice tool-notice--error" role="alert" data-testid="network-wire-error">
@@ -294,7 +294,7 @@ const layerDetailError = ref('');
 const layerDetailHeads = ref<HeadNorms[]>([]);
 const layerDetailCache = new Map<number, HeadNorms[]>();
 
-const wirePrompt = ref('The capital of France is');
+const wirePrompt = ref('');
 const wiringLoading = ref(false);
 const wiringError = ref('');
 const wireTokens = ref<string[]>([]);
@@ -691,21 +691,27 @@ function freshPromptTimestamp(): string {
 
 async function fetchFreshPrompt(manual: boolean): Promise<void> {
   if (freshPromptState.value === 'loading') return;
-  if (wiringLoading.value) {
-    if (manual) freshPromptNote.value = 'Wait for the wiring run to finish, then try again.';
-    return;
-  }
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     freshPromptNote.value = 'Reconnect this browser before requesting a model-created prompt.';
     return;
   }
   freshPromptState.value = 'loading';
   try {
-    const res = await api.gpt2FreshPrompt();
-    const text = isRecord(res) && typeof res.prompt === 'string' ? res.prompt.trim() : '';
-    const provenance = isRecord(res) && typeof res.provenance === 'string' ? res.provenance : 'unavailable';
-    if (!text || provenance !== 'live') {
-      freshPromptNote.value = 'The model did not return a usable prompt; the previous text was kept.';
+    const previousPrompt = wirePrompt.value.trim();
+    let text = '';
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const res = await api.gpt2FreshPrompt();
+      const generated = isRecord(res) && typeof res.prompt === 'string' ? res.prompt.trim() : '';
+      const provenance = isRecord(res) && typeof res.provenance === 'string' ? res.provenance : 'unavailable';
+      if (!generated || provenance !== 'live' || !isRecord(res) || res.attested !== true) {
+        freshPromptNote.value = 'GPT-2 did not return a live prompt; no canned text was substituted.';
+        return;
+      }
+      text = generated;
+      if (text !== previousPrompt) break;
+    }
+    if (!text || text === previousPrompt) {
+      freshPromptNote.value = 'GPT-2 did not produce a distinct prompt after three live samples; the current prompt was kept.';
       return;
     }
     wirePrompt.value = text;
@@ -720,9 +726,9 @@ async function fetchFreshPrompt(manual: boolean): Promise<void> {
 function startFreshPromptTimer(): void {
   stopFreshPromptTimer();
   freshPromptTimer = setInterval(() => {
-    if (!autoPrompt.value || document.hidden) return;
+    if (!autoPrompt.value) return;
     void fetchFreshPrompt(false);
-  }, 60_000);
+  }, 120_000);
 }
 
 function stopFreshPromptTimer(): void {
