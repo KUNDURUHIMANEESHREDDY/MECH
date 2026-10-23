@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import pytest
 import torch
+from transformers.masking_utils import create_causal_mask
 
 from _weight_guard import skip_reason, weights_available
 
@@ -86,13 +87,32 @@ def truth_stream(engine, snapshot):
     n_layers = engine._n_layers()
 
     with torch.no_grad():
-        h = model.transformer.wte(ids) + model.transformer.wpe(
-            torch.arange(seq)
-        ).unsqueeze(0)
+        token_embeddings = model.transformer.wte(ids)
+        position_ids = torch.arange(seq, device=ids.device).unsqueeze(0)
+        h = token_embeddings + model.transformer.wpe(position_ids).to(
+            token_embeddings.device
+        )
+        # Transformers 5 constructs a causal mask in GPT2Model.forward and
+        # passes it into each block. Calling GPT2Attention directly without
+        # that mask makes every position attend to future tokens, so a
+        # "manual" replay diverges massively from the actual model. Reuse the
+        # public mask factory with identical sequence/device/config semantics.
+        causal_mask = create_causal_mask(
+            config=model.config,
+            inputs_embeds=token_embeddings,
+            attention_mask=None,
+            past_key_values=None,
+            position_ids=position_ids,
+            allow_is_causal_skip=False,
+        )
         stream = [h]                                  # [1, seq, d]
         for layer in range(n_layers):
             block = model.transformer.h[layer]
-            resid_mid = stream[-1] + block.attn(block.ln_1(stream[-1]))[0]
+            attn_out, _ = block.attn(
+                block.ln_1(stream[-1]),
+                attention_mask=causal_mask,
+            )
+            resid_mid = stream[-1] + attn_out
             stream.append(resid_mid + block.mlp(block.ln_2(resid_mid)))
 
     pre = [t[0] for t in stream]                       # n_layers + 1 entries
