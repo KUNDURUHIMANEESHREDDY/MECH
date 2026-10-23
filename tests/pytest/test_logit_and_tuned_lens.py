@@ -656,7 +656,7 @@ def test_the_readme_quotes_the_measured_tuned_lens_result():
     payload = json.loads(artifact_path.read_text(encoding="utf-8"))
     report = payload["full_affine"]
     assert report["status"] == "completed"
-    assert report["provenance"] == LIVE
+    assert report["provenance"] == "experimental-unverified"
     assert report["validation_eligible"] is False
     assert report["publication_eligible"] is False
     assert report["model_id"] is None
