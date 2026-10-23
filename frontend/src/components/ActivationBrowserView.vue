@@ -651,10 +651,13 @@ function previewCount(available: number): number {
 <style scoped>
 .activation-surface {
   min-height: 100%;
-  padding: clamp(18px, 3vw, 30px);
-  background: var(--surface);
+  min-width: 0;
+  padding: clamp(14px, 2vw, 24px);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
   color: var(--text);
   color-scheme: light;
+  font-family: var(--font);
 }
 
 .surface-header,
@@ -1103,6 +1106,27 @@ function previewCount(available: number): number {
 @media (prefers-reduced-motion: reduce) {
   .progress-fill {
     transition: none;
+  }
+}
+
+/* Shared MECH interaction contract: visible keyboard focus and restrained motion. */
+.activation-surface :is(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.activation-surface button,
+.activation-surface input,
+.activation-surface select {
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activation-surface *,
+  .activation-surface *::before,
+  .activation-surface *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
 </style>
