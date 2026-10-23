@@ -212,7 +212,7 @@ jobs:
             "$BACKEND_FAST_RESULT" \
             "$BACKEND_RESULT" \
             "$LIVE_EVIDENCE_RESULT" \
-            "$E2E_RESULT" \\
+            "$E2E_RESULT" \
             "$SECURITY_RESULT"; do
             if [ "$result" != success ]; then
               echo "::error::Release gate failed: every required check must succeed (got $result)."
