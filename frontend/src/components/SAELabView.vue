@@ -660,8 +660,11 @@ const exampleRuns = computed(() => {
     }));
 });
 
-onMounted(() => {
-  void loadStatus();
+onMounted(async () => {
+  await loadStatus();
+  // A linked feature is a concrete navigation request: inspect the carried prompt/checkpoint
+  // immediately so the feature can be selected (or an explicit mismatch can be reported).
+  if (pendingFeature != null) await inspect();
 });
 
 async function loadStatus() {
