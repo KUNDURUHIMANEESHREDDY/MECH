@@ -111,14 +111,16 @@ jobs:
           if not selected:
               raise SystemExit(f"No pytest files assigned to shard {shard}/{shard_count}.")
           print(f"Running {len(selected)} test files in shard {shard}/{shard_count}.")
-          subprocess.run(
-              [
-                  sys.executable, "-m", "pytest", *selected,
-                  "-q", "--maxfail=1", "--tb=short", "--durations=25",
-                  "--show-capture=all",
-              ],
-              check=True,
-          )
+          junit_path = Path("pytest-shard.xml")
+          command = [
+              sys.executable, "-m", "pytest", *selected,
+              "-q", "--maxfail=1", "--tb=short", "--durations=25",
+              "--show-capture=all", "--junitxml", str(junit_path),
+          ]
+          completed = subprocess.run(command, check=False)
+          if completed.returncode:
+              print("Pytest shard failed; the failing node id and traceback are in the console output.")
+              raise SystemExit(completed.returncode)
           PY
 
   live-evidence:
