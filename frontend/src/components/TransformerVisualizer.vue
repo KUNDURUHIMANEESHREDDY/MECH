@@ -1136,21 +1136,21 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .transformer-visualizer {
-  --tv-primary: #2563eb;
-  --tv-primary-dark: #1d4ed8;
-  --tv-primary-soft: #eaf1ff;
-  --tv-ink: #182230;
-  --tv-muted: #647184;
-  --tv-subtle: #8c99a7;
-  --tv-border: #d9e0e8;
-  --tv-border-strong: #c8d1dc;
-  --tv-surface: #ffffff;
-  --tv-surface-soft: #f8fafc;
-  --tv-canvas: #f4f6f8;
+  --tv-primary: var(--primary, #2563eb);
+  --tv-primary-dark: var(--primary-focus, #1d4ed8);
+  --tv-primary-soft: var(--accent-soft, #eaf1ff);
+  --tv-ink: var(--text, #182230);
+  --tv-muted: var(--text-muted, #647184);
+  --tv-subtle: var(--text-muted, #8c99a7);
+  --tv-border: var(--border, #d9e0e8);
+  --tv-border-strong: var(--border-light, #c8d1dc);
+  --tv-surface: var(--surface, #ffffff);
+  --tv-surface-soft: var(--surface-2, #f8fafc);
+  --tv-canvas: var(--bg, #f4f6f8);
   min-width: 0;
   min-height: 100%;
-  padding: 16px;
-  background: var(--tv-canvas);
+  padding: clamp(14px, 2vw, 24px);
+  background: var(--bg, var(--tv-canvas));
   color: var(--tv-ink);
   color-scheme: light;
   font-family: var(--font, "IBM Plex Sans", "Segoe UI", sans-serif);
