@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import threading
 from typing import Any, Dict, Optional
 
 
@@ -101,6 +102,92 @@ def _finite_number(value: Any) -> Optional[float]:
     return result if math.isfinite(result) else None
 
 
+_MODEL_LOCKS_GUARD = threading.Lock()
+_MODEL_LOCKS: Dict[int, Any] = {}
+
+
+def _model_lock(model: Any) -> Any:
+    """Serialize temporary forward hooks on a shared cached model instance."""
+    key = id(model)
+    with _MODEL_LOCKS_GUARD:
+        if key not in _MODEL_LOCKS:
+            _MODEL_LOCKS[key] = threading.RLock()
+        return _MODEL_LOCKS[key]
+
+
+def _layer_sequence(model: Any) -> Any:
+    """Find common HF transformer block containers without assuming a family."""
+    paths = (
+        ("transformer", "h"),
+        ("model", "layers"),
+        ("gpt_neox", "layers"),
+        ("transformer", "layers"),
+        ("model", "decoder", "layers"),
+        ("transformer", "blocks"),
+        ("layers",),
+    )
+    for path in paths:
+        current = model
+        for part in path:
+            current = getattr(current, part, None)
+            if current is None:
+                break
+        if current is not None and not isinstance(current, (str, bytes)):
+            try:
+                if len(current) > 0 and hasattr(current, "__getitem__"):
+                    return current
+            except (TypeError, AttributeError):
+                pass
+    return ()
+
+
+def _forward_with_activations(model: Any, inputs: Dict[str, Any], torch: Any):
+    """Run a real forward pass and capture available MLP intermediate tensors."""
+    captured: Dict[int, Any] = {}
+    hooks = []
+    lock = _model_lock(model)
+    with lock:
+        try:
+            for index, block in enumerate(_layer_sequence(model)):
+                mlp = getattr(block, "mlp", None)
+                if mlp is None:
+                    mlp = getattr(block, "feed_forward", getattr(block, "ffn", None))
+                if mlp is None:
+                    continue
+                projection_name = next(
+                    (name for name in (
+                        "c_proj", "down_proj", "dense_4h_to_h", "fc2", "w2",
+                    ) if getattr(mlp, name, None) is not None),
+                    None,
+                )
+                if projection_name is not None:
+                    projection = getattr(mlp, projection_name)
+
+                    def capture_projection(_module, args, layer=index, name=projection_name):
+                        if args and hasattr(args[0], "detach"):
+                            captured[layer] = (args[0].detach(), "input_to_" + name)
+
+                    hooks.append(projection.register_forward_pre_hook(capture_projection))
+                else:
+                    def capture_mlp(_module, _args, output, layer=index):
+                        tensor = output[0] if isinstance(output, (tuple, list)) and output else output
+                        if hasattr(tensor, "detach"):
+                            captured[layer] = (tensor.detach(), "mlp_block_output")
+
+                    hooks.append(mlp.register_forward_hook(capture_mlp))
+            with torch.inference_mode():
+                output = model(
+                    **inputs,
+                    output_hidden_states=True,
+                    output_attentions=True,
+                    return_dict=True,
+                )
+        finally:
+            for hook in hooks:
+                hook.remove()
+    return output, captured
+
+
 class HuggingFaceComparisonBackend:
     """Load and compare independently requested real checkpoints."""
 
@@ -156,11 +243,8 @@ class HuggingFaceComparisonBackend:
             tokens_a = tokenizer_a.convert_ids_to_tokens(ids_a)
             tokens_b = tokenizer_b.convert_ids_to_tokens(ids_b)
 
-            with torch.inference_mode():
-                out_a = model_a_obj(**encoded_a, output_hidden_states=True,
-                                    output_attentions=True, return_dict=True)
-                out_b = model_b_obj(**encoded_b, output_hidden_states=True,
-                                    output_attentions=True, return_dict=True)
+            out_a, mlp_a = _forward_with_activations(model_a_obj, encoded_a, torch)
+            out_b, mlp_b = _forward_with_activations(model_b_obj, encoded_b, torch)
 
             logits_a = out_a.logits[0, -1].float()
             logits_b = out_b.logits[0, -1].float()
@@ -243,6 +327,46 @@ class HuggingFaceComparisonBackend:
                 if not residual_layers:
                     residual_reason = "No residual layers had exactly aligned finite tensors."
 
+            activation_layers = []
+            activation_reason = None
+            activation_kinds = sorted({
+                value[1] for value in list(mlp_a.values()) + list(mlp_b.values())
+                if isinstance(value, tuple) and len(value) == 2
+            })
+            if not same_tokenization:
+                activation_reason = "The checkpoints tokenize this prompt differently; activation positions cannot be aligned."
+            elif not same_family:
+                activation_reason = "MLP activation comparison requires the same model family."
+            else:
+                for layer_a in sorted(set(mlp_a).intersection(mlp_b)):
+                    item_a, item_b = mlp_a[layer_a], mlp_b[layer_a]
+                    if not isinstance(item_a, tuple) or not isinstance(item_b, tuple):
+                        continue
+                    tensor_a, kind_a = item_a
+                    tensor_b, kind_b = item_b
+                    if kind_a != kind_b:
+                        continue
+                    a = tensor_a.detach().float().cpu()
+                    b = tensor_b.detach().float().cpu()
+                    if a.shape != b.shape or not torch.isfinite(a).all().item() or not torch.isfinite(b).all().item():
+                        continue
+                    flat_a, flat_b = a.reshape(-1), b.reshape(-1)
+                    cosine = _finite_number(F.cosine_similarity(flat_a, flat_b, dim=0).item())
+                    mae = _finite_number(torch.mean(torch.abs(flat_a - flat_b)).item())
+                    if cosine is not None and mae is not None:
+                        activation_layers.append({
+                            "layer_a": layer_a, "layer_b": layer_a,
+                            "shape": list(a.shape),
+                            "activation_kind": kind_a,
+                            "cosine_similarity": cosine,
+                            "mean_absolute_difference": mae,
+                        })
+                if not activation_layers:
+                    activation_reason = (
+                        "No MLP activation tensors had matching layer indices, capture kinds, "
+                        "token positions, and finite tensor shapes."
+                    )
+
             attention_layers = []
             attention_reason = None
             attentions_a = getattr(out_a, "attentions", None)
@@ -307,6 +431,13 @@ class HuggingFaceComparisonBackend:
                 "validation_eligible": False,
                 "publication_eligible": False,
                 "metrics_measured": True,
+                "activations": {
+                    "comparable": bool(activation_layers),
+                    "layers": activation_layers,
+                    "not_comparable_reason": activation_reason,
+                    "capture_kinds_observed": activation_kinds,
+                    "interpretation": "Live MLP intermediate tensors; coordinates are compared numerically and are not asserted to have identical neuron semantics.",
+                },
                 "predictions": {
                     "model_a_top": {"token": top_token_a, "token_id": top_id_a, "probability": top_prob_a},
                     "model_b_top": {"token": top_token_b, "token_id": top_id_b, "probability": top_prob_b},
