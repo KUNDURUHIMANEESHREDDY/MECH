@@ -51,7 +51,7 @@ import {computed,onBeforeUnmount,onMounted,ref} from 'vue';
 import {api} from '../services/api';
 import {asArray,asNumber,asString,gpt2LayerActivations,gpt2LogitLensAll,isRecord,numberMatrix,saeInspect,statusOf,type JsonRecord} from '../services/interpretabilityClient';
 import {setResearchSelection} from '../services/researchSelectionContext';
-const title=ref('Prompt and checkpoint comparison'),checkpoint=ref(''),checkpointB=ref(''),promptA=ref(''),promptB=ref(''),layer=ref(''),source=ref(''),notes=ref(''),lens=ref<Array<{prompt:string;record:JsonRecord}>>([]),sae=ref<Array<{prompt:string;record:JsonRecord;features:Array<{index:number;value:number|null}>}>>([]),running=ref(false),saving=ref(false),error=ref(''),notice=ref(''),saved=ref(''),backendLabel=ref('READY TO RUN'),feature=ref<number|null>(null),selectedLayer=ref<number|null>(null);
+const title=ref('Prompt and checkpoint comparison'),checkpoint=ref('gpt2'),checkpointB=ref(''),promptA=ref(''),promptB=ref(''),layer=ref(''),source=ref(''),notes=ref(''),lens=ref<Array<{prompt:string;record:JsonRecord}>>([]),sae=ref<Array<{prompt:string;record:JsonRecord;features:Array<{index:number;value:number|null}>}>>([]),running=ref(false),saving=ref(false),error=ref(''),notice=ref(''),saved=ref(''),backendLabel=ref('READY TO RUN'),feature=ref<number|null>(null),selectedLayer=ref<number|null>(null);
 const activationLayer=ref(0),activationDimensionStart=ref(0),activationLoading=ref(false),activationError=ref(''),activationComparison=ref<{a:JsonRecord;b:JsonRecord;model:string;fingerprint:string}|null>(null);
 const promptRotationNote=ref('Waiting for live GPT-2 prompt generation…'),promptRotationBusy=ref(false);
 let promptRotationTimer:ReturnType<typeof setInterval>|null=null;
