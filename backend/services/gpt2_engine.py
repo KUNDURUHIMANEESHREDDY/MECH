@@ -35,10 +35,6 @@ _cache: Dict[str, Any] = {}
 #: actually produced it.
 SUPPORTED_MODEL = "gpt2"
 
-#: The prompt an intervention measures on when the caller named none and no
-#: prompt is cached. Fixed rather than sampled: see `patch_neuron`.
-_DEFAULT_MEASURE_PROMPT = "The capital of France is"
-
 
 def _loaded_model_id() -> Optional[str]:
     """Identity of the weights currently loaded, or None if nothing is.
@@ -1473,7 +1469,19 @@ def patch_neuron(
         prompt_defaulted = not prompt
         prompt = prompt or (_cache.get("prompt") if _cache else None)
         if not prompt:
-            prompt = _DEFAULT_MEASURE_PROMPT
+            return {
+                "status": "unavailable",
+                "provenance": "unavailable",
+                "measured": False,
+                "validation_eligible": False,
+                "publication_eligible": False,
+                "layer": layer,
+                "neuron_index": neuron_index,
+                "reason": (
+                    "No input prompt was supplied or cached. The intervention "
+                    "was not run and no hardcoded prompt was substituted."
+                ),
+            }
 
         before = run(False)
         after = run(True)
