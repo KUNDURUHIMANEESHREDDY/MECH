@@ -332,7 +332,7 @@
         <form class="comparison-form" @submit.prevent="runComparison"><label class="field-label" for="activation-compare-prompt">Comparison prompt</label><input id="activation-compare-prompt" v-model="comparisonPrompt" class="text-input" :disabled="isComparing" /><button class="primary-button" type="submit" :disabled="isComparing || !comparisonPrompt.trim()">{{ isComparing ? 'Capturing comparison…' : comparison ? 'Recapture comparison' : 'Capture comparison prompt' }}</button></form>
         <p v-if="comparisonError" class="notice notice-error" role="alert">{{ comparisonError }}</p>
         <p v-else-if="comparison" class="help-copy">Comparing “{{ capture.prompt }}” with “{{ comparison.prompt }}”. Token positions are aligned by index, not by matching token text; differing tokenization is shown below.</p>
-        <div v-if="comparison" class="comparison-table-wrap"><table class="grid comparison-table"><thead><tr><th scope="col">Token index</th><th v-for="layer in columns" :key="layer" scope="col">L{{ layer }} Δ</th></tr></thead><tbody><tr v-for="row in comparisonGrid.slice(0, PAGE_SIZE)" :key="row.token"><th scope="row" class="row-head"><span class="token-pos">#{{ row.token }}</span><code>{{ row.text }}</code><small>vs {{ tokenLabels(comparison?.layers.find(entry=>entry.record)?.record ?? null)[row.token] || 'token not returned' }}</small></th><td v-for="cell in row.values" :key="cell.layer"><button type="button" class="cell" :class="{ 'is-missing': cell.delta===null }" :style="cell.delta===null?{}:{background: 'color-mix(in srgb, ' + (cell.delta >= 0 ? '#0f9f75' : '#d97757') + ' ' + Math.round(8+Math.min(1,Math.abs(cell.delta)/(Math.abs(cell.base||0)+Math.abs(cell.compare||0)+1))*60) + '%, transparent)'}" :aria-label="'Token '+row.token+', layer '+cell.layer+', delta '+formatNumber(cell.delta,4)" @click="selectCell(row.token,cell.layer)">{{ formatNumber(cell.delta,4) }}</button></td></tr></tbody></table></div>
+        <div v-if="comparison" class="comparison-table-wrap"><table class="grid comparison-table"><thead><tr><th scope="col">Token index</th><th v-for="layer in columns" :key="layer" scope="col">L{{ layer }} Δ</th></tr></thead><tbody><tr v-for="row in comparisonGrid.slice(0, PAGE_SIZE)" :key="row.token"><th scope="row" class="row-head"><span class="token-pos">#{{ row.token }}</span><code>{{ row.text }}</code><small>vs {{ comparisonTokens[row.token] || 'token not returned' }}</small></th><td v-for="cell in row.values" :key="cell.layer"><button type="button" class="cell" :class="{ 'is-missing': cell.delta===null }" :style="cell.delta===null?{}:{background: 'color-mix(in srgb, ' + (cell.delta >= 0 ? '#0f9f75' : '#d97757') + ' ' + Math.round(8+Math.min(1,Math.abs(cell.delta)/(Math.abs(cell.base||0)+Math.abs(cell.compare||0)+1))*60) + '%, transparent)'}" :aria-label="'Token '+row.token+', layer '+cell.layer+', delta '+formatNumber(cell.delta,4)" @click="selectCell(row.token,cell.layer)">{{ formatNumber(cell.delta,4) }}</button></td></tr></tbody></table></div>
       </section>
 
       <section class="panel distribution-panel" aria-labelledby="activation-distribution-title" data-testid="activation-distribution">
@@ -442,6 +442,15 @@ const probeProvenance = computed(() => provenanceOf(capture.value?.probe ?? null
 
 const columns = computed<number[]>(() => (capture.value?.layers ?? []).map((entry) => entry.layer));
 
+const comparisonTokens = computed<string[]>(() => {
+  for (const entry of comparison.value?.layers ?? []) {
+    if (!entry.record || statusOf(entry.record) !== 'ok') continue;
+    const labels = tokenLabels(entry.record);
+    if (labels.length) return labels;
+  }
+  return [];
+});
+
 const tokens = computed<string[]>(() => {
   for (const entry of capture.value?.layers ?? []) {
     if (!entry.record || statusOf(entry.record) !== 'ok') continue;
@@ -503,7 +512,6 @@ const distributionStats = computed(() => {
 const comparisonGrid = computed(() => {
   if (!capture.value || !comparison.value) return [] as Array<{token:number; text:string; values:Array<{layer:number; base:number|null; compare:number|null; delta:number|null}>}>;
   const baseTokens = tokens.value;
-  const compareTokens = (() => { for (const entry of comparison.value!.layers) { if (entry.record && statusOf(entry.record)==='ok') { const labels=tokenLabels(entry.record); if(labels.length) return labels; } } return []; })();
   return baseTokens.map((text, token) => ({ token, text, values: columns.value.map(layer => {
     const baseRecord = capture.value!.layers.find(entry=>entry.layer===layer)?.record ?? null;
     const compareRecord = comparison.value!.layers.find(entry=>entry.layer===layer)?.record ?? null;
