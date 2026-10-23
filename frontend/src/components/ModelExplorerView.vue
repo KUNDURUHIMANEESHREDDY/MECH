@@ -1515,7 +1515,7 @@ async function fetchFreshPrompt(manual: boolean): Promise<void> {
       const response = requireResponse(await api.gpt2FreshPrompt(), 'Fresh prompt');
       const generated = firstText(response, ['prompt', 'text'])?.trim() ?? '';
       const provenance = provenanceFrom(response, 'unavailable');
-      if (!generated || provenance !== 'live') {
+      if (!generated || provenance !== 'live' || response.attested !== true) {
         freshPromptNote.value = 'GPT-2 did not return a live prompt; no canned text was substituted.';
         return;
       }
