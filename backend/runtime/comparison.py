@@ -345,35 +345,48 @@ class ModelComparisonEngine:
         self.backend = backend
 
     def compare_available(self) -> bool:
-        return self.backend is not None
+        # A protocol-compatible object may still return fabricated dictionaries.
+        # Only the built-in implementation is permitted to attest live results.
+        return isinstance(self.backend, HuggingFaceComparisonBackend)
 
     def compare(self, prompt: str, model_a: str, model_b: str,
                 revision_a: str = "main", revision_b: str = "main") -> Dict[str, Any]:
-        if self.backend is None:
+        if not isinstance(self.backend, HuggingFaceComparisonBackend):
             return _unavailable(
                 prompt, model_a, model_b, revision_a, revision_b,
-                "No model-comparison backend is configured; no comparison was executed.",
+                "No trusted Hugging Face comparison backend is configured; "
+                "custom/self-attested result dictionaries are refused.",
             )
         result = self.backend.compare(
             prompt=prompt, model_a=model_a, model_b=model_b,
             revision_a=revision_a, revision_b=revision_b,
         )
-        if not isinstance(result, dict):
-            return _unavailable(
+        if not isinstance(result, dict) or result.get("status") != "completed":
+            return result if isinstance(result, dict) else _unavailable(
                 prompt, model_a, model_b, revision_a, revision_b,
                 "The comparison backend did not return a structured measured result.",
             )
-        # A plug-in implementation is not trusted to self-attest. It must at
-        # least report both authentic weight hashes and two successful forwards.
-        if result.get("status") == "completed":
-            models = result.get("models")
-            if not isinstance(models, dict):
+        # Validate the attestation envelope rather than accepting plausible
+        # numbers from an injected or accidentally substituted implementation.
+        models = result.get("models")
+        input_record = result.get("input")
+        if (
+            result.get("provenance") != "live"
+            or result.get("attested") is not True
+            or result.get("measured") is not True
+            or not isinstance(models, dict)
+            or not isinstance(input_record, dict)
+            or not isinstance(input_record.get("sha256"), str)
+            or not input_record["sha256"].startswith("sha256:")
+        ):
+            return _unavailable(prompt, model_a, model_b, revision_a, revision_b,
+                                "The result is missing live-forward attestation or an input commitment.")
+        from backend.science.models.adapter_base import is_canonical_fingerprint
+        for side in ("a", "b"):
+            identity = models.get(side)
+            digest = identity.get("weights_sha256") if isinstance(identity, dict) else None
+            tokenizer_digest = identity.get("tokenizer_sha256") if isinstance(identity, dict) else None
+            if not is_canonical_fingerprint(digest) or not isinstance(tokenizer_digest, str) or not tokenizer_digest.startswith("sha256:"):
                 return _unavailable(prompt, model_a, model_b, revision_a, revision_b,
-                                    "Comparison lacked checkpoint identity records.")
-            for side in ("a", "b"):
-                identity = models.get(side)
-                digest = identity.get("weights_sha256") if isinstance(identity, dict) else None
-                if not isinstance(digest, str) or not digest.startswith("sha256:"):
-                    return _unavailable(prompt, model_a, model_b, revision_a, revision_b,
-                                        "Comparison lacked a real weight-derived fingerprint.")
+                                    "Comparison lacks a weight-derived or tokenizer-derived fingerprint.")
         return result
