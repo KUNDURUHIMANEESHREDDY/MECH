@@ -50,40 +50,29 @@ pyarrow>=15.0.0,<26.0.0
 
 # ML / Interpretability
 #
-# UPPER BOUNDS ARE LOAD-BEARING. transformer-lens 4.0 removed HookedTransformer
-# outright (replaced by TransformerBridge), and 16 call sites across backend/
-# use the 2.x API -- HookedTransformer.from_pretrained, run_with_cache,
-# run_with_hooks, hook_z. With an unbounded ">=2.0.0" a clean install resolved
-# to 4.x and every neuron-inspection import failed with:
-#     ImportError: cannot import name 'HookedTransformer' from 'transformer_lens'
-# Migrating to the v4 API is real work on the causal-intervention core and wants
-# its own change; this pin restores a working install without touching that code.
+# The original transformers 4.57.6 stack is no longer acceptable: the strict
+# October 2026 dependency audit reports known advisories for that release. Use
+# the patched Transformers 5.x line and a TransformerLens 3.x release that both
+# supports Transformers 5 and still exports the legacy HookedTransformer API.
+# TransformerLens 4.0 removed HookedTransformer in favor of TransformerBridge;
+# this upper bound is therefore intentional while API migration remains separate.
 #
-# The transformers bound is also load-bearing, in the other direction:
-# transformer-lens 2.x declares `transformers>=4.57` with no upper bound, so
-# without `<5.0` pip will happily pair tl 2.x with an incompatible 5.x. (That
-# half was found on this branch; the transformer-lens half was found
-# independently on security/plugin-and-path-hardening.)
+# TransformerLens 3.9 declares transformers>=5.9.0 and retains HookedTransformer.
+# Transformers 5.20.2 is beyond the fixes reported by the current audit; its
+# metadata requires huggingface-hub>=1.31.0,<3.0. Keep these ranges together so
+# the resolver cannot recreate the known incompatible 2.x / transformers-5 or
+# 4.x / HookedTransformer combinations.
 #
-# huggingface-hub is pinned directly because transformers and transformer-lens
-# disagree about it: transformers 5.x imports `ResolvedRevision`, removed in
-# huggingface-hub 1.0, while transformer-lens 2.18 requires `<1.0`. Holding
-# transformers below 5.0 resolves the conflict, but naming the bound here means
-# pip does not have to be trusted to notice it.
-#
-# Verified working combination:
-#   torch 2.14.0+cu126 | transformers 4.57.6 | transformer-lens 2.18.0
-#   numpy 1.26.4 | pandas 2.0.3 | huggingface-hub 0.36.2
-# `backend/interpretability/tl_compat.py` turns a bad install into an
-# actionable error instead of a bare AttributeError.
+# The numpy, pandas, and pyarrow upper bounds remain load-bearing for the
+# project's scientific stack and its NumPy/PyArrow binary ABI.
 torch>=2.6
-transformers>=4.57,<5.0
-transformer-lens>=2.18.0,<3.0
-huggingface-hub>=0.23.2,<1.0
+transformers>=5.20.2,<6.0
+transformer-lens>=3.9.0,<4.0
+huggingface-hub>=1.31.0,<3.0
 
-# Utilities
-psutil>=5.9.0
-httpx>=0.24.0
+# Security tooling audits the installed Python environment, including the
+# runner's preinstalled setuptools. Require a release fixed for PYSEC-2026-3447.
+setuptools>=83.0.0
 
 # MCP control plane (external agents drive MECH through tools, not the UI).
 # Verified with 1.30.0; the FastMCP surface used here (tool/streamable_http_app
