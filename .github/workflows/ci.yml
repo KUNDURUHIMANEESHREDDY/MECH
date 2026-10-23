@@ -54,8 +54,13 @@ jobs:
       - run: python -m pytest tests/pytest -q --maxfail=1 --tb=short --durations=25 -k 'comparison or model_lock or tuned_lens'
 
   backend:
+    name: backend shard ${{ matrix.shard }}/8
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -76,10 +81,45 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund --prefix frontend
-      - name: Backend pytest with actionable failure and duration report
-        run: python -m pytest tests/pytest -x -vv --tb=short --durations=25 --show-capture=all
+      - name: Backend pytest shard with actionable failure and duration report
         env:
           MECH_REQUIRE_JS_LINT: '1'
+          PYTEST_SHARD: ${{ matrix.shard }}
+          PYTEST_SHARDS: '8'
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path("tests/pytest")
+          files = sorted({*root.rglob("test_*.py"), *root.rglob("*_test.py")})
+          if not files:
+              raise SystemExit("No pytest files were found.")
+          shard_count = int(os.environ["PYTEST_SHARDS"])
+          shard = int(os.environ["PYTEST_SHARD"])
+          buckets = [[] for _ in range(shard_count)]
+          loads = [0] * shard_count
+          # Deterministic largest-first balancing by file size to avoid putting
+          # every expensive test module into the same shard.
+          for path in sorted(files, key=lambda p: (-p.stat().st_size, p.as_posix())):
+              target = loads.index(min(loads))
+              buckets[target].append(path.as_posix())
+              loads[target] += path.stat().st_size
+          selected = buckets[shard - 1]
+          if not selected:
+              raise SystemExit(f"No pytest files assigned to shard {shard}/{shard_count}.")
+          print(f"Running {len(selected)} test files in shard {shard}/{shard_count}.")
+          subprocess.run(
+              [
+                  sys.executable, "-m", "pytest", *selected,
+                  "-q", "--maxfail=1", "--tb=short", "--durations=25",
+                  "--show-capture=all",
+              ],
+              check=True,
+          )
+          PY
 
   live-evidence:
     runs-on: ubuntu-latest
