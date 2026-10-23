@@ -385,8 +385,9 @@
                         :key="`cell-${rowIndex}-${columnIndex}`"
                         :style="cellStyle(cell)"
                         :title="cellTitle(cell, rowIndex, columnIndex)"
+                        :class="{ 'attention-cell--selected': selectedAttentionCell?.query === rowIndex && selectedAttentionCell?.key === columnIndex }"
                       >
-                        {{ cell === null ? '—' : formatMetric(cell, 2) }}
+                        <button class="attention-cell-button" type="button" :disabled="cell === null" :aria-label="cellTitle(cell,rowIndex,columnIndex)" @click="selectAttentionCell(cell,rowIndex,columnIndex)">{{ cell === null ? '—' : formatMetric(cell, 2) }}</button>
                       </td>
                     </tr>
                   </tbody>
@@ -395,6 +396,16 @@
               <p v-if="headText(headDetail, 'prompt')" class="matrix-prompt">
                 Returned prompt: <q>{{ headText(headDetail, 'prompt') }}</q>
               </p>
+              <div class="attention-selection" v-if="selectedAttentionCell" role="status">
+                <strong>Token flow selection</strong>
+                <span>Query {{ selectedAttentionCell.query }} · {{ formatToken(headTokens[selectedAttentionCell.query] || '') }} → key {{ selectedAttentionCell.key }} · {{ formatToken(headTokens[selectedAttentionCell.key] || '') }}</span>
+                <b>Attention weight {{ formatMetric(selectedAttentionCell.value, 6) }}</b>
+              </div>
+              <div class="circuit-trace">
+                <div class="circuit-trace__heading"><div><span class="section-kicker">Cross-layer circuit trace</span><strong>Follow this query across layers</strong><p>For each layer, reports the highest returned key weight for the selected query row and selected head index.</p></div><button class="run-button" type="button" :disabled="tracingCircuit || selectedHead===null" @click="traceCircuitAcrossLayers">{{ tracingCircuit ? 'Tracing…' : 'Trace across layers' }}</button></div>
+                <p v-if="circuitTraceError" class="inline-error" role="alert">{{ circuitTraceError }}</p>
+                <ol v-if="circuitTrace.length" class="trace-list"><li v-for="item in circuitTrace" :key="item.layer" :class="{ 'trace-list__item--missing': item.value===null }"><span class="trace-list__layer">L{{ item.layer }} · H{{ item.head }}</span><span class="trace-list__tokens">{{ item.queryToken }} <span aria-hidden="true">→</span> {{ item.keyToken }}</span><strong>{{ item.value===null ? 'No matrix value' : formatMetric(item.value,6) }}</strong><small>{{ item.provenance }}</small></li></ol>
+              </div>
             </template>
             <div v-else class="empty-attention">
               <span class="empty-attention__mark" aria-hidden="true"><Search :size="20" /></span>
@@ -465,6 +476,12 @@
               <strong>No prompt result yet.</strong>
               <span>The output area stays empty until the endpoint returns data.</span>
             </div>
+          </section>
+
+          <section class="panel projection-panel" aria-labelledby="projection-title">
+            <header class="panel-header panel-header--compact"><div><span class="section-kicker">Attention internals</span><h2 id="projection-title">Q · K · V · Output projections</h2></div></header>
+            <p class="panel-description">Projection values or shapes are displayed only when the backend includes them in its layer/head response.</p>
+            <dl class="projection-list"><div v-for="item in projectionDetails" :key="item.label"><dt>{{ item.label }}</dt><dd><code>{{ item.value }}</code></dd></div></dl>
           </section>
 
           <section class="panel head-detail" aria-labelledby="head-detail-title">
@@ -555,6 +572,10 @@ const headDetail = ref<JsonRecord | null>(null);
 const headState = ref<DetailState>('idle');
 const headError = ref('');
 const headProvenance = ref<Provenance>('unavailable');
+const selectedAttentionCell = ref<{ query: number; key: number; value: number } | null>(null);
+const tracingCircuit = ref(false);
+const circuitTrace = ref<Array<{ layer: number; head: number; query: number; key: number; queryToken: string; keyToken: string; value: number | null; provenance: string }>>([]);
+const circuitTraceError = ref('');
 
 const prompt = ref('The capital of France is');
 const promptResult = ref<JsonRecord | null>(null);
@@ -880,6 +901,63 @@ function cellStyle(cell: number | null): Record<string, string> {
     color: ratio > 0.58 ? '#ffffff' : '#182230',
   };
 }
+
+function selectAttentionCell(cell: number | null, query: number, key: number): void {
+  if (cell === null) return;
+  selectedAttentionCell.value = { query, key, value: cell };
+}
+
+async function traceCircuitAcrossLayers(): Promise<void> {
+  if (selectedLayer.value === null || selectedHead.value === null || tracingCircuit.value || !layerOptions.value.length) return;
+  tracingCircuit.value = true;
+  circuitTraceError.value = '';
+  circuitTrace.value = [];
+  const queryIndex = selectedAttentionCell.value?.query ?? Math.max(0, headMatrix.value.length - 1);
+  const nextTrace: typeof circuitTrace.value = [];
+  try {
+    for (const layer of layerOptions.value) {
+      try {
+        const response = requireResponse(await api.gpt2AttentionHead(layer, selectedHead.value), `Attention head L${layer}H${selectedHead.value}`);
+        const raw = firstValue(response, ['matrix', 'attention_matrix']);
+        const matrix = Array.isArray(raw) ? raw.map(row => Array.isArray(row) ? row.map(numberValue) : []) : [];
+        const row = matrix[queryIndex] ?? [];
+        let bestIndex = -1;
+        let bestValue = Number.NEGATIVE_INFINITY;
+        row.forEach((value, index) => { if (value !== undefined && value !== null && value > bestValue) { bestValue = value; bestIndex = index; } });
+        const tokens = extractTokens(response);
+        nextTrace.push({ layer, head: selectedHead.value, query: queryIndex, key: bestIndex, queryToken: tokens[queryIndex] || `t${queryIndex}`, keyToken: bestIndex >= 0 ? tokens[bestIndex] || `t${bestIndex}` : 'no key returned', value: bestIndex >= 0 ? bestValue : null, provenance: firstText(response, ['provenance']) || 'not supplied' });
+      } catch {
+        nextTrace.push({ layer, head: selectedHead.value, query: queryIndex, key: -1, queryToken: `t${queryIndex}`, keyToken: 'unavailable', value: null, provenance: 'unavailable' });
+      }
+    }
+    circuitTrace.value = nextTrace;
+  } catch (error) {
+    circuitTraceError.value = errorText(error);
+  } finally {
+    tracingCircuit.value = false;
+  }
+}
+
+function projectionRows(source: JsonRecord | null): Array<{label:string; value:string}> {
+  if (!source) return [];
+  const candidates: Array<[string,string[]]> = [
+    ['Q projection', ['q_proj','query_projection','q_projection','q_weight_shape','q_shape']],
+    ['K projection', ['k_proj','key_projection','k_projection','k_weight_shape','k_shape']],
+    ['V projection', ['v_proj','value_projection','v_projection','v_weight_shape','v_shape']],
+    ['Output projection', ['out_proj','o_proj','output_projection','o_weight_shape','out_shape']],
+  ];
+  return candidates.map(([label, keys]) => {
+    for (const key of keys) {
+      const value = source[key];
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) return {label, value: value.every(item => typeof item === 'number') ? '[' + value.join(' × ') + ']' : JSON.stringify(value).slice(0, 180)};
+      if (typeof value === 'object') return {label, value: JSON.stringify(value).slice(0, 180)};
+      return {label, value: String(value)};
+    }
+    return {label, value: 'not returned'};
+  });
+}
+const projectionDetails = computed(() => projectionRows(headDetail.value ?? layerDetail.value));
 
 function cellTitle(cell: number | null, row: number, column: number): string {
   if (cell === null) return `Query ${row}, key ${column}: no value returned`;
@@ -2505,4 +2583,7 @@ onBeforeUnmount(() => {
     animation: none;
   }
 }
+
+
+.attention-cell-button{display:block;width:100%;height:100%;min-width:var(--matrix-cell);min-height:var(--matrix-cell);padding:0;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer}.attention-cell-button:disabled{cursor:default}.attention-matrix td.attention-cell--selected{outline:2px solid #0f766e;outline-offset:-2px}.attention-selection{display:grid;gap:5px;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);font-size:12px}.attention-selection span{color:var(--text-muted)}.circuit-trace{margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}.circuit-trace__heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.circuit-trace__heading strong{display:block;margin-top:4px}.circuit-trace__heading p,.panel-description{color:var(--text-muted);font-size:11px;line-height:1.55}.trace-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px;padding:0;margin:12px 0 0;list-style:none}.trace-list li{display:grid;gap:5px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)}.trace-list__layer{color:var(--text-muted);font-size:10px;font-weight:700}.trace-list__tokens{font-size:12px;overflow-wrap:anywhere}.trace-list strong{font:600 12px var(--font-mono)}.trace-list small{color:var(--text-muted);font-size:9px}.trace-list__item--missing{opacity:.65}.projection-list{display:grid;gap:0;margin:0}.projection-list>div{display:grid;grid-template-columns:minmax(105px,.65fr) minmax(0,1.35fr);gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}.projection-list dt{font-size:11px;color:var(--text-muted)}.projection-list dd{margin:0;overflow-wrap:anywhere;font-size:11px}.projection-list code{white-space:pre-wrap}
 </style>
