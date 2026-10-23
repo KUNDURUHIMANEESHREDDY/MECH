@@ -57,14 +57,14 @@ const promptRotationNote=ref('Waiting for live GPT-2 prompt generation…'),prom
 let promptRotationTimer:ReturnType<typeof setInterval>|null=null;
 const compareModelA=ref(''),compareModelB=ref(''),compareRevisionA=ref('main'),compareRevisionB=ref('main');
 const crossModelBusy=ref(false),crossModelError=ref(''),crossModelResult=ref<JsonRecord|null>(null);
-const crossModelModels=computed(()=>isRecord(crossModelResult.value?.models)?crossModelResult.value!.models as JsonRecord:{});
-const crossModelPredictions=computed(()=>isRecord(crossModelResult.value?.predictions)?crossModelResult.value!.predictions as JsonRecord:{});
-const crossModelLogits=computed(()=>isRecord(crossModelResult.value?.logits)?crossModelResult.value!.logits as JsonRecord:{});
-const crossModelResiduals=computed(()=>isRecord(crossModelResult.value?.residuals)?crossModelResult.value!.residuals as JsonRecord:{});
-const crossModelAttention=computed(()=>isRecord(crossModelResult.value?.attention)?crossModelResult.value!.attention as JsonRecord:{});
+const crossModelModels=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.models)?crossModelResult.value!.models as JsonRecord:{});
+const crossModelPredictions=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.predictions)?crossModelResult.value!.predictions as JsonRecord:{});
+const crossModelLogits=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.logits)?crossModelResult.value!.logits as JsonRecord:{});
+const crossModelResiduals=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.residuals)?crossModelResult.value!.residuals as JsonRecord:{});
+const crossModelAttention=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.attention)?crossModelResult.value!.attention as JsonRecord:{});
 const crossModelResidualRows=computed(()=>asArray(crossModelResiduals.value.layers).filter(isRecord));
 const crossModelAttentionRows=computed(()=>asArray(crossModelAttention.value.layers).filter(isRecord));
-function nestedText(value:unknown,key:string):string{return isRecord(value)?asString(value[key]):''}
+function nestedText(value:unknown,key:string):string{return (isRecord(value)?asString(value[key]):undefined)??''}
 function nestedNumber(value:unknown,key:string):number|null{return isRecord(value)?asNumber(value[key])??null:null}
 
 
