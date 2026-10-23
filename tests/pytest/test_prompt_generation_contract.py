@@ -23,6 +23,9 @@ def test_fresh_prompt_endpoint_uses_only_gpt2_generated_text(monkeypatch):
 
     engine = LiveEngine()
     monkeypatch.setattr(dispatcher, "get_engine", lambda: engine)
+    # The stub verifies handler inputs/output shaping only; it is not being
+    # presented as a real measurement or used to bypass runtime attestation.
+    monkeypatch.setattr(dispatcher, "_mark", lambda body, provenance: {**body, "provenance": provenance})
     response = dispatcher.gpt2_fresh_prompt({
         # A client-provided prefix must be ignored by the model-only endpoint.
         "primer": "this must never appear in generated output",
