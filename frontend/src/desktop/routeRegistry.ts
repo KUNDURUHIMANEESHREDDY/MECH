@@ -66,6 +66,15 @@ export const ROUTES: DesktopRoute[] = [
     load: () => import('../components/visualizations/TransformerExplorer.vue'),
   },
   {
+    id: 'neuroninspector',
+    label: 'Neuron Inspector',
+    group: 'Explore',
+    requirement: 'model',
+    legacy: false,
+    aliases: ['neuron-inspector'],
+    load: () => import('../components/NeuronInspectorView.vue'),
+  },
+  {
     id: 'network',
     label: 'Network',
     group: 'Explore',
