@@ -224,11 +224,11 @@
           </div>
           <p id="model-explorer-prompt-help" class="field-help">
             Results are shown only when the backend returns them. A seeded response is labeled and is not presented as a live measurement.
-            The prompt box is never modified by a run — copy the next token yourself if you want to extend the prompt.
+            The prompt box starts empty and is filled only by live GPT-2 generation. It rotates automatically every 2 minutes; model-generation failures are shown instead of substituted with canned text.
           </p>
           <label class="auto-prompt-toggle">
             <input v-model="autoPrompt" type="checkbox" />
-            <span>New model-created prompt every minute</span>
+            <span>New GPT-2 model-created prompt every 2 minutes</span>
           </label>
           <p v-if="freshPromptNote" class="provenance-note">{{ freshPromptNote }}</p>
           <p v-if="promptResult" class="provenance-note">{{ promptProvenanceNote }}</p>
@@ -792,7 +792,7 @@ const architectureProvenance = ref<Provenance>('unavailable');
 const architectureLoading = ref(false);
 const architectureError = ref('');
 
-const prompt = ref('The capital of France is');
+const prompt = ref('');
 
 const autoPrompt = ref(true);
 const freshPromptNote = ref('');
@@ -1533,9 +1533,9 @@ async function fetchFreshPrompt(manual: boolean): Promise<void> {
 function startFreshPromptTimer(): void {
   stopFreshPromptTimer();
   freshPromptTimer = setInterval(() => {
-    if (!autoPrompt.value || document.hidden) return;
+    if (!autoPrompt.value) return;
     void fetchFreshPrompt(false);
-  }, 60_000);
+  }, 120_000);
 }
 
 function stopFreshPromptTimer(): void {
