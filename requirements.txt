@@ -6,11 +6,11 @@ sqlalchemy>=2.0.0
 
 # Scientific Computing
 #
-# NUMPY AND PANDAS UPPER BOUNDS ARE ALSO LOAD-BEARING, for the same reason as the
-# ML pins below: transformer-lens 2.18 declares `numpy>=1.24,<2` and
-# `pandas>=1.1.5,<2.1` on Python 3.11. With unbounded ">=1.24.0" and ">=2.0.0",
-# a clean install resolved to numpy 2.4.6 and pandas 3.0.6, and the ML stack broke
-# with a binary-ABI error that surfaces far from its cause:
+# NUMPY AND PANDAS UPPER BOUNDS ARE LOAD-BEARING for MECH's tested compiled
+# scientific stack. The current TransformerLens 3.x / Transformers 5.x packages
+# accept newer NumPy/Pandas versions, but MECH's current PyArrow and scientific
+# dependencies have a real binary-ABI constraint. With unbounded versions, a
+# clean install resolved to numpy 2.4.6 and pandas 3.0.6, and imports failed with:
 #
 #   ValueError: numpy.dtype size changed, may indicate binary incompatibility.
 #               Expected 96 from C header, got 88 from PyObject
@@ -20,9 +20,10 @@ sqlalchemy>=2.0.0
 # rather than a version-pinning problem. Six tests failed this way on a machine
 # that had been fine an hour earlier.
 #
-# The trigger was unrelated to this project: installing OCR tooling for coursework
-# pulled numpy up to 2.4.6. Because the bounds were missing, pip had no reason to
-# hold transformer-lens back.
+# The trigger was unrelated to this project: installing OCR tooling pulled
+# numpy up to 2.4.6. Because the bounds were missing, pip had no reason to retain
+# the compatible scientific stack. Keep the bounds until a separate NumPy 2 / ABI
+# migration has been measured across the backend and live-weight checks.
 numpy>=1.24.0,<2
 scipy>=1.10.0
 matplotlib>=3.7.0
@@ -43,9 +44,9 @@ pandas>=2.0.0,<2.1
 # 25.0.1 tags of python/pyarrow/lib.pyx), and `import datasets` works against
 # it: datasets 5.0.1, pyarrow 25.0.1, numpy 1.26.4.
 #
-# The alternative -- letting numpy float up to 2.x -- is not on the table:
-# transformer-lens 2.18 declares `numpy>=1.24,<2`, and the pin above explains
-# why that bound has to hold.
+# The alternative -- letting numpy float up to 2.x -- is not on the table
+# in this security upgrade: it would also require selecting and validating a
+# compatible PyArrow/scientific stack, which is independent of the ML security fix.
 pyarrow>=15.0.0,<26.0.0
 
 # ML / Interpretability
