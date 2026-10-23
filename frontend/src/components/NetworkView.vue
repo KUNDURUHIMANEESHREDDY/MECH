@@ -294,7 +294,7 @@ const layerDetailError = ref('');
 const layerDetailHeads = ref<HeadNorms[]>([]);
 const layerDetailCache = new Map<number, HeadNorms[]>();
 
-const wirePrompt = ref('The capital of France is');
+const wirePrompt = ref('');
 const wiringLoading = ref(false);
 const wiringError = ref('');
 const wireTokens = ref<string[]>([]);
@@ -720,9 +720,9 @@ async function fetchFreshPrompt(manual: boolean): Promise<void> {
 function startFreshPromptTimer(): void {
   stopFreshPromptTimer();
   freshPromptTimer = setInterval(() => {
-    if (!autoPrompt.value || document.hidden) return;
+    if (!autoPrompt.value) return;
     void fetchFreshPrompt(false);
-  }, 60_000);
+  }, 120_000);
 }
 
 function stopFreshPromptTimer(): void {
