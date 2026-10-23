@@ -122,6 +122,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { takeResearchSelection } from '../services/researchSelectionContext';
 import {
   asArray, asNumber, asString, describeError, fieldProvenanceSummary,
   gpt2Activations, gpt2Architecture, gpt2LayerActivations, isRecord,
@@ -132,7 +133,8 @@ type LayerInfo = { index: number; heads: number | null; mlpWidth: number | null;
 type GraphNode = { id: string; label: string; kind: string; layer: number; index: number; x: number; y: number; width: number; height: number; meta: string; activation: number | null; mlpWidth: number | null };
 type GraphEdge = { id: string; d: string; from: string; to: string; highlight: boolean };
 type Selection = { id: string; label: string; kind: string; layer: number; index: number; mlpWidth: number | null };
-const prompt = ref('The capital of France is');
+const linkedContext = takeResearchSelection();
+const prompt = ref(linkedContext?.prompt || 'The capital of France is');
 const architecture = ref<JsonRecord | null>(null);
 const architectureLoading = ref(false);
 const capturing = ref(false);
@@ -304,7 +306,12 @@ async function loadArchitecture() {
     const parsed=readLayers(result);
     if(!parsed.length) throw new Error('The backend responded but supplied no transformer layer list.');
     architecture.value=result; layers.value=parsed; expanded.value=new Set(parsed.slice(0,3).map(l=>l.index));
-    if(!selected.value) selected.value={id:'layer-0',label:'Layer 0',kind:'Layer',layer:parsed[0].index,index:parsed[0].index,mlpWidth:parsed[0].mlpWidth};
+    if (linkedContext?.layer != null && parsed.some((item) => item.index === linkedContext.layer)) {
+      const layerIndex = linkedContext.layer;
+      if (linkedContext.neuron != null) selectNeuron(layerIndex, linkedContext.neuron);
+      else selected.value={id:'layer-'+layerIndex,label:'Layer '+layerIndex,kind:'Layer',layer:layerIndex,index:layerIndex,mlpWidth:parsed.find((item)=>item.index===layerIndex)?.mlpWidth ?? null};
+      selectedTokenIndex.value = Math.max(0, linkedContext.token ?? 0);
+    } else if(!selected.value) selected.value={id:'layer-0',label:'Layer 0',kind:'Layer',layer:parsed[0].index,index:parsed[0].index,mlpWidth:parsed[0].mlpWidth};
     captureMessage.value='Architecture loaded from backend · '+parsed.length+' layers.';
   } catch(error) {
     architecture.value=null; layers.value=[];
