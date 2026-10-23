@@ -25,6 +25,8 @@
 <div class="analysis-card"><h3>Next-token prediction</h3><p>A: <code>{{nestedText(crossModelPredictions.model_a_top,'token')||'—'}}</code> · p={{fmt(nestedNumber(crossModelPredictions.model_a_top,'probability')??null)}}</p><p>B: <code>{{nestedText(crossModelPredictions.model_b_top,'token')||'—'}}</code> · p={{fmt(nestedNumber(crossModelPredictions.model_b_top,'probability')??null)}}</p><p>Decoded top token match: <strong>{{crossModelPredictions.top_token_match===true?'yes':crossModelPredictions.top_token_match===false?'no':'not measured'}}</strong></p></div>
 <div class="analysis-card"><h3>Logit distribution</h3><p>KL divergence A → B: <strong>{{fmt(asNumber(crossModelLogits.kl_divergence_a_to_b)??null)}}</strong></p><p class="hint">{{asString(crossModelLogits.not_comparable_reason)||'Computed from real next-token logits where tokenizer and vocabulary identities match.'}}</p></div>
 </div>
+<h3>Aligned MLP activation tensors ({{crossModelActivationRows.length}})</h3>
+<div v-if="crossModelActivationRows.length" class="table-wrap"><table><thead><tr><th>Layer A/B</th><th>Activation captured</th><th>Tensor shape</th><th>Cosine similarity</th><th>Mean absolute difference</th></tr></thead><tbody><tr v-for="r in crossModelActivationRows" :key="'cross-mlp-'+r.layer_a"><td>{{r.layer_a}} / {{r.layer_b}}</td><td><code>{{asString(r.activation_kind)||'MLP activation'}}</code></td><td><code>{{asArray(r.shape).join(' × ')}}</code></td><td>{{fmt(asNumber(r.cosine_similarity)??null)}}</td><td>{{fmt(asNumber(r.mean_absolute_difference)??null)}}</td></tr></tbody></table></div><p v-else class="hint">{{asString(crossModelActivations.not_comparable_reason)||'No MLP activation tensors aligned for this pair.'}}</p>
 <h3>Aligned residual layers ({{crossModelResidualRows.length}})</h3>
 <div v-if="crossModelResidualRows.length" class="table-wrap"><table><thead><tr><th>Layer A/B</th><th>Tensor shape</th><th>Cosine similarity</th><th>Mean absolute difference</th></tr></thead><tbody><tr v-for="r in crossModelResidualRows" :key="'cross-resid-'+r.layer_a"><td>{{r.layer_a}} / {{r.layer_b}}</td><td><code>{{asArray(r.shape).join(' × ')}}</code></td><td>{{fmt(asNumber(r.cosine_similarity)??null)}}</td><td>{{fmt(asNumber(r.mean_absolute_difference)??null)}}</td></tr></tbody></table></div><p v-else class="hint">{{asString(crossModelResiduals.not_comparable_reason)||'No residual tensors aligned for this pair.'}}</p>
 <h3>Aligned attention layers ({{crossModelAttentionRows.length}})</h3>
@@ -60,6 +62,9 @@ const crossModelBusy=ref(false),crossModelError=ref(''),crossModelResult=ref<Jso
 const crossModelModels=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.models)?crossModelResult.value!.models as JsonRecord:{});
 const crossModelPredictions=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.predictions)?crossModelResult.value!.predictions as JsonRecord:{});
 const crossModelLogits=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.logits)?crossModelResult.value!.logits as JsonRecord:{});
+const crossModelActivations=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.activations)?crossModelResult.value!.activations as JsonRecord:{});
+const crossModelActivationRows=computed(()=>asArray(crossModelActivations.value.layers).filter(isRecord));
+
 const crossModelResiduals=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.residuals)?crossModelResult.value!.residuals as JsonRecord:{});
 const crossModelAttention=computed<JsonRecord>(()=>isRecord(crossModelResult.value?.attention)?crossModelResult.value!.attention as JsonRecord:{});
 const crossModelResidualRows=computed(()=>asArray(crossModelResiduals.value.layers).filter(isRecord));
