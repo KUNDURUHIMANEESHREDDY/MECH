@@ -729,7 +729,7 @@ def generate_text(primer: str, max_new_tokens: int = 12,
             "error": "GPT-2 produced no usable text tokens.",
             "provenance": "unavailable",
         }
-    return {
+    result = {
         "status": "ok",
         "primer": primer,
         "model_only": model_only,
@@ -739,6 +739,11 @@ def generate_text(primer: str, max_new_tokens: int = 12,
         "temperature": temperature,
         "top_k": top_k,
     }
+    # Put the prompt alias on the measurement-layer result, before
+    # @_measured attests it. API wrappers must not add unsealed output fields.
+    if model_only:
+        result["prompt"] = text
+    return result
 
 
 # ---------------------------------------------------------------------------
