@@ -121,7 +121,7 @@
       </form>
       <label class="auto-prompt-toggle">
         <input v-model="autoPrompt" type="checkbox" />
-        <span>New model-created prompt every minute</span>
+        <span>New GPT-2 model-created prompt every 2 minutes</span>
       </label>
       <p v-if="freshPromptNote" class="wire-note">{{ freshPromptNote }}</p>
       <div v-if="wiringError" class="tool-notice tool-notice--error" role="alert" data-testid="network-wire-error">
