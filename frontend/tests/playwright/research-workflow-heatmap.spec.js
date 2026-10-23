@@ -29,6 +29,7 @@ async function openHeatmap(page, responses) {
       body: JSON.stringify({
         status: 'ok',
         provenance: 'live',
+        attested: true,
         prompt: 'GPT-2 generated test prompt ' + promptCall,
         method: 'test fixture for the live GPT-2 prompt endpoint',
       }),
