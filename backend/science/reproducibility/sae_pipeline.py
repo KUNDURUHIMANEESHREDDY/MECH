@@ -78,6 +78,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..models.adapter_base import LiveUnavailable
+from backend.services.model_lock import MODEL_LOCK
 
 LIVE = "live"
 UNAVAILABLE = "unavailable"
@@ -658,8 +659,12 @@ class SAEReproductionPipeline:
                 chunk = ids[:, start:start + block].to(device)
                 if chunk.shape[1] < 2:
                     continue
-                with torch.no_grad():
-                    out = model(chunk, output_hidden_states=True)
+                # The shared GPT-2 module has global forward hooks; keep
+                # SAE activation collection mutually exclusive with live
+                # intervention and cache-building forwards.
+                with MODEL_LOCK:
+                    with torch.no_grad():
+                        out = model(chunk, output_hidden_states=True)
                 hidden = out.hidden_states[layer + 1]
                 block_obj = model.transformer.h[layer]
                 normed = block_obj.ln_2(hidden)
