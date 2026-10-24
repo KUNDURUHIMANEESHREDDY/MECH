@@ -263,12 +263,47 @@ def _injected_logits(engine: Any, prompt: str,
         by_layer: Dict[int, List[int]] = {}
         for layer, head in sorted(active_heads):
             by_layer.setdefault(layer, []).append(head)
+
+        # Clean/corrupted activation injection is positional. If tokenization
+        # produced different batch/sequence shapes, truncating or broadcasting
+        # would silently patch the wrong positions, so refuse before installing
+        # any model hooks.
+        inputs = _inputs(engine, prompt)
+        token_shape = tuple(inputs["input_ids"].shape)
+        for layer in by_layer:
+            clean = clean_caps.get(layer)
+            if clean is None or not hasattr(clean, "shape") or len(clean.shape) < 3:
+                raise LiveUnavailable(
+                    f"Activation injection refused: no valid clean capture for layer {layer}."
+                )
+            clean_shape = tuple(clean.shape[:2])
+            if clean_shape != token_shape:
+                raise LiveUnavailable(
+                    "Activation injection refused: clean and corrupted token positions "
+                    f"cannot be aligned (clean shape {clean_shape}, corrupted shape "
+                    f"{token_shape}). Use prompts with matching tokenized sequence "
+                    "lengths; no intervention was applied."
+                )
+            config = getattr(engine._model, "config", None)
+            hidden_size = getattr(config, "n_embd", None)
+            if hidden_size is not None and int(clean.shape[-1]) != int(hidden_size):
+                raise LiveUnavailable(
+                    "Activation injection refused: clean capture hidden dimension "
+                    f"{clean.shape[-1]} does not match model hidden size {hidden_size}."
+                )
+
         for layer, heads in by_layer.items():
             clean = clean_caps[layer]
             def hook(mod: Any, inp: Any, _x: Any = clean,
                      _hs: Tuple[int, ...] = tuple(heads)) -> Any:
                 x = inp[0].clone()
                 src = _x.to(x.device)
+                if tuple(src.shape) != tuple(x.shape):
+                    raise LiveUnavailable(
+                        "Activation injection refused: clean and corrupted activation "
+                        f"shapes differ ({tuple(src.shape)} vs {tuple(x.shape)}); "
+                        "token positions cannot be aligned."
+                    )
                 for hh in _hs:
                     x[..., hh * hd:(hh + 1) * hd] = src[..., hh * hd:(hh + 1) * hd]
                 return (x,) + tuple(inp[1:])
@@ -276,7 +311,7 @@ def _injected_logits(engine: Any, prompt: str,
                          .attn.c_proj.register_forward_pre_hook(hook))
         try:
             with torch.no_grad():
-                out = engine._model(**_inputs(engine, prompt))
+                out = engine._model(**inputs)
             return out.logits[0, -1].detach().cpu()
         finally:
             for handle in hooks:
