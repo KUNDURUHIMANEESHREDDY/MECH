@@ -507,7 +507,7 @@ def test_sse_stream_does_not_leak_bearer_credentials_in_its_url():
     assert "apiToken()" not in text, "the renderer must not expose or resolve the bearer token"
     assert "token=${encodeURIComponent(token)}" not in text
     assert "bearer_token=" not in text, "bearer credentials must not be placed in an EventSource URL"
-    assert re.search(r"HttpOnly\s+session\s+cookie", text), (
+    assert "HttpOnly session cookie" in text, (
         "document the cookie-backed browser transport so URL-token auth is not reintroduced"
     )
 
@@ -1125,33 +1125,33 @@ def _requirement_line(package: str) -> str:
     raise AssertionError(f"{package} missing from requirements.txt")
 
 
-def test_requirements_pin_excludes_every_tl_version_needing_transformers_5_9():
-    """The conflict is provable locally: the pin must sit below the floor bump."""
-    line = _requirement_line("transformer-lens")
-    assert ">=2.18" in line.replace(" ", ""), line
-    upper = int(re.search(r"<\s*(\d+)", line).group(1))
-    assert upper <= 3, (
-        f"transformer-lens upper bound {upper} admits versions whose "
-        f"transformers floor is 5.9.0: {line!r}")
+def test_requirements_select_the_audited_transformers_lens_intersection():
+    """The security fix must satisfy TL's floor without reintroducing the 4.x API break."""
+    lens = _requirement_line("transformer-lens").replace(" ", "")
+    transformers = _requirement_line("transformers").replace(" ", "")
+    hub = _requirement_line("huggingface-hub").replace(" ", "")
+    setuptools = _requirement_line("setuptools").replace(" ", "")
 
-    floor_bump = _parse_version(TL_TRANSFORMERS_FLOOR[
-        FIRST_TL_NEEDING_TRANSFORMERS_5_9])
-    assert floor_bump >= (5, 9), FIRST_TL_NEEDING_TRANSFORMERS_5_9
-    for version, floor in TL_TRANSFORMERS_FLOOR.items():
-        if _parse_version(floor) >= (5, 9):
-            assert _parse_version(version)[0] >= upper or \
-                _parse_version(version) < (2, 18), (
-                f"transformer-lens {version} (transformers>={floor}) satisfies "
-                f"the pin {line!r}, so the documented conflict would be live")
+    assert lens.startswith("transformer-lens>=3.9.0,<4.0"), lens
+    assert transformers.startswith("transformers>=5.20.2,<6.0"), transformers
+    assert hub.startswith("huggingface-hub>=1.31.0,<3.0"), hub
+    assert setuptools.startswith("setuptools>=83.0.0"), setuptools
+
+    # The chosen TL version's declared Transformers floor is satisfied by the
+    # repository pin; the old test enforced the now-vulnerable TL 2.x stack.
+    assert _parse_version("5.20.2") >= _parse_version(TL_TRANSFORMERS_FLOOR["3.9.0"])
+    assert _parse_version("3.9.0") < (4, 0)
 
 
-def test_transformers_upper_bound_is_stricter_than_the_tl_floor():
-    line = _requirement_line("transformers")
-    bound = int(re.search(r"<\s*(\d+)", line).group(1))
-    assert bound <= 5, line
-    assert (5, 9) >= (bound, 0), (
-        f"transformers {line!r} would allow the >=5.9.0 that transformer-lens "
-        f"{FIRST_TL_NEEDING_TRANSFORMERS_5_9}+ requires")
+def test_transformers_lower_bound_satisfies_the_tl_floor():
+    lens = _requirement_line("transformer-lens").replace(" ", "")
+    transformers = _requirement_line("transformers").replace(" ", "")
+    assert ">=3.9.0" in lens and "<4.0" in lens, lens
+    assert ">=5.20.2" in transformers and "<6.0" in transformers, transformers
+    floor = _parse_version(TL_TRANSFORMERS_FLOOR["3.9.0"])
+    lower = _parse_version(re.search(r">=([0-9.]+)", transformers).group(1))
+    assert lower >= floor, (
+        f"transformers {transformers!r} is below transformer-lens 3.9.0's floor {floor!r}")
 
 
 def test_migration_note_exists_and_names_the_conflict():

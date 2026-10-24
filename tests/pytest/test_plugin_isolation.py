@@ -243,6 +243,42 @@ def test_service_disable_terminates_worker(tmp_path):
     assert "echo" not in service._workers  # noqa: SLF001
 
 
+def test_service_shutdown_reaps_workers_without_disabling_plugins(tmp_path):
+    """Application shutdown must stop child processes but preserve saved intent."""
+    from backend.plugins.plugin_manager import PluginManager
+    from backend.plugins.service import PluginService
+
+    manager = PluginManager(plugins_dir=str(tmp_path / "installed"))
+    service = PluginService(manager=manager)
+    manager.install_plugin(
+        {"name": "echo", "version": "1.0.0"}, ECHO.read_text(encoding="utf-8")
+    )
+
+    service.enable("echo")
+    proc = service._workers["echo"][1]  # noqa: SLF001
+    assert proc.poll() is None
+    assert manager.registry["echo"]["enabled"] is True
+
+    service.shutdown()
+    for _ in range(50):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.02)
+
+    assert proc.poll() is not None, "shutdown must reap the plugin worker"
+    assert service._workers == {}  # noqa: SLF001
+    assert manager.registry["echo"]["enabled"] is True, (
+        "runtime shutdown must not rewrite persisted plugin enablement"
+    )
+    assert all(
+        plugin.manifest.plugin_id != "mech.test.live_probe"
+        for plugin in service._registry.list_plugins()  # noqa: SLF001
+    )
+
+    # Shutdown is idempotent, including when no workers remain.
+    service.shutdown()
+
+
 def test_hostile_hook_cannot_kill_the_backend(tmp_path):
     """A hook that raises is reported as an error, not propagated as a crash."""
     payload = tmp_path / "raiser.py"

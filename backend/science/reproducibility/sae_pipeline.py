@@ -659,9 +659,9 @@ class SAEReproductionPipeline:
                 chunk = ids[:, start:start + block].to(device)
                 if chunk.shape[1] < 2:
                     continue
-                # The model uses process-global forward hooks for live interventions.
-                # Serialize this forward with those hooks so a concurrent intervention
-                # cannot patch an unrelated SAE training batch.
+                # The shared GPT-2 module has global forward hooks; keep
+                # SAE activation collection mutually exclusive with live
+                # intervention and cache-building forwards.
                 with MODEL_LOCK:
                     with torch.no_grad():
                         out = model(chunk, output_hidden_states=True)

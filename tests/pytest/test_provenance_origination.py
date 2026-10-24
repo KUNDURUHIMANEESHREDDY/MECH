@@ -269,6 +269,11 @@ MEASUREMENT_LAYERS: Dict[str, str] = {
         "faithfulness, minimality and recovery itself",
     "backend/science/reproducibility/logit_lens_pipeline.py":
         "computes the logit lens over real hidden states at each layer",
+    "backend/runtime/comparison.py":
+        "loads two independently requested Hugging Face checkpoints, verifies "
+        "weight and tokenizer fingerprints, performs real forward passes, and "
+        "reduces only finite, shape-compatible comparison metrics; every "
+        "unavailable or unaligned path refuses a live label",
     # `backend/science/reproducibility/greater_than_pipeline.py` left this table
     # on 2026-10-20. It still measures -- `measure()` runs the forward passes
     # and `run()` runs the per-layer MLP patches, and it raises

@@ -263,11 +263,9 @@ def _injected_logits(engine: Any, prompt: str,
         by_layer: Dict[int, List[int]] = {}
         for layer, head in sorted(active_heads):
             by_layer.setdefault(layer, []).append(head)
-
-        # Clean/corrupted activation injection is positional. If tokenization
-        # produced different batch/sequence shapes, truncating or broadcasting
-        # would silently patch the wrong positions, so refuse before installing
-        # any model hooks.
+        # Clean/corrupted activation injection is positional. Refuse shape
+        # mismatches before installing hooks; broadcasting or truncating would
+        # silently intervene on different token positions.
         inputs = _inputs(engine, prompt)
         token_shape = tuple(inputs["input_ids"].shape)
         for layer in by_layer:
@@ -298,12 +296,6 @@ def _injected_logits(engine: Any, prompt: str,
                      _hs: Tuple[int, ...] = tuple(heads)) -> Any:
                 x = inp[0].clone()
                 src = _x.to(x.device)
-                if tuple(src.shape) != tuple(x.shape):
-                    raise LiveUnavailable(
-                        "Activation injection refused: clean and corrupted activation "
-                        f"shapes differ ({tuple(src.shape)} vs {tuple(x.shape)}); "
-                        "token positions cannot be aligned."
-                    )
                 for hh in _hs:
                     x[..., hh * hd:(hh + 1) * hd] = src[..., hh * hd:(hh + 1) * hd]
                 return (x,) + tuple(inp[1:])

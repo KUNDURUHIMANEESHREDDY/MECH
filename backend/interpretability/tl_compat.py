@@ -3,8 +3,10 @@
 Why this module exists
 ----------------------
 TransformerLens 4.0 **removed** ``HookedTransformer``. MECH's TransformerLens
-code paths depend on it (and on its hook-name conventions), so a fresh install
-that resolves to 4.x used to fail deep inside the stack with:
+code paths depend on it (and on its hook-name conventions), so the supported
+stack uses the compatible TransformerLens 3.x line alongside patched
+Transformers 5.x rather than jumping directly to 4.x. A 4.x install used to fail
+deep inside the stack with:
 
     AttributeError: 'HookedTransformer' was removed in TransformerLens 4.0.
 
@@ -12,14 +14,12 @@ That message points at the symptom, not the fix. Importing ``HookedTransformer``
 through this module instead turns the failure into an actionable error that
 names the supported version range and the exact install command.
 
-Two things made this reachable in practice:
-
-* ``transformer-lens 2.18.0`` declares ``transformers>=4.57`` with **no upper
-  bound**, so pip is free to pair it with a transformers 5.x release.
-* ``requirements.txt`` historically pinned neither library from above.
-
-Both are now pinned; see ``requirements.txt``. This module is the second line
-of defence: it makes a bad environment obvious instead of mysterious.
+The former TransformerLens 2.x pin conflicted with patched Transformers 5.x,
+while TransformerLens 4.x no longer exported the API MECH uses. The supported
+intersection is TransformerLens 3.9.x (which retains ``HookedTransformer`` and
+requires Transformers >=5.9.0), Transformers >=5.20.2, and huggingface-hub
+>=1.31.0. These ranges are defined together in ``requirements.txt``. This
+module makes an unsupported API version obvious instead of mysterious.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 #: transformer-lens releases that still export ``HookedTransformer``.
-SUPPORTED_TL_RANGE = ">=2.18.0,<3.0"
+SUPPORTED_TL_RANGE = ">=3.9.0,<4.0"
 
 
 class TransformerLensUnavailable(ImportError):
@@ -53,14 +53,16 @@ class TransformerLensEnvironmentError(TransformerLensUnavailable):
 
 _INSTALL_HINT = (
     "MECH's TransformerLens code paths require transformer-lens "
-    f"{SUPPORTED_TL_RANGE} and transformers >=4.57,<5.0.\n"
+    f"{SUPPORTED_TL_RANGE}, transformers >=5.20.2,<6.0, and "
+    "huggingface-hub >=1.31.0,<3.0.\n"
     "  Install the pinned set:\n"
     "      pip install -r requirements.txt\n"
     "  Or repair an existing environment:\n"
-    "      pip install 'transformer-lens>=2.18.0,<3.0' 'transformers>=4.57,<5.0'\n"
+    "      pip install 'transformer-lens>=3.9.0,<4.0' "
+    "'transformers>=5.20.2,<6.0' 'huggingface-hub>=1.31.0,<3.0'\n"
     "TransformerLens 4.x removed HookedTransformer in favour of "
-    "TransformerBridge; migrating this codebase to that API is tracked in "
-    "docs/roadmap.md."
+    "TransformerBridge; the <4.0 bound is intentional until that API migration "
+    "is completed and validated."
 )
 
 

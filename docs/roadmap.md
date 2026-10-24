@@ -18,31 +18,39 @@ corresponds to a verified gap. Evidence and measured results live in the
 
 ## Phase 1 — Make it installable and trustworthy
 
-### 1.1 Pin dependencies ✅ done
+### 1.1 Maintain a secure, API-compatible ML dependency stack — CI verification pending
 
-`requirements.txt` had no upper bounds, so a clean install pulled `transformers` 5.x and
-`transformer-lens` 4.x. TransformerLens 4.0 **removed `HookedTransformer`**, breaking
-`gpt2_steps.py` and `backend/interpretability/gpt2_model.py`.
+A first compatibility pin held `transformers` at 4.57.6 with
+`transformer-lens` 2.18.0, but the strict October 2026 audit identified known
+advisories in that Transformers release (and in the runner's preinstalled
+`setuptools 79.0.1`). Keeping those versions would leave actual vulnerabilities
+unresolved.
 
-Fixed: the ML stack is pinned to a verified combination
-(`torch 2.14.0+cu126`, `transformers 4.57.6`, `transformer-lens 2.18.0`). Note that
-`transformer-lens` 2.x declares `transformers>=4.57` with no ceiling, so **both** libraries
-need capping — capping transformer-lens alone is not enough.
+The current security branch updates the intended ranges together:
 
-Also fixed: all three call sites now resolve the class through
-`backend/interpretability/tl_compat.py`, which distinguishes a version mismatch from a broken
-environment and reports the supported range plus the exact install command.
+- `transformers>=5.20.2,<6.0` — excludes the releases reported by the strict audit.
+- `transformer-lens>=3.9.0,<4.0` — supports Transformers 5 while retaining the legacy
+  `HookedTransformer` API that MECH's current hook paths use.
+- `huggingface-hub>=1.31.0,<3.0` — compatible with the Transformers 5.20.2 requirements.
+- `setuptools>=83.0.0` — addresses PYSEC-2026-3447 detected in the runner's old version.
 
-- [x] Pin `transformers` and `transformer-lens` with upper bounds.
-- [x] Add a compat shim with actionable errors.
-- [x] Add `tests/pytest/test_dependency_contract.py`, including a negative control that
-      proves the check rejects a simulated 4.x install.
-- [x] Add a CI job that runs `python -c "import backend.main"` as an import smoke test.
-      **done** — `.github/workflows/ci.yml` runs it in the `backend` job, alongside
-      the explicit `datasets`-shadowing assertion.
-- [ ] Migrate to the TransformerLens 4.x `TransformerBridge` API and drop the `<3.0` pin.
-      Substantial: the code depends on hook-name conventions (`run_with_cache`, `hook_z`)
-      whose v4 equivalents differ, so it is a rewrite rather than a rename.
+TransformerLens 4.0 removed `HookedTransformer`; the `<4.0` bound remains deliberate
+until a separate TransformerBridge migration maps hook names and tensor shapes and
+passes the live-weight parity tests. NumPy, pandas, and PyArrow retain their existing
+bounds because their binary compatibility requires a separate measured change.
+
+The security PR also fixes the fail-closed inventory audit for the CPU PyTorch build
+label, adds the multi-model comparison to the measurement-layer provenance register,
+and states `model_id: null` explicitly in the tuned-lens README caveat. These changes
+are **not release-verified until the fresh full hosted workflow is green**.
+
+- [x] Add an exact installed-package inventory for pip-audit that fails closed on unsupported local build labels.
+- [x] Fix the tuned-lens README contract without weakening its experimental/unverified disclosure.
+- [x] Classify the real multi-model comparison as a measured provenance source.
+- [x] Enforce the patched ML and setuptools ranges in dependency-contract tests.
+- [ ] Verify a complete CI run: strict pip-audit, SBOM, Gitleaks, frontend, lint, every backend shard, live evidence, and Playwright E2E.
+- [ ] Confirm repository branch-protection settings require the aggregate release check; the current connector was unable to read these settings.
+- [ ] Migrate to the TransformerLens 4.x `TransformerBridge` API as a separate refactor and remove the `<4.0` cap only after parity validation.
 
 ### 1.4 Fix the `datasets` package shadowing ✅ done
 
