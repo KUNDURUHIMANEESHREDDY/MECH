@@ -91,6 +91,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund --prefix frontend
         if: matrix.shard == 1
+      # Stop at the first failure so a long suite reports an actionable traceback
+      # instead of consuming the entire timeout before showing the failure summary.
+      # On a passing run, pytest still executes the complete suite.
       - name: Backend pytest shard with actionable failure and duration report
         env:
           MECH_REQUIRE_JS_LINT: ${{ matrix.shard == 1 && '1' || '0' }}
@@ -251,6 +254,10 @@ jobs:
           path: mech-python-sbom.json
           if-no-files-found: error
 
+  # This gate must execute even if a dependency fails or is skipped.
+  # A skipped GitHub Actions job can be treated as neutral by branch protection,
+  # so relying on the default needs() behavior can accidentally make a failed
+  # dependency non-blocking when only this aggregate check is required.
   required:
     name: required
     if: ${{ always() }}
