@@ -78,6 +78,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..models.adapter_base import LiveUnavailable
+from backend.services.model_lock import MODEL_LOCK
 
 LIVE = "live"
 UNAVAILABLE = "unavailable"
@@ -658,8 +659,12 @@ class SAEReproductionPipeline:
                 chunk = ids[:, start:start + block].to(device)
                 if chunk.shape[1] < 2:
                     continue
-                with torch.no_grad():
-                    out = model(chunk, output_hidden_states=True)
+                # The model uses process-global forward hooks for live interventions.
+                # Serialize this forward with those hooks so a concurrent intervention
+                # cannot patch an unrelated SAE training batch.
+                with MODEL_LOCK:
+                    with torch.no_grad():
+                        out = model(chunk, output_hidden_states=True)
                 hidden = out.hidden_states[layer + 1]
                 block_obj = model.transformer.h[layer]
                 normed = block_obj.ln_2(hidden)
