@@ -128,6 +128,40 @@ def test_shared_model_forward_runs_under_model_lock(
     )
 
 
+def test_sae_activation_collection_forward_runs_under_model_lock(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """SAE collection must not interleave with global live-intervention hooks."""
+    import torch
+    from backend.science.reproducibility import sae_pipeline
+
+    eng = _engine_or_skip()
+    recorder = _RecordingLock(eng.MODEL_LOCK)
+    monkeypatch.setattr(sae_pipeline, "MODEL_LOCK", recorder)
+
+    observed: List[bool] = []
+    handle = eng._model.register_forward_pre_hook(
+        lambda module, args: observed.append(recorder.held))
+    try:
+        activations = sae_pipeline.SAEReproductionPipeline()._collect_activations(
+            torch,
+            eng._model,
+            eng._tokenizer,
+            "MECH shared model lock regression. " * 100,
+            n_tokens=8,
+        )
+    finally:
+        handle.remove()
+
+    assert activations is not None and activations.shape[0] > 0, (
+        "SAE activation collection did not return real activations"
+    )
+    assert observed, "SAE activation collection did not run the shared model"
+    assert all(observed), (
+        "SAE activation collection forwarded outside MODEL_LOCK, allowing "
+        "live-measurement hooks to affect unrelated training inputs"
+    )
+
+
 def test_patch_neuron_measures_the_prompt_it_was_given() -> None:
     """A named prompt is the prompt measured, and the record says so."""
     eng = _engine_or_skip()
