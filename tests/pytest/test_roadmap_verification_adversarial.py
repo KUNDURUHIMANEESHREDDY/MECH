@@ -507,7 +507,7 @@ def test_sse_stream_does_not_leak_bearer_credentials_in_its_url():
     assert "apiToken()" not in text, "the renderer must not expose or resolve the bearer token"
     assert "token=${encodeURIComponent(token)}" not in text
     assert "bearer_token=" not in text, "bearer credentials must not be placed in an EventSource URL"
-    assert "HttpOnly session cookie" in text, (
+    assert re.search(r"HttpOnly\s+session cookie", text), (
         "document the cookie-backed browser transport so URL-token auth is not reintroduced"
     )
 
