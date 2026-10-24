@@ -51,6 +51,13 @@ jobs:
           key: pip-fast-${{ runner.os }}-py311-v1
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
       - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Focused regressions for the reported failures
+        run: >-
+          python -m pytest
+          tests/pytest/test_live_measure_sequence_alignment.py
+          tests/pytest/test_roadmap_verification_adversarial.py::test_sse_stream_does_not_leak_bearer_credentials_in_its_url
+          tests/pytest/test_shared_model_lock_scope.py::test_sae_activation_collection_forward_runs_under_model_lock
+          -vv --tb=short --timeout=600 --timeout-method=thread
       - run: python -m pytest tests/pytest -vv --maxfail=1 --tb=short --durations=25 --timeout=600 --timeout-method=thread -k 'comparison or model_lock or tuned_lens'
 
   backend:
