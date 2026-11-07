@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+language: en-US
+enable_free_tier: true
+
+tone_instructions: >-
+  Be concise, technical, and evidence-driven. Prioritize correctness, security,
+  data isolation, reliability, and production-readiness over style preferences.
+  Explain impact and provide actionable fixes. Do not invent vulnerabilities.
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  commit_status: true
+  collapse_walkthrough: true
+  poem: false
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    base_branches:
+      - master
+      - main
+    auto_pause_after_reviewed_commits: 0
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: >-
+        Review Rust code for memory safety, error handling, concurrency,
+        panic paths, resource lifecycle, API correctness, and maintainability.
+        Pay particular attention to authorization and tenant/resource isolation.
+    - path: "**/*auth*/**"
+      instructions: >-
+        Treat authentication and authorization changes as security-sensitive.
+        Verify deny-by-default behavior, role and resource-level checks,
+        cross-user isolation, token/session handling, and negative test coverage.
+    - path: "**/*.{ts,tsx,js,jsx}"
+      instructions: >-
+        Review frontend correctness, unsafe rendering, state and async race
+        conditions, API boundary validation, accessibility, and error states.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Check workflow permissions, untrusted input handling, secret exposure,
+        dependency pinning, and supply-chain risks.
+    - path: "**/*.{sql,prisma}"
+      instructions: >-
+        Review schema changes, migration safety, data integrity, indexes,
+        transaction boundaries, and tenant isolation.
