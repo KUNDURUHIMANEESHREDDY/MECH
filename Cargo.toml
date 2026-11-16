@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/mech-core",
+  "crates/mech-runtime",
+  "frontend/src-tauri",
+]
+
+[workspace.package]
+version = "2.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/KUNDURUHIMANEESHREDDY/MECH"
+
+[workspace.dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+chrono = "0.4.45"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["process", "time", "net", "io-util", "sync", "rt-multi-thread", "macros"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }

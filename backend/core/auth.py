@@ -31,7 +31,7 @@ Token source of truth (in order):
 1. ``MECH_API_TOKEN`` env var when set and non-empty (operator / test override).
 2. Otherwise a random token persisted to
    ``backend/storage/.mech_api_token`` with ``0o600`` so the trusted
-   Electron renderer can read it across restarts without churning every boot.
+   Rust desktop host can read it across restarts without churning every boot.
    The file is runtime state, never committed.
 
 Comparison is constant-time via :func:`hmac.compare_digest`.

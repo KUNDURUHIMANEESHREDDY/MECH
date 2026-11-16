@@ -1,8 +1,6 @@
 # MECH
 
-Mechanistic interpretability research platform. Python + PyTorch +
-TransformerLens backend, FastAPI control plane, React frontend. GPT-2 Small is
-the initial model.
+Mechanistic interpretability research platform. Migration target: Rust + Tauri 2 application runtime and Vue 3 renderer. Python + PyTorch + TransformerLens remain the scientific compatibility engine until Rust replacements pass documented parity tests.
 
 ## Agent skills
 

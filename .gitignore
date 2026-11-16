@@ -233,3 +233,10 @@ frontend/audit_*
 .opencode/
 .pytest-tmp/
 vite.config.mts.timestamp-*
+# Rust build artifacts
+/target/
+/frontend/src-tauri/target/
+/frontend/src-tauri/gen/
+
+# Lock the Rust workspace dependency graph
+!Cargo.lock

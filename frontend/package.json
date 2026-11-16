@@ -1,28 +1,26 @@
 {
   "name": "mech-platform",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "license": "Apache-2.0",
-  "description": "MECH Research Platform - Mechanistic Interpretability Desktop Application",
-  "main": "electron/main.js",
+  "description": "Rust-native mechanistic interpretability research platform",
   "type": "commonjs",
   "scripts": {
     "dev:renderer": "vite",
-    "dev:electron": "node scripts/dev.js",
-    "dev": "concurrently -k -n vite,electron -c blue,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev": "tauri dev",
     "build:renderer": "vite build",
-    "build:electron": "node scripts/build.js",
-    "build": "npm run build:renderer && npm run build:electron",
-    "start": "electron .",
+    "build": "tauri build",
+    "start": "tauri dev",
     "seed": "node scripts/seed.js",
     "test:js": "vitest run",
     "test:js:watch": "vitest",
     "test:py": "cd .. && pytest tests/pytest -q",
     "test:e2e": "playwright test",
-    "test": "npm run test:js && npm run test:py"
+    "test": "npm run test:js && npm run test:py",
+    "dev:tauri": "tauri dev",
+    "build:tauri": "tauri build"
   },
   "dependencies": {
-    "@vitejs/plugin-vue": "^6.0.8",
-    "better-sqlite3": "^11.3.0",
+    "@tauri-apps/api": "^2.8.0",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^4.0.2",
     "vue": "^3.5.40",
@@ -31,58 +29,16 @@
   "devDependencies": {
     "@playwright/test": "^1.47.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.8.0",
     "@testing-library/jest-dom": "^6.4.8",
-    "concurrently": "^8.2.2",
-    "electron": "32.3.3",
-    "electron-builder": "^25.0.5",
+    "@vitejs/plugin-vue": "^6.0.8",
     "jsdom": "^25.0.0",
     "tailwindcss": "4.1",
     "typescript": "^5.5.0",
     "vite": "^5.4.0",
     "vitest": "^2.0.5"
   },
-  "build": {
-    "appId": "com.mech.platform",
-    "productName": "MECH Platform",
-    "electronVersion": "32.3.3",
-    "files": [
-      "electron/**/*",
-      "dist/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "output": "release"
-    },
-    "extraResources": [
-      {
-        "from": "build/backend",
-        "to": "backend",
-        "filter": [
-          "**/*",
-          "!__pycache__",
-          "!**/*.pyc",
-          "!storage/.mech_api_token",
-          "!storage/*.db*",
-          "!storage/evidence/**",
-          "!storage/v2_jobs/**",
-          "!runtime.db"
-        ]
-      },
-      {
-        "from": "build/python",
-        "to": "python",
-        "filter": [
-          "**/*",
-          "!**/__pycache__/**",
-          "!**/*.pyc",
-          "!**/*.pyo"
-        ]
-      }
-    ]
-  },
   "allowScripts": {
-    "electron@32.3.3": true,
-    "esbuild@0.21.5": true,
-    "better-sqlite3@11.10.0": true
+    "esbuild@0.21.5": true
   }
 }

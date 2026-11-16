@@ -1,0 +1,20 @@
+[package]
+name = "mech-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+mech-core = { path = "../../crates/mech-core" }
+mech-runtime = { path = "../../crates/mech-runtime" }
+reqwest.workspace = true
+chrono.workspace = true
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.12.5", features = [] }
+tokio.workspace = true

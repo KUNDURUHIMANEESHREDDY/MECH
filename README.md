@@ -58,10 +58,13 @@ Concretely, it does six things:
    plausible noise. (Only `IOI` has a full benchmark executor today.)
 5. **Refuses to fake the rest.** Validation and publication are gated behind proof that
    discovery was live. A missing executor returns `"unavailable"` with a reason, not a number.
-6. **Shows its work.** A Vue 3 desktop UI with 31 tools, plus an Electron shell that boots
-   the backend for you.
+6. **Shows its work.** A Vue 3 desktop UI with 31 tools, hosted by a Rust + Tauri 2 desktop runtime. Rust supervises the scientific compatibility worker during migration.
 
 It is a research instrument, not a demo: the point is that a negative result stays negative.
+
+## Rust migration
+
+MECH is moving its desktop runtime, persistence, control plane, and application services to Rust. The Vue 3 renderer is retained. Python + PyTorch + TransformerLens remain behind a supervised compatibility boundary until equivalent Rust implementations pass real-weight parity tests. See [the migration plan](docs/RUST_MIGRATION.md) and [ADR 0001](docs/adr/0001-rust-native-application.md).
 
 ---
 
@@ -511,7 +514,8 @@ MECH/
 ├── frontend/                   Vue 3 + Vite + Tailwind, 31 tools
 │   ├── src/desktop/routeRegistry.ts   34 routes, 31 in the sidebar
 │   ├── src/desktop.css                the live "blue-primary" design system
-│   └── electron/                     desktop shell that boots the backend
+|   |-- src-tauri/                    Rust + Tauri 2 desktop host
+|   `-- electron/                     legacy source retained during migration
 ├── scripts/                    result + screenshot capture (this README's evidence)
 └── docs/results/capture.json   the raw measurements quoted above
 ```

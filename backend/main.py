@@ -1,7 +1,8 @@
 """MECH Platform - FastAPI Server Entry Point.
 
-This is the backend entry used by the Electron app in both development and the
-packaged .exe. Keep /api routes available without needing a separate server.
+This is the temporary scientific compatibility worker entry used by the Tauri
+desktop host during the Rust migration. Keep /api routes available until the
+Rust control plane reaches route parity.
 """
 import asyncio
 import importlib.util
